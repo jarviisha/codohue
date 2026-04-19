@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: codohue
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: codohue
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install migrate CLI
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+      - name: Run migrations
+        run: migrate -path ./migrations -database "$DATABASE_URL" up
+        env:
+          DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Test
+        run: make coverage-check-all
+        env:
+          DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+          QDRANT_HOST: ""
+          QDRANT_PORT: "6334"
+          RECOMMENDER_API_KEY: ci-test-key
+
+  e2e:
+    needs: lint-test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: codohue
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: codohue
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+      qdrant:
+        image: qdrant/qdrant:latest
+        ports:
+          - 6333:6333
+          - 6334:6334
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install migrate CLI
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
+      - name: Run migrations
+        run: migrate -path ./migrations -database "$DATABASE_URL" up
+        env:
+          DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
+
+      - name: Build API binary
+        run: go build -o ./tmp/api ./cmd/api
+
+      - name: Run E2E tests
+        run: go test -v -tags=e2e -timeout=120s ./e2e/...
+        env:
+          DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+          QDRANT_HOST: localhost
+          QDRANT_PORT: "6334"
+          RECOMMENDER_API_KEY: ci-test-key

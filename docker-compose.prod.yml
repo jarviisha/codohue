@@ -1,0 +1,56 @@
+services:
+  api:
+    image: ghcr.io/jarviisha/codohue/api:latest
+    restart: unless-stopped
+    ports:
+      - "2001:2001"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY}
+      - LOG_FORMAT=json
+      - BATCH_INTERVAL_MINUTES=5
+    depends_on:
+      - redis
+      - qdrant
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2001/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  cron:
+    image: ghcr.io/jarviisha/codohue/cron:latest
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - LOG_FORMAT=json
+      - BATCH_INTERVAL_MINUTES=5
+    depends_on:
+      - redis
+      - qdrant
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  redis_data:
+  qdrant_data:

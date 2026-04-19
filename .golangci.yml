@@ -1,0 +1,85 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - errcheck        # unchecked errors
+    - govet           # go vet checks
+    - staticcheck     # staticcheck suite (SA*, S*, ST*, QF*)
+    - bodyclose       # HTTP response body not closed
+    - sqlclosecheck   # sql.Rows not closed
+    - noctx           # HTTP requests created without context
+
+    # Code quality
+    - revive          # drop-in replacement for golint
+    - gocritic        # opinionated checks
+    - prealloc        # suggest preallocating slices
+
+    # Error handling
+    - wrapcheck       # errors from external packages must be wrapped
+
+    # Style
+    - misspell        # common spelling mistakes in comments/strings
+    - whitespace      # leading/trailing blank lines
+
+    # Unused code
+    - unused          # unused constants, variables, functions, types
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+            - "sayRepetitiveInsteadOfStutters"
+        - name: error-return
+        - name: error-naming
+        - name: if-return
+        - name: var-naming
+        - name: indent-error-flow
+        - name: superfluous-else
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+      disabled-checks:
+        - hugeParam        # noisy for repo/service patterns
+        - rangeValCopy
+
+    wrapcheck:
+      ignorePackageGlobs:
+        - "github.com/jarviisha/codohue/*"  # internal errors don't need wrapping
+
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000"   # package comment — enforced by docs.go convention instead
+        - "-ST1003"   # naming: too opinionated for generated/proto code
+
+formatters:
+  enable:
+    - goimports   # import grouping and formatting
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  exclude-rules:
+    # Test files: relax wrapcheck and errcheck
+    - path: "_test\\.go$"
+      linters:
+        - wrapcheck
+        - errcheck
+    # main packages don't need exported-symbol docs
+    - path: "cmd/"
+      linters:
+        - revive

@@ -1,0 +1,2 @@
+ALTER TABLE namespace_configs
+    ADD COLUMN IF NOT EXISTS gamma FLOAT NOT NULL DEFAULT 0.02;

@@ -1,0 +1,71 @@
+services:
+  api:
+    build: .
+    container_name: codohue-api
+    ports:
+      - "2001:2001"
+    environment:
+      - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - RECOMMENDER_API_KEY=dev-secret-key
+      - BATCH_INTERVAL_MINUTES=5
+      - LOG_FORMAT=text
+    volumes:
+      - .:/app
+    command: air
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2001/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: codohue-postgres
+    environment:
+      POSTGRES_USER: codohue
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: codohue
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/migrations
+      - ./docker/init.sh:/docker-entrypoint-initdb.d/init.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codohue"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: codohue-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: codohue-qdrant
+    ports:
+      - "6333:6333"   # HTTP
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
