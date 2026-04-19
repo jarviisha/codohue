@@ -45,7 +45,7 @@ jobs:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
 
       - name: Lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.1.6
 
