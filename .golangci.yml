@@ -57,8 +57,8 @@ linters:
         - rangeValCopy
 
     wrapcheck:
-      ignorePackageGlobs:
-        - "github.com/jarviisha/codohue/*"  # internal errors don't need wrapping
+      ignoreSigRegexps:
+        - "github\\.com/jarviisha/codohue/.*"
 
     staticcheck:
       checks:
@@ -73,13 +73,12 @@ formatters:
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
-  exclude-rules:
-    # Test files: relax wrapcheck and errcheck
-    - path: "_test\\.go$"
-      linters:
-        - wrapcheck
-        - errcheck
-    # main packages don't need exported-symbol docs
-    - path: "cmd/"
-      linters:
-        - revive
+  exclusions:
+    rules:
+      - path: "_test\\.go$"
+        linters:
+          - wrapcheck
+          - errcheck
+      - path: "cmd/"
+        linters:
+          - revive
