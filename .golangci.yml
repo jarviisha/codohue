@@ -7,27 +7,27 @@ linters:
   default: none
   enable:
     # Correctness
-    - errcheck        # unchecked errors
-    - govet           # go vet checks
-    - staticcheck     # staticcheck suite (SA*, S*, ST*, QF*)
-    - bodyclose       # HTTP response body not closed
-    - sqlclosecheck   # sql.Rows not closed
-    - noctx           # HTTP requests created without context
+    - errcheck # unchecked errors
+    - govet # go vet checks
+    - staticcheck # staticcheck suite (SA*, S*, ST*, QF*)
+    - bodyclose # HTTP response body not closed
+    - sqlclosecheck # sql.Rows not closed
+    - noctx # HTTP requests created without context
 
     # Code quality
-    - revive          # drop-in replacement for golint
-    - gocritic        # opinionated checks
-    - prealloc        # suggest preallocating slices
+    - revive # drop-in replacement for golint
+    - gocritic # opinionated checks
+    - prealloc # suggest preallocating slices
 
     # Error handling
-    - wrapcheck       # errors from external packages must be wrapped
+    - wrapcheck # errors from external packages must be wrapped
 
     # Style
-    - misspell        # common spelling mistakes in comments/strings
-    - whitespace      # leading/trailing blank lines
+    - misspell # common spelling mistakes in comments/strings
+    - whitespace # leading/trailing blank lines
 
     # Unused code
-    - unused          # unused constants, variables, functions, types
+    - unused # unused constants, variables, functions, types
 
   settings:
     errcheck:
@@ -53,26 +53,19 @@ linters:
         - style
         - performance
       disabled-checks:
-        - hugeParam        # noisy for repo/service patterns
+        - hugeParam # noisy for repo/service patterns
         - rangeValCopy
 
     wrapcheck:
-      ignoreSigRegexps:
+      ignore-sig-regexps:
         - "github\\.com/jarviisha/codohue/.*"
 
     staticcheck:
       checks:
         - "all"
-        - "-ST1000"   # package comment — enforced by docs.go convention instead
-        - "-ST1003"   # naming: too opinionated for generated/proto code
+        - "-ST1000" # package comment — enforced by docs.go convention instead
+        - "-ST1003" # naming: too opinionated for generated/proto code
 
-formatters:
-  enable:
-    - goimports   # import grouping and formatting
-
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
   exclusions:
     rules:
       - path: "_test\\.go$"
@@ -82,3 +75,11 @@ issues:
       - path: "cmd/"
         linters:
           - revive
+
+formatters:
+  enable:
+    - goimports # import grouping and formatting
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
