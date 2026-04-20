@@ -110,6 +110,9 @@ func newTestService(repo recommendRepo, ns recommendNsConfig, idmap recommendIDM
 	s.qdrantGetFn = func(_ context.Context, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
 		return nil, nil
 	}
+	s.qdrantSearchFn = func(_ context.Context, _ *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
 	s.qdrantQueryFn = func(_ context.Context, _ *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error) {
 		return nil, nil
 	}
@@ -138,7 +141,7 @@ func TestNewService(t *testing.T) {
 	if svc.getTrendingFn == nil || svc.fetchSubjectVecFn == nil || svc.fetchSubjectDenseVecFn == nil {
 		t.Fatal("expected query hooks to be initialized")
 	}
-	if svc.qdrantGetFn == nil || svc.qdrantQueryFn == nil || svc.qdrantUpsertFn == nil || svc.qdrantDeleteFn == nil {
+	if svc.qdrantGetFn == nil || svc.qdrantSearchFn == nil || svc.qdrantQueryFn == nil || svc.qdrantUpsertFn == nil || svc.qdrantDeleteFn == nil {
 		t.Fatal("expected qdrant hooks to be initialized")
 	}
 	if svc.ensureDenseCollectionsFn == nil || svc.deleteFromCollectionFn == nil {
@@ -886,9 +889,12 @@ func TestSearchObjectsDense_QueryError(t *testing.T) {
 
 func TestSearchObjects_Success(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantQueryFn = func(_ context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error) {
+	s.qdrantSearchFn = func(_ context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error) {
 		if points.CollectionName != "ns_objects" {
 			t.Fatalf("unexpected collection: %s", points.CollectionName)
+		}
+		if points.VectorName == nil || *points.VectorName != "sparse_interactions" {
+			t.Fatalf("unexpected vector name: %#v", points.VectorName)
 		}
 		return []*qdrant.ScoredPoint{
 			{Score: 1, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},

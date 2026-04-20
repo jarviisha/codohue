@@ -269,6 +269,12 @@ Build outputs are written to `tmp/`.
 
 ## Testing
 
+Available test layers:
+
+- Unit and package tests for isolated package behavior
+- API E2E tests for HTTP contracts and auth flows
+- Integration-heavy E2E tests for Redis Streams ingest, cron recompute, and hybrid/computed recommendation paths
+
 Unit and package tests:
 
 ```bash
@@ -284,7 +290,18 @@ make migrate-up
 make test-e2e
 ```
 
-The e2e suite launches the API binary on port `12001` and validates recommendation, ranking, trending, health, config, and embedding flows.
+Targeted E2E commands:
+
+```bash
+make test-e2e-api
+make test-e2e-heavy
+go test -v -tags=e2e ./e2e/... -run Ingest
+go test -v -tags=e2e ./e2e/... -run Cron
+go test -v -tags=e2e ./e2e/... -run 'RecommendComputed|RankComputed'
+go test -v -tags=e2e ./e2e/... -run Hybrid
+```
+
+The E2E suite launches the API binary on port `12001`. The full suite also executes the cron binary and validates recommendation, ranking, trending, health, config, embedding, Redis Streams ingest, recompute, and hybrid flows.
 
 ## Project Layout
 

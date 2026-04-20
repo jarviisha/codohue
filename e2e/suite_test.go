@@ -3,9 +3,7 @@
 package e2e
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -22,6 +20,7 @@ const (
 	testPort = "12001"
 	baseURL  = "http://localhost:" + testPort
 	apiBin   = "../tmp/api"
+	cronBin  = "../tmp/cron"
 	// testNS is a fixed namespace name used across all tests. It is created
 	// in TestMain and deleted both before (to clear stale data) and after tests.
 	testNS = "e2e_suite"
@@ -59,7 +58,7 @@ func TestMain(m *testing.M) {
 	defer testRedis.Close()
 
 	// Clean up any data left by a previously interrupted run.
-	cleanupTestNS()
+	cleanupNamespaceData(testNS)
 
 	// Redirect subprocess output to a temp file. Using *os.File avoids the
 	// "WaitDelay expired before I/O complete" error that occurs when Go's exec
@@ -93,14 +92,14 @@ func TestMain(m *testing.M) {
 		fatalf("api not ready after 20s: %v\nServer logs: %s", err, logFile.Name())
 	}
 
-	nsKey, err = createTestNamespace()
+	nsKey, _, err = createNamespaceRequest(testNS, defaultNamespaceConfig())
 	if err != nil {
 		_ = cmd.Process.Kill()
 		fatalf("create test namespace: %v", err)
 	}
 
 	code := m.Run()
-	cleanupTestNS()
+	cleanupNamespaceData(testNS)
 
 	// Kill the subprocess and wait for it to exit cleanly before os.Exit so that
 	// all file descriptors are released and no "WaitDelay expired" warning appears.
@@ -128,59 +127,18 @@ func waitReady(url string, timeout time.Duration) error {
 	return fmt.Errorf("not ready after %s", timeout)
 }
 
-// createTestNamespace upserts testNS with a known config and returns the plaintext API key.
-func createTestNamespace() (string, error) {
-	payload, _ := json.Marshal(map[string]any{
-		"action_weights": map[string]float64{"click": 1.0, "like": 2.0},
-		"lambda":         0.01,
-		"gamma":          0.5,
-		"max_results":    20,
-		"dense_strategy": "byoe",
-		"embedding_dim":  4,
-		"alpha":          0.7,
-		"dense_distance": "cosine",
-	})
-
-	req, _ := http.NewRequest(http.MethodPut,
-		baseURL+"/v1/config/namespaces/"+testNS,
-		bytes.NewReader(payload))
-	req.Header.Set("Authorization", "Bearer "+adminKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("http: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("status %d", resp.StatusCode)
-	}
-
-	var body struct {
-		APIKey string `json:"api_key"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", fmt.Errorf("decode: %w", err)
-	}
-	if body.APIKey == "" {
-		return "", fmt.Errorf("api_key empty — namespace may already exist; run cleanupTestNS manually")
-	}
-	return body.APIKey, nil
-}
-
-// cleanupTestNS removes all postgres data and Redis cache keys for testNS.
-// Qdrant collections are left in place; they are idempotently re-created by the
-// BYOE endpoints and do not affect test correctness across runs.
-func cleanupTestNS() {
+// cleanupNamespaceData removes postgres data and Redis cache keys for a namespace.
+// Qdrant collections are left in place for now; later suites can add explicit
+// collection cleanup where vector state must be isolated.
+func cleanupNamespaceData(namespace string) {
 	ctx := context.Background()
-	_, _ = testDB.Exec(ctx, "DELETE FROM events WHERE namespace = $1", testNS)
-	_, _ = testDB.Exec(ctx, "DELETE FROM id_mappings WHERE namespace = $1", testNS)
-	_, _ = testDB.Exec(ctx, "DELETE FROM namespace_configs WHERE namespace = $1", testNS)
+	_, _ = testDB.Exec(ctx, "DELETE FROM events WHERE namespace = $1", namespace)
+	_, _ = testDB.Exec(ctx, "DELETE FROM id_mappings WHERE namespace = $1", namespace)
+	_, _ = testDB.Exec(ctx, "DELETE FROM namespace_configs WHERE namespace = $1", namespace)
 
-	// Delete recommendation cache (rec:<ns>:*) and trending cache for testNS.
+	// Delete recommendation cache (rec:<ns>:*) and trending cache for the namespace.
 	// Without this, stale cached responses from previous runs bleed into new runs.
-	for _, pattern := range []string{"rec:" + testNS + ":*", "trending:" + testNS} {
+	for _, pattern := range []string{"rec:" + namespace + ":*", "trending:" + namespace} {
 		var cursor uint64
 		for {
 			keys, next, err := testRedis.Scan(ctx, cursor, pattern, 100).Result()

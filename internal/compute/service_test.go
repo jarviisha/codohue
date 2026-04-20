@@ -211,35 +211,32 @@ func TestBuildVectors_MaxTimeTracksLatest(t *testing.T) {
 
 // ─── existing accumulation + decay helpers (kept for regression) ──────────────
 
-func TestObjectAccumulation(t *testing.T) {
-	type subjectResult struct {
-		numericID uint64
-		scores    map[string]float64
-	}
-
-	subjects := []subjectResult{
-		{numericID: 1, scores: map[string]float64{"obj-A": 2.0, "obj-B": 1.5}},
-		{numericID: 2, scores: map[string]float64{"obj-A": 0.8, "obj-C": 3.0}},
-	}
+func TestObjectCooccurrenceAccumulation(t *testing.T) {
+	idmap := newFakeIDMap()
+	svc := newTestService(&fakeComputeRepo{}, idmap)
 
 	objectAccum := make(map[string]map[uint64]float32)
-	for _, s := range subjects {
-		for objID, score := range s.scores {
-			if objectAccum[objID] == nil {
-				objectAccum[objID] = make(map[uint64]float32)
-			}
-			objectAccum[objID][s.numericID] = float32(score)
-		}
+	err := svc.accumulateObjectCooccurrence(context.Background(), "ns", objectAccum, map[string]float64{
+		"obj-A": 2.0,
+		"obj-B": 1.5,
+		"obj-C": 0.8,
+	})
+	if err != nil {
+		t.Fatalf("accumulateObjectCooccurrence: %v", err)
 	}
 
-	if got := objectAccum["obj-A"][1]; math.Abs(float64(got)-2.0) > 1e-6 {
-		t.Errorf("obj-A[subj1] = %v, want 2.0", got)
+	objAID := idmap.objectIDs["obj-A"]
+	objBID := idmap.objectIDs["obj-B"]
+	objCID := idmap.objectIDs["obj-C"]
+
+	if got := objectAccum["obj-A"][objBID]; math.Abs(float64(got)-1.5) > 1e-6 {
+		t.Errorf("obj-A[obj-B] = %v, want 1.5", got)
 	}
-	if got := objectAccum["obj-A"][2]; math.Abs(float64(got)-0.8) > 1e-6 {
-		t.Errorf("obj-A[subj2] = %v, want 0.8", got)
+	if got := objectAccum["obj-A"][objCID]; math.Abs(float64(got)-0.8) > 1e-6 {
+		t.Errorf("obj-A[obj-C] = %v, want 0.8", got)
 	}
-	if _, exists := objectAccum["obj-B"][2]; exists {
-		t.Error("obj-B should not have score for subject 2")
+	if _, exists := objectAccum["obj-A"][objAID]; exists {
+		t.Error("obj-A should not contain self dimension")
 	}
 }
 

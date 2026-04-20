@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
@@ -79,12 +80,11 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 			slog.Error("upsert subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
 		}
 
-		for objID, score := range scores {
-			if objectAccum[objID] == nil {
-				objectAccum[objID] = make(map[uint64]float32)
-			}
-			objectAccum[objID][subjectVec.NumericID] = float32(score)
+		if err := s.accumulateObjectCooccurrence(ctx, namespace, objectAccum, scores); err != nil {
+			slog.Error("accumulate object cooccurrence failed", "namespace", namespace, "subject_id", subjectID, "error", err)
+		}
 
+		for objID := range scores {
 			if t, ok := maxTimes[objID]; ok && t > objectMaxTime[objID] {
 				objectMaxTime[objID] = t
 			}
@@ -102,6 +102,31 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 
 	metrics.BatchSubjectsProcessed.WithLabelValues(namespace).Set(float64(len(subjects)))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", len(subjects), "objects", len(objectAccum))
+	return nil
+}
+
+func (s *Service) accumulateObjectCooccurrence(ctx context.Context, namespace string, objectAccum map[string]map[uint64]float32, objectScores map[string]float64) error {
+	objectIDs := make(map[string]uint64, len(objectScores))
+	for objectID := range objectScores {
+		objNumID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
+		if err != nil {
+			return fmt.Errorf("get object id for %q: %w", objectID, err)
+		}
+		objectIDs[objectID] = objNumID
+	}
+
+	for targetID := range objectScores {
+		for otherID, score := range objectScores {
+			if otherID == targetID {
+				continue
+			}
+			if objectAccum[targetID] == nil {
+				objectAccum[targetID] = make(map[uint64]float32)
+			}
+			objectAccum[targetID][objectIDs[otherID]] += float32(score)
+		}
+	}
+
 	return nil
 }
 
@@ -145,16 +170,28 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		return nil, fmt.Errorf("get subject id for %q: %w", subjectID, err)
 	}
 
-	indices := make([]uint32, 0, len(objectScores))
-	values := make([]float32, 0, len(objectScores))
-
+	type sparseEntry struct {
+		index uint32
+		value float32
+	}
+	entries := make([]sparseEntry, 0, len(objectScores))
 	for objectID, score := range objectScores {
 		objNumID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
 		if err != nil {
 			return nil, fmt.Errorf("get object id for %q: %w", objectID, err)
 		}
-		indices = append(indices, uint32(objNumID))
-		values = append(values, float32(score))
+		entries = append(entries, sparseEntry{index: uint32(objNumID), value: float32(score)})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].index < entries[j].index
+	})
+
+	indices := make([]uint32, 0, len(entries))
+	values := make([]float32, 0, len(entries))
+	for _, entry := range entries {
+		indices = append(indices, entry.index)
+		values = append(values, entry.value)
 	}
 
 	return &SubjectVector{
@@ -218,11 +255,23 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 			return fmt.Errorf("get object id %q: %w", objectID, err)
 		}
 
-		indices := make([]uint32, 0, len(subjectScores))
-		values := make([]float32, 0, len(subjectScores))
+		type sparseEntry struct {
+			index uint32
+			value float32
+		}
+		entries := make([]sparseEntry, 0, len(subjectScores))
 		for subjNumID, score := range subjectScores {
-			indices = append(indices, uint32(subjNumID))
-			values = append(values, score)
+			entries = append(entries, sparseEntry{index: uint32(subjNumID), value: score})
+		}
+		sort.Slice(entries, func(i, j int) bool {
+			return entries[i].index < entries[j].index
+		})
+
+		indices := make([]uint32, 0, len(entries))
+		values := make([]float32, 0, len(entries))
+		for _, entry := range entries {
+			indices = append(indices, entry.index)
+			values = append(values, entry.value)
 		}
 
 		// Prefer explicit object_created_at from the event payload; fall back to max occurred_at.

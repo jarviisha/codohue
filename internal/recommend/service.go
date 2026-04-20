@@ -65,6 +65,7 @@ type Service struct {
 	deleteFromCollectionFn   func(ctx context.Context, collection string, ids []*qdrant.PointId) error
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
 	qdrantGetFn              func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
+	qdrantSearchFn           func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error)
 	qdrantQueryFn            func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error)
 	qdrantUpsertFn           func(ctx context.Context, points *qdrant.UpsertPoints) error
 	qdrantDeleteFn           func(ctx context.Context, points *qdrant.DeletePoints) error
@@ -100,6 +101,13 @@ func NewService(
 	s.deleteFromCollectionFn = s.deleteFromCollection
 	s.qdrantGetFn = func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
 		return qdrantClient.Get(ctx, points)
+	}
+	s.qdrantSearchFn = func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error) {
+		resp, err := qdrantClient.GetPointsClient().Search(ctx, points)
+		if err != nil {
+			return nil, fmt.Errorf("qdrant search: %w", err)
+		}
+		return resp.GetResult(), nil
 	}
 	s.qdrantQueryFn = func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error) {
 		return qdrantClient.Query(ctx, points)
@@ -649,12 +657,13 @@ func (s *Service) searchObjects(ctx context.Context, namespace string, queryVec 
 	collection := namespace + "_objects"
 	timer := metrics.QdrantQueryDuration.WithLabelValues(namespace, collection)
 	start := time.Now()
-	results, err := s.qdrantQueryFn(ctx, &qdrant.QueryPoints{
+	results, err := s.qdrantSearchFn(ctx, &qdrant.SearchPoints{
 		CollectionName: collection,
-		Query:          qdrant.NewQuerySparse(queryVec.Indices, queryVec.Values),
-		Using:          qdrant.PtrOf(sparseVectorName),
+		Vector:         queryVec.Values,
+		SparseIndices:  &qdrant.SparseIndices{Data: queryVec.Indices},
+		VectorName:     qdrant.PtrOf(sparseVectorName),
 		Filter:         filter,
-		Limit:          qdrant.PtrOf(topK),
+		Limit:          topK,
 		WithPayload:    qdrant.NewWithPayload(true),
 	})
 	timer.Observe(time.Since(start).Seconds())

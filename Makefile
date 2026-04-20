@@ -22,7 +22,7 @@ MIN_CMD_API ?= 40
 MIN_CMD_CRON ?= 45
 
 .PHONY: build build-api build-cron run run-cron dev lint fmt \
-        test test-pkg test-verbose test-race test-e2e \
+        test test-pkg test-verbose test-race test-e2e test-e2e-api test-e2e-heavy \
         coverage coverage-unit coverage-race coverage-report coverage-html coverage-check coverage-check-pkg coverage-check-all coverage-clean \
         up up-d up-infra down down-v logs logs-cron \
         migrate migrate-up migrate-down migrate-version migrate-create \
@@ -188,8 +188,17 @@ coverage-clean:
 ## E2E tests require infra to be running (make up-infra) and migrations applied (make migrate-up).
 ## Full sequence:
 ##   make up-infra && make migrate-up && make test-e2e
-test-e2e: build-api
+## This target builds both binaries because the heavy suites execute `tmp/cron`.
+test-e2e: build
 	go test -v -tags=e2e -timeout=120s ./e2e/...
+
+## API-only E2E coverage for health, config, embedding, recommendation, ranking, and trending.
+test-e2e-api: build-api
+	go test -v -tags=e2e -timeout=120s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
+
+## Heavier E2E coverage that exercises Redis Streams ingest, cron recompute, and hybrid/computed artifacts.
+test-e2e-heavy: build
+	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid'
 
 # ── Migrations ─────────────────────────────────────────────────────────────────
 
