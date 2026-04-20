@@ -57,7 +57,7 @@ services:
       - redis_data:/data
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.17.1
     container_name: codohue-qdrant
     ports:
       - "6333:6333"   # HTTP
