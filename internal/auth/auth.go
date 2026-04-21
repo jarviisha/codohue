@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -51,7 +52,7 @@ func RequireAdmin(adminKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ExtractBearerToken(r) != adminKey {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -75,7 +76,7 @@ func RequireNamespace(adminKey string, getHash KeyHashFn, extractNamespace func(
 			}
 
 			if !ValidateNamespaceKey(r.Context(), token, adminKey, getHash, namespace) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 				return
 			}
 			next.ServeHTTP(w, r)

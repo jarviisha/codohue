@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 // maxCandidates is the hard upper bound on the number of candidates accepted by
@@ -47,17 +48,26 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 
 	subjectID := q.Get("subject_id")
 	namespace := q.Get("namespace")
+	h.get(w, r, namespace, subjectID)
+}
 
+// GetByNamespace handles GET /v1/namespaces/{ns}/recommendations.
+func (h *Handler) GetByNamespace(w http.ResponseWriter, r *http.Request) {
+	h.get(w, r, chi.URLParam(r, "ns"), r.URL.Query().Get("subject_id"))
+}
+
+func (h *Handler) get(w http.ResponseWriter, r *http.Request, namespace, subjectID string) {
 	if subjectID == "" || namespace == "" {
-		http.Error(w, "subject_id and namespace are required", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "subject_id and namespace are required")
 		return
 	}
 
+	q := r.URL.Query()
 	limit := 20
 	if l := q.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
 		if err != nil || n <= 0 {
-			http.Error(w, "invalid limit", http.StatusBadRequest)
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_limit", "invalid limit")
 			return
 		}
 		limit = n
@@ -69,12 +79,11 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		Limit:     limit,
 	})
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := writeJSON(w, resp); err != nil {
 		log.Printf("[recommend] encode response: %v", err)
 	}
 }
@@ -82,38 +91,55 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 // Rank handles POST /v1/rank — scores and ranks a list of candidate items for a subject.
 // Auth is validated here (after body parse) because the namespace lives in the request body.
 func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
+	h.rank(w, r, "")
+}
+
+// RankByNamespace handles POST /v1/namespaces/{ns}/rank.
+func (h *Handler) RankByNamespace(w http.ResponseWriter, r *http.Request) {
+	h.rank(w, r, chi.URLParam(r, "ns"))
+}
+
+func (h *Handler) rank(w http.ResponseWriter, r *http.Request, pathNamespace string) {
 	var req RankRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 
+	if pathNamespace != "" {
+		if req.Namespace == "" {
+			req.Namespace = pathNamespace
+		} else if req.Namespace != pathNamespace {
+			httpapi.WriteError(w, http.StatusBadRequest, "namespace_mismatch", "namespace in path and body must match")
+			return
+		}
+	}
+
 	if req.SubjectID == "" || req.Namespace == "" {
-		http.Error(w, "subject_id and namespace are required", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "subject_id and namespace are required")
 		return
 	}
 
 	if len(req.Candidates) > maxCandidates {
-		http.Error(w, "candidates exceeds limit of "+strconv.Itoa(maxCandidates), http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "too_many_candidates", "candidates exceeds limit of "+strconv.Itoa(maxCandidates))
 		return
 	}
 
 	if h.validateKey != nil {
 		token := extractBearerToken(r)
 		if !h.validateKey(r.Context(), token, req.Namespace) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 			return
 		}
 	}
 
 	resp, err := h.service.Rank(r.Context(), &req)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := writeJSON(w, resp); err != nil {
 		log.Printf("[recommend] rank: encode response: %v", err)
 	}
 }
@@ -122,7 +148,7 @@ func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	if ns == "" {
-		http.Error(w, "ns is required", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return
 	}
 
@@ -132,7 +158,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	if l := q.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
 		if err != nil || n <= 0 {
-			http.Error(w, "invalid limit", http.StatusBadRequest)
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_limit", "invalid limit")
 			return
 		}
 		limit = n
@@ -142,7 +168,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	if o := q.Get("offset"); o != "" {
 		n, err := strconv.Atoi(o)
 		if err != nil || n < 0 {
-			http.Error(w, "invalid offset", http.StatusBadRequest)
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_offset", "invalid offset")
 			return
 		}
 		offset = n
@@ -152,7 +178,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	if wh := q.Get("window_hours"); wh != "" {
 		n, err := strconv.Atoi(wh)
 		if err != nil || n <= 0 {
-			http.Error(w, "invalid window_hours", http.StatusBadRequest)
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_window_hours", "invalid window_hours")
 			return
 		}
 		windowHours = n
@@ -160,12 +186,11 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.GetTrending(r.Context(), ns, limit, offset, windowHours)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	if err := writeJSON(w, resp); err != nil {
 		log.Printf("[recommend] trending: encode response: %v", err)
 	}
 }
@@ -185,20 +210,20 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	id := chi.URLParam(r, "id")
 
 	if ns == "" || id == "" {
-		http.Error(w, "ns and id are required", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "ns and id are required")
 		return
 	}
 
 	if h.validateKey != nil {
 		if !h.validateKey(r.Context(), extractBearerToken(r), ns) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 			return
 		}
 	}
 
 	var req EmbeddingRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Vector) == 0 {
-		http.Error(w, "invalid request body: vector required", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body: vector required")
 		return
 	}
 
@@ -212,11 +237,11 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	if storeErr != nil {
 		// Distinguish dimension mismatch (400) from infra errors (500).
 		if isDimMismatch(storeErr) {
-			http.Error(w, storeErr.Error(), http.StatusBadRequest)
+			httpapi.WriteError(w, http.StatusBadRequest, "embedding_dimension_mismatch", storeErr.Error())
 			return
 		}
 		log.Printf("[recommend] store %s embedding: %v", entityType, storeErr)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 
@@ -231,20 +256,20 @@ func (h *Handler) DeleteObject(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 
 	if ns == "" || id == "" {
-		http.Error(w, "ns and id are required", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "ns and id are required")
 		return
 	}
 
 	if h.validateKey != nil {
 		if !h.validateKey(r.Context(), extractBearerToken(r), ns) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 			return
 		}
 	}
 
 	if err := h.service.DeleteObject(r.Context(), ns, id); err != nil {
 		log.Printf("[recommend] delete object: %v", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 
@@ -256,6 +281,11 @@ func isDimMismatch(err error) bool {
 		return false
 	}
 	return strings.HasPrefix(err.Error(), "embedding dimension mismatch")
+}
+
+func writeJSON(w http.ResponseWriter, v any) error {
+	w.Header().Set("Content-Type", "application/json")
+	return json.NewEncoder(w).Encode(v)
 }
 
 func extractBearerToken(r *http.Request) string {

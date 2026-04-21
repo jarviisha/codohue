@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 // fakeService implements nsConfigUpserter for testing.
@@ -45,6 +46,13 @@ func TestHandlerUpsert_InvalidJSON(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("expected 400, got %d", rec.Code)
+	}
+	var got httpapi.ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if got.Error.Code != "invalid_request" {
+		t.Fatalf("unexpected error code: %+v", got)
 	}
 }
 

@@ -2,9 +2,15 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jarviisha/codohue/internal/nsconfig"
+)
+
+var (
+	ErrInvalidPayload = errors.New("invalid payload")
+	ErrUnknownAction  = errors.New("unknown action")
 )
 
 type eventInserter interface {
@@ -29,7 +35,7 @@ func NewService(repo *Repository, nsConfigSvc *nsconfig.Service) *Service {
 // Process validates the payload, resolves the action weight, and stores the event.
 func (s *Service) Process(ctx context.Context, payload *EventPayload) error {
 	if payload.Namespace == "" || payload.SubjectID == "" || payload.ObjectID == "" {
-		return fmt.Errorf("invalid payload: namespace, subject_id, object_id are required")
+		return fmt.Errorf("%w: namespace, subject_id, object_id are required", ErrInvalidPayload)
 	}
 
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)
@@ -64,5 +70,5 @@ func (s *Service) resolveWeight(ctx context.Context, namespace string, action Ac
 	if w, ok := DefaultActionWeights[action]; ok {
 		return w, nil
 	}
-	return 0, fmt.Errorf("unknown action: %s", action)
+	return 0, fmt.Errorf("%w: %s", ErrUnknownAction, action)
 }

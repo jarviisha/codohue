@@ -190,6 +190,14 @@ Example publish:
 redis-cli XADD codohue:events * payload '{"namespace":"demo","subject_id":"user-123","object_id":"item-456","action":"VIEW","timestamp":"2026-04-19T10:00:00Z"}'
 ```
 
+For client integrations that do not want direct Redis access, Codohue also exposes:
+
+```bash
+POST /v1/namespaces/{ns}/events
+```
+
+with the same JSON payload shape.
+
 Default built-in actions in the ingest layer:
 
 - `VIEW`
@@ -221,11 +229,32 @@ Namespace routes:
 - `POST /v1/subjects/{ns}/{id}/embedding`
 - `DELETE /v1/objects/{ns}/{id}`
 
+Canonical namespace-path routes for new clients:
+
+- `POST /v1/namespaces/{ns}/events`
+- `GET /v1/namespaces/{ns}/recommendations?subject_id=...`
+- `POST /v1/namespaces/{ns}/rank`
+- `GET /v1/namespaces/{ns}/trending`
+- `POST /v1/namespaces/{ns}/objects/{id}/embedding`
+- `POST /v1/namespaces/{ns}/subjects/{id}/embedding`
+- `DELETE /v1/namespaces/{ns}/objects/{id}`
+
 Authentication model:
 
 - `PUT /v1/config/namespaces/{namespace}` uses the global admin key from `RECOMMENDER_API_KEY`
 - namespace routes use the per-namespace API key returned when the namespace is created
 - `GET /ping` and `GET /healthz` are public
+
+Error responses use a stable JSON shape:
+
+```json
+{
+  "error": {
+    "code": "invalid_request",
+    "message": "invalid request body"
+  }
+}
+```
 
 Recommendation sources returned by the service include:
 

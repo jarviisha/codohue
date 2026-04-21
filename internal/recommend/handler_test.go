@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 // ─── fake service ────────────────────────────────────────────────────────────
@@ -71,6 +72,15 @@ func newChiRequest(method, target string, params map[string]string, body string)
 	return r
 }
 
+func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) httpapi.ErrorResponse {
+	t.Helper()
+	var resp httpapi.ErrorResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	return resp
+}
+
 // ─── GET /v1/recommendations ─────────────────────────────────────────────────
 
 func TestHandlerGetMissingParams(t *testing.T) {
@@ -87,6 +97,18 @@ func TestHandlerGetMissingParams(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("url %s: expected 400, got %d", url, rec.Code)
 		}
+	}
+}
+
+func TestHandlerGetMissingParams_JSONError(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/recommendations", http.NoBody)
+	rec := httptest.NewRecorder()
+
+	h.Get(rec, req)
+
+	if got := decodeErrorResponse(t, rec); got.Error.Code != "missing_required_fields" {
+		t.Fatalf("unexpected error code: %+v", got)
 	}
 }
 
@@ -247,6 +269,50 @@ func TestHandlerRankSuccess(t *testing.T) {
 	}
 	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "p1" {
 		t.Errorf("items: got %v", resp.Items)
+	}
+}
+
+func TestHandlerRankByNamespaceSuccess(t *testing.T) {
+	h := &Handler{
+		service: &fakeSvc{
+			rankResp: &RankResponse{
+				SubjectID: "u1", Namespace: "ns",
+				Items:  []RankedItem{{ObjectID: "p1", Score: 0.9}},
+				Source: SourceHybridRank, GeneratedAt: time.Now(),
+			},
+		},
+		validateKey: func(_ context.Context, _, _ string) bool { return true },
+	}
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rank", map[string]string{"ns": "ns"}, `{"subject_id":"u1","candidates":["p1"]}`)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	rec := httptest.NewRecorder()
+
+	h.RankByNamespace(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp RankResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Namespace != "ns" {
+		t.Fatalf("namespace: got %q", resp.Namespace)
+	}
+}
+
+func TestHandlerRankByNamespaceMismatch(t *testing.T) {
+	h := &Handler{}
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns-a/rank", map[string]string{"ns": "ns-a"}, `{"namespace":"ns-b","subject_id":"u1","candidates":["p1"]}`)
+	rec := httptest.NewRecorder()
+
+	h.RankByNamespace(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if got := decodeErrorResponse(t, rec); got.Error.Code != "namespace_mismatch" {
+		t.Fatalf("unexpected error code: %+v", got)
 	}
 }
 

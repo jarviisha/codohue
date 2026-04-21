@@ -107,6 +107,7 @@ func run() error {
 	// ingest
 	ingestRepo := ingest.NewRepository(db)
 	ingestSvc := ingest.NewService(ingestRepo, nsConfigSvc)
+	ingestHandler := ingest.NewHandler(ingestSvc)
 	ingestWorker := ingest.NewWorker(redisClient, ingestSvc)
 
 	if err := ingestWorker.Init(ctx); err != nil {
@@ -172,6 +173,13 @@ func run() error {
 		r.Post("/v1/objects/{ns}/{id}/embedding", recommendHandler.StoreObjectEmbedding)
 		r.Post("/v1/subjects/{ns}/{id}/embedding", recommendHandler.StoreSubjectEmbedding)
 		r.Delete("/v1/objects/{ns}/{id}", recommendHandler.DeleteObject)
+		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
+		r.Get("/v1/namespaces/{ns}/recommendations", recommendHandler.GetByNamespace)
+		r.Post("/v1/namespaces/{ns}/rank", recommendHandler.RankByNamespace)
+		r.Get("/v1/namespaces/{ns}/trending", recommendHandler.GetTrending)
+		r.Post("/v1/namespaces/{ns}/objects/{id}/embedding", recommendHandler.StoreObjectEmbedding)
+		r.Post("/v1/namespaces/{ns}/subjects/{id}/embedding", recommendHandler.StoreSubjectEmbedding)
+		r.Delete("/v1/namespaces/{ns}/objects/{id}", recommendHandler.DeleteObject)
 	})
 
 	// Goroutines

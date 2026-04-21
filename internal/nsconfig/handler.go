@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 type nsConfigUpserter interface {
@@ -29,13 +30,13 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 
 	var req UpsertRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 
 	resp, err := h.service.Upsert(r.Context(), namespace, &req)
 	if err != nil {
-		http.Error(w, "internal server error", http.StatusInternalServerError)
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
 

@@ -94,6 +94,31 @@ func decodeJSON(t testing.TB, resp *http.Response, v any) {
 	}
 }
 
+func decodeErrorJSON(t testing.TB, resp *http.Response, wantStatus int) (string, string) {
+	t.Helper()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != wantStatus {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected HTTP %d, got %d: %s", wantStatus, resp.StatusCode, bytes.TrimSpace(body))
+	}
+
+	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type = %q, want application/json", ct)
+	}
+
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode JSON error response: %v", err)
+	}
+	return body.Error.Code, body.Error.Message
+}
+
 // createNamespace upserts a namespace config and returns the plaintext API key
 // only when the namespace is created for the first time.
 func createNamespace(t testing.TB, namespace string, payload map[string]any) string {

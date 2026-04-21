@@ -2,10 +2,12 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -120,6 +122,13 @@ func TestRequireAdmin(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("expected 401, got %d", rec.Code)
 		}
+		var got httpapi.ErrorResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if got.Error.Code != "unauthorized" {
+			t.Fatalf("unexpected error code: %+v", got)
+		}
 	})
 
 	t.Run("missing header", func(t *testing.T) {
@@ -177,6 +186,13 @@ func TestRequireNamespace(t *testing.T) {
 
 		if rec.Code != http.StatusUnauthorized {
 			t.Fatalf("expected 401, got %d", rec.Code)
+		}
+		var got httpapi.ErrorResponse
+		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if got.Error.Code != "unauthorized" {
+			t.Fatalf("unexpected error code: %+v", got)
 		}
 		if nextCalled {
 			t.Fatal("did not expect next handler to be called")
