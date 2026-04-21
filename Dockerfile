@@ -6,6 +6,7 @@ RUN apk add --no-cache git ca-certificates
 WORKDIR /build
 
 COPY go.mod go.sum ./
+COPY pkg/codohuetypes/go.mod ./pkg/codohuetypes/go.mod
 RUN go mod download
 
 COPY . .
