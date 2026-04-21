@@ -51,9 +51,7 @@ temp/
 .claude/
 .mex/
 CLAUDE-*.md
-CLAUDE.md
 skills-lock.json
-AGENTS.md
 ai-docs/
 .codex
 ai-*/
