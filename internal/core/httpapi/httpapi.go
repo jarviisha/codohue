@@ -3,18 +3,17 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // ErrorDetail is the machine-readable error payload returned by API handlers.
-type ErrorDetail struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-}
+// Re-exported from codohuetypes so SDK clients parse the same struct.
+type ErrorDetail = codohuetypes.ErrorDetail
 
 // ErrorResponse wraps ErrorDetail in a stable top-level object for clients.
-type ErrorResponse struct {
-	Error ErrorDetail `json:"error"`
-}
+// Re-exported from codohuetypes so SDK clients parse the same struct.
+type ErrorResponse = codohuetypes.ErrorResponse
 
 // WriteJSON writes a JSON response with the given status code.
 func WriteJSON(w http.ResponseWriter, status int, v any) {

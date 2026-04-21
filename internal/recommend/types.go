@@ -1,6 +1,6 @@
 package recommend
 
-import "time"
+import "github.com/jarviisha/codohue/pkg/codohuetypes"
 
 // Request holds the query parameters for GET /v1/recommendations.
 type Request struct {
@@ -9,56 +9,26 @@ type Request struct {
 	Limit     int
 }
 
-// Response is returned to the Main Backend.
-type Response struct {
-	SubjectID   string    `json:"subject_id"`
-	Namespace   string    `json:"namespace"`
-	Items       []string  `json:"items"`
-	Source      string    `json:"source"`
-	GeneratedAt time.Time `json:"generated_at"`
-}
+// Response re-exports codohuetypes.Response.
+type Response = codohuetypes.Response
 
-// EmbeddingRequest is the payload for BYOE embedding endpoints.
-type EmbeddingRequest struct {
-	Vector []float32 `json:"vector"`
-}
+// EmbeddingRequest re-exports codohuetypes.EmbeddingRequest.
+type EmbeddingRequest = codohuetypes.EmbeddingRequest
 
-// RankRequest is the payload for POST /v1/rank.
-type RankRequest struct {
-	SubjectID  string   `json:"subject_id"`
-	Namespace  string   `json:"namespace"`
-	Candidates []string `json:"candidates"`
-}
+// RankRequest re-exports codohuetypes.RankRequest.
+type RankRequest = codohuetypes.RankRequest
 
-// RankedItem pairs an object ID with its computed relevance score.
-// Score is 0 when the subject has no interaction history (fallback — original order preserved).
-type RankedItem struct {
-	ObjectID string  `json:"object_id"`
-	Score    float64 `json:"score"`
-}
+// RankedItem re-exports codohuetypes.RankedItem.
+type RankedItem = codohuetypes.RankedItem
 
-// RankResponse is returned after ranking candidates.
-type RankResponse struct {
-	SubjectID   string       `json:"subject_id"`
-	Namespace   string       `json:"namespace"`
-	Items       []RankedItem `json:"items"`
-	Source      string       `json:"source"`
-	GeneratedAt time.Time    `json:"generated_at"`
-}
+// RankResponse re-exports codohuetypes.RankResponse.
+type RankResponse = codohuetypes.RankResponse
 
-// TrendingItem is a single item in the trending list with its score.
-type TrendingItem struct {
-	ObjectID string  `json:"object_id"`
-	Score    float64 `json:"score"`
-}
+// TrendingItem re-exports codohuetypes.TrendingItem.
+type TrendingItem = codohuetypes.TrendingItem
 
-// TrendingResponse is the response from GET /v1/trending/{ns}.
-type TrendingResponse struct {
-	Namespace   string         `json:"namespace"`
-	Items       []TrendingItem `json:"items"`
-	WindowHours int            `json:"window_hours"`
-	GeneratedAt time.Time      `json:"generated_at"`
-}
+// TrendingResponse re-exports codohuetypes.TrendingResponse.
+type TrendingResponse = codohuetypes.TrendingResponse
 
 // Source constants
 const (
