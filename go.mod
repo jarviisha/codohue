@@ -2,9 +2,14 @@ module github.com/jarviisha/codohue
 
 go 1.26.1
 
+// Shared wire types live in a sibling module so SDK consumers do not pull in
+// the server's dependency graph (pgx, qdrant, prometheus, etc).
+replace github.com/jarviisha/codohue/pkg/codohuetypes => ./pkg/codohuetypes
+
 require (
 	github.com/go-chi/chi/v5 v5.2.5
 	github.com/jackc/pgx/v5 v5.9.1
+	github.com/jarviisha/codohue/pkg/codohuetypes v0.0.0-00010101000000-000000000000
 	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/prometheus/client_model v0.6.2

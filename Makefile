@@ -2,6 +2,12 @@ BIN_DIR   := ./tmp
 API_BIN   := $(BIN_DIR)/api
 CRON_BIN  := $(BIN_DIR)/cron
 
+# Go modules in this repo. Targets that should cover the whole workspace
+# (lint, fmt, test, test-race) iterate over this list.
+GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
+
+LINT_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
+
 MIGRATIONS_DIR := ./migrations
 COVERAGE_DIR := $(BIN_DIR)/coverage
 COVERAGE_UNIT_OUT := $(COVERAGE_DIR)/unit.out
@@ -81,15 +87,24 @@ logs-cron:
 # ── Lint & Format ──────────────────────────────────────────────────────────────
 
 lint:
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off golangci-lint run ./...
+	@for m in $(GO_MODULES); do \
+		echo "==> lint $$m"; \
+		(cd $$m && $(LINT_ENV) golangci-lint run ./...) || exit 1; \
+	done
 
 fmt:
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off golangci-lint fmt ./...
+	@for m in $(GO_MODULES); do \
+		echo "==> fmt $$m"; \
+		(cd $$m && $(LINT_ENV) golangci-lint fmt ./...) || exit 1; \
+	done
 
 # ── Test ───────────────────────────────────────────────────────────────────────
 
 test:
-	go test ./...
+	@for m in $(GO_MODULES); do \
+		echo "==> test $$m"; \
+		(cd $$m && go test ./...) || exit 1; \
+	done
 
 ## Run tests for a specific package, for example:
 ##   make test-pkg PKG=./internal/ingest/...
@@ -97,10 +112,16 @@ test-pkg:
 	go test $(PKG)
 
 test-verbose:
-	go test -v ./...
+	@for m in $(GO_MODULES); do \
+		echo "==> test -v $$m"; \
+		(cd $$m && go test -v ./...) || exit 1; \
+	done
 
 test-race:
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go test -race ./...
+	@for m in $(GO_MODULES); do \
+		echo "==> test -race $$m"; \
+		(cd $$m && env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go test -race ./...) || exit 1; \
+	done
 
 coverage: coverage-unit
 

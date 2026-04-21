@@ -12,8 +12,8 @@ bin/
 # Output of the go coverage tool
 *.out
 
-# Go workspace file
-go.work
+# Go workspace sum (go.work itself is committed for monorepo dev ergonomics)
+go.work.sum
 
 # Environment variables
 .env
