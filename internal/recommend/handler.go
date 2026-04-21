@@ -3,6 +3,7 @@ package recommend
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -285,7 +286,10 @@ func isDimMismatch(err error) bool {
 
 func writeJSON(w http.ResponseWriter, v any) error {
 	w.Header().Set("Content-Type", "application/json")
-	return json.NewEncoder(w).Encode(v)
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		return fmt.Errorf("encode json response: %w", err)
+	}
+	return nil
 }
 
 func extractBearerToken(r *http.Request) string {

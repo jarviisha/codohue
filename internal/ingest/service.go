@@ -9,8 +9,10 @@ import (
 )
 
 var (
+	// ErrInvalidPayload indicates that the inbound event payload is missing required fields or is otherwise malformed.
 	ErrInvalidPayload = errors.New("invalid payload")
-	ErrUnknownAction  = errors.New("unknown action")
+	// ErrUnknownAction indicates that the event action cannot be resolved to a configured or default weight.
+	ErrUnknownAction = errors.New("unknown action")
 )
 
 type eventInserter interface {
