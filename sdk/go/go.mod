@@ -1,6 +1,6 @@
 module github.com/jarviisha/codohue/sdk/go
 
-go 1.26.1
+go 1.24.13
 
 // Local development: resolve pkg/codohuetypes from this repo. This replace
 // directive is scoped to this module's own builds and does not propagate to

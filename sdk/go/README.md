@@ -1,9 +1,8 @@
-# Codohue Go SDK
+# Codohue Go HTTP SDK
 
-Go client for the [Codohue](../../README.md) recommendation engine. Covers the
-data-plane HTTP endpoints (recommend, rank, trending, ingest, BYOE embeddings,
-delete object, health) plus a Redis Streams producer for high-throughput event
-ingestion.
+Go HTTP client for the [Codohue](../../README.md) recommendation engine.
+Covers the data-plane HTTP endpoints: recommend, rank, trending, ingest, BYOE
+embeddings, delete object, and health.
 
 Admin endpoints (namespace config upsert) are intentionally **not** wrapped by
 this SDK — those are operator-facing and live on a separate key tier.
@@ -16,6 +15,9 @@ go get github.com/jarviisha/codohue/sdk/go
 
 Module path: `github.com/jarviisha/codohue/sdk/go`. Wire types shared with the
 server live in `github.com/jarviisha/codohue/pkg/codohuetypes`.
+
+This module targets Go `1.24.13`. The server application in the repo root
+tracks Go `1.26.1` separately.
 
 ## Quick start
 
@@ -80,37 +82,14 @@ func main() {
 
 ### Redis Streams producer
 
-The HTTP ingest endpoint is convenient for one-off events. For bulk traffic
-publish directly to the ingest stream — the server's ingest worker consumes it
-with the same `EventPayload` contract.
+For bulk event ingestion, use the separate Redis Streams producer module:
 
-```go
-import (
-    "github.com/redis/go-redis/v9"
-    "github.com/jarviisha/codohue/pkg/codohuetypes"
-    "github.com/jarviisha/codohue/sdk/go/redistream"
-)
-
-rdb := redis.NewClient(&redis.Options{Addr: "localhost:6379"})
-p := redistream.NewProducer(rdb)
-
-id, err := p.Publish(ctx, codohuetypes.EventPayload{
-    Namespace: "feed",
-    SubjectID: "user-123",
-    ObjectID:  "item-a",
-    Action:    codohuetypes.ActionView,
-    Timestamp: time.Now().UTC(),
-})
-_ = id
-_ = err
-
-// Sequential batch helper — returns partial IDs if one XADD fails.
-_, _ = p.PublishBatch(ctx, []codohuetypes.EventPayload{ /* … */ })
+```bash
+go get github.com/jarviisha/codohue/sdk/go/redistream
 ```
 
-The stream name and payload field match the server's ingest contract
-(`codohue:events` / `payload`) — both are exported as
-`codohuetypes.StreamName` and `codohuetypes.PayloadField`.
+That module is documented separately and is the only SDK module that pulls
+`github.com/redis/go-redis/v9`.
 
 ## Errors
 
@@ -132,6 +111,12 @@ Sentinels (match with `errors.Is`):
 | `ErrNotFound` | HTTP 404 |
 | `ErrBadRequest` | any 4xx |
 | `ErrDimMismatch` | code `embedding_dimension_mismatch` |
+| `ErrDegraded` | `Healthz()` returned parsed degraded health on HTTP 503 |
+
+`Healthz()` has one special case: when the server replies with a parseable
+degraded health body, the SDK returns both the populated `*HealthStatus` and
+an `*APIError` that matches `ErrDegraded`. This preserves the per-component
+health details while still surfacing the degraded status as an error.
 
 ## Client options
 
@@ -164,6 +149,7 @@ go build ./...            # builds the server module
 cd sdk/go && go test ./... # runs SDK tests
 ```
 
-The `replace github.com/jarviisha/codohue => ../..` directive in `sdk/go/go.mod`
-resolves `pkg/codohuetypes` locally. It is scoped to this module's own builds
-and does not affect downstream consumers.
+The `replace github.com/jarviisha/codohue/pkg/codohuetypes => ../../pkg/codohuetypes`
+directive in `sdk/go/go.mod` resolves the shared wire-types module locally. It
+is scoped to this module's own builds and does not affect downstream
+consumers.

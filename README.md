@@ -20,6 +20,21 @@ The project ships two executables:
 - `cmd/api`: HTTP API on port `2001` and the Redis Streams ingest worker
 - `cmd/cron`: scheduled batch recompute job for vectors and trending data
 
+## Modules
+
+This repository contains the server application plus Go modules used by
+external clients:
+
+- root module `github.com/jarviisha/codohue`: the server application and
+  internal packages
+- `github.com/jarviisha/codohue/pkg/codohuetypes`: shared wire types for HTTP
+  and Redis Streams payloads
+- `github.com/jarviisha/codohue/sdk/go`: HTTP client SDK for the data-plane API
+- `github.com/jarviisha/codohue/sdk/go/redistream`: Redis Streams producer SDK
+
+See [sdk/go/README.md](./sdk/go/README.md) for the HTTP client and
+`sdk/go/redistream` usage.
+
 ## Architecture
 
 Core runtime components:
@@ -51,6 +66,13 @@ Main internal packages:
 - `golangci-lint` if you want to run lint or format targets
 - `air` if you want to use `make dev`
 - `migrate` if you want to run database migrations from the host
+
+SDK note:
+
+- the server application tracks Go `1.26.1`
+- the SDK-related modules (`pkg/codohuetypes`, `sdk/go`,
+  `sdk/go/redistream`) currently target Go `1.24.13` for broader downstream
+  adoption
 
 ## Configuration
 
