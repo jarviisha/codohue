@@ -1,10 +1,8 @@
 name: Release
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  push:
+    tags: ['v*']
 
 env:
   REGISTRY: ghcr.io
@@ -14,7 +12,6 @@ env:
 
 jobs:
   build-push:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,9 +41,9 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.ref_name }}
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ github.sha }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ github.ref_name }}
 
       - name: Build and push Cron image
         uses: docker/build-push-action@v6
@@ -56,9 +53,9 @@ jobs:
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ github.ref_name }}
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.sha }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.ref_name }}
 
   deploy:
     if: false # TODO: enable when VPS is ready
