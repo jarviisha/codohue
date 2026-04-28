@@ -8,4 +8,4 @@ go 1.24.13
 // pkg/codohuetypes tag and keep the replace for local dev via go.work.
 replace github.com/jarviisha/codohue/pkg/codohuetypes => ../../pkg/codohuetypes
 
-require github.com/jarviisha/codohue/pkg/codohuetypes v0.0.0-00010101000000-000000000000
+require github.com/jarviisha/codohue/pkg/codohuetypes v0.2.0
