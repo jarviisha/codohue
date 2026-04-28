@@ -107,60 +107,115 @@ API_PORT=2001
 
 ## Quick Start
 
-### Option 1: Run with Docker Compose
+The project ships two Docker Compose files:
 
-Start the full stack:
+- `docker-compose.yml` — local development; builds images from source, runs the API with live reload via `air`
+- `docker-compose.prod.yml` — production; pulls prebuilt images from GHCR, no source mount
+
+### Option 1: Full stack with Docker Compose (development)
+
+**1. Copy and review environment variables**
+
+```bash
+cp .env.example .env
+```
+
+The default values in `.env.example` match what `docker-compose.yml` already injects, so no edits are required for a local first run.
+
+**2. Start the full stack in the background**
 
 ```bash
 make up-d
 ```
 
-The API becomes available at `http://localhost:2001`.
+This starts:
 
-Useful follow-up commands:
+| Container          | Image                    | Exposed ports                    |
+| ------------------ | ------------------------ | -------------------------------- |
+| `codohue-api`      | built from source + air  | `2001` (HTTP API)                |
+| `codohue-postgres` | `postgres:16-alpine`     | `5432`                           |
+| `codohue-redis`    | `redis:7-alpine`         | `6379`                           |
+| `codohue-qdrant`   | `qdrant/qdrant:v1.17.1`  | `6333` (HTTP), `6334` (gRPC)     |
 
-```bash
-make logs
-make logs-cron
-make down
-```
-
-To reset local volumes:
-
-```bash
-make down-v
-```
-
-### Option 2: Run the API locally against Docker infra
-
-Start only infrastructure:
-
-```bash
-make up-infra
-```
-
-Apply migrations:
+**3. Apply database migrations**
 
 ```bash
 make migrate-up
 ```
 
-Run the API:
+Migrations must be applied manually on first run (and after any schema updates). The `postgres` container starts healthy before the API, so migrations can be run immediately after `make up-d`.
+
+**4. Verify the stack**
 
 ```bash
-make run
+curl http://localhost:2001/healthz
 ```
 
-Run one cron cycle manually:
+**Useful commands**
 
 ```bash
-make run-cron
+make logs          # tail API logs
+make logs-cron     # tail cron logs
+make down          # stop and remove containers
+make down-v        # stop and remove containers + all local volumes (full reset)
 ```
 
-For live reload:
+---
+
+### Option 2: Run the API locally against Docker infra
+
+Use this when you want fast iteration on the Go source without rebuilding the Docker image.
+
+**1. Start only the infrastructure services**
 
 ```bash
-make dev
+make up-infra
+```
+
+**2. Apply migrations**
+
+```bash
+make migrate-up
+```
+
+**3. Run the API or cron**
+
+```bash
+make run           # start the API
+make run-cron      # run one cron cycle
+make dev           # start the API with live reload (requires air)
+```
+
+---
+
+### Option 3: Production deployment with Docker Compose
+
+`docker-compose.prod.yml` pulls prebuilt images from GHCR (`ghcr.io/jarviisha/codohue/api:latest` and `ghcr.io/jarviisha/codohue/cron:latest`). It does **not** include a Postgres container — you must supply an external database.
+
+**Required environment variables**
+
+```bash
+export DATABASE_URL="postgres://user:password@host:5432/dbname?sslmode=require"
+export RECOMMENDER_API_KEY="your-secret-key"
+```
+
+**Start the stack**
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**Notable differences from the dev compose**
+
+- `api` and `cron` containers use `restart: unless-stopped`
+- Qdrant and Redis gRPC/HTTP ports are bound to `127.0.0.1` only (not exposed to the network)
+- Redis uses `maxmemory 256mb` with `allkeys-lru` eviction
+- Log format defaults to `json`
+
+Run migrations against the production database before starting (or as a pre-deploy step):
+
+```bash
+migrate -path migrations -database "$DATABASE_URL" up
 ```
 
 ## Namespace Setup
