@@ -32,7 +32,7 @@ import (
 )
 
 var (
-	loadConfigFn      = config.Load
+	loadConfigFn      = config.LoadAPI
 	newPoolFn         = infrapg.NewPool
 	newRedisFn        = infraredis.NewClient
 	newQdrantFn       = infraqdrant.NewClient

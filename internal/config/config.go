@@ -20,28 +20,45 @@ type AppConfig struct {
 	APIPort              string // HTTP listen port (default: "2001")
 }
 
-// Load reads and validates configuration from environment variables.
-// If a .env file is present it is loaded first; variables already set in the
-// environment take precedence (godotenv does not overwrite existing values).
-func Load() (*AppConfig, error) {
+// LoadAPI reads and validates configuration for the API binary.
+// It requires both DATABASE_URL and RECOMMENDER_API_KEY to be set.
+func LoadAPI() (*AppConfig, error) {
+	cfg, err := loadBase()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.RecommenderAPIKey = getEnv("RECOMMENDER_API_KEY", "")
+	if cfg.RecommenderAPIKey == "" {
+		return nil, fmt.Errorf("RECOMMENDER_API_KEY is required")
+	}
+
+	cfg.APIPort = getEnv("API_PORT", "2001")
+	return cfg, nil
+}
+
+// LoadCron reads and validates configuration for the cron binary.
+// It requires DATABASE_URL but not RECOMMENDER_API_KEY.
+func LoadCron() (*AppConfig, error) {
+	return loadBase()
+}
+
+// loadBase loads the config fields shared by all binaries and validates them.
+func loadBase() (*AppConfig, error) {
 	err := godotenv.Load()
 	if err != nil {
 		fmt.Println("No .env file found, relying on environment variables")
 	}
+
 	cfg := &AppConfig{
-		DatabaseURL:       getEnv("DATABASE_URL", ""),
-		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379"),
-		QdrantHost:        getEnv("QDRANT_HOST", "localhost"),
-		RecommenderAPIKey: getEnv("RECOMMENDER_API_KEY", ""),
-		LogFormat:         getEnv("LOG_FORMAT", "text"),
-		APIPort:           getEnv("API_PORT", "2001"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
+		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
+		LogFormat:   getEnv("LOG_FORMAT", "text"),
 	}
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
-	}
-	if cfg.RecommenderAPIKey == "" {
-		return nil, fmt.Errorf("RECOMMENDER_API_KEY is required")
 	}
 
 	port, err := strconv.Atoi(getEnv("QDRANT_PORT", "6334"))

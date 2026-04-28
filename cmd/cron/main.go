@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	loadConfigFn    = config.Load
+	loadConfigFn    = config.LoadCron
 	newPoolFn       = infrapg.NewPool
 	newQdrantFn     = infraqdrant.NewClient
 	newRedisFn      = infraredis.NewClient
