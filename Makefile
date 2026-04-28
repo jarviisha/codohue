@@ -30,7 +30,7 @@ MIN_CMD_CRON ?= 45
 .PHONY: build build-api build-cron run run-cron dev lint fmt \
         test test-pkg test-verbose test-race test-e2e test-e2e-api test-e2e-heavy \
         coverage coverage-unit coverage-race coverage-report coverage-html coverage-check coverage-check-pkg coverage-check-all coverage-clean \
-        up up-d up-infra down down-v logs logs-cron \
+        up up-d up-infra up-app up-app-d down-app logs logs-cron logs-app \
         migrate migrate-up migrate-down migrate-version migrate-create \
         clean
 
@@ -71,6 +71,16 @@ up-d:
 up-infra:
 	docker compose up -d postgres redis qdrant
 
+## Start only API and cron; connect them to external infra from .env/environment
+up-app:
+	docker compose -f docker-compose.app.yml up --build
+
+up-app-d:
+	docker compose -f docker-compose.app.yml up -d --build
+
+down-app:
+	docker compose -f docker-compose.app.yml down
+
 down:
 	docker compose down
 
@@ -83,6 +93,9 @@ logs:
 
 logs-cron:
 	docker compose logs -f cron
+
+logs-app:
+	docker compose -f docker-compose.app.yml logs -f
 
 # ── Lint & Format ──────────────────────────────────────────────────────────────
 

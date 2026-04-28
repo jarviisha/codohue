@@ -109,7 +109,8 @@ API_PORT=2001
 
 The project ships two Docker Compose files:
 
-- `docker-compose.yml` — local development; builds images from source, runs the API with live reload via `air`
+- `docker-compose.yml` — local development; builds images from source and runs the API binary
+- `docker-compose.app.yml` — app-only development; builds API and cron, connects to externally managed Postgres, Redis, and Qdrant
 - `docker-compose.prod.yml` — production; pulls prebuilt images from GHCR, no source mount
 
 ### Option 1: Full stack with Docker Compose (development)
@@ -132,7 +133,7 @@ This starts:
 
 | Container          | Image                    | Exposed ports                    |
 | ------------------ | ------------------------ | -------------------------------- |
-| `codohue-api`      | built from source + air  | `2001` (HTTP API)                |
+| `codohue-api`      | built from source        | `2001` (HTTP API)                |
 | `codohue-postgres` | `postgres:16-alpine`     | `5432`                           |
 | `codohue-redis`    | `redis:7-alpine`         | `6379`                           |
 | `codohue-qdrant`   | `qdrant/qdrant:v1.17.1`  | `6333` (HTTP), `6334` (gRPC)     |
@@ -188,15 +189,46 @@ make dev           # start the API with live reload (requires air)
 
 ---
 
-### Option 3: Production deployment with Docker Compose
+### Option 3: API and cron only with external infrastructure
+
+Use this when Postgres, Redis, and Qdrant are managed outside this compose stack. The app-only compose file reads the same `.env` variables as the application and uses host networking, so `localhost` means the Docker host.
+
+```env
+DATABASE_URL=postgres://user:password@localhost:5432/codohue?sslmode=disable
+REDIS_URL=redis://localhost:6379
+QDRANT_HOST=localhost
+QDRANT_PORT=6334
+RECOMMENDER_API_KEY=dev-secret-key
+BATCH_INTERVAL_MINUTES=5
+LOG_FORMAT=text
+API_PORT=2001
+```
+
+Start only `api` and `cron`:
+
+```bash
+make up-app-d
+```
+
+Stop them:
+
+```bash
+make down-app
+```
+
+If your infrastructure is on another host or network, set `DATABASE_URL`, `REDIS_URL`, and `QDRANT_HOST` to those reachable addresses instead of `localhost`.
+
+---
+
+### Option 4: Production deployment with Docker Compose
 
 `docker-compose.prod.yml` pulls prebuilt images from GHCR (`ghcr.io/jarviisha/codohue/api:latest` and `ghcr.io/jarviisha/codohue/cron:latest`). It does **not** include a Postgres container — you must supply an external database.
 
 **Required environment variables**
 
 ```bash
-export DATABASE_URL="postgres://user:password@host:5432/dbname?sslmode=require"
-export RECOMMENDER_API_KEY="your-secret-key"
+export CODOHUE_DATABASE_URL="postgres://user:password@host:5432/dbname?sslmode=require"
+export CODOHUE_RECOMMENDER_API_KEY="your-secret-key"
 ```
 
 **Start the stack**
@@ -428,7 +460,7 @@ e2e/                     end-to-end tests
 
 - `docker-compose.yml` is aimed at local development
 - `docker-compose.prod.yml` runs the prebuilt `api` and `cron` images
-- The production compose file expects `DATABASE_URL` and `RECOMMENDER_API_KEY` from the environment
+- The production compose file expects `CODOHUE_DATABASE_URL` and `CODOHUE_RECOMMENDER_API_KEY` from the environment
 
 ## Notes
 

@@ -1,15 +1,15 @@
 services:
   api:
-    image: jarviisha/codohue-api:latest
+    image: ghcr.io/jarviisha/codohue/api:latest
     restart: unless-stopped
     ports:
       - "2001:2001"
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
-      - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY}
+      - RECOMMENDER_API_KEY=${CODOHUE_RECOMMENDER_API_KEY:?set CODOHUE_RECOMMENDER_API_KEY to the production admin API key}
       - LOG_FORMAT=json
       - BATCH_INTERVAL_MINUTES=5
     depends_on:
@@ -26,10 +26,10 @@ services:
       retries: 3
 
   cron:
-    image: jarviisha/codohue-cron:latest
+    image: ghcr.io/jarviisha/codohue/cron:latest
     restart: unless-stopped
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
@@ -44,10 +44,10 @@ services:
         condition: service_started
 
   migrate:
-    image: jarviisha/codohue-migrate:latest
+    image: ghcr.io/jarviisha/codohue/migrate:latest
     restart: on-failure
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
 
   redis:
     image: redis:7-alpine

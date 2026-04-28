@@ -12,7 +12,9 @@ services:
         condition: service_healthy
 
   api:
-    build: .
+    build:
+      context: .
+      target: api
     container_name: codohue-api
     ports:
       - "2001:2001"
@@ -24,9 +26,6 @@ services:
       - RECOMMENDER_API_KEY=dev-secret-key
       - BATCH_INTERVAL_MINUTES=5
       - LOG_FORMAT=text
-    volumes:
-      - .:/app
-    command: air
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -54,7 +53,6 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/migrations
-      - ./docker/init.sh:/docker-entrypoint-initdb.d/init.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U codohue"]
       interval: 5s
