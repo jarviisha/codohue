@@ -7,17 +7,10 @@ services:
     network_mode: host
     extra_hosts:
       - "host.docker.internal:127.0.0.1"
-    environment:
-      - DATABASE_URL=${DATABASE_URL:?set DATABASE_URL to your external Postgres URL}
-      - REDIS_URL=${REDIS_URL:-redis://host.docker.internal:6379}
-      - QDRANT_HOST=${QDRANT_HOST:-host.docker.internal}
-      - QDRANT_PORT=${QDRANT_PORT:-6334}
-      - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY:?set RECOMMENDER_API_KEY for the API}
-      - BATCH_INTERVAL_MINUTES=${BATCH_INTERVAL_MINUTES:-5}
-      - LOG_FORMAT=${LOG_FORMAT:-text}
-      - API_PORT=${API_PORT:-2001}
+    env_file:
+      - .env.app
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${API_PORT:-2001}/healthz"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${API_PORT:-2001}/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -30,10 +23,5 @@ services:
     network_mode: host
     extra_hosts:
       - "host.docker.internal:127.0.0.1"
-    environment:
-      - DATABASE_URL=${DATABASE_URL:?set DATABASE_URL to your external Postgres URL}
-      - REDIS_URL=${REDIS_URL:-redis://host.docker.internal:6379}
-      - QDRANT_HOST=${QDRANT_HOST:-host.docker.internal}
-      - QDRANT_PORT=${QDRANT_PORT:-6334}
-      - BATCH_INTERVAL_MINUTES=${BATCH_INTERVAL_MINUTES:-5}
-      - LOG_FORMAT=${LOG_FORMAT:-text}
+    env_file:
+      - .env.app
