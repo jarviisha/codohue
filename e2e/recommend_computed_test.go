@@ -54,10 +54,12 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 		apiKey, nil)
 
 	var body struct {
-		SubjectID string   `json:"subject_id"`
-		Namespace string   `json:"namespace"`
-		Items     []string `json:"items"`
-		Source    string   `json:"source"`
+		SubjectID string `json:"subject_id"`
+		Namespace string `json:"namespace"`
+		Items     []struct {
+			ObjectID string `json:"object_id"`
+		} `json:"items"`
+		Source string `json:"source"`
 	}
 	decodeJSON(t, resp, &body)
 
@@ -74,8 +76,8 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 		t.Fatal("expected non-empty recommendations for warm subject")
 	}
 	for _, item := range body.Items {
-		if seen[item] {
-			t.Fatalf("recommended seen item %q", item)
+		if seen[item.ObjectID] {
+			t.Fatalf("recommended seen item %q", item.ObjectID)
 		}
 	}
 }
@@ -107,8 +109,10 @@ func TestRecommendComputed_ColdStartFallsBackToTrendingOrPopular(t *testing.T) {
 		apiKey, nil)
 
 	var body struct {
-		Items  []string `json:"items"`
-		Source string   `json:"source"`
+		Items []struct {
+			ObjectID string `json:"object_id"`
+		} `json:"items"`
+		Source string `json:"source"`
 	}
 	decodeJSON(t, resp, &body)
 

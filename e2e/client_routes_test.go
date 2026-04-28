@@ -53,9 +53,11 @@ func TestClientRoutes_RecommendationsByNamespace(t *testing.T) {
 		nsKey, nil)
 
 	var body struct {
-		SubjectID string   `json:"subject_id"`
-		Namespace string   `json:"namespace"`
-		Items     []string `json:"items"`
+		SubjectID string `json:"subject_id"`
+		Namespace string `json:"namespace"`
+		Items     []struct {
+			ObjectID string `json:"object_id"`
+		} `json:"items"`
 	}
 	decodeJSON(t, resp, &body)
 

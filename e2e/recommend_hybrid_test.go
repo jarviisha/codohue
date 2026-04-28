@@ -74,8 +74,10 @@ func TestRecommendHybrid_UsesSparseAndDenseArtifacts(t *testing.T) {
 		apiKey, nil)
 
 	var body struct {
-		Items  []string `json:"items"`
-		Source string   `json:"source"`
+		Items []struct {
+			ObjectID string `json:"object_id"`
+		} `json:"items"`
+		Source string `json:"source"`
 	}
 	decodeJSON(t, resp, &body)
 
@@ -86,8 +88,8 @@ func TestRecommendHybrid_UsesSparseAndDenseArtifacts(t *testing.T) {
 		t.Fatal("expected non-empty hybrid recommendations")
 	}
 	for _, item := range body.Items {
-		if seen[item] {
-			t.Fatalf("hybrid recommended seen item %q", item)
+		if seen[item.ObjectID] {
+			t.Fatalf("hybrid recommended seen item %q", item.ObjectID)
 		}
 	}
 }

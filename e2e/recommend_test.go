@@ -18,7 +18,9 @@ func TestRecommend_ColdStart(t *testing.T) {
 	var body struct {
 		SubjectID   string    `json:"subject_id"`
 		Namespace   string    `json:"namespace"`
-		Items       []string  `json:"items"`
+		Items       []struct {
+			ObjectID string `json:"object_id"`
+		} `json:"items"`
 		Source      string    `json:"source"`
 		GeneratedAt time.Time `json:"generated_at"`
 	}
@@ -98,7 +100,9 @@ func TestRecommend_LimitCapped(t *testing.T) {
 		nsKey, nil)
 
 	var body struct {
-		Items []string `json:"items"`
+		Items []struct {
+			ObjectID string `json:"object_id"`
+		} `json:"items"`
 	}
 	decodeJSON(t, resp, &body)
 
