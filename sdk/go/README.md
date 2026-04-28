@@ -48,12 +48,19 @@ func main() {
     // Recommendations
     rec, err := ns.Recommend(ctx, "user-123", codohue.WithLimit(20))
     if err != nil { log.Fatal(err) }
-    log.Printf("items: %v (source=%s)", rec.Items, rec.Source)
+    for _, it := range rec.Items {
+        log.Printf("rank=%d object=%s score=%.4f", it.Rank, it.ObjectID, it.Score)
+    }
+    log.Printf("source=%s total=%d", rec.Source, rec.Total)
+
+    // Paginate recommendations
+    page2, _ := ns.Recommend(ctx, "user-123", codohue.WithLimit(20), codohue.WithOffset(20))
+    _ = page2
 
     // Rank candidates
     rk, _ := ns.Rank(ctx, "user-123", []string{"item-a", "item-b", "item-c"})
     for _, it := range rk.Items {
-        log.Printf("%s: %.4f", it.ObjectID, it.Score)
+        log.Printf("rank=%d object=%s score=%.4f", it.Rank, it.ObjectID, it.Score)
     }
 
     // Trending

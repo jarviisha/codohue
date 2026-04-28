@@ -74,10 +74,21 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request, namespace, subject
 		limit = n
 	}
 
+	offset := 0
+	if o := q.Get("offset"); o != "" {
+		n, err := strconv.Atoi(o)
+		if err != nil || n < 0 {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_offset", "invalid offset")
+			return
+		}
+		offset = n
+	}
+
 	resp, err := h.service.Recommend(r.Context(), &Request{
 		SubjectID: subjectID,
 		Namespace: namespace,
 		Limit:     limit,
+		Offset:    offset,
 	})
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")

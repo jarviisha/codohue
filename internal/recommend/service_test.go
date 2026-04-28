@@ -154,14 +154,14 @@ func TestNewService(t *testing.T) {
 func TestRecommend_CacheHit(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	s.getCacheFn = func(_ context.Context, _ string) (string, error) {
-		return `{"subject_id":"u1","namespace":"ns","items":["cached-item"],"source":"cf","generated_at":"2024-01-01T00:00:00Z"}`, nil
+		return `{"subject_id":"u1","namespace":"ns","items":[{"object_id":"cached-item","score":0,"rank":1}],"source":"cf","limit":10,"offset":0,"total":1,"generated_at":"2024-01-01T00:00:00Z"}`, nil
 	}
 
 	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 10})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0] != "cached-item" {
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "cached-item" {
 		t.Errorf("expected cached-item, got %v", resp.Items)
 	}
 }
@@ -202,7 +202,7 @@ func TestDoRecommend_ColdStart_UsesTrendingCache(t *testing.T) {
 	if resp.Source != SourceFallbackPopular {
 		t.Errorf("source: got %q, want %q", resp.Source, SourceFallbackPopular)
 	}
-	if len(resp.Items) != 2 || resp.Items[0] != "trending-1" {
+	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "trending-1" {
 		t.Errorf("items: got %v", resp.Items)
 	}
 }
@@ -260,7 +260,7 @@ func TestCollaborativeFiltering_SeenItemsError_StillQueriesAndReturnsCF(t *testi
 	if resp.Source != SourceCollaborativeFiltering {
 		t.Fatalf("source: got %q, want %q", resp.Source, SourceCollaborativeFiltering)
 	}
-	if len(resp.Items) != 1 || resp.Items[0] != "obj-1" {
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "obj-1" {
 		t.Fatalf("unexpected items: %v", resp.Items)
 	}
 }
@@ -573,6 +573,9 @@ func TestRankFallback(t *testing.T) {
 		if item.Score != 0 {
 			t.Errorf("items[%d].Score = %f, want 0", i, item.Score)
 		}
+		if item.Rank != i+1 {
+			t.Errorf("items[%d].Rank = %d, want %d", i, item.Rank, i+1)
+		}
 	}
 }
 
@@ -731,7 +734,7 @@ func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
 	if len(resp.Items) != 3 {
 		t.Fatalf("items length: got %d want 3", len(resp.Items))
 	}
-	if resp.Items[0] != "obj-sparse" {
+	if resp.Items[0].ObjectID != "obj-sparse" {
 		t.Fatalf("expected obj-sparse first, got %v", resp.Items)
 	}
 }
@@ -754,7 +757,7 @@ func TestHybridRecommend_AppliesFreshnessDecay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Items[0] != "fresh" {
+	if resp.Items[0].ObjectID != "fresh" {
 		t.Fatalf("expected fresh item first after decay, got %v", resp.Items)
 	}
 }
@@ -772,7 +775,7 @@ func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceFallbackPopular || resp.Items[0] != "popular-1" {
+	if resp.Source != SourceFallbackPopular || resp.Items[0].ObjectID != "popular-1" {
 		t.Fatalf("unexpected fallback response: %+v", resp)
 	}
 }
@@ -1016,7 +1019,7 @@ func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceHybridCold || len(resp.Items) != 1 || resp.Items[0] != "cf-1" {
+	if resp.Source != SourceHybridCold || len(resp.Items) != 1 || resp.Items[0].ObjectID != "cf-1" {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
@@ -1031,7 +1034,7 @@ func TestHybridCold_WhenCFEmptyReturnsPopular(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0] != "pop-1" {
+	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0].ObjectID != "pop-1" {
 		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
@@ -1095,9 +1098,15 @@ func TestDeleteFromCollection_Error(t *testing.T) {
 }
 
 func TestRecCacheKey(t *testing.T) {
-	key := recCacheKey("ns_feed", "user123", 20)
-	want := "rec:ns_feed:user123:limit=20"
+	key := recCacheKey("ns_feed", "user123", 20, 0)
+	want := "rec:ns_feed:user123:limit=20:offset=0"
 	if key != want {
 		t.Errorf("got %q, want %q", key, want)
+	}
+
+	keyWithOffset := recCacheKey("ns_feed", "user123", 20, 10)
+	wantWithOffset := "rec:ns_feed:user123:limit=20:offset=10"
+	if keyWithOffset != wantWithOffset {
+		t.Errorf("got %q, want %q", keyWithOffset, wantWithOffset)
 	}
 }

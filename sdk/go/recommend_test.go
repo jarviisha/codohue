@@ -15,10 +15,16 @@ func TestNamespaceRecommend(t *testing.T) {
 	t.Parallel()
 
 	want := codohuetypes.Response{
-		SubjectID:   "user-1",
-		Namespace:   "feed",
-		Items:       []string{"a", "b", "c"},
+		SubjectID: "user-1",
+		Namespace: "feed",
+		Items: []codohuetypes.RecommendedItem{
+			{ObjectID: "a", Score: 0.9, Rank: 1},
+			{ObjectID: "b", Score: 0.7, Rank: 2},
+			{ObjectID: "c", Score: 0.5, Rank: 3},
+		},
 		Source:      "collaborative_filtering",
+		Limit:       5,
+		Total:       3,
 		GeneratedAt: time.Date(2026, 4, 21, 10, 0, 0, 0, time.UTC),
 	}
 

@@ -142,7 +142,14 @@ func TestHandlerGetSuccess(t *testing.T) {
 	h := &Handler{service: &fakeSvc{
 		recommendResp: &Response{
 			SubjectID: "u1", Namespace: "ns",
-			Items: []string{"item-1", "item-2"}, Source: SourceFallbackPopular,
+			Items: []RecommendedItem{
+				{ObjectID: "item-1", Score: 0.9, Rank: 1},
+				{ObjectID: "item-2", Score: 0.7, Rank: 2},
+			},
+			Source:      SourceFallbackPopular,
+			Limit:       20,
+			Offset:      0,
+			Total:       2,
 			GeneratedAt: time.Now(),
 		},
 	}}
@@ -159,7 +166,7 @@ func TestHandlerGetSuccess(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(resp.Items) != 2 || resp.Items[0] != "item-1" {
+	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "item-1" {
 		t.Errorf("items: got %v", resp.Items)
 	}
 }

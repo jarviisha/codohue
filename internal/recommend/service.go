@@ -217,6 +217,9 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	if req.Limit <= 0 {
 		req.Limit = 20
 	}
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
 
 	cfg, err := s.nsConfigSvc.Get(ctx, req.Namespace)
 	if err != nil {
@@ -227,7 +230,7 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 		maxResults = cfg.MaxResults
 	}
 
-	cacheKey := recCacheKey(req.Namespace, req.SubjectID, maxResults)
+	cacheKey := recCacheKey(req.Namespace, req.SubjectID, maxResults, req.Offset)
 	if cached, err := s.getCacheFn(ctx, cacheKey); err == nil {
 		var resp Response
 		if json.Unmarshal([]byte(cached), &resp) == nil {
@@ -301,7 +304,9 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 		slog.Debug("hybrid: no subject dense vector, using pure CF", "namespace", req.Namespace, "subject_id", req.SubjectID)
 	}
 
-	results, err := s.searchObjectsFn(ctx, req.Namespace, subjectVec, seenFilter, uint64(limit*cfOverFetchFactor))
+	// Over-fetch enough to cover offset + limit after reranking.
+	fetchLimit := uint64((req.Offset + limit) * cfOverFetchFactor)
+	results, err := s.searchObjectsFn(ctx, req.Namespace, subjectVec, seenFilter, fetchLimit)
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		return s.fallbackPopular(ctx, req, limit)
@@ -311,7 +316,10 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	if cfg != nil && cfg.Gamma > 0 {
 		gamma = cfg.Gamma
 	}
-	items := rerank(results, gamma, limit)
+	scored := rerankScored(results, gamma, req.Offset+limit)
+	total := len(scored)
+
+	items := pageItems(scored, req.Offset, limit)
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceCollaborativeFiltering).Inc()
 	return &Response{
@@ -319,6 +327,9 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 		Namespace:   req.Namespace,
 		Items:       items,
 		Source:      SourceCollaborativeFiltering,
+		Limit:       limit,
+		Offset:      req.Offset,
+		Total:       total,
 		GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -335,15 +346,19 @@ func (s *Service) hybridRecommend(
 ) (*Response, error) {
 	alpha := cfg.Alpha
 
+	// Over-fetch enough to cover offset + limit.
+	sparseTopK := uint64((req.Offset + limit) * cfOverFetchFactor)
+	denseTopK := uint64((req.Offset + limit) * denseOverFetchFactor)
+
 	// Sparse retrieval.
-	sparseResults, err := s.searchObjectsFn(ctx, req.Namespace, subjectSparseVec, seenFilter, uint64(limit*cfOverFetchFactor))
+	sparseResults, err := s.searchObjectsFn(ctx, req.Namespace, subjectSparseVec, seenFilter, sparseTopK)
 	if err != nil {
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
 	}
 
 	// Dense retrieval.
-	denseResults, err := s.searchObjectsDenseFn(ctx, req.Namespace, subjectDenseVec, seenFilter, uint64(limit*denseOverFetchFactor))
+	denseResults, err := s.searchObjectsDenseFn(ctx, req.Namespace, subjectDenseVec, seenFilter, denseTopK)
 	if err != nil {
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
@@ -403,13 +418,26 @@ func (s *Service) hybridRecommend(
 		return candidates[i].score > candidates[j].score
 	})
 
-	top := limit
-	if top > len(candidates) {
-		top = len(candidates)
+	total := len(candidates)
+
+	// Apply offset + limit.
+	start := req.Offset
+	if start > len(candidates) {
+		start = len(candidates)
 	}
-	items := make([]string, top)
-	for i, c := range candidates[:top] {
-		items[i] = c.objectID
+	end := start + limit
+	if end > len(candidates) {
+		end = len(candidates)
+	}
+	paged := candidates[start:end]
+
+	items := make([]RecommendedItem, len(paged))
+	for i, c := range paged {
+		items[i] = RecommendedItem{
+			ObjectID: c.objectID,
+			Score:    c.score,
+			Rank:     start + i + 1,
+		}
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybrid).Inc()
@@ -418,6 +446,9 @@ func (s *Service) hybridRecommend(
 		Namespace:   req.Namespace,
 		Items:       items,
 		Source:      SourceHybrid,
+		Limit:       limit,
+		Offset:      req.Offset,
+		Total:       total,
 		GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -527,8 +558,17 @@ func buildCreatedAtLookup(sets ...[]*qdrant.ScoredPoint) map[string]time.Time {
 }
 
 func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *nsconfig.NamespaceConfig) (*Response, error) {
-	cfResp, cfErr := s.collaborativeFiltering(ctx, req, limit, cfg)
-	popularResp, popErr := s.fallbackTrending(ctx, req, limit, cfg)
+	// Over-fetch from both sources to cover offset before blending.
+	overLimit := req.Offset + limit
+	innerReq := &Request{
+		SubjectID: req.SubjectID,
+		Namespace: req.Namespace,
+		Limit:     overLimit,
+		Offset:    0,
+	}
+
+	cfResp, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
+	popularResp, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg)
 
 	if popErr != nil && cfErr != nil {
 		return nil, fmt.Errorf("hybrid cold: popular: %w; cf: %v", popErr, cfErr)
@@ -543,13 +583,34 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 		return popularResp, nil
 	}
 
-	blended := blendItems(popularResp.Items, cfResp.Items, 0.7, limit)
+	blended := blendItems(itemIDs(popularResp.Items), itemIDs(cfResp.Items), 0.7, overLimit)
+	total := len(blended)
+
+	// Apply offset.
+	start := req.Offset
+	if start > len(blended) {
+		start = len(blended)
+	}
+	end := start + limit
+	if end > len(blended) {
+		end = len(blended)
+	}
+	blended = blended[start:end]
+
+	items := make([]RecommendedItem, len(blended))
+	for i, id := range blended {
+		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1}
+	}
+
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybridCold).Inc()
 	return &Response{
 		SubjectID:   req.SubjectID,
 		Namespace:   req.Namespace,
-		Items:       blended,
+		Items:       items,
 		Source:      SourceHybridCold,
+		Limit:       limit,
+		Offset:      req.Offset,
+		Total:       total,
 		GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -592,6 +653,9 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, win
 		Namespace:   ns,
 		Items:       items,
 		WindowHours: actualWindow,
+		Limit:       limit,
+		Offset:      offset,
+		Total:       len(items),
 		GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -599,11 +663,15 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, win
 // fallbackTrending serves trending items from Redis as the cold-start response.
 // When the trending cache is empty or unavailable, falls back to DB popular items.
 func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *nsconfig.NamespaceConfig) (*Response, error) {
-	entries, err := s.getTrendingFn(ctx, req.Namespace, 0, limit)
+	entries, err := s.getTrendingFn(ctx, req.Namespace, req.Offset, limit)
 	if err == nil && len(entries) > 0 {
-		items := make([]string, len(entries))
+		items := make([]RecommendedItem, len(entries))
 		for i, e := range entries {
-			items[i] = e.ObjectID
+			items[i] = RecommendedItem{
+				ObjectID: e.ObjectID,
+				Score:    e.Score,
+				Rank:     req.Offset + i + 1,
+			}
 		}
 		metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
 		return &Response{
@@ -611,6 +679,9 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 			Namespace:   req.Namespace,
 			Items:       items,
 			Source:      SourceFallbackPopular,
+			Limit:       limit,
+			Offset:      req.Offset,
+			Total:       req.Offset + len(items),
 			GeneratedAt: time.Now().UTC(),
 		}, nil
 	}
@@ -619,16 +690,38 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 }
 
 func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int) (*Response, error) {
-	items, err := s.repo.GetPopularItems(ctx, req.Namespace, limit)
+	// Fetch enough rows to cover offset + limit so we can slice in-process.
+	rawItems, err := s.repo.GetPopularItems(ctx, req.Namespace, req.Offset+limit)
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
+	total := len(rawItems)
+
+	// Apply offset.
+	start := req.Offset
+	if start > len(rawItems) {
+		start = len(rawItems)
+	}
+	end := start + limit
+	if end > len(rawItems) {
+		end = len(rawItems)
+	}
+	rawItems = rawItems[start:end]
+
+	items := make([]RecommendedItem, len(rawItems))
+	for i, id := range rawItems {
+		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1}
+	}
+
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
 	return &Response{
 		SubjectID:   req.SubjectID,
 		Namespace:   req.Namespace,
 		Items:       items,
 		Source:      SourceFallbackPopular,
+		Limit:       limit,
+		Offset:      req.Offset,
+		Total:       total,
 		GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -733,7 +826,7 @@ func rerankScored(points []*qdrant.ScoredPoint, gamma float64, limit int) []scor
 }
 
 // rerank is a convenience wrapper around rerankScored that returns only object IDs.
-// Used by recommendation paths that do not need per-item scores.
+// Used by tests that verify ordering without needing per-item scores.
 func rerank(points []*qdrant.ScoredPoint, gamma float64, limit int) []string {
 	scored := rerankScored(points, gamma, limit)
 	result := make([]string, len(scored))
@@ -741,6 +834,40 @@ func rerank(points []*qdrant.ScoredPoint, gamma float64, limit int) []string {
 		result[i] = s.objectID
 	}
 	return result
+}
+
+// pageItems slices a scored list to [offset : offset+limit] and builds RecommendedItem
+// values with 1-based global rank. The caller is responsible for ensuring that
+// len(scored) reflects the total candidate count before slicing.
+func pageItems(scored []scoredItem, offset, limit int) []RecommendedItem {
+	start := offset
+	if start > len(scored) {
+		start = len(scored)
+	}
+	end := start + limit
+	if end > len(scored) {
+		end = len(scored)
+	}
+	paged := scored[start:end]
+
+	items := make([]RecommendedItem, len(paged))
+	for i, s := range paged {
+		items[i] = RecommendedItem{
+			ObjectID: s.objectID,
+			Score:    s.finalScore,
+			Rank:     start + i + 1,
+		}
+	}
+	return items
+}
+
+// itemIDs extracts ObjectID strings from a RecommendedItem slice for use with blendItems.
+func itemIDs(items []RecommendedItem) []string {
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = it.ObjectID
+	}
+	return ids
 }
 
 // blendItems interleaves popular and cf items at the given popularRatio, deduplicating.
@@ -787,6 +914,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 			Namespace:   req.Namespace,
 			Items:       []RankedItem{},
 			Source:      SourceHybridRank,
+			Total:       0,
 			GeneratedAt: time.Now().UTC(),
 		}, nil
 	}
@@ -842,7 +970,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 
 	ranked := make([]RankedItem, len(scored))
 	for i, s := range scored {
-		ranked[i] = RankedItem{ObjectID: s.objectID, Score: s.finalScore}
+		ranked[i] = RankedItem{ObjectID: s.objectID, Score: s.finalScore, Rank: i + 1}
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybridRank).Inc()
@@ -851,6 +979,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 		Namespace:   req.Namespace,
 		Items:       ranked,
 		Source:      SourceHybridRank,
+		Total:       len(ranked),
 		GeneratedAt: time.Now().UTC(),
 	}, nil
 }
@@ -860,13 +989,14 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 func (s *Service) rankFallback(req *RankRequest) *RankResponse {
 	items := make([]RankedItem, len(req.Candidates))
 	for i, c := range req.Candidates {
-		items[i] = RankedItem{ObjectID: c, Score: 0}
+		items[i] = RankedItem{ObjectID: c, Score: 0, Rank: i + 1}
 	}
 	return &RankResponse{
 		SubjectID:   req.SubjectID,
 		Namespace:   req.Namespace,
 		Items:       items,
 		Source:      SourceHybridRank,
+		Total:       len(items),
 		GeneratedAt: time.Now().UTC(),
 	}
 }
@@ -922,6 +1052,6 @@ func (s *Service) deleteFromCollection(ctx context.Context, collection string, i
 	return nil
 }
 
-func recCacheKey(namespace, subjectID string, limit int) string {
-	return fmt.Sprintf("rec:%s:%s:limit=%d", namespace, subjectID, limit)
+func recCacheKey(namespace, subjectID string, limit, offset int) string {
+	return fmt.Sprintf("rec:%s:%s:limit=%d:offset=%d", namespace, subjectID, limit, offset)
 }

@@ -7,7 +7,11 @@ type Request struct {
 	SubjectID string
 	Namespace string
 	Limit     int
+	Offset    int
 }
+
+// RecommendedItem re-exports codohuetypes.RecommendedItem.
+type RecommendedItem = codohuetypes.RecommendedItem
 
 // Response re-exports codohuetypes.Response.
 type Response = codohuetypes.Response
