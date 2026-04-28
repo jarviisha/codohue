@@ -31,3 +31,15 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /out/cron /cron
 
 ENTRYPOINT ["/cron"]
+
+# Stage 4: Migrate
+FROM alpine:3.21 AS migrate
+
+RUN apk add --no-cache ca-certificates curl && \
+    curl -fsSL https://github.com/golang-migrate/migrate/releases/download/v4.18.1/migrate.linux-amd64.tar.gz \
+    | tar xz -C /usr/local/bin migrate && \
+    apk del curl
+
+COPY migrations /migrations
+
+ENTRYPOINT ["sh", "-c", "migrate -path /migrations -database \"$DATABASE_URL\" up"]

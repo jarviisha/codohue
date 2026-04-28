@@ -1,4 +1,16 @@
 services:
+  migrate:
+    build:
+      context: .
+      target: migrate
+    container_name: codohue-migrate
+    restart: on-failure
+    environment:
+      - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     container_name: codohue-api
@@ -16,6 +28,8 @@ services:
       - .:/app
     command: air
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

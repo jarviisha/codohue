@@ -1,8 +1,9 @@
 name: Release
 
 on:
-  push:
-    tags: ['v*']
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 env:
   REGISTRY: ghcr.io
@@ -12,6 +13,9 @@ env:
 
 jobs:
   build-push:
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,6 +23,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -39,11 +48,13 @@ jobs:
           context: .
           target: api
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.ref_name }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.event.workflow_run.head_branch }}
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ github.ref_name }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ github.event.workflow_run.head_branch }}
 
       - name: Build and push Cron image
         uses: docker/build-push-action@v6
@@ -51,11 +62,27 @@ jobs:
           context: .
           target: cron
           push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ github.ref_name }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ github.event.workflow_run.head_branch }}
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.ref_name }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.event.workflow_run.head_branch }}
+
+      - name: Build and push Migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ github.event.workflow_run.head_branch }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:latest
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ github.event.workflow_run.head_branch }}
 
   deploy:
     if: false # TODO: enable when VPS is ready
