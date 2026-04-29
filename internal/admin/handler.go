@@ -177,11 +177,16 @@ func (h *Handler) DebugRecommend(w http.ResponseWriter, r *http.Request) {
 
 	result, statusCode, err := h.svc.DebugRecommend(r.Context(), &req)
 	if err != nil {
-		if statusCode == http.StatusNotFound {
+		switch statusCode {
+		case http.StatusNotFound:
 			httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
-			return
+		case http.StatusUnauthorized:
+			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid api key for namespace")
+		case 0:
+			httpapi.WriteError(w, http.StatusBadGateway, "proxy_error", "could not reach api")
+		default:
+			httpapi.WriteError(w, statusCode, "api_error", err.Error())
 		}
-		httpapi.WriteError(w, http.StatusBadGateway, "proxy_error", "could not reach api")
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)

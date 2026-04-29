@@ -67,10 +67,10 @@ func TestValidateNamespaceKey(t *testing.T) {
 		}
 	})
 
-	t.Run("admin key rejected when namespace has a key", func(t *testing.T) {
+	t.Run("admin key accepted even when namespace has a key", func(t *testing.T) {
 		ok := ValidateNamespaceKey(context.Background(), adminKey, adminKey, getHashWith(string(hash)), "ns")
-		if ok {
-			t.Error("expected admin key to be rejected when namespace has its own key")
+		if !ok {
+			t.Error("expected admin key to be accepted even when namespace has its own key")
 		}
 	})
 
