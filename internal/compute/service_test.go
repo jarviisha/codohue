@@ -419,7 +419,7 @@ func TestRecomputeNamespace_ContinuesOnBuildAndUpsertFailures(t *testing.T) {
 		return nil
 	}
 
-	err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -431,7 +431,7 @@ func TestRecomputeNamespace_ContinuesOnBuildAndUpsertFailures(t *testing.T) {
 func TestRecomputeNamespace_GetActiveSubjectsError(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{err: context.DeadlineExceeded}, newFakeIDMap())
 
-	err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

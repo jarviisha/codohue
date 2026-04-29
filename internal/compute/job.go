@@ -17,7 +17,7 @@ import (
 )
 
 type recomputer interface {
-	RecomputeNamespace(ctx context.Context, namespace string, lambda float64) error
+	RecomputeNamespace(ctx context.Context, namespace string, lambda float64) (subjects, objects int, err error)
 }
 
 type jobNsConfigReader interface {
@@ -30,9 +30,26 @@ type jobComputeRepo interface {
 	GetNamespaceEventsInWindow(ctx context.Context, namespace string, windowHours int) ([]*RawEvent, error)
 }
 
+// PhaseResult holds per-phase metrics captured during a batch run.
+type PhaseResult struct {
+	OK         bool
+	DurationMs int
+	Count1     int // phase 1: subjects; phase 2: items; phase 3: trending items
+	Count2     int // phase 1: objects; phase 2: subjects (unused in phase 3)
+	Error      string
+}
+
+// PhaseResults aggregates results from all three batch phases.
+type PhaseResults struct {
+	Phase1 *PhaseResult
+	Phase2 *PhaseResult
+	Phase3 *PhaseResult
+}
+
 type batchLogger interface {
 	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time) (int64, error)
 	UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string) error
+	UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error
 }
 
 // Job is a periodic batch job that recomputes sparse and dense vectors for all namespaces.
@@ -135,7 +152,7 @@ func (j *Job) processNamespace(ctx context.Context, ns string) {
 	}
 
 	var runErr error
-	subjects := 0
+	var phases PhaseResults
 
 	cfg, err := j.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
@@ -144,23 +161,43 @@ func (j *Job) processNamespace(ctx context.Context, ns string) {
 	}
 
 	if runErr == nil {
-		if err := j.runPhase1(ctx, ns, cfg); err != nil {
+		t0 := time.Now()
+		subjects, objects, err := j.runPhase1(ctx, ns, cfg)
+		p := &PhaseResult{OK: err == nil, DurationMs: int(time.Since(t0).Milliseconds()), Count1: subjects, Count2: objects}
+		if err != nil {
 			slog.Error("phase 1 failed", "namespace", ns, "error", err)
+			p.Error = err.Error()
 			runErr = err
 		}
+		phases.Phase1 = p
 	}
 
 	if runErr == nil && cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
-		if err := j.runPhase2Dense(ctx, ns, cfg); err != nil {
+		t0 := time.Now()
+		items, subjectCount, err := j.runPhase2Dense(ctx, ns, cfg)
+		p := &PhaseResult{OK: err == nil, DurationMs: int(time.Since(t0).Milliseconds()), Count1: items, Count2: subjectCount}
+		if err != nil {
 			slog.Error("phase 2 dense failed", "namespace", ns, "error", err)
+			p.Error = err.Error()
 			// non-fatal; continue to phase 3
 		}
+		phases.Phase2 = p
 	}
 
 	if j.redis != nil {
-		if err := j.runPhase3Trending(ctx, ns, cfg); err != nil {
+		t0 := time.Now()
+		items, err := j.runPhase3Trending(ctx, ns, cfg)
+		p := &PhaseResult{OK: err == nil, DurationMs: int(time.Since(t0).Milliseconds()), Count1: items}
+		if err != nil {
 			slog.Error("phase 3 trending failed", "namespace", ns, "error", err)
+			p.Error = err.Error()
 		}
+		phases.Phase3 = p
+	}
+
+	subjects := 0
+	if phases.Phase1 != nil {
+		subjects = phases.Phase1.Count1
 	}
 
 	if j.batchLog != nil && logID > 0 {
@@ -173,13 +210,19 @@ func (j *Job) processNamespace(ctx context.Context, ns string) {
 		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, durMs, subjects, runErr == nil, errMsg); err != nil {
 			slog.Warn("could not update batch_run_log", "namespace", ns, "error", err)
 		}
+		if err := j.batchLog.UpdateBatchRunPhases(ctx, logID, phases); err != nil {
+			slog.Warn("could not update batch_run_phases", "namespace", ns, "error", err)
+		}
 	}
 }
 
 // runPhase1 recomputes CF sparse vectors for a namespace.
-func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) error {
+// Returns the number of subjects and objects upserted to Qdrant.
+func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) (subjects, objects int, err error) {
+	start := time.Now()
+
 	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
-		return fmt.Errorf("ensure collections: %w", err)
+		return 0, 0, fmt.Errorf("ensure collections: %w", err)
 	}
 
 	lambda := defaultLambda
@@ -187,10 +230,18 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceC
 		lambda = cfg.Lambda
 	}
 
-	if err := j.service.RecomputeNamespace(ctx, ns, lambda); err != nil {
-		return fmt.Errorf("recompute namespace %s: %w", ns, err)
+	subjects, objects, err = j.service.RecomputeNamespace(ctx, ns, lambda)
+	if err != nil {
+		return 0, 0, fmt.Errorf("recompute namespace %s: %w", ns, err)
 	}
-	return nil
+
+	slog.Info("phase 1 sparse complete",
+		"namespace", ns,
+		"subjects", subjects,
+		"objects", objects,
+		"duration_ms", time.Since(start).Milliseconds(),
+	)
+	return subjects, objects, nil
 }
 
 // item2vecLargeEventThreshold is the event count above which Item2Vec full retrain is
@@ -209,7 +260,7 @@ const item2vecLargeEventThreshold = 500_000
 // For corpora beyond ~500K events, consider: (a) increasing BATCH_INTERVAL_MINUTES so
 // fewer retrains happen per hour, (b) switching dense_strategy to "svd" (cheaper full
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
-func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) error {
+func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) (items, subjectCount int, err error) {
 	start := time.Now()
 
 	embeddingDim := 64
@@ -223,17 +274,17 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 
 	// Scaffold dense collections if not present.
 	if err := j.ensureDenseCollectionsFn(ctx, ns, uint64(embeddingDim), distance); err != nil {
-		return fmt.Errorf("ensure dense collections: %w", err)
+		return 0, 0, fmt.Errorf("ensure dense collections: %w", err)
 	}
 
 	// Fetch all namespace events (shared data pull for both item and user vectors).
 	events, err := j.repo.GetAllNamespaceEvents(ctx, ns)
 	if err != nil {
-		return fmt.Errorf("get namespace events: %w", err)
+		return 0, 0, fmt.Errorf("get namespace events: %w", err)
 	}
 	if len(events) == 0 {
 		slog.Info("phase 2: no events, skipping dense computation", "namespace", ns)
-		return nil
+		return 0, 0, nil
 	}
 
 	var itemVecs map[string][]float32
@@ -257,25 +308,25 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 	case "svd":
 		itemVecs, err = SVDEmbeddings(events, embeddingDim)
 		if err != nil {
-			return fmt.Errorf("svd embeddings: %w", err)
+			return 0, 0, fmt.Errorf("svd embeddings: %w", err)
 		}
 	}
 
 	if len(itemVecs) == 0 {
 		slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseStrategy)
-		return nil
+		return 0, 0, nil
 	}
 
 	// Upsert item dense vectors.
 	if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseStrategy, itemVecs); err != nil {
-		return fmt.Errorf("upsert item dense vectors: %w", err)
+		return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
 	}
 
 	// Compute subject (user) dense vectors via mean pooling of item vectors.
 	subjectVecs := UserDenseVectors(events, itemVecs)
 	if len(subjectVecs) > 0 {
 		if err := j.upsertSubjectDenseFn(ctx, ns, cfg.DenseStrategy, subjectVecs); err != nil {
-			return fmt.Errorf("upsert subject dense vectors: %w", err)
+			return 0, 0, fmt.Errorf("upsert subject dense vectors: %w", err)
 		}
 	}
 
@@ -286,11 +337,12 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 		"subjects", len(subjectVecs),
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
-	return nil
+	return len(itemVecs), len(subjectVecs), nil
 }
 
 // runPhase3Trending computes trending scores for a namespace and caches them in Redis.
-func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) error {
+// Returns the number of trending items computed.
+func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) (items int, err error) {
 	start := time.Now()
 
 	windowHours := 24
@@ -313,21 +365,21 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.Na
 
 	events, err := j.repo.GetNamespaceEventsInWindow(ctx, ns, windowHours)
 	if err != nil {
-		return fmt.Errorf("get events in window: %w", err)
+		return 0, fmt.Errorf("get events in window: %w", err)
 	}
 	if len(events) == 0 {
 		slog.Info("phase 3 trending: no events in window", "namespace", ns, "window_hours", windowHours)
-		return nil
+		return 0, nil
 	}
 
 	scores := TrendingScores(events, actionWeights, lambdaTrending, windowHours)
 	if len(scores) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	ttl := time.Duration(ttlSeconds) * time.Second
 	if err := j.storeTrendingFn(ctx, ns, scores, ttl); err != nil {
-		return fmt.Errorf("store trending: %w", err)
+		return 0, fmt.Errorf("store trending: %w", err)
 	}
 
 	metrics.TrendingItemsTotal.WithLabelValues(ns).Set(float64(len(scores)))
@@ -337,5 +389,5 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.Na
 		"window_hours", windowHours,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
-	return nil
+	return len(scores), nil
 }

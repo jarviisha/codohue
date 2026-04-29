@@ -18,6 +18,7 @@ type adminSvc interface {
 	GetHealth(ctx context.Context) (*HealthResponse, int, error)
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
+	GetNamespacesOverview(ctx context.Context) (*NamespacesOverviewResponse, error)
 	UpsertNamespace(ctx context.Context, namespace string, body io.Reader) (*NamespaceUpsertResponse, int, error)
 	GetBatchRuns(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error)
 	DebugRecommend(ctx context.Context, req *RecommendDebugRequest) (*RecommendDebugResponse, int, error)
@@ -138,6 +139,16 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, statusCode, result)
+}
+
+// GetNamespacesOverview handles GET /api/admin/v1/namespaces/overview.
+func (h *Handler) GetNamespacesOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := h.svc.GetNamespacesOverview(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not build namespace overview")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, overview)
 }
 
 // GetBatchRuns handles GET /api/admin/v1/batch-runs.

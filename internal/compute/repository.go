@@ -209,3 +209,70 @@ func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedA
 	}
 	return nil
 }
+
+// UpdateBatchRunPhases writes per-phase metrics into an existing batch_run_logs row.
+func (r *Repository) UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error {
+	nullStr := func(s string) *string {
+		if s == "" {
+			return nil
+		}
+		return &s
+	}
+	nullInt := func(v int, present bool) *int {
+		if !present {
+			return nil
+		}
+		return &v
+	}
+	nullBool := func(v bool, present bool) *bool {
+		if !present {
+			return nil
+		}
+		return &v
+	}
+
+	var (
+		p1ok, p2ok, p3ok                   *bool
+		p1ms, p1sub, p1obj                 *int
+		p2ms, p2items, p2sub               *int
+		p3ms, p3items                      *int
+		p1err, p2err, p3err                *string
+	)
+
+	if p := phases.Phase1; p != nil {
+		p1ok = nullBool(p.OK, true)
+		p1ms = nullInt(p.DurationMs, true)
+		p1sub = nullInt(p.Count1, true)
+		p1obj = nullInt(p.Count2, true)
+		p1err = nullStr(p.Error)
+	}
+	if p := phases.Phase2; p != nil {
+		p2ok = nullBool(p.OK, true)
+		p2ms = nullInt(p.DurationMs, true)
+		p2items = nullInt(p.Count1, true)
+		p2sub = nullInt(p.Count2, true)
+		p2err = nullStr(p.Error)
+	}
+	if p := phases.Phase3; p != nil {
+		p3ok = nullBool(p.OK, true)
+		p3ms = nullInt(p.DurationMs, true)
+		p3items = nullInt(p.Count1, true)
+		p3err = nullStr(p.Error)
+	}
+
+	_, err := r.db.Exec(ctx, `
+		UPDATE batch_run_logs
+		SET phase1_ok = $2,  phase1_duration_ms = $3,  phase1_subjects = $4,  phase1_objects = $5,  phase1_error = $6,
+		    phase2_ok = $7,  phase2_duration_ms = $8,  phase2_items    = $9,  phase2_subjects = $10, phase2_error = $11,
+		    phase3_ok = $12, phase3_duration_ms = $13, phase3_items    = $14, phase3_error    = $15
+		WHERE id = $1
+	`, id,
+		p1ok, p1ms, p1sub, p1obj, p1err,
+		p2ok, p2ms, p2items, p2sub, p2err,
+		p3ok, p3ms, p3items, p3err,
+	)
+	if err != nil {
+		return fmt.Errorf("update batch_run_phases %d: %w", id, err)
+	}
+	return nil
+}

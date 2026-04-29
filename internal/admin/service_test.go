@@ -13,14 +13,18 @@ import (
 // ─── fake repo ────────────────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	namespaces      []NamespaceConfig
-	nsListErr       error
-	namespace       *NamespaceConfig
-	nsGetErr        error
-	batchRuns       []BatchRunLog
-	batchRunsErr    error
-	subjectStats    *SubjectStats
-	subjectStatsErr error
+	namespaces         []NamespaceConfig
+	nsListErr          error
+	namespace          *NamespaceConfig
+	nsGetErr           error
+	batchRuns          []BatchRunLog
+	batchRunsErr       error
+	lastBatchRuns      map[string]BatchRunLog
+	lastBatchRunsErr   error
+	recentEventCounts  map[string]int
+	recentEventCountsErr error
+	subjectStats       *SubjectStats
+	subjectStatsErr    error
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -33,6 +37,20 @@ func (f *fakeRepo) GetNamespace(_ context.Context, _ string) (*NamespaceConfig, 
 
 func (f *fakeRepo) GetBatchRunLogs(_ context.Context, _ string, _ int) ([]BatchRunLog, error) {
 	return f.batchRuns, f.batchRunsErr
+}
+
+func (f *fakeRepo) GetLastBatchRunPerNamespace(_ context.Context) (map[string]BatchRunLog, error) {
+	if f.lastBatchRuns == nil {
+		return map[string]BatchRunLog{}, f.lastBatchRunsErr
+	}
+	return f.lastBatchRuns, f.lastBatchRunsErr
+}
+
+func (f *fakeRepo) GetRecentEventCounts(_ context.Context, _ int) (map[string]int, error) {
+	if f.recentEventCounts == nil {
+		return map[string]int{}, f.recentEventCountsErr
+	}
+	return f.recentEventCounts, f.recentEventCountsErr
 }
 
 func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*SubjectStats, error) {

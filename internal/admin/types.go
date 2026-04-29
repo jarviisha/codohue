@@ -31,6 +31,24 @@ type BatchRunLog struct {
 	SubjectsProcessed int        `json:"subjects_processed"`
 	Success           bool       `json:"success"`
 	ErrorMessage      *string    `json:"error_message"`
+
+	// Per-phase breakdown (nil when the phase was skipped or the row predates migration 007).
+	Phase1OK       *bool   `json:"phase1_ok"`
+	Phase1DurMs    *int    `json:"phase1_duration_ms"`
+	Phase1Subjects *int    `json:"phase1_subjects"`
+	Phase1Objects  *int    `json:"phase1_objects"`
+	Phase1Error    *string `json:"phase1_error"`
+
+	Phase2OK       *bool   `json:"phase2_ok"`
+	Phase2DurMs    *int    `json:"phase2_duration_ms"`
+	Phase2Items    *int    `json:"phase2_items"`
+	Phase2Subjects *int    `json:"phase2_subjects"`
+	Phase2Error    *string `json:"phase2_error"`
+
+	Phase3OK    *bool   `json:"phase3_ok"`
+	Phase3DurMs *int    `json:"phase3_duration_ms"`
+	Phase3Items *int    `json:"phase3_items"`
+	Phase3Error *string `json:"phase3_error"`
 }
 
 // TrendingAdminEntry extends a trending item with Redis cache TTL info.
@@ -115,6 +133,35 @@ type TrendingAdminResponse struct {
 // NamespacesListResponse is the response for GET /api/admin/v1/namespaces.
 type NamespacesListResponse struct {
 	Namespaces []NamespaceConfig `json:"namespaces"`
+}
+
+// NamespaceStatus is the computed health state for a namespace.
+// Values: "active", "idle", "degraded", "cold".
+//   - active   — last batch run succeeded and there are events in the last 24 h
+//   - idle     — last batch run succeeded but no events in the last 24 h
+//   - degraded — last completed batch run failed
+//   - cold     — no completed batch run exists yet
+type NamespaceStatus = string
+
+const (
+	NSStatusActive   NamespaceStatus = "active"
+	NSStatusIdle     NamespaceStatus = "idle"
+	NSStatusDegraded NamespaceStatus = "degraded"
+	NSStatusCold     NamespaceStatus = "cold"
+)
+
+// NamespaceHealth combines config, last batch run, and recent activity into a
+// single health record for the overview dashboard.
+type NamespaceHealth struct {
+	Config         NamespaceConfig `json:"config"`
+	Status         NamespaceStatus `json:"status"`
+	ActiveEvents24h int            `json:"active_events_24h"`
+	LastRun        *BatchRunLog    `json:"last_run"`
+}
+
+// NamespacesOverviewResponse is the response for GET /api/admin/v1/namespaces/overview.
+type NamespacesOverviewResponse struct {
+	Namespaces []NamespaceHealth `json:"namespaces"`
 }
 
 // HealthResponse is the response for GET /api/admin/v1/health.

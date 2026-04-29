@@ -17,10 +17,10 @@ type fakeRecomputer struct {
 	err        error
 }
 
-func (f *fakeRecomputer) RecomputeNamespace(_ context.Context, _ string, lambda float64) error {
+func (f *fakeRecomputer) RecomputeNamespace(_ context.Context, _ string, lambda float64) (int, int, error) {
 	f.called = true
 	f.lastLambda = lambda
-	return f.err
+	return 0, 0, f.err
 }
 
 type fakeNsConfigReader struct {
@@ -266,7 +266,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 		return nil
 	}
 
-	err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{
 		DenseStrategy: "item2vec",
 		EmbeddingDim:  8,
 		DenseDistance: "dot",
@@ -307,7 +307,7 @@ func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
 		return nil
 	}
 
-	err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{
 		DenseStrategy: "svd",
 		EmbeddingDim:  4,
 		DenseDistance: "dot",
@@ -336,7 +336,7 @@ func TestRunPhase2Dense_NoEvents_SkipsUpserts(t *testing.T) {
 		return nil
 	}
 
-	err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec"})
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -351,7 +351,7 @@ func TestRunPhase2Dense_EnsureDenseCollectionsFailure(t *testing.T) {
 		return errors.New("ensure failed")
 	}
 
-	err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec"})
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -375,7 +375,7 @@ func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
 		return errors.New("item upsert failed")
 	}
 
-	err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec", EmbeddingDim: 8})
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec", EmbeddingDim: 8})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -399,7 +399,7 @@ func TestRunPhase2Dense_SubjectUpsertFailure(t *testing.T) {
 		return errors.New("subject upsert failed")
 	}
 
-	err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec", EmbeddingDim: 8})
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &nsconfig.NamespaceConfig{DenseStrategy: "item2vec", EmbeddingDim: 8})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -421,7 +421,7 @@ func TestRunPhase3Trending_UsesDefaults(t *testing.T) {
 		return nil
 	}
 
-	err := job.runPhase3Trending(context.Background(), "ns1", nil)
+	_, err := job.runPhase3Trending(context.Background(), "ns1", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -454,7 +454,7 @@ func TestRunPhase3Trending_UsesConfigOverrides(t *testing.T) {
 		return nil
 	}
 
-	err := job.runPhase3Trending(context.Background(), "ns1", &nsconfig.NamespaceConfig{
+	_, err := job.runPhase3Trending(context.Background(), "ns1", &nsconfig.NamespaceConfig{
 		TrendingWindow: 48,
 		LambdaTrending: 0.2,
 		TrendingTTL:    120,
@@ -480,7 +480,7 @@ func TestRunPhase3Trending_StoreFailure(t *testing.T) {
 		return errors.New("redis failed")
 	}
 
-	err := job.runPhase3Trending(context.Background(), "ns1", nil)
+	_, err := job.runPhase3Trending(context.Background(), "ns1", nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

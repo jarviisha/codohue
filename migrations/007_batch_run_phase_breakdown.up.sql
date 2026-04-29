@@ -1,0 +1,15 @@
+ALTER TABLE batch_run_logs
+  ADD COLUMN phase1_ok          BOOLEAN,
+  ADD COLUMN phase1_duration_ms INTEGER,
+  ADD COLUMN phase1_subjects    INTEGER,
+  ADD COLUMN phase1_objects     INTEGER,
+  ADD COLUMN phase1_error       TEXT,
+  ADD COLUMN phase2_ok          BOOLEAN,
+  ADD COLUMN phase2_duration_ms INTEGER,
+  ADD COLUMN phase2_items       INTEGER,
+  ADD COLUMN phase2_subjects    INTEGER,
+  ADD COLUMN phase2_error       TEXT,
+  ADD COLUMN phase3_ok          BOOLEAN,
+  ADD COLUMN phase3_duration_ms INTEGER,
+  ADD COLUMN phase3_items       INTEGER,
+  ADD COLUMN phase3_error       TEXT;

@@ -17,23 +17,25 @@ import (
 // ─── fake service ─────────────────────────────────────────────────────────────
 
 type fakeSvc struct {
-	healthResp    *HealthResponse
-	healthStatus  int
-	healthErr     error
-	nsListResp    []NamespaceConfig
-	nsListErr     error
-	nsGetResp     *NamespaceConfig
-	nsGetErr      error
-	upsertResp    *NamespaceUpsertResponse
-	upsertStatus  int
-	upsertErr     error
-	batchRuns     []BatchRunLog
-	batchRunsErr  error
-	debugResp     *RecommendDebugResponse
-	debugStatus   int
-	debugErr      error
-	trendingResp  *TrendingAdminResponse
-	trendingErr   error
+	healthResp      *HealthResponse
+	healthStatus    int
+	healthErr       error
+	nsListResp      []NamespaceConfig
+	nsListErr       error
+	nsGetResp       *NamespaceConfig
+	nsGetErr        error
+	nsOverviewResp  *NamespacesOverviewResponse
+	nsOverviewErr   error
+	upsertResp      *NamespaceUpsertResponse
+	upsertStatus    int
+	upsertErr       error
+	batchRuns       []BatchRunLog
+	batchRunsErr    error
+	debugResp       *RecommendDebugResponse
+	debugStatus     int
+	debugErr        error
+	trendingResp    *TrendingAdminResponse
+	trendingErr     error
 	profileResp     *SubjectProfileResponse
 	profileErr      error
 	qdrantStatsResp *QdrantStatsResponse
@@ -50,6 +52,10 @@ func (f *fakeSvc) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
 
 func (f *fakeSvc) GetNamespace(_ context.Context, _ string) (*NamespaceConfig, error) {
 	return f.nsGetResp, f.nsGetErr
+}
+
+func (f *fakeSvc) GetNamespacesOverview(_ context.Context) (*NamespacesOverviewResponse, error) {
+	return f.nsOverviewResp, f.nsOverviewErr
 }
 
 func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ io.Reader) (*NamespaceUpsertResponse, int, error) {

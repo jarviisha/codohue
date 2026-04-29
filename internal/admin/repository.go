@@ -142,7 +142,10 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace string, limi
 
 	const base = `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       subjects_processed, success, error_message
+		       subjects_processed, success, error_message,
+		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
+		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
+		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
 		FROM batch_run_logs`
 
 	var (
@@ -162,14 +165,81 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace string, limi
 
 	var out []BatchRunLog
 	for rows.Next() {
-		var b BatchRunLog
-		if err := rows.Scan(
-			&b.ID, &b.Namespace, &b.StartedAt, &b.CompletedAt,
-			&b.DurationMs, &b.SubjectsProcessed, &b.Success, &b.ErrorMessage,
-		); err != nil {
+		b, err := scanBatchRunLog(rows.Scan)
+		if err != nil {
 			return nil, fmt.Errorf("scan batch_run_log: %w", err)
 		}
 		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// scanBatchRunLog scans one batch_run_logs row (all columns including phase breakdown).
+func scanBatchRunLog(scan func(...any) error) (BatchRunLog, error) {
+	var b BatchRunLog
+	err := scan(
+		&b.ID, &b.Namespace, &b.StartedAt, &b.CompletedAt,
+		&b.DurationMs, &b.SubjectsProcessed, &b.Success, &b.ErrorMessage,
+		&b.Phase1OK, &b.Phase1DurMs, &b.Phase1Subjects, &b.Phase1Objects, &b.Phase1Error,
+		&b.Phase2OK, &b.Phase2DurMs, &b.Phase2Items, &b.Phase2Subjects, &b.Phase2Error,
+		&b.Phase3OK, &b.Phase3DurMs, &b.Phase3Items, &b.Phase3Error,
+	)
+	return b, err
+}
+
+// GetLastBatchRunPerNamespace returns the most recent completed batch run for each
+// namespace, keyed by namespace name.
+func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT DISTINCT ON (namespace)
+		    id, namespace, started_at, completed_at, duration_ms,
+		    subjects_processed, success, error_message,
+		    phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
+		    phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
+		    phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
+		FROM batch_run_logs
+		WHERE completed_at IS NOT NULL
+		ORDER BY namespace, started_at DESC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query last batch runs: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]BatchRunLog)
+	for rows.Next() {
+		b, err := scanBatchRunLog(rows.Scan)
+		if err != nil {
+			return nil, fmt.Errorf("scan last batch run: %w", err)
+		}
+		out[b.Namespace] = b
+	}
+	return out, rows.Err()
+}
+
+// GetRecentEventCounts returns the number of events ingested in the last windowHours
+// hours, grouped by namespace.
+func (r *Repository) GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT namespace, COUNT(*) AS cnt
+		FROM events
+		WHERE occurred_at > NOW() - make_interval(hours => $1)
+		GROUP BY namespace`,
+		windowHours,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query recent event counts: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]int)
+	for rows.Next() {
+		var ns string
+		var cnt int
+		if err := rows.Scan(&ns, &cnt); err != nil {
+			return nil, fmt.Errorf("scan event count: %w", err)
+		}
+		out[ns] = cnt
 	}
 	return out, rows.Err()
 }

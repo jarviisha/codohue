@@ -54,10 +54,11 @@ func NewService(repo *Repository, idmapSvc *idmap.Service, qdrantClient *qdrant.
 }
 
 // RecomputeNamespace runs a full vector recompute for a single namespace.
-func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lambda float64) error {
+// It returns the number of subjects and distinct objects processed.
+func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lambda float64) (subjectCount, objectCount int, err error) {
 	subjects, err := s.repo.GetActiveSubjects(ctx, namespace)
 	if err != nil {
-		return fmt.Errorf("get active subjects: %w", err)
+		return 0, 0, fmt.Errorf("get active subjects: %w", err)
 	}
 
 	slog.Info("recomputing namespace", "namespace", namespace, "subjects", len(subjects))
@@ -102,7 +103,7 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 
 	metrics.BatchSubjectsProcessed.WithLabelValues(namespace).Set(float64(len(subjects)))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", len(subjects), "objects", len(objectAccum))
-	return nil
+	return len(subjects), len(objectAccum), nil
 }
 
 func (s *Service) accumulateObjectCooccurrence(ctx context.Context, namespace string, objectAccum map[string]map[uint64]float32, objectScores map[string]float64) error {

@@ -18,6 +18,8 @@ type adminRepo interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
 	GetBatchRunLogs(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error)
+	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
+	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 }
 
@@ -99,6 +101,50 @@ func (s *Service) UpsertNamespace(ctx context.Context, namespace string, body io
 // GetBatchRuns returns recent batch run logs.
 func (s *Service) GetBatchRuns(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error) {
 	return s.repo.GetBatchRunLogs(ctx, namespace, limit)
+}
+
+// GetNamespacesOverview returns all namespaces with computed health status.
+func (s *Service) GetNamespacesOverview(ctx context.Context) (*NamespacesOverviewResponse, error) {
+	namespaces, err := s.repo.ListNamespaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list namespaces: %w", err)
+	}
+
+	lastRuns, err := s.repo.GetLastBatchRunPerNamespace(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get last batch runs: %w", err)
+	}
+
+	eventCounts, err := s.repo.GetRecentEventCounts(ctx, 24)
+	if err != nil {
+		return nil, fmt.Errorf("get recent event counts: %w", err)
+	}
+
+	out := make([]NamespaceHealth, 0, len(namespaces))
+	for _, ns := range namespaces {
+		h := NamespaceHealth{
+			Config:          ns,
+			ActiveEvents24h: eventCounts[ns.Namespace],
+		}
+
+		if run, ok := lastRuns[ns.Namespace]; ok {
+			r := run
+			h.LastRun = &r
+			if !run.Success {
+				h.Status = NSStatusDegraded
+			} else if h.ActiveEvents24h > 0 {
+				h.Status = NSStatusActive
+			} else {
+				h.Status = NSStatusIdle
+			}
+		} else {
+			h.Status = NSStatusCold
+		}
+
+		out = append(out, h)
+	}
+
+	return &NamespacesOverviewResponse{Namespaces: out}, nil
 }
 
 // DebugRecommend proxies a recommendation request to cmd/api and returns debug info.
@@ -257,6 +303,11 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("trending proxy returned %d: %s", resp.StatusCode, string(body))
+	}
+
 	var raw struct {
 		Namespace   string    `json:"namespace"`
 		Items       []struct {
@@ -274,15 +325,13 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 	}
 
 	// Get Redis TTL for the trending key.
+	// d.Seconds() must be used for both positive and negative durations:
+	// time.Duration(-2)*time.Second gives int(d)==-2000000000 (nanoseconds), not -2.
 	ttl := -2
 	if s.redisClient != nil {
 		d, err := s.redisClient.TTL(ctx, "trending:"+namespace).Result()
 		if err == nil {
-			if d < 0 {
-				ttl = int(d) // -1 or -2 from Redis
-			} else {
-				ttl = int(d.Seconds())
-			}
+			ttl = int(d.Seconds())
 		}
 	}
 
