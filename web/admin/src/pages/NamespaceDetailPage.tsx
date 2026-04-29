@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNamespace, useUpsertNamespace } from '../hooks/useNamespaces'
+import { useQdrantStats } from '../hooks/useQdrantStats'
+import type { QdrantCollectionStat } from '../hooks/useQdrantStats'
 import ErrorBanner from '../components/ErrorBanner'
 
 const defaultWeights: Record<string, number> = { VIEW: 1, LIKE: 5, COMMENT: 8, SHARE: 10, SKIP: -2 }
@@ -11,6 +13,7 @@ export default function NamespaceDetailPage() {
   const navigate = useNavigate()
 
   const { data: existing, error: loadErr } = useNamespace(ns ?? '')
+  const { data: qdrantStats } = useQdrantStats(isNew ? '' : (ns ?? ''))
   const upsert = useUpsertNamespace()
 
   const [name, setName] = useState('')
@@ -99,6 +102,10 @@ export default function NamespaceDetailPage() {
 
       {saveError && <ErrorBanner message={saveError} onDismiss={() => setSaveError('')} />}
 
+      {!isNew && qdrantStats && (
+        <QdrantStatsPanel ns={ns!} stats={qdrantStats.collections} />
+      )}
+
       {!newKey && (
         <form onSubmit={handleSave}>
           {isNew && (
@@ -186,3 +193,36 @@ function Field({ label, children, inline }: { label: string; children: React.Rea
 
 const inputBase = 'px-2.5 py-1.5 border border-gray-300 rounded text-sm'
 const inputFull = `${inputBase} w-full`
+
+function QdrantStatsPanel({ ns, stats }: { ns: string; stats: Record<string, QdrantCollectionStat> }) {
+  const collections = [
+    { key: `${ns}_subjects`, label: 'subjects (sparse)' },
+    { key: `${ns}_objects`, label: 'objects (sparse)' },
+    { key: `${ns}_subjects_dense`, label: 'subjects (dense)' },
+    { key: `${ns}_objects_dense`, label: 'objects (dense)' },
+  ]
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg p-4 mb-5">
+      <h3 className="mt-0 mb-3 text-sm font-semibold text-gray-700 uppercase tracking-wide">Qdrant Collections</h3>
+      <div className="grid grid-cols-4 gap-3">
+        {collections.map(({ key, label }) => {
+          const col = stats[key]
+          return (
+            <div key={key} className="bg-gray-50 rounded p-3">
+              <div className="text-xs text-gray-500 mb-1 truncate" title={key}>{label}</div>
+              {col?.exists ? (
+                <>
+                  <div className="text-xl font-bold text-gray-800">{col.points_count.toLocaleString()}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">pts</div>
+                </>
+              ) : (
+                <div className="text-sm text-gray-300 mt-1">—</div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}

@@ -34,6 +34,10 @@ type fakeSvc struct {
 	debugErr      error
 	trendingResp  *TrendingAdminResponse
 	trendingErr   error
+	profileResp     *SubjectProfileResponse
+	profileErr      error
+	qdrantStatsResp *QdrantStatsResponse
+	qdrantStatsErr  error
 }
 
 func (f *fakeSvc) GetHealth(_ context.Context) (*HealthResponse, int, error) {
@@ -62,6 +66,14 @@ func (f *fakeSvc) DebugRecommend(_ context.Context, _ *RecommendDebugRequest) (*
 
 func (f *fakeSvc) GetTrending(_ context.Context, _ string, _, _, _ int) (*TrendingAdminResponse, error) {
 	return f.trendingResp, f.trendingErr
+}
+
+func (f *fakeSvc) GetSubjectProfile(_ context.Context, _, _ string) (*SubjectProfileResponse, error) {
+	return f.profileResp, f.profileErr
+}
+
+func (f *fakeSvc) GetQdrantStats(_ context.Context, _ string) (*QdrantStatsResponse, error) {
+	return f.qdrantStatsResp, f.qdrantStatsErr
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -371,6 +383,61 @@ func TestDebugRecommend_NamespaceNotFound(t *testing.T) {
 	h.DebugRecommend(rec, r)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+// ─── subject profile handler tests ───────────────────────────────────────────
+
+func TestGetSubjectProfile_OK(t *testing.T) {
+	h := newTestHandler(&fakeSvc{
+		profileResp: &SubjectProfileResponse{
+			SubjectID:        "user-1",
+			Namespace:        "ns1",
+			InteractionCount: 5,
+			SeenItems:        []string{"post_1", "post_2"},
+			SeenItemsDays:    30,
+			SparseVectorNNZ:  -1,
+		},
+	})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/subjects/ns1/user-1/profile",
+		map[string]string{"ns": "ns1", "id": "user-1"}, "")
+	h.GetSubjectProfile(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var resp SubjectProfileResponse
+	assertJSON(t, rec, &resp)
+	if resp.InteractionCount != 5 {
+		t.Errorf("expected interaction_count=5, got %d", resp.InteractionCount)
+	}
+}
+
+// ─── qdrant stats handler tests ───────────────────────────────────────────────
+
+func TestGetQdrantStats_OK(t *testing.T) {
+	h := newTestHandler(&fakeSvc{
+		qdrantStatsResp: &QdrantStatsResponse{
+			Namespace: "ns1",
+			Collections: map[string]QdrantCollectionStat{
+				"ns1_subjects":       {Exists: true, PointsCount: 500, IndexedVectorsCount: 500},
+				"ns1_objects":        {Exists: true, PointsCount: 2000, IndexedVectorsCount: 2000},
+				"ns1_subjects_dense": {Exists: false},
+				"ns1_objects_dense":  {Exists: false},
+			},
+		},
+	})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/qdrant-stats",
+		map[string]string{"ns": "ns1"}, "")
+	h.GetQdrantStats(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var resp QdrantStatsResponse
+	assertJSON(t, rec, &resp)
+	if s := resp.Collections["ns1_subjects"]; !s.Exists || s.PointsCount != 500 {
+		t.Errorf("unexpected ns1_subjects stat: %+v", s)
 	}
 }
 

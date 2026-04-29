@@ -84,6 +84,8 @@ type AdminConfig struct {
 	APIURL            string // internal URL of cmd/api for proxying
 	AdminPort         string // HTTP listen port (default: "2002")
 	LogFormat         string // "json" | "text" (default: "text")
+	QdrantHost        string
+	QdrantPort        int
 }
 
 // LoadAdmin reads and validates configuration for the admin binary.
@@ -100,6 +102,7 @@ func LoadAdmin() (*AdminConfig, error) {
 		APIURL:            getEnv("API_URL", "http://localhost:2001"),
 		AdminPort:         getEnv("ADMIN_PORT", "2002"),
 		LogFormat:         getEnv("LOG_FORMAT", "text"),
+		QdrantHost:        getEnv("QDRANT_HOST", "localhost"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -108,6 +111,12 @@ func LoadAdmin() (*AdminConfig, error) {
 	if cfg.RecommenderAPIKey == "" {
 		return nil, fmt.Errorf("RECOMMENDER_API_KEY is required")
 	}
+
+	qdrantPort, err := strconv.Atoi(getEnv("QDRANT_PORT", "6334"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid QDRANT_PORT: %w", err)
+	}
+	cfg.QdrantPort = qdrantPort
 
 	return cfg, nil
 }

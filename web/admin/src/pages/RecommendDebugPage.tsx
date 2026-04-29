@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useRecommendDebug } from '../hooks/useRecommendDebug'
+import { useSubjectProfile } from '../hooks/useSubjectProfile'
 import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
 
@@ -8,6 +9,7 @@ const LIMITS = [5, 10, 20, 50]
 export default function RecommendDebugPage() {
   const { data: nsData } = useNamespaceList()
   const debug = useRecommendDebug()
+  const profile = useSubjectProfile()
 
   const [namespace, setNamespace] = useState('')
   const [subjectID, setSubjectID] = useState('')
@@ -16,7 +18,10 @@ export default function RecommendDebugPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     debug.mutate({ namespace, subject_id: subjectID, limit, offset: 0 })
+    profile.mutate({ namespace, subject_id: subjectID })
   }
+
+  const isPending = debug.isPending || profile.isPending
 
   return (
     <div>
@@ -53,16 +58,57 @@ export default function RecommendDebugPage() {
         </div>
         <button
           type="submit"
-          disabled={debug.isPending}
+          disabled={isPending}
           className={`px-4 py-2 bg-blue-600 text-white border-none rounded text-sm font-medium ${
-            debug.isPending ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-700'
+            isPending ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-700'
           }`}
         >
-          {debug.isPending ? 'Fetching…' : 'Fetch'}
+          {isPending ? 'Fetching…' : 'Fetch'}
         </button>
       </form>
 
-      {debug.error && <ErrorBanner message={debug.error.message} />}
+      {(debug.error || profile.error) && (
+        <ErrorBanner message={debug.error?.message ?? profile.error?.message ?? 'Unknown error'} />
+      )}
+
+      {profile.data && (
+        <div className="bg-white border border-gray-200 rounded-lg p-4 mb-6">
+          <h3 className="mt-0 mb-3 text-sm font-semibold text-gray-700 uppercase tracking-wide">Subject Profile</h3>
+          <div className="grid grid-cols-3 gap-4 mb-4">
+            <div className="bg-gray-50 rounded p-3">
+              <div className="text-xs text-gray-500 mb-1">Total interactions</div>
+              <div className="text-2xl font-bold text-gray-800">{profile.data.interaction_count}</div>
+            </div>
+            <div className="bg-gray-50 rounded p-3">
+              <div className="text-xs text-gray-500 mb-1">Seen items (last {profile.data.seen_items_days}d)</div>
+              <div className="text-2xl font-bold text-gray-800">{profile.data.seen_items.length}</div>
+            </div>
+            <div className="bg-gray-50 rounded p-3">
+              <div className="text-xs text-gray-500 mb-1">Sparse vector NNZ</div>
+              <div className="text-2xl font-bold text-gray-800">
+                {profile.data.sparse_vector_nnz === -1
+                  ? <span className="text-base text-gray-400">not indexed</span>
+                  : profile.data.sparse_vector_nnz}
+              </div>
+            </div>
+          </div>
+
+          {profile.data.seen_items.length > 0 && (
+            <div>
+              <div className="text-xs text-gray-500 mb-2">
+                Seen items (last {profile.data.seen_items_days} days — excluded from recommendations)
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {profile.data.seen_items.map(id => (
+                  <code key={id} className="text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-mono">
+                    {id}
+                  </code>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {debug.data && (
         <div>

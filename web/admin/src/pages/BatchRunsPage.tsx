@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useBatchRuns } from '../hooks/useBatchRuns'
 import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
@@ -44,6 +45,7 @@ export default function BatchRunsPage() {
                 <th className={th}>Duration</th>
                 <th className={th}>Subjects</th>
                 <th className={th}>Status</th>
+                <th className={th}></th>
               </tr>
             </thead>
             <tbody>
@@ -71,6 +73,14 @@ export default function BatchRunsPage() {
                     ) : (
                       <span className="text-yellow-500">⟳ Running</span>
                     )}
+                  </td>
+                  <td className={td}>
+                    <Link
+                      to={`/namespaces/${run.namespace}`}
+                      className="text-xs text-blue-500 hover:text-blue-700 hover:underline whitespace-nowrap"
+                    >
+                      vector stats →
+                    </Link>
                   </td>
                 </tr>
               ))}

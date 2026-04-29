@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 )
 
@@ -17,25 +18,28 @@ type adminRepo interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
 	GetBatchRunLogs(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error)
+	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 }
 
 // Service implements admin business logic.
 type Service struct {
-	repo        adminRepo
-	apiURL      string
-	apiKey      string
-	redisClient *goredis.Client
-	httpClient  *http.Client
+	repo         adminRepo
+	apiURL       string
+	apiKey       string
+	redisClient  *goredis.Client
+	qdrantClient *qdrant.Client
+	httpClient   *http.Client
 }
 
 // NewService creates a new Service.
-func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client) *Service {
+func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client) *Service {
 	return &Service{
-		repo:        repo,
-		apiURL:      apiURL,
-		apiKey:      apiKey,
-		redisClient: redisClient,
-		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		repo:         repo,
+		apiURL:       apiURL,
+		apiKey:       apiKey,
+		redisClient:  redisClient,
+		qdrantClient: qdrantClient,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -157,6 +161,80 @@ func (s *Service) DebugRecommend(ctx context.Context, req *RecommendDebugRequest
 		Total:       raw.Total,
 		GeneratedAt: raw.GeneratedAt,
 	}, http.StatusOK, nil
+}
+
+// GetQdrantStats returns point counts for the four Qdrant collections of a namespace.
+func (s *Service) GetQdrantStats(ctx context.Context, namespace string) (*QdrantStatsResponse, error) {
+	names := []string{
+		namespace + "_subjects",
+		namespace + "_objects",
+		namespace + "_subjects_dense",
+		namespace + "_objects_dense",
+	}
+
+	cols := make(map[string]QdrantCollectionStat, len(names))
+	for _, col := range names {
+		stat := QdrantCollectionStat{}
+		if s.qdrantClient != nil {
+			exists, err := s.qdrantClient.CollectionExists(ctx, col)
+			if err == nil && exists {
+				stat.Exists = true
+				if info, err := s.qdrantClient.GetCollectionInfo(ctx, col); err == nil {
+					stat.PointsCount = info.GetPointsCount()
+					stat.IndexedVectorsCount = info.GetIndexedVectorsCount()
+				}
+			}
+		}
+		cols[col] = stat
+	}
+
+	return &QdrantStatsResponse{Namespace: namespace, Collections: cols}, nil
+}
+
+// GetSubjectProfile returns interaction count, seen items, and sparse vector NNZ for a subject.
+func (s *Service) GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error) {
+	ns, err := s.repo.GetNamespace(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace: %w", err)
+	}
+	seenItemsDays := 30
+	if ns != nil {
+		seenItemsDays = ns.SeenItemsDays
+	}
+
+	stats, err := s.repo.GetSubjectStats(ctx, namespace, subjectID, seenItemsDays)
+	if err != nil {
+		return nil, fmt.Errorf("get subject stats: %w", err)
+	}
+
+	nnz := -1
+	if stats.NumericID != nil && s.qdrantClient != nil {
+		results, err := s.qdrantClient.Get(ctx, &qdrant.GetPoints{
+			CollectionName: namespace + "_subjects",
+			Ids:            []*qdrant.PointId{qdrant.NewIDNum(*stats.NumericID)},
+			WithVectors:    qdrant.NewWithVectorsInclude("sparse_interactions"),
+		})
+		if err == nil && len(results) > 0 {
+			sv := results[0].GetVectors().GetVectors().GetVectors()["sparse_interactions"].GetSparse()
+			if sv != nil {
+				nnz = len(sv.GetIndices())
+			}
+		}
+	}
+
+	seenItems := stats.SeenItems
+	if seenItems == nil {
+		seenItems = []string{}
+	}
+
+	return &SubjectProfileResponse{
+		SubjectID:        subjectID,
+		Namespace:        namespace,
+		InteractionCount: stats.InteractionCount,
+		SeenItems:        seenItems,
+		SeenItemsDays:    seenItemsDays,
+		SparseVectorNNZ:  nnz,
+	}, nil
 }
 
 // GetTrending proxies the trending request to cmd/api, then fetches the Redis TTL.

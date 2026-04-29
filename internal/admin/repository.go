@@ -82,6 +82,56 @@ func (r *Repository) GetNamespace(ctx context.Context, namespace string) (*Names
 	return ns, nil
 }
 
+// GetSubjectStats returns interaction count, seen items, and the Qdrant numeric
+// ID (if one exists in id_mappings) for the given subject.
+func (r *Repository) GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error) {
+	var stats SubjectStats
+
+	if err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM events WHERE subject_id = $1 AND namespace = $2`,
+		subjectID, namespace,
+	).Scan(&stats.InteractionCount); err != nil {
+		return nil, fmt.Errorf("count interactions: %w", err)
+	}
+
+	rows, err := r.db.Query(ctx,
+		`SELECT DISTINCT object_id FROM events
+		 WHERE subject_id  = $1
+		   AND namespace   = $2
+		   AND occurred_at > NOW() - ($3 * INTERVAL '1 day')`,
+		subjectID, namespace, seenItemsDays,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query seen items: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan seen item: %w", err)
+		}
+		stats.SeenItems = append(stats.SeenItems, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate seen items: %w", err)
+	}
+
+	var numericID uint64
+	err = r.db.QueryRow(ctx,
+		`SELECT numeric_id FROM id_mappings
+		 WHERE namespace = $1 AND entity_type = 'subject' AND string_id = $2`,
+		namespace, subjectID,
+	).Scan(&numericID)
+	if err != nil && err != pgx.ErrNoRows {
+		return nil, fmt.Errorf("lookup id_mapping: %w", err)
+	}
+	if err == nil {
+		stats.NumericID = &numericID
+	}
+
+	return &stats, nil
+}
+
 // GetBatchRunLogs returns recent batch run history.
 // If namespace is non-empty, results are filtered to that namespace.
 // Limit is capped at 50.

@@ -22,6 +22,8 @@ type adminSvc interface {
 	GetBatchRuns(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error)
 	DebugRecommend(ctx context.Context, req *RecommendDebugRequest) (*RecommendDebugResponse, int, error)
 	GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error)
+	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
+	GetQdrantStats(ctx context.Context, namespace string) (*QdrantStatsResponse, error)
 }
 
 // Handler handles HTTP requests for the admin API.
@@ -190,6 +192,30 @@ func (h *Handler) DebugRecommend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+// GetQdrantStats handles GET /api/admin/v1/namespaces/{ns}/qdrant-stats.
+func (h *Handler) GetQdrantStats(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	stats, err := h.svc.GetQdrantStats(r.Context(), ns)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get qdrant stats")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, stats)
+}
+
+// GetSubjectProfile handles GET /api/admin/v1/subjects/{ns}/{id}/profile.
+func (h *Handler) GetSubjectProfile(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	id := chi.URLParam(r, "id")
+
+	profile, err := h.svc.GetSubjectProfile(r.Context(), ns, id)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get subject profile")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, profile)
 }
 
 // GetTrending handles GET /api/admin/v1/trending/{ns}.

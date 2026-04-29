@@ -130,6 +130,8 @@ The cron binary runs three phases per namespace on each tick:
 | `GET`    | `/api/admin/v1/batch-runs`             | session       | Recent batch run history (`?namespace=&limit=`)           |
 | `GET`    | `/api/admin/v1/trending/{ns}`          | session       | Trending items + Redis TTL (`?limit=&offset=&window_hours=`) |
 | `POST`   | `/api/admin/v1/recommend/debug`        | session       | Debug recommendations for a subject                       |
+| `GET`    | `/api/admin/v1/subjects/{ns}/{id}/profile` | session   | Subject profile: interaction count, seen items, sparse vector NNZ |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/qdrant-stats` | session | Points count for `{ns}_subjects/objects/subjects_dense/objects_dense` |
 
 ### Database Schema
 

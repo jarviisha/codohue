@@ -124,3 +124,33 @@ type HealthResponse struct {
 	Qdrant   string `json:"qdrant"`
 	Status   string `json:"status"`
 }
+
+// QdrantCollectionStat holds point counts for one Qdrant collection.
+type QdrantCollectionStat struct {
+	Exists              bool   `json:"exists"`
+	PointsCount         uint64 `json:"points_count"`
+	IndexedVectorsCount uint64 `json:"indexed_vectors_count"`
+}
+
+// QdrantStatsResponse is the response for GET /api/admin/v1/namespaces/{ns}/qdrant-stats.
+type QdrantStatsResponse struct {
+	Namespace   string                          `json:"namespace"`
+	Collections map[string]QdrantCollectionStat `json:"collections"`
+}
+
+// SubjectStats holds raw DB data for a subject used internally by Service.
+type SubjectStats struct {
+	InteractionCount int
+	SeenItems        []string
+	NumericID        *uint64 // nil if the subject has no Qdrant point yet
+}
+
+// SubjectProfileResponse is the response for GET /api/admin/v1/subjects/{ns}/{id}/profile.
+type SubjectProfileResponse struct {
+	SubjectID        string   `json:"subject_id"`
+	Namespace        string   `json:"namespace"`
+	InteractionCount int      `json:"interaction_count"`
+	SeenItems        []string `json:"seen_items"`
+	SeenItemsDays    int      `json:"seen_items_days"`
+	SparseVectorNNZ  int      `json:"sparse_vector_nnz"` // -1 means not yet indexed in Qdrant
+}

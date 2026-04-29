@@ -17,6 +17,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/config"
+	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	adminui "github.com/jarviisha/codohue/web/admin"
@@ -54,8 +55,14 @@ func run() error {
 		defer redisClient.Close() //nolint:errcheck
 	}
 
+	qdrantClient, err := infraqdrant.NewClient(cfg.QdrantHost, cfg.QdrantPort)
+	if err != nil {
+		slog.Warn("qdrant unavailable, sparse vector NNZ will be disabled", "error", err)
+		qdrantClient = nil
+	}
+
 	repo := admin.NewRepository(db)
-	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient)
+	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient)
 	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
 
 	r := chi.NewRouter()
@@ -76,6 +83,8 @@ func run() error {
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
 		r.Post("/api/admin/v1/recommend/debug", h.DebugRecommend)
 		r.Get("/api/admin/v1/trending/{ns}", h.GetTrending)
+		r.Get("/api/admin/v1/subjects/{ns}/{id}/profile", h.GetSubjectProfile)
+		r.Get("/api/admin/v1/namespaces/{ns}/qdrant-stats", h.GetQdrantStats)
 	})
 
 	// Static file serving — React SPA embedded in the binary

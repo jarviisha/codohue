@@ -13,12 +13,14 @@ import (
 // ─── fake repo ────────────────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	namespaces   []NamespaceConfig
-	nsListErr    error
-	namespace    *NamespaceConfig
-	nsGetErr     error
-	batchRuns    []BatchRunLog
-	batchRunsErr error
+	namespaces      []NamespaceConfig
+	nsListErr       error
+	namespace       *NamespaceConfig
+	nsGetErr        error
+	batchRuns       []BatchRunLog
+	batchRunsErr    error
+	subjectStats    *SubjectStats
+	subjectStatsErr error
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -33,10 +35,14 @@ func (f *fakeRepo) GetBatchRunLogs(_ context.Context, _ string, _ int) ([]BatchR
 	return f.batchRuns, f.batchRunsErr
 }
 
+func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*SubjectStats, error) {
+	return f.subjectStats, f.subjectStatsErr
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func newTestService(repo adminRepo, apiURL, apiKey string) *Service {
-	return NewService(repo, apiURL, apiKey, nil)
+	return NewService(repo, apiURL, apiKey, nil, nil)
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -172,6 +178,36 @@ func TestDebugRecommend_404Passthrough(t *testing.T) {
 	}
 	if statusCode != http.StatusNotFound {
 		t.Errorf("expected statusCode=404, got %d", statusCode)
+	}
+}
+
+func TestGetSubjectProfile_NoQdrant(t *testing.T) {
+	numID := uint64(42)
+	repo := &fakeRepo{
+		namespace: &NamespaceConfig{Namespace: "ns1", SeenItemsDays: 30},
+		subjectStats: &SubjectStats{
+			InteractionCount: 7,
+			SeenItems:        []string{"post_1", "post_2"},
+			NumericID:        &numID,
+		},
+	}
+	svc := newTestService(repo, "", "")
+	profile, err := svc.GetSubjectProfile(context.Background(), "ns1", "user-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if profile.InteractionCount != 7 {
+		t.Errorf("expected 7 interactions, got %d", profile.InteractionCount)
+	}
+	if len(profile.SeenItems) != 2 {
+		t.Errorf("expected 2 seen items, got %d", len(profile.SeenItems))
+	}
+	// qdrantClient is nil → NNZ should be -1
+	if profile.SparseVectorNNZ != -1 {
+		t.Errorf("expected sparse_vector_nnz=-1 when qdrant unavailable, got %d", profile.SparseVectorNNZ)
+	}
+	if profile.SeenItemsDays != 30 {
+		t.Errorf("expected seen_items_days=30, got %d", profile.SeenItemsDays)
 	}
 }
 
