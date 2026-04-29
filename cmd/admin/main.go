@@ -78,6 +78,7 @@ func run() error {
 		r.Use(admin.RequireSession(cfg.RecommenderAPIKey))
 		r.Get("/api/admin/v1/health", h.GetHealth)
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
+		r.Get("/api/admin/v1/namespaces/overview", h.GetNamespacesOverview)
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
