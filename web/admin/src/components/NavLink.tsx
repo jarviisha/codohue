@@ -9,15 +9,13 @@ export default function NavLink({ to, children }: Props) {
   return (
     <RouterNavLink
       to={to}
-      style={({ isActive }) => ({
-        display: 'block',
-        padding: '0.5rem 1rem',
-        color: isActive ? '#1a73e8' : '#333',
-        textDecoration: 'none',
-        borderRadius: 4,
-        background: isActive ? '#e8f0fe' : 'transparent',
-        fontWeight: isActive ? 600 : 400,
-      })}
+      className={({ isActive }) =>
+        `block mx-2 px-3 py-2 rounded text-sm no-underline transition-colors ${
+          isActive
+            ? 'text-blue-600 bg-blue-50 font-semibold'
+            : 'text-gray-700 font-normal hover:bg-gray-100'
+        }`
+      }
     >
       {children}
     </RouterNavLink>

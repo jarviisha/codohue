@@ -25,29 +25,29 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#f5f5f5' }}>
-      <form onSubmit={handleSubmit} style={{ background: '#fff', padding: '2rem', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', minWidth: 320 }}>
-        <h1 style={{ marginTop: 0, fontSize: '1.5rem' }}>Codohue Admin</h1>
+    <div className="flex justify-center items-center min-h-screen bg-gray-100">
+      <form onSubmit={handleSubmit} className="bg-white p-8 rounded-lg shadow-md w-[320px]">
+        <h1 className="mt-0 mb-6 text-2xl font-semibold text-gray-900">Codohue Admin</h1>
         {error && (
-          <div style={{ background: '#ffeaea', color: '#c00', padding: '0.5rem 0.75rem', borderRadius: 4, marginBottom: '1rem', fontSize: '0.9rem' }}>
+          <div className="bg-red-50 text-red-700 py-2 px-3 rounded mb-4 text-sm">
             {error}
           </div>
         )}
-        <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#666' }}>
-          API Key
-        </label>
+        <label className="block mb-1.5 text-sm text-gray-500">API Key</label>
         <input
           type="password"
           value={apiKey}
           onChange={e => setApiKey(e.target.value)}
           placeholder="Enter RECOMMENDER_API_KEY"
           required
-          style={{ width: '100%', padding: '0.5rem', borderRadius: 4, border: '1px solid #ccc', boxSizing: 'border-box', marginBottom: '1rem' }}
+          className="w-full py-2 px-3 rounded border border-gray-300 mb-4 text-sm"
         />
         <button
           type="submit"
           disabled={loading}
-          style={{ width: '100%', padding: '0.6rem', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: 4, cursor: loading ? 'not-allowed' : 'pointer', opacity: loading ? 0.7 : 1 }}
+          className={`w-full py-2.5 bg-blue-600 text-white border-none rounded text-sm font-medium ${
+            loading ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-700'
+          }`}
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>

@@ -20,12 +20,15 @@ export default function RecommendDebugPage() {
 
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>Recommendation Debug</h2>
+      <h2 className="mt-0 mb-4 text-xl font-semibold text-gray-800">Recommendation Debug</h2>
 
-      <form onSubmit={handleSubmit} style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '1rem', marginBottom: '1.5rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white border border-gray-200 rounded-lg p-4 mb-6 flex gap-3 flex-wrap items-end"
+      >
         <div>
-          <label style={labelStyle}>Namespace</label>
-          <select required value={namespace} onChange={e => setNamespace(e.target.value)} style={inputStyle}>
+          <label className={label}>Namespace</label>
+          <select required value={namespace} onChange={e => setNamespace(e.target.value)} className={input}>
             <option value="">Select namespace</option>
             {nsData?.namespaces.map(ns => (
               <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
@@ -33,16 +36,28 @@ export default function RecommendDebugPage() {
           </select>
         </div>
         <div>
-          <label style={labelStyle}>Subject ID</label>
-          <input required value={subjectID} onChange={e => setSubjectID(e.target.value)} placeholder="e.g. user-123" style={inputStyle} />
+          <label className={label}>Subject ID</label>
+          <input
+            required
+            value={subjectID}
+            onChange={e => setSubjectID(e.target.value)}
+            placeholder="e.g. user-123"
+            className={input}
+          />
         </div>
         <div>
-          <label style={labelStyle}>Limit</label>
-          <select value={limit} onChange={e => setLimit(+e.target.value)} style={{ ...inputStyle, width: 80 }}>
+          <label className={label}>Limit</label>
+          <select value={limit} onChange={e => setLimit(+e.target.value)} className={`${input} w-20`}>
             {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
-        <button type="submit" disabled={debug.isPending} style={{ padding: '0.5rem 1rem', background: '#1a73e8', color: '#fff', border: 'none', borderRadius: 4, cursor: debug.isPending ? 'not-allowed' : 'pointer' }}>
+        <button
+          type="submit"
+          disabled={debug.isPending}
+          className={`px-4 py-2 bg-blue-600 text-white border-none rounded text-sm font-medium ${
+            debug.isPending ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-700'
+          }`}
+        >
           {debug.isPending ? 'Fetching…' : 'Fetch'}
         </button>
       </form>
@@ -51,30 +66,30 @@ export default function RecommendDebugPage() {
 
       {debug.data && (
         <div>
-          <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '1rem', fontSize: '0.85rem', color: '#555' }}>
-            <span>Subject: <strong>{debug.data.subject_id}</strong></span>
-            <span>Source: <strong style={{ background: '#e8f0fe', color: '#1a73e8', padding: '0.1rem 0.4rem', borderRadius: 3 }}>{debug.data.source}</strong></span>
-            <span>Total: <strong>{debug.data.total}</strong></span>
+          <div className="mb-3 flex gap-4 text-sm text-gray-600">
+            <span>Subject: <strong className="text-gray-800">{debug.data.subject_id}</strong></span>
+            <span>Source: <strong className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded text-xs">{debug.data.source}</strong></span>
+            <span>Total: <strong className="text-gray-800">{debug.data.total}</strong></span>
           </div>
 
           {debug.data.items.length === 0 ? (
-            <p style={{ color: '#888' }}>No recommendations found for this subject.</p>
+            <p className="text-gray-400">No recommendations found for this subject.</p>
           ) : (
-            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full border-collapse">
                 <thead>
-                  <tr style={{ background: '#f8f9fa', borderBottom: '1px solid #e0e0e0' }}>
-                    <th style={th}>Rank</th>
-                    <th style={th}>Object ID</th>
-                    <th style={th}>Score</th>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className={th}>Rank</th>
+                    <th className={th}>Object ID</th>
+                    <th className={th}>Score</th>
                   </tr>
                 </thead>
                 <tbody>
                   {debug.data.items.map(item => (
-                    <tr key={item.object_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={td}>{item.rank}</td>
-                      <td style={td}><code>{item.object_id}</code></td>
-                      <td style={td}>{item.score.toFixed(4)}</td>
+                    <tr key={item.object_id} className="border-b border-gray-100">
+                      <td className={td}>{item.rank}</td>
+                      <td className={td}><code className="font-mono text-sm bg-gray-100 px-1.5 py-0.5 rounded">{item.object_id}</code></td>
+                      <td className={td}>{item.score.toFixed(4)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -87,7 +102,7 @@ export default function RecommendDebugPage() {
   )
 }
 
-const labelStyle: React.CSSProperties = { display: 'block', fontSize: '0.8rem', color: '#555', marginBottom: '0.25rem' }
-const inputStyle: React.CSSProperties = { padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: 4, fontSize: '0.9rem' }
-const th: React.CSSProperties = { padding: '0.65rem 1rem', textAlign: 'left', fontSize: '0.85rem', fontWeight: 600, color: '#666' }
-const td: React.CSSProperties = { padding: '0.65rem 1rem', fontSize: '0.9rem' }
+const label = 'block text-xs text-gray-500 mb-1'
+const input = 'px-2.5 py-1.5 border border-gray-300 rounded text-sm'
+const th = 'px-4 py-2.5 text-left text-sm font-semibold text-gray-500'
+const td = 'px-4 py-2.5 text-sm text-gray-700'

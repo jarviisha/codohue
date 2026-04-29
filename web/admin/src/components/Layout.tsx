@@ -9,12 +9,12 @@ export default function Layout() {
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div className="flex min-h-screen">
       <nav
         aria-label="Main navigation"
-        style={{ width: 200, background: '#fff', borderRight: '1px solid #e0e0e0', padding: '1rem 0', display: 'flex', flexDirection: 'column' }}
+        className="w-[200px] shrink-0 bg-white border-r border-gray-200 py-4 flex flex-col"
       >
-        <div style={{ padding: '0 1rem 1rem', fontWeight: 700, fontSize: '1.1rem', color: '#1a73e8' }}>
+        <div className="px-4 pb-4 font-bold text-lg text-blue-600">
           Codohue Admin
         </div>
         <NavLink to="/health">System Health</NavLink>
@@ -22,17 +22,17 @@ export default function Layout() {
         <NavLink to="/debug">Recommend Debug</NavLink>
         <NavLink to="/batch-runs">Batch Runs</NavLink>
         <NavLink to="/trending">Trending</NavLink>
-        <div style={{ flex: 1 }} />
-        <div style={{ padding: '0 0.5rem' }}>
+        <div className="flex-1" />
+        <div className="px-2">
           <button
             onClick={handleLogout}
-            style={{ width: '100%', padding: '0.5rem', background: 'none', border: '1px solid #ccc', borderRadius: 4, cursor: 'pointer', color: '#666' }}
+            className="w-full py-2 bg-transparent border border-gray-300 rounded cursor-pointer text-gray-500 text-sm hover:bg-gray-50"
           >
             Sign out
           </button>
         </div>
       </nav>
-      <main style={{ flex: 1, padding: '1.5rem', background: '#f8f9fa', overflowY: 'auto' }}>
+      <main className="flex-1 p-6 bg-gray-50 overflow-y-auto">
         <Outlet />
       </main>
     </div>

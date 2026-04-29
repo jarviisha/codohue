@@ -19,9 +19,13 @@ export default function TrendingPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
-        <h2 style={{ margin: 0 }}>Trending Items</h2>
-        <select value={namespace} onChange={e => setNamespace(e.target.value)} style={{ padding: '0.4rem 0.6rem', border: '1px solid #ccc', borderRadius: 4 }}>
+      <div className="flex items-center gap-4 mb-4">
+        <h2 className="m-0 text-xl font-semibold text-gray-800">Trending Items</h2>
+        <select
+          value={namespace}
+          onChange={e => setNamespace(e.target.value)}
+          className="px-2.5 py-1.5 border border-gray-300 rounded text-sm"
+        >
           <option value="">Select namespace</option>
           {nsData?.namespaces.map(ns => (
             <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
@@ -29,44 +33,44 @@ export default function TrendingPage() {
         </select>
       </div>
 
-      {!namespace && <p style={{ color: '#888' }}>Select a namespace to view trending items.</p>}
+      {!namespace && <p className="text-gray-400">Select a namespace to view trending items.</p>}
       {error && <ErrorBanner message="Failed to load trending data." />}
-      {isLoading && <p style={{ color: '#888' }}>Loading…</p>}
+      {isLoading && <p className="text-gray-400">Loading…</p>}
 
       {data && (
         <>
-          <div style={{ marginBottom: '0.75rem', display: 'flex', gap: '1.5rem', fontSize: '0.85rem', color: '#555' }}>
-            <span>Window: <strong>{data.window_hours}h</strong></span>
-            <span>Total: <strong>{data.total}</strong></span>
-            <span style={{ color: data.cache_ttl_sec === -2 ? '#ea4335' : '#34a853' }}>
+          <div className="mb-3 flex gap-6 text-sm text-gray-600">
+            <span>Window: <strong className="text-gray-800">{data.window_hours}h</strong></span>
+            <span>Total: <strong className="text-gray-800">{data.total}</strong></span>
+            <span className={data.cache_ttl_sec === -2 ? 'text-red-500' : 'text-green-600'}>
               Cache: <strong>{formatTTL(data.cache_ttl_sec)}</strong>
             </span>
           </div>
 
           {data.cache_ttl_sec === -2 ? (
-            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, padding: '2rem', textAlign: 'center', color: '#888' }}>
-              No trending data — run <code>make run-cron</code> to populate the trending cache.
+            <div className="bg-white border border-gray-200 rounded-lg p-8 text-center text-gray-400">
+              No trending data — run <code className="font-mono text-sm bg-gray-100 px-1.5 py-0.5 rounded">make run-cron</code> to populate the trending cache.
             </div>
           ) : data.items.length === 0 ? (
-            <p style={{ color: '#888' }}>No items in trending window.</p>
+            <p className="text-gray-400">No items in trending window.</p>
           ) : (
-            <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8, overflow: 'hidden' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <table className="w-full border-collapse">
                 <thead>
-                  <tr style={{ background: '#f8f9fa', borderBottom: '1px solid #e0e0e0' }}>
-                    <th style={th}>#</th>
-                    <th style={th}>Object ID</th>
-                    <th style={th}>Score</th>
-                    <th style={th}>Cache TTL</th>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className={th}>#</th>
+                    <th className={th}>Object ID</th>
+                    <th className={th}>Score</th>
+                    <th className={th}>Cache TTL</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.map((item, i) => (
-                    <tr key={item.object_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                      <td style={td}>{i + 1}</td>
-                      <td style={td}><code>{item.object_id}</code></td>
-                      <td style={td}>{item.score.toFixed(2)}</td>
-                      <td style={td}>{formatTTL(item.cache_ttl_sec)}</td>
+                    <tr key={item.object_id} className="border-b border-gray-100">
+                      <td className={td}>{i + 1}</td>
+                      <td className={td}><code className="font-mono text-sm bg-gray-100 px-1.5 py-0.5 rounded">{item.object_id}</code></td>
+                      <td className={td}>{item.score.toFixed(2)}</td>
+                      <td className={td}>{formatTTL(item.cache_ttl_sec)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -79,5 +83,5 @@ export default function TrendingPage() {
   )
 }
 
-const th: React.CSSProperties = { padding: '0.65rem 1rem', textAlign: 'left', fontSize: '0.85rem', fontWeight: 600, color: '#666' }
-const td: React.CSSProperties = { padding: '0.65rem 1rem', fontSize: '0.9rem' }
+const th = 'px-4 py-2.5 text-left text-sm font-semibold text-gray-500'
+const td = 'px-4 py-2.5 text-sm text-gray-700'
