@@ -30,11 +30,17 @@ type jobComputeRepo interface {
 	GetNamespaceEventsInWindow(ctx context.Context, namespace string, windowHours int) ([]*RawEvent, error)
 }
 
+type batchLogger interface {
+	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time) (int64, error)
+	UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string) error
+}
+
 // Job is a periodic batch job that recomputes sparse and dense vectors for all namespaces.
 type Job struct {
 	service     recomputer
 	nsConfigSvc jobNsConfigReader
 	repo        jobComputeRepo
+	batchLog    batchLogger
 	redis       *goredis.Client
 	interval    time.Duration
 
@@ -52,6 +58,7 @@ func NewJob(service *Service, nsConfigSvc *nsconfig.Service, repo *Repository, q
 	return &Job{
 		service:     service,
 		nsConfigSvc: nsConfigSvc,
+		batchLog:    repo,
 		repo:        repo,
 		redis:       redisClient,
 		interval:    time.Duration(intervalMinutes) * time.Minute,
@@ -106,35 +113,67 @@ func (j *Job) runOnce(ctx context.Context) {
 	}
 
 	for _, ns := range namespaces {
-		cfg, err := j.nsConfigSvc.Get(ctx, ns)
-		if err != nil {
-			slog.Error("get ns config failed", "namespace", ns, "error", err)
-		}
-
-		// Phase 1 — CF sparse vectors (unchanged from MVP).
-		if err := j.runPhase1(ctx, ns, cfg); err != nil {
-			slog.Error("phase 1 failed", "namespace", ns, "error", err)
-		}
-
-		// Phase 2 — Dense vectors (Item2Vec or SVD).
-		// Skipped when strategy is "byoe" (embeddings pushed externally) or "disabled".
-		if cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
-			if err := j.runPhase2Dense(ctx, ns, cfg); err != nil {
-				slog.Error("phase 2 dense failed", "namespace", ns, "error", err)
-			}
-		}
-
-		// Phase 3 — Trending scores (requires Redis).
-		if j.redis != nil {
-			if err := j.runPhase3Trending(ctx, ns, cfg); err != nil {
-				slog.Error("phase 3 trending failed", "namespace", ns, "error", err)
-			}
-		}
+		j.processNamespace(ctx, ns)
 	}
 
 	elapsed := time.Since(start)
 	metrics.BatchJobLagSeconds.Set(elapsed.Seconds())
 	slog.Info("batch run done", "duration_ms", elapsed.Milliseconds())
+}
+
+// processNamespace runs all batch phases for a single namespace and writes batch_run_logs.
+func (j *Job) processNamespace(ctx context.Context, ns string) {
+	nsStart := time.Now()
+
+	var logID int64
+	if j.batchLog != nil {
+		var err error
+		logID, err = j.batchLog.InsertBatchRunLog(ctx, ns, nsStart)
+		if err != nil {
+			slog.Warn("could not insert batch_run_log", "namespace", ns, "error", err)
+		}
+	}
+
+	var runErr error
+	subjects := 0
+
+	cfg, err := j.nsConfigSvc.Get(ctx, ns)
+	if err != nil {
+		slog.Error("get ns config failed", "namespace", ns, "error", err)
+		runErr = err
+	}
+
+	if runErr == nil {
+		if err := j.runPhase1(ctx, ns, cfg); err != nil {
+			slog.Error("phase 1 failed", "namespace", ns, "error", err)
+			runErr = err
+		}
+	}
+
+	if runErr == nil && cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
+		if err := j.runPhase2Dense(ctx, ns, cfg); err != nil {
+			slog.Error("phase 2 dense failed", "namespace", ns, "error", err)
+			// non-fatal; continue to phase 3
+		}
+	}
+
+	if j.redis != nil {
+		if err := j.runPhase3Trending(ctx, ns, cfg); err != nil {
+			slog.Error("phase 3 trending failed", "namespace", ns, "error", err)
+		}
+	}
+
+	if j.batchLog != nil && logID > 0 {
+		now := time.Now()
+		durMs := int(time.Since(nsStart).Milliseconds())
+		errMsg := ""
+		if runErr != nil {
+			errMsg = runErr.Error()
+		}
+		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, durMs, subjects, runErr == nil, errMsg); err != nil {
+			slog.Warn("could not update batch_run_log", "namespace", ns, "error", err)
+		}
+	}
 }
 
 // runPhase1 recomputes CF sparse vectors for a namespace.

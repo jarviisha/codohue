@@ -1,0 +1,35 @@
+# Stage 1: Build React SPA
+FROM node:20-alpine AS frontend
+
+WORKDIR /web
+COPY web/admin/package*.json ./
+RUN npm ci
+COPY web/admin/ ./
+RUN npm run build
+
+# Stage 2: Build Go binary
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+COPY pkg/codohuetypes/go.mod ./pkg/codohuetypes/go.mod
+RUN go mod download
+
+COPY . .
+COPY --from=frontend /web/dist ./web/admin/dist
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/admin ./cmd/admin
+
+# Stage 3: Runtime
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=builder /out/admin /admin
+
+EXPOSE 2002
+
+ENTRYPOINT ["/admin"]

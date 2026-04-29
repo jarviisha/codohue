@@ -1,6 +1,7 @@
-BIN_DIR   := ./tmp
-API_BIN   := $(BIN_DIR)/api
-CRON_BIN  := $(BIN_DIR)/cron
+BIN_DIR    := ./tmp
+API_BIN    := $(BIN_DIR)/api
+CRON_BIN   := $(BIN_DIR)/cron
+ADMIN_BIN  := $(BIN_DIR)/admin
 
 # Go modules in this repo. Targets that should cover the whole workspace
 # (lint, fmt, test, test-race) iterate over this list.
@@ -27,7 +28,7 @@ MIN_INFRA_POSTGRES ?= 85
 MIN_CMD_API ?= 40
 MIN_CMD_CRON ?= 45
 
-.PHONY: build build-api build-cron run run-cron dev lint fmt \
+.PHONY: build build-api build-cron build-admin run run-cron run-admin dev lint fmt \
         test test-pkg test-verbose test-race test-e2e test-e2e-api test-e2e-heavy \
         coverage coverage-unit coverage-race coverage-report coverage-html coverage-check coverage-check-pkg coverage-check-all coverage-clean \
         up up-d up-infra up-app up-app-d down-app logs logs-cron logs-app \
@@ -36,13 +37,17 @@ MIN_CMD_CRON ?= 45
 
 # ── Build ──────────────────────────────────────────────────────────────────────
 
-build: build-api build-cron
+build: build-api build-cron build-admin
 
 build-api:
 	go build -o $(API_BIN) ./cmd/api
 
 build-cron:
 	go build -o $(CRON_BIN) ./cmd/cron
+
+build-admin:
+	cd web/admin && npm run build
+	go build -o $(ADMIN_BIN) ./cmd/admin
 
 # ── Run ────────────────────────────────────────────────────────────────────────
 
@@ -53,6 +58,10 @@ run:
 ## Run one cron cycle manually (requires infra to be up)
 run-cron:
 	go run ./cmd/cron
+
+## Run admin dashboard (requires infra + cmd/api up; run make build-admin first)
+run-admin:
+	go run ./cmd/admin
 
 ## Run the API with live reload via air
 dev:

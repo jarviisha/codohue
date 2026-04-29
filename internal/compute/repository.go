@@ -3,6 +3,7 @@ package compute
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -176,4 +177,35 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 		return ns, fmt.Errorf("iterate active namespaces: %w", err)
 	}
 	return ns, nil
+}
+
+// InsertBatchRunLog inserts a new in-progress batch run log row and returns its ID.
+func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time) (int64, error) {
+	var id int64
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO batch_run_logs (namespace, started_at, subjects_processed, success)
+		VALUES ($1, $2, 0, FALSE)
+		RETURNING id
+	`, namespace, startedAt).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("insert batch_run_log: %w", err)
+	}
+	return id, nil
+}
+
+// UpdateBatchRunLog updates a batch run log row on completion or failure.
+func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string) error {
+	var errMsgPtr *string
+	if errMsg != "" {
+		errMsgPtr = &errMsg
+	}
+	_, err := r.db.Exec(ctx, `
+		UPDATE batch_run_logs
+		SET completed_at = $2, duration_ms = $3, subjects_processed = $4, success = $5, error_message = $6
+		WHERE id = $1
+	`, id, completedAt, durationMs, subjectsProcessed, success, errMsgPtr)
+	if err != nil {
+		return fmt.Errorf("update batch_run_log %d: %w", id, err)
+	}
+	return nil
 }

@@ -41,6 +41,24 @@ services:
       timeout: 5s
       retries: 3
 
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    container_name: codohue-admin
+    ports:
+      - "2002:2002"
+    environment:
+      - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - RECOMMENDER_API_KEY=dev-secret-key
+      - API_URL=http://api:2001
+      - ADMIN_PORT=2002
+      - LOG_FORMAT=text
+    depends_on:
+      api:
+        condition: service_healthy
+
   postgres:
     image: postgres:16-alpine
     container_name: codohue-postgres

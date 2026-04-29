@@ -102,7 +102,7 @@ The cron binary runs three phases per namespace on each tick:
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
 - **Two-tier auth**: Global `RECOMMENDER_API_KEY` for admin routes (namespace config upsert); per-namespace bcrypt-hashed keys for data routes (stored in `namespace_configs.api_key_hash`). Falls back to global key when a namespace has no key provisioned.
 
-### REST API
+### REST API — `cmd/api` (port 2001)
 
 | Method   | Path                                | Auth                    | Description                                                         |
 | -------- | ----------------------------------- | ----------------------- | ------------------------------------------------------------------- |
@@ -116,6 +116,20 @@ The cron binary runs three phases per namespace on each tick:
 | `POST`   | `/v1/objects/{ns}/{id}/embedding`   | namespace key           | Store BYOE dense vector for an object                               |
 | `POST`   | `/v1/subjects/{ns}/{id}/embedding`  | namespace key           | Store BYOE dense vector for a subject                               |
 | `DELETE` | `/v1/objects/{ns}/{id}`             | namespace key           | Remove an object from all Qdrant collections (idempotent)           |
+
+### REST API — `cmd/admin` (port 2002, session-cookie auth via `codohue_admin_session`)
+
+| Method   | Path                                   | Auth          | Description                                               |
+| -------- | -------------------------------------- | ------------- | --------------------------------------------------------- |
+| `POST`   | `/api/auth/login`                      | none (public) | Validate `RECOMMENDER_API_KEY`; set session cookie        |
+| `DELETE` | `/api/auth/logout`                     | none (public) | Clear session cookie                                      |
+| `GET`    | `/api/admin/v1/health`                 | session       | Proxy `GET /healthz` from `cmd/api`                       |
+| `GET`    | `/api/admin/v1/namespaces`             | session       | List all namespace configs from PostgreSQL                |
+| `GET`    | `/api/admin/v1/namespaces/{ns}`        | session       | Get single namespace config                               |
+| `PUT`    | `/api/admin/v1/namespaces/{ns}`        | session       | Create/update namespace (proxy to `cmd/api`)              |
+| `GET`    | `/api/admin/v1/batch-runs`             | session       | Recent batch run history (`?namespace=&limit=`)           |
+| `GET`    | `/api/admin/v1/trending/{ns}`          | session       | Trending items + Redis TTL (`?limit=&offset=&window_hours=`) |
+| `POST`   | `/api/admin/v1/recommend/debug`        | session       | Debug recommendations for a subject                       |
 
 ### Database Schema
 
@@ -160,3 +174,9 @@ All code comments (inline comments, doc comments, TODO notes) must be written in
 ### Test files
 
 Every file that contains business logic (`service.go`, `repository.go`, `job.go`, `worker.go`) must have a corresponding `_test.go` file. Handler tests live in `handler_test.go`. Files that only declare types (`types.go`) or wire dependencies (`docs.go`) do not require test files.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+at specs/001-web-admin-dashboard/plan.md
+<!-- SPECKIT END -->

@@ -76,6 +76,42 @@ func loadBase() (*AppConfig, error) {
 	return cfg, nil
 }
 
+// AdminConfig holds configuration for the admin dashboard binary.
+type AdminConfig struct {
+	DatabaseURL       string
+	RedisURL          string
+	RecommenderAPIKey string
+	APIURL            string // internal URL of cmd/api for proxying
+	AdminPort         string // HTTP listen port (default: "2002")
+	LogFormat         string // "json" | "text" (default: "text")
+}
+
+// LoadAdmin reads and validates configuration for the admin binary.
+func LoadAdmin() (*AdminConfig, error) {
+	err := godotenv.Load()
+	if err != nil {
+		fmt.Println("No .env file found, relying on environment variables")
+	}
+
+	cfg := &AdminConfig{
+		DatabaseURL:       getEnv("DATABASE_URL", ""),
+		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379"),
+		RecommenderAPIKey: getEnv("RECOMMENDER_API_KEY", ""),
+		APIURL:            getEnv("API_URL", "http://localhost:2001"),
+		AdminPort:         getEnv("ADMIN_PORT", "2002"),
+		LogFormat:         getEnv("LOG_FORMAT", "text"),
+	}
+
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+	if cfg.RecommenderAPIKey == "" {
+		return nil, fmt.Errorf("RECOMMENDER_API_KEY is required")
+	}
+
+	return cfg, nil
+}
+
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
