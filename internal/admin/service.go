@@ -104,7 +104,7 @@ func (s *Service) DebugRecommend(ctx context.Context, req *RecommendDebugRequest
 		limit = 10
 	}
 
-	url := fmt.Sprintf("%s/v1/namespaces/%s/recommendations?subject_id=%s&limit=%d&offset=%d",
+	url := fmt.Sprintf("%s/v1/recommendations?namespace=%s&subject_id=%s&limit=%d&offset=%d",
 		s.apiURL, req.Namespace, req.SubjectID, limit, req.Offset)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
@@ -166,7 +166,7 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 		params += "&window_hours=" + strconv.Itoa(windowHours)
 	}
 
-	url := s.apiURL + "/v1/namespaces/" + namespace + "/trending" + params
+	url := s.apiURL + "/v1/trending/" + namespace + params
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("build trending request: %w", err)

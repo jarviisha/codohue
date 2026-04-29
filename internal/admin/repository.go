@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -19,21 +20,34 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 }
 
 const nsSelectCols = `
-	SELECT namespace, action_weights, lambda, gamma, alpha, max_results,
+	SELECT namespace, action_weights, time_decay_factor, gamma, alpha, max_results,
 	       seen_items_days, dense_strategy, embedding_dim, dense_distance,
 	       trending_window, trending_ttl, lambda_trending,
 	       api_key_hash IS NOT NULL AS has_api_key, updated_at
 	FROM namespace_configs`
 
-func scanNamespaceConfig(row pgx.Row) (*NamespaceConfig, error) {
-	var ns NamespaceConfig
-	err := row.Scan(
-		&ns.Namespace, &ns.ActionWeights, &ns.Lambda, &ns.Gamma, &ns.Alpha,
+// scanNamespaceConfigRow scans one namespace_configs row.
+// action_weights is JSONB — pgx returns it as []byte, so we unmarshal manually.
+func scanNamespaceConfigRow(scan func(...any) error) (*NamespaceConfig, error) {
+	var (
+		ns          NamespaceConfig
+		weightsJSON []byte
+	)
+	err := scan(
+		&ns.Namespace, &weightsJSON, &ns.Lambda, &ns.Gamma, &ns.Alpha,
 		&ns.MaxResults, &ns.SeenItemsDays, &ns.DenseStrategy, &ns.EmbeddingDim,
 		&ns.DenseDistance, &ns.TrendingWindow, &ns.TrendingTTL, &ns.LambdaTrending,
 		&ns.HasAPIKey, &ns.UpdatedAt,
 	)
-	return &ns, err
+	if err != nil {
+		return nil, err
+	}
+	if len(weightsJSON) > 0 {
+		if err := json.Unmarshal(weightsJSON, &ns.ActionWeights); err != nil {
+			return nil, fmt.Errorf("unmarshal action_weights: %w", err)
+		}
+	}
+	return &ns, nil
 }
 
 // ListNamespaces returns all namespace configurations ordered alphabetically.
@@ -46,7 +60,7 @@ func (r *Repository) ListNamespaces(ctx context.Context) ([]NamespaceConfig, err
 
 	var out []NamespaceConfig
 	for rows.Next() {
-		ns, err := scanNamespaceConfig(rows)
+		ns, err := scanNamespaceConfigRow(rows.Scan)
 		if err != nil {
 			return nil, fmt.Errorf("scan namespace_config: %w", err)
 		}
@@ -57,7 +71,8 @@ func (r *Repository) ListNamespaces(ctx context.Context) ([]NamespaceConfig, err
 
 // GetNamespace returns a single namespace configuration, or nil if not found.
 func (r *Repository) GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error) {
-	ns, err := scanNamespaceConfig(r.db.QueryRow(ctx, nsSelectCols+` WHERE namespace = $1`, namespace))
+	row := r.db.QueryRow(ctx, nsSelectCols+` WHERE namespace = $1`, namespace)
+	ns, err := scanNamespaceConfigRow(row.Scan)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
