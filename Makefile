@@ -28,7 +28,7 @@ MIN_INFRA_POSTGRES ?= 85
 MIN_CMD_API ?= 40
 MIN_CMD_CRON ?= 45
 
-.PHONY: build build-api build-cron build-admin run run-cron run-admin dev lint fmt \
+.PHONY: build build-api build-cron build-admin run run-cron run-admin dev dev-admin lint fmt \
         test test-pkg test-verbose test-race test-e2e test-e2e-api test-e2e-heavy \
         coverage coverage-unit coverage-race coverage-report coverage-html coverage-check coverage-check-pkg coverage-check-all coverage-clean \
         up up-d up-infra up-app up-app-d down-app logs logs-cron logs-app \
@@ -66,6 +66,10 @@ run-admin:
 ## Run the API with live reload via air
 dev:
 	air
+
+## Run admin web dev server with hot reload (proxies /api to :2002; requires run-admin up)
+dev-admin:
+	cd web/admin && npm run dev
 
 # ── Docker ─────────────────────────────────────────────────────────────────────
 

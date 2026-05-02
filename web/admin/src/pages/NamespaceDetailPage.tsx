@@ -82,18 +82,43 @@ export default function NamespaceDetailPage() {
   if (loadErr) return <ErrorBanner message="Failed to load namespace config." />
 
   return (
-    <div className="max-w-xl">
-      <h2 className="mt-0 mb-4 text-xl font-semibold text-gray-800">
+    <div style={{ maxWidth: '560px' }}>
+      <h2
+        className="font-light text-[#061b31] m-0 mb-6"
+        style={{ fontSize: '26px', letterSpacing: '-0.26px', lineHeight: 1.12 }}
+      >
         {isNew ? 'Create Namespace' : `Edit: ${ns}`}
       </h2>
 
       {newKey && (
-        <div role="alert" className="bg-green-50 border border-green-500 rounded-lg p-4 mb-4">
-          <strong>Namespace created!</strong> API key (shown once only):
-          <pre className="mt-2 font-mono text-sm break-all">{newKey}</pre>
+        <div
+          className="p-5 mb-5"
+          style={{
+            background: 'rgba(21,190,83,0.05)',
+            border: '1px solid rgba(21,190,83,0.3)',
+            borderRadius: '5px',
+          }}
+        >
+          <p className="text-sm font-normal text-[#061b31] m-0 mb-2">
+            Namespace created. API key (shown once only):
+          </p>
+          <pre
+            className="text-sm break-all m-0 mb-4 p-3 rounded"
+            style={{
+              fontFamily: "'Source Code Pro', monospace",
+              fontWeight: 500,
+              background: '#f5f6ff',
+              color: '#533afd',
+              border: '1px solid rgba(83,58,253,0.15)',
+              borderRadius: '4px',
+            }}
+          >
+            {newKey}
+          </pre>
           <button
             onClick={() => navigate('/namespaces')}
-            className="mt-3 px-3 py-1.5 bg-blue-600 text-white border-none rounded cursor-pointer text-sm hover:bg-blue-700"
+            className="text-sm font-normal text-white cursor-pointer"
+            style={{ background: '#533afd', border: 'none', borderRadius: '4px', padding: '7px 16px' }}
           >
             Done
           </button>
@@ -110,62 +135,111 @@ export default function NamespaceDetailPage() {
         <form onSubmit={handleSave}>
           {isNew && (
             <Field label="Namespace name">
-              <input required value={name} onChange={e => setName(e.target.value)} className={inputFull} placeholder="e.g. my_feed" />
+              <input
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. my_feed"
+                style={inputFullStyle}
+                onFocus={e => { e.target.style.borderColor = '#533afd' }}
+                onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
+              />
             </Field>
           )}
 
           <SectionHeader>Action Weights</SectionHeader>
           {Object.entries(weights).map(([k, v]) => (
             <Field key={k} label={k} inline>
-              <input type="number" step="0.1" value={v}
+              <input
+                type="number"
+                step="0.1"
+                value={v}
                 onChange={e => setWeights(w => ({ ...w, [k]: parseFloat(e.target.value) }))}
-                className={`${inputBase} w-20`} />
+                style={{ ...inputBaseStyle, width: '80px' }}
+                className="tabular-nums"
+                onFocus={e => { e.target.style.borderColor = '#533afd' }}
+                onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
+              />
             </Field>
           ))}
 
           <SectionHeader>Scoring Parameters</SectionHeader>
-          <Field label="Lambda (time decay)" inline><input type="number" step="0.001" value={lambda} onChange={e => setLambda(+e.target.value)} className={`${inputBase} w-24`} /></Field>
-          <Field label="Gamma (object freshness)" inline><input type="number" step="0.001" value={gamma} onChange={e => setGamma(+e.target.value)} className={`${inputBase} w-24`} /></Field>
-          <Field label="Alpha (CF blend)" inline><input type="number" step="0.01" min={0} max={1} value={alpha} onChange={e => setAlpha(+e.target.value)} className={`${inputBase} w-24`} /></Field>
-          <Field label="Max results" inline><input type="number" min={1} value={maxResults} onChange={e => setMaxResults(+e.target.value)} className={`${inputBase} w-24`} /></Field>
-          <Field label="Seen items days" inline><input type="number" min={1} value={seenDays} onChange={e => setSeenDays(+e.target.value)} className={`${inputBase} w-24`} /></Field>
+          <Field label="Lambda (time decay)" inline>
+            <input type="number" step="0.001" value={lambda} onChange={e => setLambda(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
+          <Field label="Gamma (object freshness)" inline>
+            <input type="number" step="0.001" value={gamma} onChange={e => setGamma(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
+          <Field label="Alpha (CF blend)" inline>
+            <input type="number" step="0.01" min={0} max={1} value={alpha} onChange={e => setAlpha(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
+          <Field label="Max results" inline>
+            <input type="number" min={1} value={maxResults} onChange={e => setMaxResults(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
+          <Field label="Seen items days" inline>
+            <input type="number" min={1} value={seenDays} onChange={e => setSeenDays(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
 
           <SectionHeader>Dense Hybrid</SectionHeader>
           <Field label="Strategy">
-            <select value={strategy} onChange={e => setStrategy(e.target.value)} className={inputFull}>
+            <select value={strategy} onChange={e => setStrategy(e.target.value)} style={inputFullStyle} onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }}>
               <option value="item2vec">item2vec</option>
               <option value="svd">svd</option>
               <option value="byoe">byoe</option>
               <option value="disabled">disabled</option>
             </select>
           </Field>
-          <Field label="Embedding dim" inline><input type="number" min={1} value={embDim} onChange={e => setEmbDim(+e.target.value)} className={`${inputBase} w-24`} /></Field>
+          <Field label="Embedding dim" inline>
+            <input type="number" min={1} value={embDim} onChange={e => setEmbDim(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
           <Field label="Distance">
-            <select value={distance} onChange={e => setDistance(e.target.value)} className={inputFull}>
+            <select value={distance} onChange={e => setDistance(e.target.value)} style={inputFullStyle} onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }}>
               <option value="cosine">cosine</option>
               <option value="dot">dot</option>
             </select>
           </Field>
 
           <SectionHeader>Trending</SectionHeader>
-          <Field label="Window (hours)" inline><input type="number" min={1} value={tWindow} onChange={e => setTWindow(+e.target.value)} className={`${inputBase} w-24`} /></Field>
-          <Field label="TTL (seconds)" inline><input type="number" min={0} value={tTTL} onChange={e => setTTTL(+e.target.value)} className={`${inputBase} w-24`} /></Field>
-          <Field label="Lambda trending" inline><input type="number" step="0.01" value={lambdaTrending} onChange={e => setLambdaTrending(+e.target.value)} className={`${inputBase} w-24`} /></Field>
+          <Field label="Window (hours)" inline>
+            <input type="number" min={1} value={tWindow} onChange={e => setTWindow(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
+          <Field label="TTL (seconds)" inline>
+            <input type="number" min={0} value={tTTL} onChange={e => setTTTL(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
+          <Field label="Lambda trending" inline>
+            <input type="number" step="0.01" value={lambdaTrending} onChange={e => setLambdaTrending(+e.target.value)} style={{ ...inputBaseStyle, width: '96px' }} className="tabular-nums" onFocus={e => { e.target.style.borderColor = '#533afd' }} onBlur={e => { e.target.style.borderColor = '#e5edf5' }} />
+          </Field>
 
           <div className="mt-6 flex gap-3">
             <button
               type="submit"
               disabled={upsert.isPending}
-              className={`px-5 py-2 bg-blue-600 text-white border-none rounded text-sm font-medium ${
-                upsert.isPending ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer hover:bg-blue-700'
-              }`}
+              className="text-sm font-normal text-white cursor-pointer transition-colors"
+              style={{
+                background: upsert.isPending ? '#4434d4' : '#533afd',
+                border: 'none',
+                borderRadius: '4px',
+                padding: '8px 20px',
+                opacity: upsert.isPending ? 0.8 : 1,
+              }}
+              onMouseEnter={e => { if (!upsert.isPending) (e.currentTarget as HTMLElement).style.background = '#4434d4' }}
+              onMouseLeave={e => { if (!upsert.isPending) (e.currentTarget as HTMLElement).style.background = '#533afd' }}
             >
               {upsert.isPending ? 'Saving…' : 'Save'}
             </button>
             <button
               type="button"
               onClick={() => navigate('/namespaces')}
-              className="px-5 py-2 bg-transparent border border-gray-300 rounded text-sm cursor-pointer hover:bg-gray-50"
+              className="text-sm font-normal cursor-pointer transition-colors"
+              style={{
+                background: 'transparent',
+                border: '1px solid #b9b9f9',
+                borderRadius: '4px',
+                padding: '8px 20px',
+                color: '#533afd',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(83,58,253,0.05)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
             >
               Cancel
             </button>
@@ -178,21 +252,45 @@ export default function NamespaceDetailPage() {
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-sm font-semibold text-gray-700 border-b border-gray-200 pb-2 mt-5 mb-3">{children}</h3>
+    <h3
+      className="font-normal m-0 mt-6 mb-3 pb-2 text-xs uppercase tracking-widest"
+      style={{ color: '#64748d', borderBottom: '1px solid #e5edf5', letterSpacing: '0.08em' }}
+    >
+      {children}
+    </h3>
   )
 }
 
 function Field({ label, children, inline }: { label: string; children: React.ReactNode; inline?: boolean }) {
   return (
     <div className={`mb-3 ${inline ? 'flex items-center gap-4' : ''}`}>
-      <label className={`text-sm text-gray-600 ${inline ? 'min-w-[180px]' : 'block mb-1'}`}>{label}</label>
+      <label
+        className={`text-sm font-normal ${inline ? 'min-w-[190px]' : 'block mb-1.5'}`}
+        style={{ color: '#273951' }}
+      >
+        {label}
+      </label>
       {children}
     </div>
   )
 }
 
-const inputBase = 'px-2.5 py-1.5 border border-gray-300 rounded text-sm'
-const inputFull = `${inputBase} w-full`
+const inputBaseStyle: React.CSSProperties = {
+  padding: '6px 10px',
+  border: '1px solid #e5edf5',
+  borderRadius: '4px',
+  fontSize: '13px',
+  color: '#061b31',
+  fontWeight: 300,
+  background: '#fff',
+  outline: 'none',
+  transition: 'border-color 0.15s',
+}
+
+const inputFullStyle: React.CSSProperties = {
+  ...inputBaseStyle,
+  width: '100%',
+}
 
 function QdrantStatsPanel({ ns, stats }: { ns: string; stats: Record<string, QdrantCollectionStat> }) {
   const collections = [
@@ -203,21 +301,38 @@ function QdrantStatsPanel({ ns, stats }: { ns: string; stats: Record<string, Qdr
   ]
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 mb-5">
-      <h3 className="mt-0 mb-3 text-sm font-semibold text-gray-700 uppercase tracking-wide">Qdrant Collections</h3>
+    <div
+      className="bg-white p-5 mb-6"
+      style={{ border: '1px solid #e5edf5', borderRadius: '6px', boxShadow: 'rgba(23,23,23,0.06) 0px 3px 6px' }}
+    >
+      <h3
+        className="font-normal m-0 mb-4 text-xs uppercase tracking-widest"
+        style={{ color: '#64748d', letterSpacing: '0.08em' }}
+      >
+        Qdrant Collections
+      </h3>
       <div className="grid grid-cols-4 gap-3">
         {collections.map(({ key, label }) => {
           const col = stats[key]
           return (
-            <div key={key} className="bg-gray-50 rounded p-3">
-              <div className="text-xs text-gray-500 mb-1 truncate" title={key}>{label}</div>
+            <div
+              key={key}
+              className="flex flex-col p-3"
+              style={{ background: '#fafbff', border: '1px solid #e5edf5', borderRadius: '5px' }}
+            >
+              <div className="text-xs text-[#64748d] font-light mb-1 truncate" title={key}>{label}</div>
               {col?.exists ? (
                 <>
-                  <div className="text-xl font-bold text-gray-800">{col.points_count.toLocaleString()}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">pts</div>
+                  <div
+                    className="font-light text-[#061b31] tabular-nums"
+                    style={{ fontSize: '22px', letterSpacing: '-0.3px' }}
+                  >
+                    {col.points_count.toLocaleString()}
+                  </div>
+                  <div className="text-xs text-[#64748d] font-light mt-0.5">pts</div>
                 </>
               ) : (
-                <div className="text-sm text-gray-300 mt-1">—</div>
+                <div className="text-sm text-[#64748d] font-light mt-1">—</div>
               )}
             </div>
           )
