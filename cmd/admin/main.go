@@ -17,8 +17,8 @@ import (
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/config"
-	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
+	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	adminui "github.com/jarviisha/codohue/web/admin"
 )
@@ -52,7 +52,7 @@ func run() error {
 		redisClient = nil
 	}
 	if redisClient != nil {
-		defer redisClient.Close() //nolint:errcheck
+		defer redisClient.Close() //nolint:errcheck // best-effort cleanup on shutdown
 	}
 
 	qdrantClient, err := infraqdrant.NewClient(cfg.QdrantHost, cfg.QdrantPort)

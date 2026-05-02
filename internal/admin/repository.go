@@ -66,7 +66,10 @@ func (r *Repository) ListNamespaces(ctx context.Context) ([]NamespaceConfig, err
 		}
 		out = append(out, *ns)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate namespace_configs: %w", err)
+	}
+	return out, nil
 }
 
 // GetNamespace returns a single namespace configuration, or nil if not found.
@@ -171,7 +174,10 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace string, limi
 		}
 		out = append(out, b)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate batch_run_logs: %w", err)
+	}
+	return out, nil
 }
 
 // scanBatchRunLog scans one batch_run_logs row (all columns including phase breakdown).
@@ -214,7 +220,10 @@ func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[strin
 		}
 		out[b.Namespace] = b
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate last batch runs: %w", err)
+	}
+	return out, nil
 }
 
 // GetRecentEventCounts returns the number of events ingested in the last windowHours
@@ -241,5 +250,8 @@ func (r *Repository) GetRecentEventCounts(ctx context.Context, windowHours int) 
 		}
 		out[ns] = cnt
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate event counts: %w", err)
+	}
+	return out, nil
 }

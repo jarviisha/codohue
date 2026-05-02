@@ -16,9 +16,9 @@ func TestRecommend_ColdStart(t *testing.T) {
 		nsKey, nil)
 
 	var body struct {
-		SubjectID   string    `json:"subject_id"`
-		Namespace   string    `json:"namespace"`
-		Items       []struct {
+		SubjectID string `json:"subject_id"`
+		Namespace string `json:"namespace"`
+		Items     []struct {
 			ObjectID string `json:"object_id"`
 		} `json:"items"`
 		Source      string    `json:"source"`

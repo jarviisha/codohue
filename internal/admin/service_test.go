@@ -13,18 +13,18 @@ import (
 // ─── fake repo ────────────────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	namespaces         []NamespaceConfig
-	nsListErr          error
-	namespace          *NamespaceConfig
-	nsGetErr           error
-	batchRuns          []BatchRunLog
-	batchRunsErr       error
-	lastBatchRuns      map[string]BatchRunLog
-	lastBatchRunsErr   error
-	recentEventCounts  map[string]int
+	namespaces           []NamespaceConfig
+	nsListErr            error
+	namespace            *NamespaceConfig
+	nsGetErr             error
+	batchRuns            []BatchRunLog
+	batchRunsErr         error
+	lastBatchRuns        map[string]BatchRunLog
+	lastBatchRunsErr     error
+	recentEventCounts    map[string]int
 	recentEventCountsErr error
-	subjectStats       *SubjectStats
-	subjectStatsErr    error
+	subjectStats         *SubjectStats
+	subjectStatsErr      error
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -84,7 +84,7 @@ func TestGetHealth_Service_OK(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(HealthResponse{ //nolint:errcheck
+		json.NewEncoder(w).Encode(HealthResponse{ //nolint:errcheck // test helper; encoding errors are not meaningful here
 			Postgres: "ok", Redis: "ok", Qdrant: "ok", Status: "ok",
 		})
 	}))
@@ -106,7 +106,7 @@ func TestGetHealth_Service_OK(t *testing.T) {
 func TestGetHealth_Service_Degraded(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(HealthResponse{ //nolint:errcheck
+		json.NewEncoder(w).Encode(HealthResponse{ //nolint:errcheck // test helper; encoding errors are not meaningful here
 			Postgres: "ok", Redis: "degraded", Qdrant: "ok", Status: "degraded",
 		})
 	}))
@@ -130,7 +130,7 @@ func TestUpsertNamespace_Proxy(t *testing.T) {
 	var receivedAuth string
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		receivedAuth = r.Header.Get("Authorization")
-		json.NewEncoder(w).Encode(NamespaceUpsertResponse{ //nolint:errcheck
+		json.NewEncoder(w).Encode(NamespaceUpsertResponse{ //nolint:errcheck // test helper; encoding errors are not meaningful here
 			Namespace: "new_ns",
 			UpdatedAt: time.Now(),
 		})
@@ -150,7 +150,7 @@ func TestUpsertNamespace_Proxy(t *testing.T) {
 
 func TestDebugRecommend_Proxy(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // test helper; encoding errors are not meaningful here
 			"subject_id":   "user-1",
 			"namespace":    "ns1",
 			"items":        []map[string]any{{"object_id": "post_1", "score": 0.9, "rank": 1}},
@@ -231,7 +231,7 @@ func TestGetSubjectProfile_NoQdrant(t *testing.T) {
 
 func TestGetTrending_WithTTL(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck // test helper; encoding errors are not meaningful here
 			"namespace":    "ns1",
 			"items":        []map[string]any{{"object_id": "post_1", "score": 100.0}},
 			"window_hours": 24,

@@ -56,7 +56,7 @@ func (s *Service) GetHealth(ctx context.Context) (*HealthResponse, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("health proxy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
 	var health HealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
@@ -89,7 +89,7 @@ func (s *Service) UpsertNamespace(ctx context.Context, namespace string, body io
 	if err != nil {
 		return nil, 0, fmt.Errorf("upsert proxy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
 	var result NamespaceUpsertResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -130,11 +130,12 @@ func (s *Service) GetNamespacesOverview(ctx context.Context) (*NamespacesOvervie
 		if run, ok := lastRuns[ns.Namespace]; ok {
 			r := run
 			h.LastRun = &r
-			if !run.Success {
+			switch {
+			case !run.Success:
 				h.Status = NSStatusDegraded
-			} else if h.ActiveEvents24h > 0 {
+			case h.ActiveEvents24h > 0:
 				h.Status = NSStatusActive
-			} else {
+			default:
 				h.Status = NSStatusIdle
 			}
 		} else {
@@ -167,17 +168,17 @@ func (s *Service) DebugRecommend(ctx context.Context, req *RecommendDebugRequest
 	if err != nil {
 		return nil, 0, fmt.Errorf("recommend proxy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // best-effort read for error context; primary error is the non-2xx status
 		return nil, resp.StatusCode, fmt.Errorf("recommend proxy returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var raw struct {
-		SubjectID   string    `json:"subject_id"`
-		Namespace   string    `json:"namespace"`
-		Items       []struct {
+		SubjectID string `json:"subject_id"`
+		Namespace string `json:"namespace"`
+		Items     []struct {
 			ObjectID string  `json:"object_id"`
 			Score    float64 `json:"score"`
 			Rank     int     `json:"rank"`
@@ -301,16 +302,16 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 	if err != nil {
 		return nil, fmt.Errorf("trending proxy: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // best-effort read for error context; primary error is the non-2xx status
 		return nil, fmt.Errorf("trending proxy returned %d: %s", resp.StatusCode, string(body))
 	}
 
 	var raw struct {
-		Namespace   string    `json:"namespace"`
-		Items       []struct {
+		Namespace string `json:"namespace"`
+		Items     []struct {
 			ObjectID string  `json:"object_id"`
 			Score    float64 `json:"score"`
 		} `json:"items"`

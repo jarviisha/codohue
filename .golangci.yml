@@ -2,6 +2,8 @@ version: "2"
 
 run:
   timeout: 5m
+  exclude-dirs:
+    - web/admin/node_modules
 
 linters:
   default: none
@@ -75,6 +77,11 @@ linters:
       - path: "cmd/"
         linters:
           - revive
+      - path: "web/admin/node_modules/"
+        linters:
+          - errcheck
+          - gocritic
+          - wrapcheck
 
 formatters:
   enable:

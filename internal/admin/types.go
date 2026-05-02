@@ -143,6 +143,7 @@ type NamespacesListResponse struct {
 //   - cold     — no completed batch run exists yet
 type NamespaceStatus = string
 
+// NSStatus* constants enumerate the possible namespace health states.
 const (
 	NSStatusActive   NamespaceStatus = "active"
 	NSStatusIdle     NamespaceStatus = "idle"
@@ -153,10 +154,10 @@ const (
 // NamespaceHealth combines config, last batch run, and recent activity into a
 // single health record for the overview dashboard.
 type NamespaceHealth struct {
-	Config         NamespaceConfig `json:"config"`
-	Status         NamespaceStatus `json:"status"`
-	ActiveEvents24h int            `json:"active_events_24h"`
-	LastRun        *BatchRunLog    `json:"last_run"`
+	Config          NamespaceConfig `json:"config"`
+	Status          NamespaceStatus `json:"status"`
+	ActiveEvents24h int             `json:"active_events_24h"`
+	LastRun         *BatchRunLog    `json:"last_run"`
 }
 
 // NamespacesOverviewResponse is the response for GET /api/admin/v1/namespaces/overview.

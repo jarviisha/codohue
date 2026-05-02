@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -35,11 +36,11 @@ func createSessionToken(apiKey string) (string, error) {
 
 	headerJSON, err := json.Marshal(h)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("marshal jwt header: %w", err)
 	}
 	claimsJSON, err := json.Marshal(c)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("marshal jwt claims: %w", err)
 	}
 
 	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
@@ -47,7 +48,7 @@ func createSessionToken(apiKey string) (string, error) {
 	payload := headerB64 + "." + claimsB64
 
 	mac := hmac.New(sha256.New, []byte(apiKey))
-	mac.Write([]byte(payload)) //nolint:errcheck
+	mac.Write([]byte(payload)) //nolint:errcheck // hmac.Hash.Write never returns an error
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 
 	return payload + "." + sig, nil
@@ -61,7 +62,7 @@ func validateSessionToken(token, apiKey string) bool {
 
 	payload := parts[0] + "." + parts[1]
 	mac := hmac.New(sha256.New, []byte(apiKey))
-	mac.Write([]byte(payload)) //nolint:errcheck
+	mac.Write([]byte(payload)) //nolint:errcheck // hmac.Hash.Write never returns an error
 	expectedSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(parts[2]), []byte(expectedSig)) {
 		return false

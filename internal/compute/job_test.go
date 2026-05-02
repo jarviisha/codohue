@@ -17,7 +17,7 @@ type fakeRecomputer struct {
 	err        error
 }
 
-func (f *fakeRecomputer) RecomputeNamespace(_ context.Context, _ string, lambda float64) (int, int, error) {
+func (f *fakeRecomputer) RecomputeNamespace(_ context.Context, _ string, lambda float64) (subjects, objects int, err error) {
 	f.called = true
 	f.lastLambda = lambda
 	return 0, 0, f.err

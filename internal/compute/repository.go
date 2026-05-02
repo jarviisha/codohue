@@ -194,7 +194,7 @@ func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, st
 }
 
 // UpdateBatchRunLog updates a batch run log row on completion or failure.
-func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string) error {
+func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs, subjectsProcessed int, success bool, errMsg string) error {
 	var errMsgPtr *string
 	if errMsg != "" {
 		errMsgPtr = &errMsg
@@ -232,11 +232,11 @@ func (r *Repository) UpdateBatchRunPhases(ctx context.Context, id int64, phases 
 	}
 
 	var (
-		p1ok, p2ok, p3ok                   *bool
-		p1ms, p1sub, p1obj                 *int
-		p2ms, p2items, p2sub               *int
-		p3ms, p3items                      *int
-		p1err, p2err, p3err                *string
+		p1ok, p2ok, p3ok     *bool
+		p1ms, p1sub, p1obj   *int
+		p2ms, p2items, p2sub *int
+		p3ms, p3items        *int
+		p1err, p2err, p3err  *string
 	)
 
 	if p := phases.Phase1; p != nil {
