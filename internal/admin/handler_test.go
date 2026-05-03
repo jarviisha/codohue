@@ -217,13 +217,34 @@ func TestGetHealth_Degraded(t *testing.T) {
 	rec := httptest.NewRecorder()
 	r := newChiRequest(http.MethodGet, "/api/admin/v1/health", nil, "")
 	h.GetHealth(rec, r)
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
 	}
 	var resp HealthResponse
 	assertJSON(t, rec, &resp)
 	if resp.Status != "degraded" {
 		t.Errorf("expected status=degraded, got %q", resp.Status)
+	}
+}
+
+func TestGetHealth_Unreachable(t *testing.T) {
+	h := newTestHandler(&fakeSvc{
+		healthErr: fmt.Errorf("connection refused"),
+	})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/health", nil, "")
+	h.GetHealth(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp HealthResponse
+	assertJSON(t, rec, &resp)
+	if resp.Status != "error" {
+		t.Errorf("expected status=error, got %q", resp.Status)
+	}
+	if resp.Postgres != "unknown" || resp.Redis != "unknown" || resp.Qdrant != "unknown" {
+		t.Errorf("expected all services unknown, got postgres=%q redis=%q qdrant=%q",
+			resp.Postgres, resp.Redis, resp.Qdrant)
 	}
 }
 

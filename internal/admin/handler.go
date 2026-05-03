@@ -80,13 +80,20 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetHealth handles GET /api/admin/v1/health.
+// Always returns HTTP 200 so the frontend can display health state from the JSON body;
+// API unreachability is surfaced as status="error" rather than a 4xx/5xx HTTP response.
 func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
-	health, statusCode, err := h.svc.GetHealth(r.Context())
+	health, _, err := h.svc.GetHealth(r.Context())
 	if err != nil {
-		httpapi.WriteError(w, http.StatusBadGateway, "proxy_error", "could not reach api")
+		httpapi.WriteJSON(w, http.StatusOK, &HealthResponse{
+			Postgres: "unknown",
+			Redis:    "unknown",
+			Qdrant:   "unknown",
+			Status:   "error",
+		})
 		return
 	}
-	httpapi.WriteJSON(w, statusCode, health)
+	httpapi.WriteJSON(w, http.StatusOK, health)
 }
 
 // ListNamespaces handles GET /api/admin/v1/namespaces.

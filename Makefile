@@ -28,7 +28,7 @@ MIN_INFRA_POSTGRES ?= 85
 MIN_CMD_API ?= 40
 MIN_CMD_CRON ?= 45
 
-.PHONY: build build-api build-cron build-admin run run-cron run-admin dev dev-admin lint fmt \
+.PHONY: build build-api build-cron build-admin run run-cron run-admin dev dev-admin dev-all lint fmt \
         test test-pkg test-verbose test-race test-e2e test-e2e-api test-e2e-heavy \
         coverage coverage-unit coverage-race coverage-report coverage-html coverage-check coverage-check-pkg coverage-check-all coverage-clean \
         up up-d up-infra up-app up-app-d down-app logs logs-cron logs-app \
@@ -70,6 +70,16 @@ dev:
 ## Run admin web dev server with hot reload (proxies /api to :2002; requires run-admin up)
 dev-admin:
 	cd web/admin && npm run dev
+
+## Run full admin dev stack: API (air live reload) + admin server + Vite frontend; Ctrl+C stops all
+## Requires infra to be up: make up-infra first
+dev-all:
+	@go build -o $(ADMIN_BIN) ./cmd/admin
+	@trap 'kill 0' SIGINT SIGTERM; \
+	air & \
+	$(ADMIN_BIN) & \
+	(cd web/admin && npm run dev) & \
+	wait
 
 # ── Docker ─────────────────────────────────────────────────────────────────────
 

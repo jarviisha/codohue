@@ -7,6 +7,7 @@ export default function HealthPage() {
 
   const overallOk = data?.status === 'ok'
   const overallDegraded = data?.status === 'degraded'
+  const overallError = data?.status === 'error'
 
   return (
     <div>
@@ -19,11 +20,14 @@ export default function HealthPage() {
         </h2>
       </div>
 
-      {error && <ErrorBanner message="Could not reach the API server. Check that cmd/api is running." />}
+      {error && <ErrorBanner message="Could not reach the admin server." />}
       {isLoading && <p className="text-sm text-[#64748d] font-light">Checking health…</p>}
 
       {data && (
         <>
+          {overallError && (
+            <ErrorBanner message="Could not reach the API server. Check that cmd/api is running." />
+          )}
           <div
             className="inline-flex items-center gap-2 px-4 py-2 mb-6 text-sm font-normal"
             style={{
@@ -46,11 +50,13 @@ export default function HealthPage() {
             )}
           </div>
 
-          <div className="flex gap-3 flex-wrap">
-            <StatusCard name="PostgreSQL" status={data.postgres} />
-            <StatusCard name="Redis" status={data.redis} />
-            <StatusCard name="Qdrant" status={data.qdrant} />
-          </div>
+          {!overallError && (
+            <div className="flex gap-3 flex-wrap">
+              <StatusCard name="PostgreSQL" status={data.postgres} />
+              <StatusCard name="Redis" status={data.redis} />
+              <StatusCard name="Qdrant" status={data.qdrant} />
+            </div>
+          )}
         </>
       )}
     </div>
