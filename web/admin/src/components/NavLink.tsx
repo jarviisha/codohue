@@ -10,13 +10,12 @@ export default function NavLink({ to, children }: Props) {
     <RouterNavLink
       to={to}
       className={({ isActive }) =>
-        `block px-3 py-2 text-sm no-underline transition-colors rounded ${
+        `flex items-center h-9 px-3 text-sm font-medium rounded-md no-underline transition-colors duration-150 ${
           isActive
-            ? 'text-[#533afd] bg-[rgba(83,58,253,0.06)] font-normal'
-            : 'text-[#273951] font-normal hover:text-[#533afd] hover:bg-[rgba(83,58,253,0.04)]'
+            ? 'bg-accent-subtle text-accent'
+            : 'text-secondary hover:bg-surface-raised hover:text-primary'
         }`
       }
-      style={{ borderRadius: '4px' }}
     >
       {children}
     </RouterNavLink>

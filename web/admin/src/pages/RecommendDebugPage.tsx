@@ -6,6 +6,8 @@ import ErrorBanner from '../components/ErrorBanner'
 
 const LIMITS = [5, 10, 20, 50]
 
+const inputClass = 'bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary placeholder:text-muted text-sm px-3 py-2 rounded-md focus:outline-none transition-shadow duration-100'
+
 export default function RecommendDebugPage() {
   const { data: nsData } = useNamespaceList()
   const debug = useRecommendDebug()
@@ -25,28 +27,17 @@ export default function RecommendDebugPage() {
 
   return (
     <div>
-      <h2
-        className="font-light text-[#061b31] m-0 mb-6"
-        style={{ fontSize: '26px', letterSpacing: '-0.26px', lineHeight: 1.12 }}
-      >
+      <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0 mb-8">
         Recommendation Debug
       </h2>
 
       <form
         onSubmit={handleSubmit}
-        className="bg-white flex gap-4 flex-wrap items-end p-5 mb-6"
-        style={{ border: '1px solid #e5edf5', borderRadius: '6px', boxShadow: 'rgba(23,23,23,0.06) 0px 3px 6px' }}
+        className="bg-surface border border-default rounded-lg flex gap-4 flex-wrap items-end p-5 mb-6"
       >
         <div>
-          <label className="block text-xs font-normal mb-1.5" style={{ color: '#273951' }}>Namespace</label>
-          <select
-            required
-            value={namespace}
-            onChange={e => setNamespace(e.target.value)}
-            style={inputStyle}
-            onFocus={e => { e.target.style.borderColor = '#533afd' }}
-            onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
-          >
+          <label className="block text-[13px] font-medium text-primary mb-1.5">Namespace</label>
+          <select required value={namespace} onChange={e => setNamespace(e.target.value)} className={inputClass}>
             <option value="">Select namespace</option>
             {nsData?.namespaces.map(ns => (
               <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
@@ -54,43 +45,25 @@ export default function RecommendDebugPage() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-normal mb-1.5" style={{ color: '#273951' }}>Subject ID</label>
+          <label className="block text-[13px] font-medium text-primary mb-1.5">Subject ID</label>
           <input
             required
             value={subjectID}
             onChange={e => setSubjectID(e.target.value)}
             placeholder="e.g. user-123"
-            style={inputStyle}
-            onFocus={e => { e.target.style.borderColor = '#533afd' }}
-            onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
+            className={inputClass}
           />
         </div>
         <div>
-          <label className="block text-xs font-normal mb-1.5" style={{ color: '#273951' }}>Limit</label>
-          <select
-            value={limit}
-            onChange={e => setLimit(+e.target.value)}
-            style={{ ...inputStyle, width: '80px' }}
-            onFocus={e => { e.target.style.borderColor = '#533afd' }}
-            onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
-          >
+          <label className="block text-[13px] font-medium text-primary mb-1.5">Limit</label>
+          <select value={limit} onChange={e => setLimit(+e.target.value)} className={`${inputClass} w-20`}>
             {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
         <button
           type="submit"
           disabled={isPending}
-          className="text-sm font-normal text-white transition-colors cursor-pointer"
-          style={{
-            background: isPending ? '#4434d4' : '#533afd',
-            border: 'none',
-            borderRadius: '4px',
-            padding: '7px 18px',
-            opacity: isPending ? 0.8 : 1,
-            cursor: isPending ? 'not-allowed' : 'pointer',
-          }}
-          onMouseEnter={e => { if (!isPending) (e.currentTarget as HTMLElement).style.background = '#4434d4' }}
-          onMouseLeave={e => { if (!isPending) (e.currentTarget as HTMLElement).style.background = '#533afd' }}
+          className="bg-accent hover:bg-accent-hover active:bg-accent-active text-accent-text text-sm font-medium px-5 py-2 rounded-md border-0 cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus"
         >
           {isPending ? 'Fetching…' : 'Fetch'}
         </button>
@@ -101,14 +74,8 @@ export default function RecommendDebugPage() {
       )}
 
       {profile.data && (
-        <div
-          className="bg-white p-5 mb-6"
-          style={{ border: '1px solid #e5edf5', borderRadius: '6px', boxShadow: 'rgba(23,23,23,0.06) 0px 3px 6px' }}
-        >
-          <h3
-            className="font-normal text-[#061b31] m-0 mb-4"
-            style={{ fontSize: '13px', letterSpacing: '0.06em', textTransform: 'uppercase', color: '#64748d' }}
-          >
+        <div className="bg-surface border border-default rounded-lg p-5 mb-6">
+          <h3 className="font-semibold m-0 mb-4 text-[11px] uppercase tracking-[0.06em] text-muted">
             Subject Profile
           </h3>
           <div className="grid grid-cols-3 gap-3 mb-4">
@@ -121,37 +88,25 @@ export default function RecommendDebugPage() {
                 empty: 'not indexed',
               },
             ].map(({ label, value, empty }) => (
-              <div
-                key={label}
-                className="flex flex-col p-4"
-                style={{ background: '#fafbff', border: '1px solid #e5edf5', borderRadius: '5px' }}
-              >
-                <span className="text-xs text-[#64748d] font-light mb-1">{label}</span>
+              <div key={label} className="flex flex-col p-4 bg-subtle border border-default rounded-lg">
+                <span className="text-xs text-muted mb-1">{label}</span>
                 {value != null
-                  ? <span className="text-2xl font-light text-[#061b31] tabular-nums" style={{ letterSpacing: '-0.4px' }}>{value}</span>
-                  : <span className="text-sm text-[#64748d] font-light mt-1">{empty}</span>}
+                  ? <span className="text-2xl font-bold text-primary tabular-nums -tracking-[0.02em]">{value}</span>
+                  : <span className="text-sm text-muted mt-1">{empty}</span>}
               </div>
             ))}
           </div>
 
           {profile.data.seen_items.length > 0 && (
             <div>
-              <div className="text-xs text-[#64748d] font-light mb-2">
+              <div className="text-xs text-muted mb-2">
                 Seen items (last {profile.data.seen_items_days} days — excluded from recommendations)
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {profile.data.seen_items.map(id => (
                   <code
                     key={id}
-                    className="text-xs"
-                    style={{
-                      fontFamily: "'Source Code Pro', monospace",
-                      background: '#f5f6ff',
-                      color: '#533afd',
-                      padding: '1px 6px',
-                      borderRadius: '3px',
-                      fontWeight: 500,
-                    }}
+                    className="font-mono text-xs bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium"
                   >
                     {id}
                   </code>
@@ -165,45 +120,39 @@ export default function RecommendDebugPage() {
       {debug.data && (
         <div>
           <div className="mb-4 flex gap-4 flex-wrap items-center">
-            <span className="text-sm text-[#64748d] font-light">
-              Subject: <strong className="text-[#061b31] font-normal">{debug.data.subject_id}</strong>
+            <span className="text-sm text-secondary">
+              Subject: <strong className="text-primary font-semibold">{debug.data.subject_id}</strong>
             </span>
-            <span
-              className="text-xs font-normal px-2 py-0.5"
-              style={{ background: '#f5f6ff', color: '#533afd', border: '1px solid rgba(83,58,253,0.2)', borderRadius: '4px' }}
-            >
+            <span className="text-[11px] font-semibold uppercase tracking-[0.04em] bg-accent-subtle text-accent border border-accent/20 px-2 py-0.5 rounded-sm">
               {debug.data.source}
             </span>
-            <span className="text-sm text-[#64748d] font-light tabular-nums">
-              Total: <strong className="text-[#061b31] font-normal">{debug.data.total}</strong>
+            <span className="text-sm text-secondary tabular-nums">
+              Total: <strong className="text-primary font-semibold">{debug.data.total}</strong>
             </span>
           </div>
 
           {debug.data.items.length === 0 ? (
-            <p className="text-sm text-[#64748d] font-light">No recommendations found for this subject.</p>
+            <p className="text-sm text-muted">No recommendations found for this subject.</p>
           ) : (
-            <div
-              className="bg-white overflow-hidden"
-              style={{ border: '1px solid #e5edf5', borderRadius: '6px', boxShadow: 'rgba(23,23,23,0.06) 0px 3px 6px' }}
-            >
+            <div className="bg-surface border border-default rounded-lg overflow-hidden">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid #e5edf5' }}>
-                    <th style={thStyle}>Rank</th>
-                    <th style={thStyle}>Object ID</th>
-                    <th style={thStyle}>Score</th>
+                  <tr className="bg-subtle border-b-2 border-default">
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Rank</th>
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Object ID</th>
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Score</th>
                   </tr>
                 </thead>
                 <tbody>
                   {debug.data.items.map(item => (
-                    <tr key={item.object_id} style={{ borderBottom: '1px solid #e5edf5' }}>
-                      <td style={{ ...tdStyle, color: '#64748d' }} className="tabular-nums">{item.rank}</td>
-                      <td style={tdStyle}>
-                        <code style={{ fontFamily: "'Source Code Pro', monospace", fontSize: '12px', background: '#f5f6ff', padding: '1px 6px', borderRadius: '3px', color: '#533afd', fontWeight: 500 }}>
+                    <tr key={item.object_id} className="border-b border-default hover:bg-surface-raised">
+                      <td className="px-4 py-3 text-sm text-muted tabular-nums">{item.rank}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium">
                           {item.object_id}
                         </code>
                       </td>
-                      <td style={{ ...tdStyle, fontFamily: "'Source Code Pro', monospace", fontSize: '12px' }} className="tabular-nums">
+                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
                         {item.score.toFixed(4)}
                       </td>
                     </tr>
@@ -216,31 +165,4 @@ export default function RecommendDebugPage() {
       )}
     </div>
   )
-}
-
-const inputStyle: React.CSSProperties = {
-  padding: '7px 10px',
-  border: '1px solid #e5edf5',
-  borderRadius: '4px',
-  fontSize: '13px',
-  color: '#061b31',
-  fontWeight: 300,
-  background: '#fff',
-  outline: 'none',
-  transition: 'border-color 0.15s',
-}
-
-const thStyle: React.CSSProperties = {
-  padding: '10px 16px',
-  textAlign: 'left',
-  fontSize: '12px',
-  fontWeight: 400,
-  color: '#64748d',
-}
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 16px',
-  fontSize: '13px',
-  color: '#273951',
-  fontWeight: 300,
 }

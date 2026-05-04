@@ -7,20 +7,14 @@ export default function ErrorBanner({ message, onDismiss }: Props) {
   return (
     <div
       role="alert"
-      className="flex justify-between items-center px-4 py-3 mb-4 rounded"
-      style={{
-        background: 'rgba(234,34,97,0.06)',
-        border: '1px solid rgba(234,34,97,0.2)',
-        borderRadius: '4px',
-      }}
+      className="flex justify-between items-center px-4 py-3 mb-4 rounded-lg bg-danger-bg border border-danger/25"
     >
-      <span className="text-sm" style={{ color: '#ea2261' }}>{message}</span>
+      <span className="text-sm font-medium text-danger">{message}</span>
       {onDismiss && (
         <button
           onClick={onDismiss}
           aria-label="Dismiss error"
-          className="bg-transparent border-0 cursor-pointer text-xl leading-none ml-4"
-          style={{ color: '#ea2261' }}
+          className="bg-transparent border-0 cursor-pointer text-xl leading-none ml-4 text-danger hover:text-danger/70 transition-colors"
         >
           ×
         </button>

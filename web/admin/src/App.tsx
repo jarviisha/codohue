@@ -8,6 +8,7 @@ import NamespaceDetailPage from './pages/NamespaceDetailPage'
 import RecommendDebugPage from './pages/RecommendDebugPage'
 import BatchRunsPage from './pages/BatchRunsPage'
 import TrendingPage from './pages/TrendingPage'
+import EventsPage from './pages/EventsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 10_000 } },
@@ -28,6 +29,7 @@ export default function App() {
             <Route path="debug" element={<RecommendDebugPage />} />
             <Route path="batch-runs" element={<BatchRunsPage />} />
             <Route path="trending" element={<TrendingPage />} />
+            <Route path="events" element={<EventsPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

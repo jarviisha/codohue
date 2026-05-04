@@ -7,50 +7,45 @@ export default function HealthPage() {
 
   const overallOk = data?.status === 'ok'
   const overallDegraded = data?.status === 'degraded'
-  const overallError = data?.status === 'error'
+
+  const statusBadgeClass = overallOk
+    ? 'bg-success-bg border border-success/30 text-success'
+    : overallDegraded
+      ? 'bg-warning-bg border border-warning/30 text-warning'
+      : 'bg-danger-bg border border-danger/25 text-danger'
+
+  const statusDotClass = overallOk ? 'bg-success' : overallDegraded ? 'bg-warning' : 'bg-danger'
 
   return (
     <div>
-      <div className="mb-6">
-        <h2
-          className="font-light text-[#061b31] m-0"
-          style={{ fontSize: '26px', letterSpacing: '-0.26px', lineHeight: 1.12 }}
-        >
+      <div className="mb-8">
+        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
           System Health
         </h2>
       </div>
 
       {error && <ErrorBanner message="Could not reach the admin server." />}
-      {isLoading && <p className="text-sm text-[#64748d] font-light">Checking health…</p>}
+      {isLoading && <p className="text-sm text-muted">Checking health…</p>}
 
       {data && (
         <>
-          {overallError && (
+          {data.status === 'error' && (
             <ErrorBanner message="Could not reach the API server. Check that cmd/api is running." />
           )}
-          <div
-            className="inline-flex items-center gap-2 px-4 py-2 mb-6 text-sm font-normal"
-            style={{
-              border: `1px solid ${overallOk ? 'rgba(21,190,83,0.3)' : overallDegraded ? 'rgba(245,158,11,0.3)' : 'rgba(234,34,97,0.25)'}`,
-              background: overallOk ? 'rgba(21,190,83,0.06)' : overallDegraded ? 'rgba(245,158,11,0.06)' : 'rgba(234,34,97,0.05)',
-              borderRadius: '4px',
-              color: overallOk ? '#108c3d' : overallDegraded ? '#92400e' : '#ea2261',
-            }}
-          >
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ background: overallOk ? '#15be53' : overallDegraded ? '#f59e0b' : '#ea2261' }}
-              aria-hidden="true"
-            />
-            <span>Overall status: <strong className="font-normal">{data.status}</strong></span>
+
+          <div className={`inline-flex items-center gap-2 px-4 py-2 mb-6 text-sm font-medium rounded-lg ${statusBadgeClass}`}>
+            <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass}`} aria-hidden="true" />
+            <span>
+              Overall status: <strong className="font-semibold">{data.status}</strong>
+            </span>
             {dataUpdatedAt > 0 && (
-              <span className="text-xs text-[#64748d] ml-2 font-light">
+              <span className="text-xs text-muted ml-2">
                 checked {new Date(dataUpdatedAt).toLocaleTimeString()}
               </span>
             )}
           </div>
 
-          {!overallError && (
+          {data.status !== 'error' && (
             <div className="flex gap-3 flex-wrap">
               <StatusCard name="PostgreSQL" status={data.postgres} />
               <StatusCard name="Redis" status={data.redis} />

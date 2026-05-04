@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -25,6 +26,9 @@ type adminSvc interface {
 	GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error)
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
 	GetQdrantStats(ctx context.Context, namespace string) (*QdrantStatsResponse, error)
+	TriggerBatch(ctx context.Context, ns string) (*TriggerBatchResponse, error)
+	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
+	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
 }
 
 // Handler handles HTTP requests for the admin API.
@@ -266,4 +270,88 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+// TriggerBatch handles POST /api/admin/v1/namespaces/{ns}/batch-runs/trigger.
+func (h *Handler) TriggerBatch(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+
+	result, err := h.svc.TriggerBatch(r.Context(), ns)
+	if err != nil {
+		if errors.Is(err, errBatchRunning) {
+			httpapi.WriteError(w, http.StatusConflict, "conflict", err.Error())
+			return
+		}
+		if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
+			httpapi.WriteError(w, http.StatusGatewayTimeout, "timeout", "batch run timed out")
+			return
+		}
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "batch trigger failed")
+		return
+	}
+	if result == nil {
+		httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+// GetRecentEvents handles GET /api/admin/v1/namespaces/{ns}/events.
+func (h *Handler) GetRecentEvents(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	q := r.URL.Query()
+
+	limit := 50
+	if lStr := q.Get("limit"); lStr != "" {
+		l, err := strconv.Atoi(lStr)
+		if err != nil || l < 1 || l > 200 {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_param", "limit must be between 1 and 200")
+			return
+		}
+		limit = l
+	}
+
+	offset := 0
+	if oStr := q.Get("offset"); oStr != "" {
+		o, err := strconv.Atoi(oStr)
+		if err != nil || o < 0 {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_param", "offset must be a non-negative integer")
+			return
+		}
+		offset = o
+	}
+
+	subjectID := q.Get("subject_id")
+
+	result, err := h.svc.GetRecentEvents(r.Context(), ns, limit, offset, subjectID)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not fetch events")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+// InjectEvent handles POST /api/admin/v1/namespaces/{ns}/events.
+func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+
+	var req InjectEventRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+	if req.SubjectID == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "subject_id is required")
+		return
+	}
+	if req.ObjectID == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "object_id is required")
+		return
+	}
+
+	if err := h.svc.InjectEvent(r.Context(), ns, req); err != nil {
+		httpapi.WriteError(w, http.StatusBadGateway, "upstream_error", "upstream event API unavailable")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }

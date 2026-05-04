@@ -130,7 +130,7 @@ func (j *Job) runOnce(ctx context.Context) {
 	}
 
 	for _, ns := range namespaces {
-		j.processNamespace(ctx, ns)
+		j.RunNamespace(ctx, ns)
 	}
 
 	elapsed := time.Since(start)
@@ -138,8 +138,8 @@ func (j *Job) runOnce(ctx context.Context) {
 	slog.Info("batch run done", "duration_ms", elapsed.Milliseconds())
 }
 
-// processNamespace runs all batch phases for a single namespace and writes batch_run_logs.
-func (j *Job) processNamespace(ctx context.Context, ns string) {
+// RunNamespace runs all batch phases for a single namespace and writes batch_run_logs.
+func (j *Job) RunNamespace(ctx context.Context, ns string) {
 	nsStart := time.Now()
 
 	var logID int64

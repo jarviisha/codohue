@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,6 +26,9 @@ type fakeRepo struct {
 	recentEventCountsErr error
 	subjectStats         *SubjectStats
 	subjectStatsErr      error
+	events               []EventSummary
+	eventsTotal          int
+	eventsErr            error
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -57,10 +61,14 @@ func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*Subj
 	return f.subjectStats, f.subjectStatsErr
 }
 
+func (f *fakeRepo) GetRecentEvents(_ context.Context, _ string, _, _ int, _ string) ([]EventSummary, int, error) {
+	return f.events, f.eventsTotal, f.eventsErr
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func newTestService(repo adminRepo, apiURL, apiKey string) *Service {
-	return NewService(repo, apiURL, apiKey, nil, nil)
+	return NewService(repo, apiURL, apiKey, nil, nil, nil)
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -255,5 +263,104 @@ func TestGetTrending_WithTTL(t *testing.T) {
 	// With nil redisClient, TTL should be -2 (key missing sentinel)
 	if resp.CacheTTLSec != -2 {
 		t.Errorf("expected cache_ttl_sec=-2 when redis unavailable, got %d", resp.CacheTTLSec)
+	}
+}
+
+// ─── TriggerBatch tests ───────────────────────────────────────────────────────
+
+func TestTriggerBatch_NamespaceNotFound(t *testing.T) {
+	repo := &fakeRepo{namespace: nil}
+	svc := newTestService(repo, "", "")
+	resp, err := svc.TriggerBatch(context.Background(), "missing")
+	if err != nil {
+		t.Fatalf("expected nil error for missing ns, got %v", err)
+	}
+	if resp != nil {
+		t.Errorf("expected nil response for missing namespace, got %+v", resp)
+	}
+}
+
+func TestTriggerBatch_ConcurrentLock(t *testing.T) {
+	repo := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1"}}
+	svc := newTestService(repo, "", "")
+
+	// Pre-load the key to simulate a running batch.
+	svc.runningBatch.Store("ns1", true)
+	defer svc.runningBatch.Delete("ns1")
+
+	_, err := svc.TriggerBatch(context.Background(), "ns1")
+	if err == nil {
+		t.Fatal("expected errBatchRunning, got nil")
+	}
+	if !errors.Is(err, errBatchRunning) {
+		t.Errorf("expected errBatchRunning, got %v", err)
+	}
+}
+
+// ─── GetRecentEvents tests ────────────────────────────────────────────────────
+
+func TestGetRecentEvents_LimitClamp_Zero(t *testing.T) {
+	repo := &fakeRepo{events: []EventSummary{}, eventsTotal: 0}
+	svc := newTestService(repo, "", "")
+	resp, err := svc.GetRecentEvents(context.Background(), "ns1", 0, 0, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Limit != 50 {
+		t.Errorf("expected limit clamped to 50, got %d", resp.Limit)
+	}
+}
+
+func TestGetRecentEvents_LimitClamp_Over200(t *testing.T) {
+	repo := &fakeRepo{events: []EventSummary{}, eventsTotal: 0}
+	svc := newTestService(repo, "", "")
+	resp, err := svc.GetRecentEvents(context.Background(), "ns1", 300, 0, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Limit != 200 {
+		t.Errorf("expected limit clamped to 200, got %d", resp.Limit)
+	}
+}
+
+// ─── InjectEvent tests ────────────────────────────────────────────────────────
+
+func TestInjectEvent_Proxy202(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/namespaces/ns1/events" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		w.Write([]byte(`{"ok":true}`)) //nolint:errcheck // test helper; encoding errors are not meaningful here
+	}))
+	defer fake.Close()
+
+	svc := newTestService(&fakeRepo{}, fake.URL, "test-key")
+	err := svc.InjectEvent(context.Background(), "ns1", InjectEventRequest{
+		SubjectID: "user-1",
+		ObjectID:  "item-1",
+		Action:    "VIEW",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error on 202, got %v", err)
+	}
+}
+
+func TestInjectEvent_ProxyError(t *testing.T) {
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"error":{"code":"invalid","message":"action VIEW not configured"}}`)) //nolint:errcheck // test helper; encoding errors are not meaningful here
+	}))
+	defer fake.Close()
+
+	svc := newTestService(&fakeRepo{}, fake.URL, "test-key")
+	err := svc.InjectEvent(context.Background(), "ns1", InjectEventRequest{
+		SubjectID: "user-1",
+		ObjectID:  "item-1",
+		Action:    "VIEW",
+	})
+	if err == nil {
+		t.Fatal("expected error on non-202, got nil")
 	}
 }

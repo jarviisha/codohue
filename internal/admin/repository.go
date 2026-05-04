@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -254,4 +255,48 @@ func (r *Repository) GetRecentEventCounts(ctx context.Context, windowHours int) 
 		return nil, fmt.Errorf("iterate event counts: %w", err)
 	}
 	return out, nil
+}
+
+// GetRecentEvents returns a paginated list of events for a namespace, newest first.
+// subjectID is optional — pass empty string to return all subjects.
+// Returns the events slice, the total count matching the filter, and any error.
+func (r *Repository) GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error) {
+	var total int
+	if err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM events WHERE namespace = $1 AND ($2 = '' OR subject_id = $2)`,
+		ns, subjectID,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count events: %w", err)
+	}
+
+	rows, err := r.db.Query(ctx,
+		`SELECT id, namespace, subject_id, object_id, action, weight, occurred_at
+		 FROM events
+		 WHERE namespace = $1 AND ($2 = '' OR subject_id = $2)
+		 ORDER BY occurred_at DESC
+		 LIMIT $3 OFFSET $4`,
+		ns, subjectID, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query events: %w", err)
+	}
+	defer rows.Close()
+
+	var out []EventSummary
+	for rows.Next() {
+		var e EventSummary
+		var occurredAt time.Time
+		if err := rows.Scan(&e.ID, &e.Namespace, &e.SubjectID, &e.ObjectID, &e.Action, &e.Weight, &occurredAt); err != nil {
+			return nil, 0, fmt.Errorf("scan event: %w", err)
+		}
+		e.OccurredAt = occurredAt.UTC().Format(time.RFC3339)
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate events: %w", err)
+	}
+	if out == nil {
+		out = []EventSummary{}
+	}
+	return out, total, nil
 }

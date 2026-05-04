@@ -40,6 +40,11 @@ type fakeSvc struct {
 	profileErr      error
 	qdrantStatsResp *QdrantStatsResponse
 	qdrantStatsErr  error
+	triggerResp     *TriggerBatchResponse
+	triggerErr      error
+	eventsResp      *EventsListResponse
+	eventsErr       error
+	injectErr       error
 }
 
 func (f *fakeSvc) GetHealth(_ context.Context) (*HealthResponse, int, error) {
@@ -80,6 +85,18 @@ func (f *fakeSvc) GetSubjectProfile(_ context.Context, _, _ string) (*SubjectPro
 
 func (f *fakeSvc) GetQdrantStats(_ context.Context, _ string) (*QdrantStatsResponse, error) {
 	return f.qdrantStatsResp, f.qdrantStatsErr
+}
+
+func (f *fakeSvc) TriggerBatch(_ context.Context, _ string) (*TriggerBatchResponse, error) {
+	return f.triggerResp, f.triggerErr
+}
+
+func (f *fakeSvc) GetRecentEvents(_ context.Context, _ string, _, _ int, _ string) (*EventsListResponse, error) {
+	return f.eventsResp, f.eventsErr
+}
+
+func (f *fakeSvc) InjectEvent(_ context.Context, _ string, _ InjectEventRequest) error {
+	return f.injectErr
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -509,5 +526,178 @@ func TestGetTrending_EmptyCache(t *testing.T) {
 	assertJSON(t, rec, &resp)
 	if resp.CacheTTLSec != -2 {
 		t.Errorf("expected cache_ttl_sec=-2 for empty cache, got %d", resp.CacheTTLSec)
+	}
+}
+
+// ─── TriggerBatch handler tests ───────────────────────────────────────────────
+
+func TestTriggerBatch_OK(t *testing.T) {
+	svc := &fakeSvc{triggerResp: &TriggerBatchResponse{BatchRunID: 7, Namespace: "ns1", Success: true, DurationMs: 500}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs/trigger", map[string]string{"ns": "ns1"}, "")
+	h.TriggerBatch(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp TriggerBatchResponse
+	assertJSON(t, rec, &resp)
+	if resp.BatchRunID != 7 {
+		t.Errorf("expected batch_run_id=7, got %d", resp.BatchRunID)
+	}
+}
+
+func TestTriggerBatch_NotFound(t *testing.T) {
+	svc := &fakeSvc{triggerResp: nil, triggerErr: nil} // nil,nil → 404
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/missing/batch-runs/trigger", map[string]string{"ns": "missing"}, "")
+	h.TriggerBatch(rec, r)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestTriggerBatch_Conflict(t *testing.T) {
+	svc := &fakeSvc{triggerErr: fmt.Errorf("%w for namespace ns1", errBatchRunning)}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs/trigger", map[string]string{"ns": "ns1"}, "")
+	h.TriggerBatch(rec, r)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestTriggerBatch_InternalError(t *testing.T) {
+	svc := &fakeSvc{triggerErr: fmt.Errorf("db error")}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs/trigger", map[string]string{"ns": "ns1"}, "")
+	h.TriggerBatch(rec, r)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+// ─── GetRecentEvents handler tests ───────────────────────────────────────────
+
+func TestGetRecentEvents_OK(t *testing.T) {
+	svc := &fakeSvc{eventsResp: &EventsListResponse{
+		Events: []EventSummary{{ID: 1, Namespace: "ns1", SubjectID: "user-1", ObjectID: "item-1", Action: "VIEW", Weight: 1.0, OccurredAt: "2026-05-03T10:00:00Z"}},
+		Total:  1, Limit: 50, Offset: 0,
+	}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/events", map[string]string{"ns": "ns1"}, "")
+	h.GetRecentEvents(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp EventsListResponse
+	assertJSON(t, rec, &resp)
+	if len(resp.Events) != 1 {
+		t.Errorf("expected 1 event, got %d", len(resp.Events))
+	}
+}
+
+func TestGetRecentEvents_InvalidLimit(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/events?limit=999", map[string]string{"ns": "ns1"}, "")
+	r.URL.RawQuery = "limit=999"
+	h.GetRecentEvents(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestGetRecentEvents_InvalidLimitZero(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/events?limit=0", map[string]string{"ns": "ns1"}, "")
+	r.URL.RawQuery = "limit=0"
+	h.GetRecentEvents(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestGetRecentEvents_InvalidOffset(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/events?offset=-1", map[string]string{"ns": "ns1"}, "")
+	r.URL.RawQuery = "offset=-1"
+	h.GetRecentEvents(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// ─── InjectEvent handler tests ────────────────────────────────────────────────
+
+func TestInjectEvent_OK(t *testing.T) {
+	h := newTestHandler(&fakeSvc{injectErr: nil})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/events",
+		map[string]string{"ns": "ns1"},
+		`{"subject_id":"user-1","object_id":"item-1","action":"VIEW"}`,
+	)
+	h.InjectEvent(rec, r)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestInjectEvent_MissingSubjectID(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/events",
+		map[string]string{"ns": "ns1"},
+		`{"subject_id":"","object_id":"item-1","action":"VIEW"}`,
+	)
+	h.InjectEvent(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestInjectEvent_MissingObjectID(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/events",
+		map[string]string{"ns": "ns1"},
+		`{"subject_id":"user-1","object_id":"","action":"VIEW"}`,
+	)
+	h.InjectEvent(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestInjectEvent_InvalidJSON(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/events",
+		map[string]string{"ns": "ns1"},
+		`not-json`,
+	)
+	h.InjectEvent(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestInjectEvent_UpstreamError(t *testing.T) {
+	svc := &fakeSvc{injectErr: fmt.Errorf("upstream returned 503")}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/events",
+		map[string]string{"ns": "ns1"},
+		`{"subject_id":"user-1","object_id":"item-1","action":"VIEW"}`,
+	)
+	h.InjectEvent(rec, r)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502, got %d", rec.Code)
 	}
 }

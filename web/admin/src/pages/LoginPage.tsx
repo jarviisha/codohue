@@ -25,47 +25,28 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex justify-center items-center min-h-screen bg-white">
-      <div style={{ width: '360px' }}>
+    <div className="flex justify-center items-center min-h-screen bg-base">
+      <div className="w-[360px]">
         <div className="mb-8 text-center">
-          <h1
-            className="font-light text-[#061b31] m-0 mb-2"
-            style={{ fontSize: '32px', letterSpacing: '-0.64px', lineHeight: 1.1 }}
-          >
+          <h1 className="text-4xl font-bold text-primary -tracking-[0.02em] leading-tight m-0 mb-2">
             Codohue
-            <span className="text-[#533afd] ml-2">Admin</span>
+            <span className="text-accent ml-2 font-semibold">Admin</span>
           </h1>
-          <p className="text-sm text-[#64748d] font-light m-0">Sign in to your dashboard</p>
+          <p className="text-sm text-secondary m-0">Sign in to your dashboard</p>
         </div>
 
         <form
           onSubmit={handleSubmit}
-          className="bg-white p-8"
-          style={{
-            border: '1px solid #e5edf5',
-            borderRadius: '6px',
-            boxShadow: 'rgba(50,50,93,0.25) 0px 30px 45px -30px, rgba(0,0,0,0.1) 0px 18px 36px -18px',
-          }}
+          className="bg-surface border border-default rounded-xl p-8 shadow-overlay"
         >
           {error && (
-            <div
-              className="px-4 py-3 mb-5 text-sm font-normal"
-              style={{
-                background: 'rgba(234,34,97,0.06)',
-                border: '1px solid rgba(234,34,97,0.2)',
-                borderRadius: '4px',
-                color: '#ea2261',
-              }}
-            >
+            <div className="px-4 py-3 mb-5 text-sm font-medium rounded-lg bg-danger-bg border border-danger/25 text-danger">
               {error}
             </div>
           )}
 
           <div className="mb-5">
-            <label
-              className="block mb-1.5 text-sm font-normal"
-              style={{ color: '#273951' }}
-            >
+            <label className="block mb-1.5 text-[13px] font-medium text-primary">
               API Key
             </label>
             <input
@@ -74,30 +55,14 @@ export default function LoginPage() {
               onChange={e => setApiKey(e.target.value)}
               placeholder="Enter RECOMMENDER_API_KEY"
               required
-              className="w-full py-2 px-3 text-sm font-normal outline-none transition-colors"
-              style={{
-                border: '1px solid #e5edf5',
-                borderRadius: '4px',
-                color: '#061b31',
-              }}
-              onFocus={e => { e.target.style.borderColor = '#533afd' }}
-              onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
+              className="w-full bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary placeholder:text-muted text-sm px-3 py-2.5 rounded-md focus:outline-none transition-shadow duration-100"
             />
           </div>
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 text-sm font-normal text-white transition-colors"
-            style={{
-              background: loading ? '#4434d4' : '#533afd',
-              borderRadius: '4px',
-              border: 'none',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              opacity: loading ? 0.8 : 1,
-            }}
-            onMouseEnter={e => { if (!loading) (e.target as HTMLElement).style.background = '#4434d4' }}
-            onMouseLeave={e => { if (!loading) (e.target as HTMLElement).style.background = '#533afd' }}
+            className="w-full py-2.5 text-sm font-medium text-accent-text bg-accent hover:bg-accent-hover active:bg-accent-active rounded-md border-0 cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus"
           >
             {loading ? 'Signing in…' : 'Sign in'}
           </button>

@@ -14,15 +14,7 @@ function formatTTL(ttlSec: number): string {
 function TTLBadge({ ttl }: { ttl: number }) {
   const missing = ttl === -2
   return (
-    <span
-      className="text-xs font-normal px-2 py-0.5 tabular-nums"
-      style={{
-        background: missing ? 'rgba(234,34,97,0.06)' : 'rgba(21,190,83,0.08)',
-        border: `1px solid ${missing ? 'rgba(234,34,97,0.2)' : 'rgba(21,190,83,0.3)'}`,
-        borderRadius: '4px',
-        color: missing ? '#ea2261' : '#108c3d',
-      }}
-    >
+    <span className={`text-xs font-semibold uppercase tracking-[0.04em] px-2 py-0.5 rounded-sm tabular-nums ${missing ? 'bg-danger-bg border border-danger/25 text-danger' : 'bg-success-bg border border-success/30 text-success'}`}>
       {formatTTL(ttl)}
     </span>
   )
@@ -35,26 +27,14 @@ export default function TrendingPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-6">
-        <h2
-          className="font-light text-[#061b31] m-0"
-          style={{ fontSize: '26px', letterSpacing: '-0.26px', lineHeight: 1.12 }}
-        >
+      <div className="flex items-center gap-4 mb-8">
+        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
           Trending Items
         </h2>
         <select
           value={namespace}
           onChange={e => setNamespace(e.target.value)}
-          className="text-sm font-normal outline-none"
-          style={{
-            padding: '6px 12px',
-            border: '1px solid #e5edf5',
-            borderRadius: '4px',
-            color: '#061b31',
-            background: '#fff',
-          }}
-          onFocus={e => { e.target.style.borderColor = '#533afd' }}
-          onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
+          className="bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary text-sm px-3 py-2 rounded-md focus:outline-none transition-shadow duration-100"
         >
           <option value="">Select namespace</option>
           {nsData?.namespaces.map(ns => (
@@ -63,76 +43,61 @@ export default function TrendingPage() {
         </select>
       </div>
 
-      {!namespace && <p className="text-sm text-[#64748d] font-light">Select a namespace to view trending items.</p>}
+      {!namespace && <p className="text-sm text-muted">Select a namespace to view trending items.</p>}
       {error && <ErrorBanner message="Failed to load trending data." />}
-      {isLoading && <p className="text-sm text-[#64748d] font-light">Loading…</p>}
+      {isLoading && <p className="text-sm text-muted">Loading…</p>}
 
       {data && (
         <>
-          <div className="flex gap-5 mb-5 flex-wrap">
-            <div
-              className="flex flex-col px-4 py-3"
-              style={{ border: '1px solid #e5edf5', borderRadius: '5px', minWidth: '100px' }}
-            >
-              <span className="text-xs text-[#64748d] font-light mb-0.5">Window</span>
-              <span className="text-sm font-normal text-[#061b31] tabular-nums">{data.window_hours}h</span>
+          <div className="flex gap-4 mb-6 flex-wrap">
+            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-lg min-w-[100px]">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-1">Window</span>
+              <span className="text-sm font-semibold text-primary tabular-nums">{data.window_hours}h</span>
             </div>
-            <div
-              className="flex flex-col px-4 py-3"
-              style={{ border: '1px solid #e5edf5', borderRadius: '5px', minWidth: '100px' }}
-            >
-              <span className="text-xs text-[#64748d] font-light mb-0.5">Total items</span>
-              <span className="text-sm font-normal text-[#061b31] tabular-nums">{data.total}</span>
+            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-lg min-w-[100px]">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-1">Total items</span>
+              <span className="text-sm font-semibold text-primary tabular-nums">{data.total}</span>
             </div>
-            <div
-              className="flex flex-col px-4 py-3"
-              style={{ border: '1px solid #e5edf5', borderRadius: '5px', minWidth: '100px' }}
-            >
-              <span className="text-xs text-[#64748d] font-light mb-1">Cache TTL</span>
+            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-lg min-w-[100px]">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-1">Cache TTL</span>
               <TTLBadge ttl={data.cache_ttl_sec} />
             </div>
           </div>
 
           {data.cache_ttl_sec === -2 ? (
-            <div
-              className="p-10 text-center text-sm text-[#64748d] font-light"
-              style={{ border: '1px dashed #d6d9fc', borderRadius: '6px' }}
-            >
+            <div className="p-10 text-center text-sm text-muted border border-dashed border-default rounded-lg">
               No trending data — run{' '}
-              <code style={{ fontFamily: "'Source Code Pro', monospace", fontSize: '12px', background: '#f5f6ff', padding: '1px 6px', borderRadius: '3px', color: '#533afd' }}>
+              <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm">
                 make run-cron
               </code>{' '}
               to populate the trending cache.
             </div>
           ) : data.items.length === 0 ? (
-            <p className="text-sm text-[#64748d] font-light">No items in trending window.</p>
+            <p className="text-sm text-muted">No items in trending window.</p>
           ) : (
-            <div
-              className="bg-white overflow-hidden"
-              style={{ border: '1px solid #e5edf5', borderRadius: '6px', boxShadow: 'rgba(23,23,23,0.06) 0px 3px 6px' }}
-            >
+            <div className="bg-surface border border-default rounded-lg overflow-hidden">
               <table className="w-full border-collapse">
                 <thead>
-                  <tr style={{ borderBottom: '1px solid #e5edf5' }}>
-                    <th style={thStyle}>#</th>
-                    <th style={thStyle}>Object ID</th>
-                    <th style={thStyle}>Score</th>
-                    <th style={thStyle}>Cache TTL</th>
+                  <tr className="bg-subtle border-b-2 border-default">
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">#</th>
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Object ID</th>
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Score</th>
+                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Cache TTL</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.items.map((item, i) => (
-                    <tr key={item.object_id} style={{ borderBottom: '1px solid #e5edf5' }}>
-                      <td style={{ ...tdStyle, color: '#64748d' }} className="tabular-nums">{i + 1}</td>
-                      <td style={tdStyle}>
-                        <code style={{ fontFamily: "'Source Code Pro', monospace", fontSize: '12px', background: '#f5f6ff', padding: '1px 6px', borderRadius: '3px', color: '#533afd', fontWeight: 500 }}>
+                    <tr key={item.object_id} className="border-b border-default hover:bg-surface-raised">
+                      <td className="px-4 py-3 text-sm text-muted tabular-nums">{i + 1}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium">
                           {item.object_id}
                         </code>
                       </td>
-                      <td style={{ ...tdStyle, fontFamily: "'Source Code Pro', monospace", fontSize: '12px' }} className="tabular-nums">
+                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
                         {item.score.toFixed(2)}
                       </td>
-                      <td style={tdStyle}>
+                      <td className="px-4 py-3 text-sm">
                         <TTLBadge ttl={item.cache_ttl_sec} />
                       </td>
                     </tr>
@@ -145,19 +110,4 @@ export default function TrendingPage() {
       )}
     </div>
   )
-}
-
-const thStyle: React.CSSProperties = {
-  padding: '10px 16px',
-  textAlign: 'left',
-  fontSize: '12px',
-  fontWeight: 400,
-  color: '#64748d',
-}
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 16px',
-  fontSize: '13px',
-  color: '#273951',
-  fontWeight: 300,
 }

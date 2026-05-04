@@ -1,359 +1,789 @@
-# Design System Inspired by Stripe
+# Personal Design System — Minimal SaaS
+
+**Identity**: Clean, precise, professional. A SaaS tool that respects the user's focus.  
+**Primary Font**: Inter  
+**Primary Color**: Meta Blue  
+**Modes**: Light + Dark (semantic tokens, no hardcoded values in components)
+
+---
 
 ## 1. Visual Theme & Atmosphere
 
-Stripe's website is the gold standard of fintech design -- a system that manages to feel simultaneously technical and luxurious, precise and warm. The page opens on a clean white canvas (`#ffffff`) with deep navy headings (`#061b31`) and a signature purple (`#533afd`) that functions as both brand anchor and interactive accent. This isn't the cold, clinical purple of enterprise software; it's a rich, saturated violet that reads as confident and premium. The overall impression is of a financial institution redesigned by a world-class type foundry.
+This system is built around clarity and trust — the two things users need from a SaaS dashboard. The light mode uses crisp white surfaces with cool blue-gray neutrals that keep the interface airy without feeling sterile. The dark mode shifts to a deep navy canvas (never pure black) that pairs naturally with Meta Blue, creating a premium, focused workspace aesthetic.
 
-The custom `sohne-var` variable font is the defining element of Stripe's visual identity. Every text element enables the OpenType `"ss01"` stylistic set, which modifies character shapes for a distinctly geometric, modern feel. At display sizes (48px-56px), sohne-var runs at weight 300 -- an extraordinarily light weight for headlines that creates an ethereal, almost whispered authority. This is the opposite of the "bold hero headline" convention; Stripe's headlines feel like they don't need to shout. The negative letter-spacing (-1.4px at 56px, -0.96px at 48px) tightens the text into dense, engineered blocks. At smaller sizes, the system also uses weight 300 with proportionally reduced tracking, and tabular numerals via `"tnum"` for financial data display.
+Inter is the single typeface throughout. It excels at small sizes (crucial for dashboards), has a full numeric tabular set for data alignment, and carries enough personality in its letterforms to feel modern without being decorative.
 
-What truly distinguishes Stripe is its shadow system. Rather than the flat or single-layer approach of most sites, Stripe uses multi-layer, blue-tinted shadows: the signature `rgba(50,50,93,0.25)` combined with `rgba(0,0,0,0.1)` creates shadows with a cool, almost atmospheric depth -- like elements are floating in a twilight sky. The blue-gray undertone of the primary shadow color (50,50,93) ties directly to the navy-purple brand palette, making even elevation feel on-brand.
+Meta Blue (`#0866FF`) is the sole accent — it handles all interactive states, CTAs, focus rings, and brand moments. A constrained palette means every blue element carries visual weight and intent.
 
 **Key Characteristics:**
 
-- sohne-var with OpenType `"ss01"` on all text -- a custom stylistic set that defines the brand's letterforms
-- Weight 300 as the signature headline weight -- light, confident, anti-convention
-- Negative letter-spacing at display sizes (-1.4px at 56px, progressive relaxation downward)
-- Blue-tinted multi-layer shadows using `rgba(50,50,93,0.25)` -- elevation that feels brand-colored
-- Deep navy (`#061b31`) headings instead of black -- warm, premium, financial-grade
-- Conservative border-radius (4px-8px) -- nothing pill-shaped, nothing harsh
-- Ruby (`#ea2261`) and magenta (`#f96bee`) accents for gradient and decorative elements
-- `SourceCodePro` as the monospace companion for code and technical labels
+- White / cool-gray-blue surfaces in light mode — never warm beige or yellow
+- Deep navy backgrounds in dark mode (`#0B1120`, `#101C33`) — never pure black
+- Single accent: Meta Blue (`#0866FF`) with a clean tonal range
+- Inter at every level — weight and size do the heavy lifting
+- 4px base unit, 8-column grid
+- Borders over shadows wherever possible — minimal depth system
+- Rounded but restrained: 6px–12px radius range
 
-## 2. Color Palette & Roles
+---
 
-### Primary
+## 2. Color Palette
 
-- **Stripe Purple** (`#533afd`): Primary brand color, CTA backgrounds, link text, interactive highlights. A saturated blue-violet that anchors the entire system.
-- **Deep Navy** (`#061b31`): `--hds-color-heading-solid`. Primary heading color. Not black, not gray -- a very dark blue that adds warmth and depth to text.
-- **Pure White** (`#ffffff`): Page background, card surfaces, button text on dark backgrounds.
+### Semantic Token System
 
-### Brand & Dark
+All components reference **semantic tokens**, not raw hex values. This makes light/dark switching trivial.
 
-- **Brand Dark** (`#1c1e54`): `--hds-color-util-brand-900`. Deep indigo for dark sections, footer backgrounds, and immersive brand moments.
-- **Dark Navy** (`#0d253d`): `--hds-color-core-neutral-975`. The darkest neutral -- almost-black with a blue undertone for maximum depth without harshness.
+| Token                 | Light Value          | Dark Value        | Role                          |
+| --------------------- | -------------------- | ----------------- | ----------------------------- |
+| `--bg-base`           | `#FFFFFF`            | `#0B1120`         | Page background               |
+| `--bg-subtle`         | `#F8FAFC`            | `#0F1A2E`         | Sidebar, secondary areas      |
+| `--bg-surface`        | `#FFFFFF`            | `#101C33`         | Cards, panels, modals         |
+| `--bg-surface-raised` | `#F1F5F9`            | `#152240`         | Hover states, nested surfaces |
+| `--bg-overlay`        | `rgba(15,23,42,0.5)` | `rgba(0,0,0,0.6)` | Modals backdrop               |
+| `--border-default`    | `#E2E8F0`            | `#1E3A5F`         | Cards, containers, dividers   |
+| `--border-strong`     | `#CBD5E1`            | `#2A4F7A`         | Inputs focus-unfocused        |
+| `--text-primary`      | `#0F172A`            | `#F1F5F9`         | Headlines, important content  |
+| `--text-secondary`    | `#475569`            | `#94A3B8`         | Descriptions, subtitles       |
+| `--text-muted`        | `#94A3B8`            | `#4A6380`         | Timestamps, captions          |
+| `--text-disabled`     | `#CBD5E1`            | `#243A55`         | Disabled labels               |
+| `--text-on-accent`    | `#FFFFFF`            | `#FFFFFF`         | Text on blue buttons          |
 
-### Accent Colors
+### Brand Blue (Meta-Inspired)
 
-- **Ruby** (`#ea2261`): `--hds-color-accentColorMode-ruby-icon-solid`. Warm red-pink for icons, alerts, and accent elements.
-- **Magenta** (`#f96bee`): `--hds-color-accentColorMode-magenta-icon-gradientMiddle`. Vivid pink-purple for gradients and decorative highlights.
-- **Magenta Light** (`#ffd7ef`): `--hds-color-util-accent-magenta-100`. Tinted surface for magenta-themed cards and badges.
+| Name         | Hex       | Use                                                    |
+| ------------ | --------- | ------------------------------------------------------ |
+| **Blue 50**  | `#EBF3FF` | Hover backgrounds, alert backgrounds                   |
+| **Blue 100** | `#C3DAFE` | Focus rings (light mode)                               |
+| **Blue 200** | `#93C5FD` | Disabled states, light badges                          |
+| **Blue 400** | `#3B82F6` | Secondary interactive, lighter accent                  |
+| **Blue 500** | `#0866FF` | **Primary — Meta Blue. Buttons, links, active states** |
+| **Blue 600** | `#0052CC` | Hover on primary button                                |
+| **Blue 700** | `#0040AA` | Active/pressed state                                   |
+| **Blue 900** | `#001A4D` | Deep accent for dark surfaces                          |
 
-### Interactive
+### Neutral (Cool Blue-Gray)
 
-- **Primary Purple** (`#533afd`): Primary link color, active states, selected elements.
-- **Purple Hover** (`#4434d4`): Darker purple for hover states on primary elements.
-- **Purple Deep** (`#2e2b8c`): `--hds-color-button-ui-iconHover`. Dark purple for icon hover states.
-- **Purple Light** (`#b9b9f9`): `--hds-color-action-bg-subduedHover`. Soft lavender for subdued hover backgrounds.
-- **Purple Mid** (`#665efd`): `--hds-color-input-selector-text-range`. Range selector and input highlight color.
+| Name            | Hex       | Use                      |
+| --------------- | --------- | ------------------------ |
+| **Neutral 50**  | `#F8FAFC` | Page bg (light)          |
+| **Neutral 100** | `#F1F5F9` | Sidebar bg (light)       |
+| **Neutral 200** | `#E2E8F0` | Borders (light)          |
+| **Neutral 300** | `#CBD5E1` | Strong borders (light)   |
+| **Neutral 400** | `#94A3B8` | Muted text, placeholders |
+| **Neutral 500** | `#64748B` | Secondary text           |
+| **Neutral 600** | `#475569` | Body text (light)        |
+| **Neutral 800** | `#1E293B` | Headlines (light)        |
+| **Neutral 900** | `#0F172A` | Primary text (light)     |
+| **Navy 900**    | `#0B1120` | Page bg (dark)           |
+| **Navy 800**    | `#0F1A2E` | Sidebar bg (dark)        |
+| **Navy 700**    | `#101C33` | Card surface (dark)      |
+| **Navy 600**    | `#152240` | Raised surface (dark)    |
+| **Navy 500**    | `#1E3A5F` | Borders (dark)           |
+| **Navy 400**    | `#2A4F7A` | Strong borders (dark)    |
 
-### Neutral Scale
+### Functional Colors
 
-- **Heading** (`#061b31`): Primary headings, nav text, strong labels.
-- **Label** (`#273951`): `--hds-color-input-text-label`. Form labels, secondary headings.
-- **Body** (`#64748d`): Secondary text, descriptions, captions.
-- **Success Green** (`#15be53`): Status badges, success indicators (with 0.2-0.4 alpha for backgrounds/borders).
-- **Success Text** (`#108c3d`): Success badge text color.
-- **Lemon** (`#9b6829`): `--hds-color-core-lemon-500`. Warning and highlight accent.
+| Purpose        | Light     | Dark      | Token                |
+| -------------- | --------- | --------- | -------------------- |
+| **Success**    | `#10B981` | `#34D399` | `--color-success`    |
+| **Success bg** | `#ECFDF5` | `#052E1F` | `--color-success-bg` |
+| **Warning**    | `#F59E0B` | `#FBBF24` | `--color-warning`    |
+| **Warning bg** | `#FFFBEB` | `#2D1B00` | `--color-warning-bg` |
+| **Danger**     | `#EF4444` | `#F87171` | `--color-danger`     |
+| **Danger bg**  | `#FEF2F2` | `#2A0A0A` | `--color-danger-bg`  |
+| **Info**       | `#0866FF` | `#60A5FA` | `--color-info`       |
+| **Info bg**    | `#EBF3FF` | `#001A4D` | `--color-info-bg`    |
 
-### Surface & Borders
+---
 
-- **Border Default** (`#e5edf5`): Standard border color for cards, dividers, and containers.
-- **Border Purple** (`#b9b9f9`): Active/selected state borders on buttons and inputs.
-- **Border Soft Purple** (`#d6d9fc`): Subtle purple-tinted borders for secondary elements.
-- **Border Magenta** (`#ffd7ef`): Pink-tinted borders for magenta-themed elements.
-- **Border Dashed** (`#362baa`): Dashed borders for drop zones and placeholder elements.
+## 3. Typography
 
-### Shadow Colors
+**Single family: Inter** — loaded via `font-feature-settings: "cv11", "ss01"` for better legibility.  
+Enable tabular numbers for all numeric data: `font-variant-numeric: tabular-nums`.
 
-- **Shadow Blue** (`rgba(50,50,93,0.25)`): The signature -- blue-tinted primary shadow color.
-- **Shadow Dark Blue** (`rgba(3,3,39,0.25)`): Deeper blue shadow for elevated elements.
-- **Shadow Black** (`rgba(0,0,0,0.1)`): Secondary shadow layer for depth reinforcement.
-- **Shadow Ambient** (`rgba(23,23,23,0.08)`): Soft ambient shadow for subtle elevation.
-- **Shadow Soft** (`rgba(23,23,23,0.06)`): Minimal ambient shadow for light lift.
+### Type Scale
 
-## 3. Typography Rules
-
-### Font Family
-
-- **Primary**: `sohne-var`, with fallback: `SF Pro Display`
-- **Monospace**: `SourceCodePro`, with fallback: `SFMono-Regular`
-- **OpenType Features**: `"ss01"` enabled globally on all sohne-var text; `"tnum"` for tabular numbers on financial data and captions.
-
-### Hierarchy
-
-| Role              | Font          | Size           | Weight  | Line Height    | Letter Spacing | Features  | Notes                                  |
-| ----------------- | ------------- | -------------- | ------- | -------------- | -------------- | --------- | -------------------------------------- |
-| Display Hero      | sohne-var     | 56px (3.50rem) | 300     | 1.03 (tight)   | -1.4px         | ss01      | Maximum size, whisper-weight authority |
-| Display Large     | sohne-var     | 48px (3.00rem) | 300     | 1.15 (tight)   | -0.96px        | ss01      | Secondary hero headlines               |
-| Section Heading   | sohne-var     | 32px (2.00rem) | 300     | 1.10 (tight)   | -0.64px        | ss01      | Feature section titles                 |
-| Sub-heading Large | sohne-var     | 26px (1.63rem) | 300     | 1.12 (tight)   | -0.26px        | ss01      | Card headings, sub-sections            |
-| Sub-heading       | sohne-var     | 22px (1.38rem) | 300     | 1.10 (tight)   | -0.22px        | ss01      | Smaller section heads                  |
-| Body Large        | sohne-var     | 18px (1.13rem) | 300     | 1.40           | normal         | ss01      | Feature descriptions, intro text       |
-| Body              | sohne-var     | 16px (1.00rem) | 300-400 | 1.40           | normal         | ss01      | Standard reading text                  |
-| Button            | sohne-var     | 16px (1.00rem) | 400     | 1.00 (tight)   | normal         | ss01      | Primary button text                    |
-| Button Small      | sohne-var     | 14px (0.88rem) | 400     | 1.00 (tight)   | normal         | ss01      | Secondary/compact buttons              |
-| Link              | sohne-var     | 14px (0.88rem) | 400     | 1.00 (tight)   | normal         | ss01      | Navigation links                       |
-| Caption           | sohne-var     | 13px (0.81rem) | 400     | normal         | normal         | ss01      | Small labels, metadata                 |
-| Caption Small     | sohne-var     | 12px (0.75rem) | 300-400 | 1.33-1.45      | normal         | ss01      | Fine print, timestamps                 |
-| Caption Tabular   | sohne-var     | 12px (0.75rem) | 300-400 | 1.33           | -0.36px        | tnum      | Financial data, numbers                |
-| Micro             | sohne-var     | 10px (0.63rem) | 300     | 1.15 (tight)   | 0.1px          | ss01      | Tiny labels, axis markers              |
-| Micro Tabular     | sohne-var     | 10px (0.63rem) | 300     | 1.15 (tight)   | -0.3px         | tnum      | Chart data, small numbers              |
-| Nano              | sohne-var     | 8px (0.50rem)  | 300     | 1.07 (tight)   | normal         | ss01      | Smallest labels                        |
-| Code Body         | SourceCodePro | 12px (0.75rem) | 500     | 2.00 (relaxed) | normal         | --        | Code blocks, syntax                    |
-| Code Bold         | SourceCodePro | 12px (0.75rem) | 700     | 2.00 (relaxed) | normal         | --        | Bold code, keywords                    |
-| Code Label        | SourceCodePro | 12px (0.75rem) | 500     | 2.00 (relaxed) | normal         | uppercase | Technical labels                       |
-| Code Micro        | SourceCodePro | 9px (0.56rem)  | 500     | 1.00 (tight)   | normal         | ss01      | Tiny code annotations                  |
+| Role        | Size             | Weight | Line Height | Letter Spacing | Notes                                                                |
+| ----------- | ---------------- | ------ | ----------- | -------------- | -------------------------------------------------------------------- |
+| **Display** | 48px / 3rem      | 700    | 1.15        | −0.02em        | Landing hero, empty states                                           |
+| **H1**      | 36px / 2.25rem   | 700    | 1.20        | −0.02em        | Page titles                                                          |
+| **H2**      | 28px / 1.75rem   | 600    | 1.25        | −0.01em        | Section headings                                                     |
+| **H3**      | 22px / 1.375rem  | 600    | 1.30        | −0.01em        | Card titles, drawer headers                                          |
+| **H4**      | 18px / 1.125rem  | 600    | 1.35        | 0              | Sub-sections                                                         |
+| **H5**      | 16px / 1rem      | 600    | 1.40        | 0              | Labels, column headers                                               |
+| **Body L**  | 16px / 1rem      | 400    | 1.60        | 0              | Primary content text                                                 |
+| **Body**    | 14px / 0.875rem  | 400    | 1.57        | 0              | Default body, table cells                                            |
+| **Body S**  | 13px / 0.8125rem | 400    | 1.54        | 0              | Secondary content                                                    |
+| **Caption** | 12px / 0.75rem   | 500    | 1.50        | 0.01em         | Timestamps, metadata                                                 |
+| **Label**   | 11px / 0.6875rem | 600    | 1.45        | 0.06em         | `text-transform: uppercase`. Nav section headers, table column chips |
+| **Code**    | 13px / 0.8125rem | 400    | 1.60        | 0              | `font-family: 'JetBrains Mono', monospace`                           |
 
 ### Principles
 
-- **Light weight as signature**: Weight 300 at display sizes is Stripe's most distinctive typographic choice. Where others use 600-700 to command attention, Stripe uses lightness as luxury -- the text is so confident it doesn't need weight to be authoritative.
-- **ss01 everywhere**: The `"ss01"` stylistic set is non-negotiable. It modifies specific glyphs (likely alternate `a`, `g`, `l` forms) to create a more geometric, contemporary feel across all sohne-var text.
-- **Two OpenType modes**: `"ss01"` for display/body text, `"tnum"` for tabular numerals in financial data. These never overlap -- a number in a paragraph uses ss01, a number in a data table uses tnum.
-- **Progressive tracking**: Letter-spacing tightens proportionally with size: -1.4px at 56px, -0.96px at 48px, -0.64px at 32px, -0.26px at 26px, normal at 16px and below.
-- **Two-weight simplicity**: Primarily 300 (body and headings) and 400 (UI/buttons). No bold (700) in the primary font -- SourceCodePro uses 500/700 for code contrast.
+- **Weight does the work**: 400 for reading, 500 for emphasis, 600 for headings, 700 for display. No bold on body text.
+- **Negative tracking at scale**: Large headings tighten letter-spacing (−0.02em) for a premium feel.
+- **Uppercase only for system labels**: Navigation section titles, table column chips — never for body or button text.
+- **Tabular numbers always**: Any column with numbers uses `font-variant-numeric: tabular-nums` so decimals align.
 
-## 4. Component Stylings
+---
 
-### Buttons
+## 4. Spacing System
 
-**Primary Purple**
+**Base unit: 4px.** All spacing values are multiples of 4.
 
-- Background: `#533afd`
-- Text: `#ffffff`
-- Padding: 8px 16px
-- Radius: 4px
-- Font: 16px sohne-var weight 400, `"ss01"`
-- Hover: `#4434d4` background
-- Use: Primary CTA ("Start now", "Contact sales")
+| Token        | Value | Use                                    |
+| ------------ | ----- | -------------------------------------- |
+| `--space-1`  | 4px   | Icon gap, tight inline spacing         |
+| `--space-2`  | 8px   | Compact padding, small gaps            |
+| `--space-3`  | 12px  | Button padding-y, input padding        |
+| `--space-4`  | 16px  | Card padding (compact), form field gap |
+| `--space-5`  | 20px  | Button padding-x                       |
+| `--space-6`  | 24px  | Card padding (default)                 |
+| `--space-8`  | 32px  | Section inner spacing                  |
+| `--space-10` | 40px  | Between card groups                    |
+| `--space-12` | 48px  | Page section gaps                      |
+| `--space-16` | 64px  | Major layout divisions                 |
+| `--space-20` | 80px  | Hero section breathing room            |
 
-**Ghost / Outlined**
+---
+
+## 5. Border Radius
+
+| Token           | Value  | Use                          |
+| --------------- | ------ | ---------------------------- |
+| `--radius-sm`   | 4px    | Badges, chips, tags          |
+| `--radius-md`   | 6px    | Buttons, inputs              |
+| `--radius-lg`   | 8px    | Cards, dropdowns, tooltips   |
+| `--radius-xl`   | 12px   | Modals, panels, larger cards |
+| `--radius-2xl`  | 16px   | Floating elements, drawers   |
+| `--radius-full` | 9999px | Avatar, pill badges          |
+
+---
+
+## 6. Shadow & Elevation
+
+Minimal shadow usage — prefer borders. Shadows only for floating/overlay elements.
+
+| Level          | Shadow                                                                | Use                                        |
+| -------------- | --------------------------------------------------------------------- | ------------------------------------------ |
+| **Flush**      | none                                                                  | Cards on same-level surface                |
+| **Raised**     | `0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06)`              | Cards with border removed                  |
+| **Floating**   | `0 4px 6px -1px rgba(0,0,0,0.10), 0 2px 4px -2px rgba(0,0,0,0.08)`    | Dropdowns, popovers                        |
+| **Overlay**    | `0 20px 25px -5px rgba(0,0,0,0.15), 0 8px 10px -6px rgba(0,0,0,0.10)` | Modals, drawers                            |
+| **Focus Ring** | `0 0 0 3px rgba(8,102,255,0.25)`                                      | Keyboard focus on all interactive elements |
+
+_Dark mode: multiply alpha by 2x on Floating and Overlay._
+
+---
+
+## 7. Components
+
+### Button
+
+**Primary**
+
+- Background: `#0866FF`
+- Text: `#FFFFFF`, 14px Inter weight 500
+- Padding: `10px 20px`
+- Radius: 6px
+- Hover: background `#0052CC`
+- Active: background `#0040AA`
+- Disabled: background `#CBD5E1`, text `#94A3B8` (light) / background `#1E3A5F`, text `#4A6380` (dark)
+- Focus: ring `0 0 0 3px rgba(8,102,255,0.25)`
+
+**Secondary**
 
 - Background: transparent
-- Text: `#533afd`
-- Padding: 8px 16px
+- Border: `1px solid var(--border-default)`
+- Text: `var(--text-primary)`, 14px weight 500
+- Hover: background `var(--bg-surface-raised)`, border `var(--border-strong)`
+
+**Ghost**
+
+- Background: transparent, no border
+- Text: `var(--text-secondary)`
+- Hover: background `var(--bg-surface-raised)`, text `var(--text-primary)`
+
+**Danger**
+
+- Background: `#EF4444`
+- Text: `#FFFFFF`
+- Hover: background `#DC2626`
+
+**Size variants:**
+
+- `sm`: padding `6px 14px`, font 13px, radius 5px
+- `md` (default): padding `10px 20px`, font 14px, radius 6px
+- `lg`: padding `12px 24px`, font 15px, radius 8px
+
+### Input
+
+**Text Input**
+
+- Background: `var(--bg-surface)`
+- Border: `1px solid var(--border-default)`
+- Text: `var(--text-primary)`, 14px Inter weight 400
+- Placeholder: `var(--text-muted)`
+- Padding: `10px 12px`
+- Radius: 6px
+- Focus: border-color `#0866FF`, shadow `0 0 0 3px rgba(8,102,255,0.15)`
+- Error: border-color `#EF4444`, shadow `0 0 0 3px rgba(239,68,68,0.15)`
+
+**Select / Dropdown**
+
+- Same as text input
+- Arrow icon: `var(--text-muted)`
+
+**Label**
+
+- 13px Inter weight 500, `var(--text-primary)`
+- Margin-bottom: 6px
+
+**Helper text**
+
+- 12px Inter weight 400, `var(--text-muted)`
+- Margin-top: 4px
+
+### Card
+
+**Default**
+
+- Background: `var(--bg-surface)`
+- Border: `1px solid var(--border-default)`
+- Radius: 8px
+- Padding: 24px
+- No shadow by default
+
+**Clickable card**
+
+- Same as default
+- Hover: border-color `var(--border-strong)`, background `var(--bg-surface-raised)`
+- Cursor: pointer
+- Transition: 150ms ease
+
+**Stat card (dashboard metric)**
+
+- Padding: 24px
+- Label: 11px uppercase weight 600, `var(--text-muted)`, letter-spacing 0.06em
+- Value: 32px Inter weight 700, `var(--text-primary)`, tabular-nums
+- Delta: 13px weight 500, green/red depending on direction
+
+### Badge / Chip
+
+- Padding: `3px 8px`
 - Radius: 4px
-- Border: `1px solid #b9b9f9`
-- Font: 16px sohne-var weight 400, `"ss01"`
-- Hover: background shifts to `rgba(83,58,253,0.05)`
-- Use: Secondary actions
+- Font: 11px weight 600, uppercase, letter-spacing 0.04em
 
-**Transparent Info**
+| Variant | Light bg  | Light text | Dark bg   | Dark text |
+| ------- | --------- | ---------- | --------- | --------- |
+| Default | `#F1F5F9` | `#475569`  | `#152240` | `#94A3B8` |
+| Blue    | `#EBF3FF` | `#0866FF`  | `#001A4D` | `#60A5FA` |
+| Green   | `#ECFDF5` | `#059669`  | `#052E1F` | `#34D399` |
+| Yellow  | `#FFFBEB` | `#B45309`  | `#2D1B00` | `#FBBF24` |
+| Red     | `#FEF2F2` | `#DC2626`  | `#2A0A0A` | `#F87171` |
 
-- Background: transparent
-- Text: `#2874ad`
-- Padding: 8px 16px
-- Radius: 4px
-- Border: `1px solid rgba(43,145,223,0.2)`
-- Use: Tertiary/info-level actions
+### Navigation (Sidebar)
 
-**Neutral Ghost**
+- Width: 240px (collapsed: 64px)
+- Background: `var(--bg-subtle)`
+- Border-right: `1px solid var(--border-default)`
 
-- Background: transparent (`rgba(255,255,255,0)`)
-- Text: `rgba(16,16,16,0.3)`
-- Padding: 8px 16px
-- Radius: 4px
-- Outline: `1px solid rgb(212,222,233)`
-- Use: Disabled or muted actions
+**Nav item**
 
-### Cards & Containers
+- Height: 36px
+- Padding: `0 12px`
+- Radius: 6px
+- Font: 14px weight 500, `var(--text-secondary)`
+- Icon: 16px, `var(--text-muted)`
+- Hover: background `var(--bg-surface-raised)`, text `var(--text-primary)`, icon `var(--text-secondary)`
+- Active: background `#EBF3FF` / dark `#001A4D`, text `#0866FF`, icon `#0866FF`
 
-- Background: `#ffffff`
-- Border: `1px solid #e5edf5` (standard) or `1px solid #061b31` (dark accent)
-- Radius: 4px (tight), 5px (standard), 6px (comfortable), 8px (featured)
-- Shadow (standard): `rgba(50,50,93,0.25) 0px 30px 45px -30px, rgba(0,0,0,0.1) 0px 18px 36px -18px`
-- Shadow (ambient): `rgba(23,23,23,0.08) 0px 15px 35px 0px`
-- Hover: shadow intensifies, often adding the blue-tinted layer
+**Section header**
 
-### Badges / Tags / Pills
+- 11px uppercase weight 600, `var(--text-muted)`, letter-spacing 0.06em
+- Padding: `16px 12px 4px`
 
-**Neutral Pill**
+### Table
 
-- Background: `#ffffff`
-- Text: `#000000`
-- Padding: 0px 6px
-- Radius: 4px
-- Border: `1px solid #f6f9fc`
-- Font: 11px weight 400
+**Header row**
 
-**Success Badge**
+- Background: `var(--bg-subtle)`
+- Border-bottom: `2px solid var(--border-default)`
+- Font: 11px uppercase weight 600, `var(--text-muted)`, letter-spacing 0.06em
+- Padding: `10px 16px`
 
-- Background: `rgba(21,190,83,0.2)`
-- Text: `#108c3d`
-- Padding: 1px 6px
-- Radius: 4px
-- Border: `1px solid rgba(21,190,83,0.4)`
-- Font: 10px weight 300
+**Data row**
 
-### Inputs & Forms
+- Border-bottom: `1px solid var(--border-default)`
+- Font: 14px weight 400, `var(--text-primary)`, tabular-nums for numbers
+- Padding: `12px 16px`
+- Hover: background `var(--bg-surface-raised)`
 
-- Border: `1px solid #e5edf5`
-- Radius: 4px
-- Focus: `1px solid #533afd` or purple ring
-- Label: `#273951`, 14px sohne-var
-- Text: `#061b31`
-- Placeholder: `#64748d`
+**Compact row**
 
-### Navigation
+- Padding: `8px 16px`
 
-- Clean horizontal nav on white, sticky with blur backdrop
-- Brand logotype left-aligned
-- Links: sohne-var 14px weight 400, `#061b31` text with `"ss01"`
-- Radius: 6px on nav container
-- CTA: purple button right-aligned ("Sign in", "Start now")
-- Mobile: hamburger toggle with 6px radius
+### Avatar
 
-### Decorative Elements
+- Shape: circle (`--radius-full`)
+- Sizes: 24px (xs), 32px (sm), 40px (md), 48px (lg)
+- Fallback: blue background `#EBF3FF`, initials in `#0866FF`, weight 600
+- Border: none (use spacing to separate)
 
-**Dashed Borders**
+### Tooltip
 
-- `1px dashed #362baa` (purple) for placeholder/drop zones
-- `1px dashed #ffd7ef` (magenta) for magenta-themed decorative borders
+- Background: `#0F172A` (light) / `#F1F5F9` (dark)
+- Text: `#F8FAFC` (light) / `#0F172A` (dark), 12px weight 500
+- Padding: `6px 10px`
+- Radius: 6px
+- Shadow: Floating level
+- Max-width: 240px
 
-**Gradient Accents**
+---
 
-- Ruby-to-magenta gradients (`#ea2261` to `#f96bee`) for hero decorations
-- Brand dark sections use `#1c1e54` backgrounds with white text
+## 8. Layout & Grid
 
-## 5. Layout Principles
+### Page Structure (SaaS Dashboard)
 
-### Spacing System
+```
+┌─────────────────────────────────────────┐
+│ TopBar (56px, optional)                 │
+├──────────┬──────────────────────────────┤
+│ Sidebar  │ Main Content                 │
+│ (240px)  │ padding: 32px               │
+│          │                              │
+│          │ ┌──────────────────────────┐ │
+│          │ │ Page Header (title+CTA)  │ │
+│          │ ├──────────────────────────┤ │
+│          │ │ Content Area             │ │
+│          │ └──────────────────────────┘ │
+└──────────┴──────────────────────────────┘
+```
 
-- Base unit: 8px
-- Scale: 1px, 2px, 4px, 6px, 8px, 10px, 11px, 12px, 14px, 16px, 18px, 20px
-- Notable: The scale is dense at the small end (every 2px from 4-12), reflecting Stripe's precision-oriented UI for financial data
+### Content Max Widths
 
-### Grid & Container
-
-- Max content width: approximately 1080px
-- Hero: centered single-column with generous padding, lightweight headlines
-- Feature sections: 2-3 column grids for feature cards
-- Full-width dark sections with `#1c1e54` background for brand immersion
-- Code/dashboard previews as contained cards with blue-tinted shadows
-
-### Whitespace Philosophy
-
-- **Precision spacing**: Unlike the vast emptiness of minimalist systems, Stripe uses measured, purposeful whitespace. Every gap is a deliberate typographic choice.
-- **Dense data, generous chrome**: Financial data displays (tables, charts) are tightly packed, but the UI chrome around them is generously spaced. This creates a sense of controlled density -- like a well-organized spreadsheet in a beautiful frame.
-- **Section rhythm**: White sections alternate with dark brand sections (`#1c1e54`), creating a dramatic light/dark cadence that prevents monotony without introducing arbitrary color.
-
-### Border Radius Scale
-
-- Micro (1px): Fine-grained elements, subtle rounding
-- Standard (4px): Buttons, inputs, badges, cards -- the workhorse
-- Comfortable (5px): Standard card containers
-- Relaxed (6px): Navigation, larger interactive elements
-- Large (8px): Featured cards, hero elements
-- Compound: `0px 0px 6px 6px` for bottom-rounded containers (tab panels, dropdown footers)
-
-## 6. Depth & Elevation
-
-| Level                | Treatment                                                                      | Use                                 |
-| -------------------- | ------------------------------------------------------------------------------ | ----------------------------------- |
-| Flat (Level 0)       | No shadow                                                                      | Page background, inline text        |
-| Ambient (Level 1)    | `rgba(23,23,23,0.06) 0px 3px 6px`                                              | Subtle card lift, hover hints       |
-| Standard (Level 2)   | `rgba(23,23,23,0.08) 0px 15px 35px`                                            | Standard cards, content panels      |
-| Elevated (Level 3)   | `rgba(50,50,93,0.25) 0px 30px 45px -30px, rgba(0,0,0,0.1) 0px 18px 36px -18px` | Featured cards, dropdowns, popovers |
-| Deep (Level 4)       | `rgba(3,3,39,0.25) 0px 14px 21px -14px, rgba(0,0,0,0.1) 0px 8px 17px -8px`     | Modals, floating panels             |
-| Ring (Accessibility) | `2px solid #533afd` outline                                                    | Keyboard focus ring                 |
-
-**Shadow Philosophy**: Stripe's shadow system is built on a principle of chromatic depth. Where most design systems use neutral gray or black shadows, Stripe's primary shadow color (`rgba(50,50,93,0.25)`) is a deep blue-gray that echoes the brand's navy palette. This creates shadows that don't just add depth -- they add brand atmosphere. The multi-layer approach pairs this blue-tinted shadow with a pure black secondary layer (`rgba(0,0,0,0.1)`) at a different offset, creating a parallax-like depth where the branded shadow sits farther from the element and the neutral shadow sits closer. The negative spread values (-30px, -18px) ensure shadows don't extend beyond the element's footprint horizontally, keeping elevation vertical and controlled.
-
-### Decorative Depth
-
-- Dark brand sections (`#1c1e54`) create immersive depth through background color contrast
-- Gradient overlays with ruby-to-magenta transitions for hero decorations
-- Shadow color `rgba(0,55,112,0.08)` (`--hds-color-shadow-sm-top`) for top-edge shadows on sticky elements
-
-## 7. Do's and Don'ts
-
-### Do
-
-- Use sohne-var with `"ss01"` on every text element -- the stylistic set IS the brand
-- Use weight 300 for all headlines and body text -- lightness is the signature
-- Apply blue-tinted shadows (`rgba(50,50,93,0.25)`) for all elevated elements
-- Use `#061b31` (deep navy) for headings instead of `#000000` -- the warmth matters
-- Keep border-radius between 4px-8px -- conservative rounding is intentional
-- Use `"tnum"` for any tabular/financial number display
-- Layer shadows: blue-tinted far + neutral close for depth parallax
-- Use `#533afd` purple as the primary interactive/CTA color
-
-### Don't
-
-- Don't use weight 600-700 for sohne-var headlines -- weight 300 is the brand voice
-- Don't use large border-radius (12px+, pill shapes) on cards or buttons -- Stripe is conservative
-- Don't use neutral gray shadows -- always tint with blue (`rgba(50,50,93,...)`)
-- Don't skip `"ss01"` on any sohne-var text -- the alternate glyphs define the personality
-- Don't use pure black (`#000000`) for headings -- always `#061b31` deep navy
-- Don't use warm accent colors (orange, yellow) for interactive elements -- purple is primary
-- Don't apply positive letter-spacing at display sizes -- Stripe tracks tight
-- Don't use the magenta/ruby accents for buttons or links -- they're decorative/gradient only
-
-## 8. Responsive Behavior
+| Context        | Max Width                                 |
+| -------------- | ----------------------------------------- |
+| Full dashboard | unlimited (fills sidebar-subtracted area) |
+| Settings pages | 720px                                     |
+| Form pages     | 560px                                     |
+| Reading / docs | 680px                                     |
+| Wide tables    | 1200px                                    |
 
 ### Breakpoints
 
-| Name          | Width       | Key Changes                                         |
-| ------------- | ----------- | --------------------------------------------------- |
-| Mobile        | <640px      | Single column, reduced heading sizes, stacked cards |
-| Tablet        | 640-1024px  | 2-column grids, moderate padding                    |
-| Desktop       | 1024-1280px | Full layout, 3-column feature grids                 |
-| Large Desktop | >1280px     | Centered content with generous margins              |
+| Name    | Width       | Behavior                                       |
+| ------- | ----------- | ---------------------------------------------- |
+| Mobile  | < 640px     | Sidebar collapses to bottom nav, single column |
+| Tablet  | 640–1024px  | Sidebar icon-only (64px)                       |
+| Desktop | 1024–1440px | Full sidebar (240px), standard layout          |
+| Wide    | > 1440px    | Max content width, centered                    |
 
-### Touch Targets
+### Spacing Within Pages
 
-- Buttons use comfortable padding (8px-16px vertical)
-- Navigation links at 14px with adequate spacing
-- Badges have 6px horizontal padding minimum for tap targets
-- Mobile nav toggle with 6px radius button
+- Page padding: `32px` (desktop), `20px` (tablet), `16px` (mobile)
+- Between page sections: `32px`
+- Between cards in a grid: `16px`
+- Card internal padding: `24px` (default), `16px` (compact)
 
-### Collapsing Strategy
+---
 
-- Hero: 56px display -> 32px on mobile, weight 300 maintained
-- Navigation: horizontal links + CTAs -> hamburger toggle
-- Feature cards: 3-column -> 2-column -> single column stacked
-- Dark brand sections: maintain full-width treatment, reduce internal padding
-- Financial data tables: horizontal scroll on mobile
-- Section spacing: 64px+ -> 40px on mobile
-- Typography scale compresses: 56px -> 48px -> 32px hero sizes across breakpoints
+## 9. Icon System
 
-### Image Behavior
+- Library: **Lucide** (consistent with SaaS tools — clean, 24px grid, 1.5px stroke)
+- Default size: 16px in nav, 18px in headers, 14px inline
+- Stroke width: 1.5px (default)
+- Color: inherits from text token unless intentional (success/danger icons use functional colors)
+- Never fill icons — always stroke-only
 
-- Dashboard/product screenshots maintain blue-tinted shadow at all sizes
-- Hero gradient decorations simplify on mobile
-- Code blocks maintain `SourceCodePro` treatment, may horizontally scroll
-- Card images maintain consistent 4px-6px border-radius
+---
 
-## 9. Agent Prompt Guide
+## 10. Motion & Transitions
 
-### Quick Color Reference
+| Context                 | Duration | Easing                          |
+| ----------------------- | -------- | ------------------------------- |
+| Hover state (color, bg) | 150ms    | `ease`                          |
+| Focus ring appear       | 100ms    | `ease-out`                      |
+| Dropdown / popover open | 150ms    | `cubic-bezier(0.16, 1, 0.3, 1)` |
+| Modal enter             | 200ms    | `cubic-bezier(0.16, 1, 0.3, 1)` |
+| Modal exit              | 150ms    | `ease-in`                       |
+| Sidebar collapse        | 250ms    | `cubic-bezier(0.4, 0, 0.2, 1)`  |
+| Skeleton shimmer        | 1.5s     | `linear` (infinite)             |
 
-- Primary CTA: Stripe Purple (`#533afd`)
-- CTA Hover: Purple Dark (`#4434d4`)
-- Background: Pure White (`#ffffff`)
-- Heading text: Deep Navy (`#061b31`)
-- Body text: Slate (`#64748d`)
-- Label text: Dark Slate (`#273951`)
-- Border: Soft Blue (`#e5edf5`)
-- Link: Stripe Purple (`#533afd`)
-- Dark section: Brand Dark (`#1c1e54`)
-- Success: Green (`#15be53`)
-- Accent decorative: Ruby (`#ea2261`), Magenta (`#f96bee`)
+**Principle**: Fast micro-interactions (under 150ms), slightly slower entrance animations. Never animate layout shifts.
 
-### Example Component Prompts
+---
 
-- "Create a hero section on white background. Headline at 48px sohne-var weight 300, line-height 1.15, letter-spacing -0.96px, color #061b31, font-feature-settings 'ss01'. Subtitle at 18px weight 300, line-height 1.40, color #64748d. Purple CTA button (#533afd, 4px radius, 8px 16px padding, white text) and ghost button (transparent, 1px solid #b9b9f9, #533afd text, 4px radius)."
-- "Design a card: white background, 1px solid #e5edf5 border, 6px radius. Shadow: rgba(50,50,93,0.25) 0px 30px 45px -30px, rgba(0,0,0,0.1) 0px 18px 36px -18px. Title at 22px sohne-var weight 300, letter-spacing -0.22px, color #061b31, 'ss01'. Body at 16px weight 300, #64748d."
-- "Build a success badge: rgba(21,190,83,0.2) background, #108c3d text, 4px radius, 1px 6px padding, 10px sohne-var weight 300, border 1px solid rgba(21,190,83,0.4)."
-- "Create navigation: white sticky header with backdrop-filter blur(12px). sohne-var 14px weight 400 for links, #061b31 text, 'ss01'. Purple CTA 'Start now' right-aligned (#533afd bg, white text, 4px radius). Nav container 6px radius."
-- "Design a dark brand section: #1c1e54 background, white text. Headline 32px sohne-var weight 300, letter-spacing -0.64px, 'ss01'. Body 16px weight 300, rgba(255,255,255,0.7). Cards inside use rgba(255,255,255,0.1) border with 6px radius."
+## 11. Do's and Don'ts
 
-### Iteration Guide
+### Do
 
-1. Always enable `font-feature-settings: "ss01"` on sohne-var text -- this is the brand's typographic DNA
-2. Weight 300 is the default; use 400 only for buttons/links/navigation
-3. Shadow formula: `rgba(50,50,93,0.25) 0px Y1 B1 -S1, rgba(0,0,0,0.1) 0px Y2 B2 -S2` where Y1/B1 are larger (far shadow) and Y2/B2 are smaller (near shadow)
-4. Heading color is `#061b31` (deep navy), body is `#64748d` (slate), labels are `#273951` (dark slate)
-5. Border-radius stays in the 4px-8px range -- never use pill shapes or large rounding
-6. Use `"tnum"` for any numbers in tables, charts, or financial displays
-7. Dark sections use `#1c1e54` -- not black, not gray, but a deep branded indigo
-8. SourceCodePro for code at 12px/500 with 2.00 line-height (very generous for readability)
+- Reference semantic tokens (`--bg-surface`, `--text-primary`) — never hardcode hex in components
+- Use borders to define boundaries — reserve shadows for floating elements
+- Apply Inter's tabular numbers on all numeric data
+- Keep uppercase labels to system chrome only (nav section headers, table column chips)
+- Use `#0866FF` as the single CTA accent — don't introduce secondary accent colors
+- Maintain 4px spacing discipline — every gap is a multiple of 4
+- Use `−0.02em` letter-spacing on headings 28px and above
+- Respect both modes — test every new component in light and dark before shipping
+
+### Don't
+
+- Don't use pure black (`#000000`) or pure white (`#FFFFFF`) as the only dark mode surface
+- Don't use more than 2 weights in a single component
+- Don't use uppercase on button labels — only system chrome labels get uppercase
+- Don't mix functional colors for decoration (red is danger only, green is success only)
+- Don't add box-shadow to cards that already have a visible border
+- Don't go below 11px for any visible text — minimum font size is 11px (uppercase label)
+- Don't use the blue accent for non-interactive elements — it signals "clickable"
+- Don't use animations longer than 300ms — this is a tool, not a showcase
+
+---
+
+## 12. Agent Prompt Guide
+
+### Quick Token Reference
+
+**Light mode:**
+
+- Page bg: `#F8FAFC`, Surface: `#FFFFFF`, Border: `#E2E8F0`
+- Text: `#0F172A` (primary), `#475569` (secondary), `#94A3B8` (muted)
+
+**Dark mode:**
+
+- Page bg: `#0B1120`, Surface: `#101C33`, Border: `#1E3A5F`
+- Text: `#F1F5F9` (primary), `#94A3B8` (secondary), `#4A6380` (muted)
+
+**Always:**
+
+- Accent: `#0866FF` (hover `#0052CC`, active `#0040AA`)
+- Font: Inter, tabular-nums on all numbers
+- Focus ring: `0 0 0 3px rgba(8,102,255,0.25)`
+
+### Example Prompts
+
+- "Dashboard page: sidebar 240px with `#F8FAFC` bg and `1px solid #E2E8F0` right border. Main content area `32px` padding. Page title `28px Inter 600 #0F172A`. Primary CTA button `#0866FF`, `10px 20px` padding, `6px` radius, white Inter 500 text."
+- "Stat card grid: 3 columns, `16px` gap. Each card: white bg, `1px solid #E2E8F0` border, `8px` radius, `24px` padding. Label `11px uppercase 600 #94A3B8 0.06em tracking`. Value `32px 700 #0F172A tabular-nums`."
+- "Data table: header row `#F8FAFC` bg, `2px solid #E2E8F0` bottom border, `11px uppercase 600 #94A3B8`. Body rows `1px solid #E2E8F0` divider, `14px 400 #0F172A`, hover `#F8FAFC`."
+- "Badge component: `3px 8px` padding, `4px` radius, `11px uppercase 600`. Blue variant: bg `#EBF3FF` text `#0866FF`."
+- "Dark mode card: bg `#101C33`, border `1px solid #1E3A5F`, radius `8px`, `24px` padding. Title `18px 600 #F1F5F9`. Body `14px 400 #94A3B8`."
+- "Nav item active state: bg `#EBF3FF`, text `#0866FF`, icon `#0866FF`, `6px` radius, `36px` height, `0 12px` padding."
+
+---
+
+## 13. Tailwind CSS Token System
+
+### Rule: Zero Hardcoded Values in Class Names
+
+**Every color, every background, every border used in Tailwind classes MUST come from a semantic token — never a raw hex, never an arbitrary value.**
+
+```html
+<!-- ✅ CORRECT -->
+<div class="bg-surface text-primary border border-default rounded-lg p-6">
+  <!-- ❌ FORBIDDEN — never do this -->
+  <div
+    class="bg-[#FFFFFF] text-[#0F172A] border border-[#E2E8F0] rounded-lg p-6"
+  >
+    <div
+      class="bg-white text-slate-900 border border-slate-200 rounded-lg p-6"
+    ></div>
+  </div>
+</div>
+```
+
+The only exception: spacing, radius, and sizing values that map directly to Tailwind's default scale (`p-4`, `gap-2`, `rounded-lg`) are allowed. All **color values** must be tokens.
+
+---
+
+### Step 1 — CSS Custom Properties
+
+Define all tokens in your global CSS file. Light mode in `:root`, dark mode under `.dark` (Tailwind `darkMode: 'class'`).
+
+```css
+/* globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Backgrounds */
+    --bg-base: 248 250 252; /* #F8FAFC */
+    --bg-subtle: 241 245 249; /* #F1F5F9 */
+    --bg-surface: 255 255 255; /* #FFFFFF */
+    --bg-surface-raised: 241 245 249; /* #F1F5F9 */
+
+    /* Borders */
+    --border-default: 226 232 240; /* #E2E8F0 */
+    --border-strong: 203 213 225; /* #CBD5E1 */
+
+    /* Text */
+    --text-primary: 15 23 42; /* #0F172A */
+    --text-secondary: 71 85 105; /* #475569 */
+    --text-muted: 148 163 184; /* #94A3B8 */
+    --text-disabled: 203 213 225; /* #CBD5E1 */
+
+    /* Accent — Meta Blue */
+    --accent: 8 102 255; /* #0866FF */
+    --accent-hover: 0 82 204; /* #0052CC */
+    --accent-active: 0 64 170; /* #0040AA */
+    --accent-subtle: 235 243 255; /* #EBF3FF */
+    --accent-text: 255 255 255; /* #FFFFFF */
+
+    /* Functional */
+    --success: 16 185 129; /* #10B981 */
+    --success-bg: 236 253 245; /* #ECFDF5 */
+    --warning: 245 158 11; /* #F59E0B */
+    --warning-bg: 255 251 235; /* #FFFBEB */
+    --danger: 239 68 68; /* #EF4444 */
+    --danger-bg: 254 242 242; /* #FEF2F2 */
+  }
+
+  .dark {
+    /* Backgrounds */
+    --bg-base: 11 17 32; /* #0B1120 */
+    --bg-subtle: 15 26 46; /* #0F1A2E */
+    --bg-surface: 16 28 51; /* #101C33 */
+    --bg-surface-raised: 21 34 64; /* #152240 */
+
+    /* Borders */
+    --border-default: 30 58 95; /* #1E3A5F */
+    --border-strong: 42 79 122; /* #2A4F7A */
+
+    /* Text */
+    --text-primary: 241 245 249; /* #F1F5F9 */
+    --text-secondary: 148 163 184; /* #94A3B8 */
+    --text-muted: 74 99 128; /* #4A6380 */
+    --text-disabled: 36 58 85; /* #243A55 */
+
+    /* Accent — stays same hue, lightens slightly */
+    --accent: 8 102 255; /* #0866FF */
+    --accent-hover: 0 82 204; /* #0052CC */
+    --accent-active: 0 64 170; /* #0040AA */
+    --accent-subtle: 0 26 77; /* #001A4D */
+    --accent-text: 255 255 255;
+
+    /* Functional */
+    --success: 52 211 153; /* #34D399 */
+    --success-bg: 5 46 31; /* #052E1F */
+    --warning: 251 191 36; /* #FBBF24 */
+    --warning-bg: 45 27 0; /* #2D1B00 */
+    --danger: 248 113 113; /* #F87171 */
+    --danger-bg: 42 10 10; /* #2A0A0A */
+  }
+}
+```
+
+> **Why RGB triplets?** Tailwind's opacity modifier (`bg-surface/50`) requires the value to be channel numbers, not hex. Write `255 255 255` not `#FFFFFF`.
+
+---
+
+### Step 2 — tailwind.config.ts
+
+Map every CSS variable into a Tailwind color key. Use the `rgb(var(...) / <alpha-value>)` pattern so opacity modifiers work.
+
+```ts
+// tailwind.config.ts
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: "class",
+  content: ["./src/**/*.{ts,tsx}"],
+  theme: {
+    extend: {
+      colors: {
+        /* Backgrounds */
+        base: "rgb(var(--bg-base) / <alpha-value>)",
+        subtle: "rgb(var(--bg-subtle) / <alpha-value>)",
+        surface: "rgb(var(--bg-surface) / <alpha-value>)",
+        "surface-raised": "rgb(var(--bg-surface-raised) / <alpha-value>)",
+
+        /* Borders */
+        default: "rgb(var(--border-default) / <alpha-value>)",
+        strong: "rgb(var(--border-strong) / <alpha-value>)",
+
+        /* Text */
+        primary: "rgb(var(--text-primary) / <alpha-value>)",
+        secondary: "rgb(var(--text-secondary) / <alpha-value>)",
+        muted: "rgb(var(--text-muted) / <alpha-value>)",
+        disabled: "rgb(var(--text-disabled) / <alpha-value>)",
+
+        /* Accent */
+        accent: "rgb(var(--accent) / <alpha-value>)",
+        "accent-hover": "rgb(var(--accent-hover) / <alpha-value>)",
+        "accent-active": "rgb(var(--accent-active) / <alpha-value>)",
+        "accent-subtle": "rgb(var(--accent-subtle) / <alpha-value>)",
+        "accent-text": "rgb(var(--accent-text) / <alpha-value>)",
+
+        /* Functional */
+        success: "rgb(var(--success) / <alpha-value>)",
+        "success-bg": "rgb(var(--success-bg) / <alpha-value>)",
+        warning: "rgb(var(--warning) / <alpha-value>)",
+        "warning-bg": "rgb(var(--warning-bg) / <alpha-value>)",
+        danger: "rgb(var(--danger) / <alpha-value>)",
+        "danger-bg": "rgb(var(--danger-bg) / <alpha-value>)",
+      },
+      fontFamily: {
+        sans: ["Inter", "-apple-system", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "Menlo", "monospace"],
+      },
+      borderRadius: {
+        sm: "4px",
+        md: "6px",
+        lg: "8px",
+        xl: "12px",
+        "2xl": "16px",
+      },
+      boxShadow: {
+        raised: "0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.06)",
+        floating:
+          "0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.08)",
+        overlay:
+          "0 20px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.10)",
+        focus: "0 0 0 3px rgb(8 102 255 / 0.25)",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;
+```
+
+---
+
+### Step 3 — Class Name Mapping Reference
+
+Use this table to translate design tokens into Tailwind classes.
+
+| Intent                    | Tailwind Class                                          |
+| ------------------------- | ------------------------------------------------------- |
+| Page background           | `bg-base`                                               |
+| Sidebar / secondary bg    | `bg-subtle`                                             |
+| Card / panel              | `bg-surface`                                            |
+| Hovered card              | `bg-surface-raised`                                     |
+| Default border            | `border-default`                                        |
+| Strong border             | `border-strong`                                         |
+| Primary text              | `text-primary`                                          |
+| Secondary text            | `text-secondary`                                        |
+| Muted / timestamp         | `text-muted`                                            |
+| Disabled text             | `text-disabled`                                         |
+| Primary button bg         | `bg-accent`                                             |
+| Primary button hover      | `hover:bg-accent-hover`                                 |
+| Primary button active     | `active:bg-accent-active`                               |
+| Link / interactive accent | `text-accent`                                           |
+| Accent subtle bg (badge)  | `bg-accent-subtle`                                      |
+| Focus ring                | `focus-visible:shadow-focus focus-visible:outline-none` |
+| Success text              | `text-success`                                          |
+| Success background        | `bg-success-bg`                                         |
+| Warning text              | `text-warning`                                          |
+| Warning background        | `bg-warning-bg`                                         |
+| Danger text               | `text-danger`                                           |
+| Danger background         | `bg-danger-bg`                                          |
+
+---
+
+### Component Examples
+
+**Card**
+
+```html
+<div class="bg-surface border border-default rounded-lg p-6">
+  <h3 class="text-primary font-semibold text-lg">Title</h3>
+  <p class="text-secondary text-sm mt-1">Description text</p>
+</div>
+```
+
+**Primary Button**
+
+```html
+<button
+  class="
+  bg-accent hover:bg-accent-hover active:bg-accent-active
+  text-accent-text font-medium text-sm
+  px-5 py-2.5 rounded-md
+  focus-visible:outline-none focus-visible:shadow-focus
+  transition-colors duration-150
+"
+>
+  Save changes
+</button>
+```
+
+**Secondary Button**
+
+```html
+<button
+  class="
+  bg-transparent border border-default hover:border-strong hover:bg-surface-raised
+  text-primary font-medium text-sm
+  px-5 py-2.5 rounded-md
+  focus-visible:outline-none focus-visible:shadow-focus
+  transition-colors duration-150
+"
+>
+  Cancel
+</button>
+```
+
+**Text Input**
+
+```html
+<input
+  class="
+  w-full bg-surface border border-default hover:border-strong
+  focus:border-accent focus:shadow-focus
+  text-primary placeholder:text-muted text-sm
+  px-3 py-2.5 rounded-md
+  focus:outline-none transition-shadow duration-100
+"
+  placeholder="Enter value..."
+/>
+```
+
+**Badge — Blue**
+
+```html
+<span
+  class="bg-accent-subtle text-accent text-[11px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-sm"
+>
+  Active
+</span>
+```
+
+**Nav Item — Active**
+
+```html
+<a
+  class="flex items-center gap-2 h-9 px-3 rounded-md bg-accent-subtle text-accent text-sm font-medium"
+>
+  <Icon class="w-4 h-4" />
+  Dashboard
+</a>
+```
+
+**Stat Card**
+
+```html
+<div class="bg-surface border border-default rounded-lg p-6">
+  <p class="text-muted text-[11px] font-semibold uppercase tracking-widest">
+    Total Revenue
+  </p>
+  <p class="text-primary text-4xl font-bold tabular-nums mt-1">$48,295</p>
+  <p class="text-success text-sm font-medium mt-1">+12.5% from last month</p>
+</div>
+```
+
+---
+
+### AI Generation Rules (enforce these in every prompt)
+
+1. **Never use `bg-[#...]`, `text-[#...]`, `border-[#...]`** — always use a semantic token class
+2. **Never use Tailwind's built-in color palette** (`bg-white`, `text-slate-900`, `border-gray-200`) — they bypass the token system and break dark mode
+3. **For dark mode**: add the `.dark` class to `<html>` — do NOT use `dark:` prefixed classes on individual elements unless overriding a specific token behavior
+4. **Opacity modifiers are allowed**: `bg-surface/80`, `text-primary/60` — these work because tokens are defined as RGB triplets
+5. **Spacing, sizing, radius**: use Tailwind's default scale freely (`p-4`, `gap-3`, `rounded-lg`, `w-full`)
+6. **Hardcoded exceptions** (the only ones allowed):
+   - `text-[11px]` — Tailwind has no `text-11` step
+   - `tracking-[0.06em]` — custom letter-spacing for uppercase labels
+   - `tabular-nums` — numeric alignment utility

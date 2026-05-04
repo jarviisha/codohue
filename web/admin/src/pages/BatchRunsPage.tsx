@@ -14,41 +14,39 @@ interface PhaseRowProps {
 }
 
 function PhaseRow({ label, ok, durMs, counts, error, skipped }: PhaseRowProps) {
-  const dimText = { color: '#64748d', fontSize: '12px', fontWeight: 300 }
-
   if (skipped) {
     return (
-      <tr style={{ borderTop: '1px solid #e5edf5' }}>
-        <td style={{ ...phaseTdStyle, color: '#273951' }}>{label}</td>
-        <td colSpan={3} style={{ ...dimText, padding: '6px 12px', fontStyle: 'italic' }}>skipped</td>
+      <tr className="border-t border-default">
+        <td className="px-3 py-1.5 text-[11px] text-primary w-[110px]">{label}</td>
+        <td colSpan={3} className="px-3 py-1.5 text-xs text-muted italic">skipped</td>
       </tr>
     )
   }
   if (ok == null) {
     return (
-      <tr style={{ borderTop: '1px solid #e5edf5' }}>
-        <td style={{ ...phaseTdStyle, color: '#273951' }}>{label}</td>
-        <td colSpan={3} style={{ ...dimText, padding: '6px 12px', fontStyle: 'italic' }}>no data</td>
+      <tr className="border-t border-default">
+        <td className="px-3 py-1.5 text-[11px] text-primary w-[110px]">{label}</td>
+        <td colSpan={3} className="px-3 py-1.5 text-xs text-muted italic">no data</td>
       </tr>
     )
   }
   return (
-    <tr style={{ borderTop: '1px solid #e5edf5' }}>
-      <td style={{ ...phaseTdStyle, color: '#273951' }}>{label}</td>
-      <td style={{ padding: '6px 12px', fontSize: '12px' }}>
+    <tr className="border-t border-default">
+      <td className="px-3 py-1.5 text-[11px] text-primary w-[110px]">{label}</td>
+      <td className="px-3 py-1.5 text-xs font-medium">
         {ok
-          ? <span style={{ color: '#108c3d', fontWeight: 400 }}>✓ OK</span>
-          : <span style={{ color: '#ea2261', fontWeight: 400 }}>✗ Failed</span>}
+          ? <span className="text-success">✓ OK</span>
+          : <span className="text-danger">✗ Failed</span>}
       </td>
-      <td style={{ ...dimText, padding: '6px 12px' }} className="tabular-nums">
+      <td className="px-3 py-1.5 text-xs text-muted tabular-nums">
         {durMs != null ? `${durMs} ms` : '—'}
       </td>
-      <td style={{ ...dimText, padding: '6px 12px' }} className="tabular-nums">
+      <td className="px-3 py-1.5 text-xs text-muted tabular-nums">
         {counts.map(c => c.value != null ? `${c.label}: ${c.value}` : null).filter(Boolean).join('  ·  ')}
         {error && (
           <details className="mt-0.5">
-            <summary className="cursor-pointer" style={{ color: '#ea2261', fontSize: '11px' }}>error</summary>
-            <pre className="mt-1 whitespace-pre-wrap" style={{ color: '#ea2261', fontFamily: "'Source Code Pro', monospace", fontSize: '11px' }}>{error}</pre>
+            <summary className="cursor-pointer text-danger text-[11px]">error</summary>
+            <pre className="mt-1 whitespace-pre-wrap text-danger font-mono text-[11px]">{error}</pre>
           </details>
         )}
       </td>
@@ -72,26 +70,14 @@ export default function BatchRunsPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
-        <h2
-          className="font-light text-[#061b31] m-0"
-          style={{ fontSize: '26px', letterSpacing: '-0.26px', lineHeight: 1.12 }}
-        >
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
           Batch Runs
         </h2>
         <select
           value={nsFilter}
           onChange={e => setNsFilter(e.target.value)}
-          className="text-sm font-normal outline-none"
-          style={{
-            padding: '6px 12px',
-            border: '1px solid #e5edf5',
-            borderRadius: '4px',
-            color: '#061b31',
-            background: '#fff',
-          }}
-          onFocus={e => { e.target.style.borderColor = '#533afd' }}
-          onBlur={e => { e.target.style.borderColor = '#e5edf5' }}
+          className="bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary text-sm px-3 py-2 rounded-md focus:outline-none transition-shadow duration-100"
         >
           <option value="">All namespaces</option>
           {nsData?.namespaces.map(ns => (
@@ -101,15 +87,12 @@ export default function BatchRunsPage() {
       </div>
 
       {error && <ErrorBanner message="Failed to load batch runs." />}
-      {isLoading && <p className="text-sm text-[#64748d] font-light">Loading…</p>}
+      {isLoading && <p className="text-sm text-muted">Loading…</p>}
 
       {data && data.runs.length === 0 && (
-        <div
-          className="p-10 text-center text-sm text-[#64748d] font-light"
-          style={{ border: '1px dashed #d6d9fc', borderRadius: '6px' }}
-        >
+        <div className="p-10 text-center text-sm text-muted border border-dashed border-default rounded-lg">
           No runs yet — run{' '}
-          <code style={{ fontFamily: "'Source Code Pro', monospace", fontSize: '12px', background: '#f5f6ff', padding: '1px 6px', borderRadius: '3px', color: '#533afd' }}>
+          <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm">
             make run-cron
           </code>{' '}
           to populate batch history.
@@ -117,21 +100,18 @@ export default function BatchRunsPage() {
       )}
 
       {data && data.runs.length > 0 && (
-        <div
-          className="bg-white overflow-hidden"
-          style={{ border: '1px solid #e5edf5', borderRadius: '6px', boxShadow: 'rgba(23,23,23,0.06) 0px 3px 6px' }}
-        >
+        <div className="bg-surface border border-default rounded-lg overflow-hidden">
           <table className="w-full border-collapse">
             <thead>
-              <tr style={{ borderBottom: '1px solid #e5edf5' }}>
-                <th style={thStyle}></th>
-                <th style={thStyle}>ID</th>
-                <th style={thStyle}>Namespace</th>
-                <th style={thStyle}>Started</th>
-                <th style={thStyle}>Duration</th>
-                <th style={thStyle}>Subjects</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}></th>
+              <tr className="bg-subtle border-b-2 border-default">
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted w-8"></th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">ID</th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Namespace</th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Started</th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Duration</th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Subjects</th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Status</th>
+                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"></th>
               </tr>
             </thead>
             <tbody>
@@ -143,61 +123,49 @@ export default function BatchRunsPage() {
 
                 return (
                   <>
-                    <tr key={run.id} style={{ borderBottom: '1px solid #e5edf5' }}>
-                      <td style={tdStyle}>
+                    <tr key={run.id} className="border-b border-default hover:bg-surface-raised">
+                      <td className="px-4 py-3">
                         {hasPhases && (
                           <button
                             onClick={() => toggleRow(run.id)}
-                            className="cursor-pointer transition-colors"
-                            style={{
-                              background: 'transparent',
-                              border: 'none',
-                              color: expanded ? '#533afd' : '#64748d',
-                              fontSize: '12px',
-                              width: '20px',
-                              textAlign: 'center',
-                              padding: 0,
-                            }}
+                            className={`cursor-pointer bg-transparent border-0 text-xs w-5 text-center p-0 transition-colors ${expanded ? 'text-accent' : 'text-muted'}`}
                             title="Toggle phase breakdown"
                           >
                             {expanded ? '▾' : '▸'}
                           </button>
                         )}
                       </td>
-                      <td style={{ ...tdStyle, ...monoStyle }} className="tabular-nums">{run.id}</td>
-                      <td style={tdStyle}>
-                        <code style={{ fontFamily: "'Source Code Pro', monospace", fontSize: '12px', background: '#f5f6ff', padding: '1px 6px', borderRadius: '3px', color: '#533afd', fontWeight: 500 }}>
+                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{run.id}</td>
+                      <td className="px-4 py-3 text-sm">
+                        <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium">
                           {run.namespace}
                         </code>
                       </td>
-                      <td style={{ ...tdStyle, ...monoStyle }} className="tabular-nums">{new Date(run.started_at).toLocaleString()}</td>
-                      <td style={{ ...tdStyle, ...monoStyle }} className="tabular-nums">
+                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{new Date(run.started_at).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
                         {run.duration_ms != null
                           ? `${run.duration_ms} ms`
                           : run.completed_at
                             ? '–'
-                            : <em style={{ color: '#64748d', fontStyle: 'italic' }}>in progress</em>}
+                            : <em className="text-muted not-italic text-accent">in progress</em>}
                       </td>
-                      <td style={{ ...tdStyle, ...monoStyle }} className="tabular-nums">{run.subjects_processed}</td>
-                      <td style={tdStyle}>
+                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{run.subjects_processed}</td>
+                      <td className="px-4 py-3 text-sm">
                         {run.success ? (
-                          <span style={{ color: '#108c3d', fontWeight: 400, fontSize: '13px' }}>✓ OK</span>
+                          <span className="text-success font-medium">✓ OK</span>
                         ) : run.completed_at ? (
                           <details>
-                            <summary className="cursor-pointer" style={{ color: '#ea2261', fontWeight: 400, fontSize: '13px' }}>✗ Failed</summary>
-                            <pre className="mt-1 whitespace-pre-wrap" style={{ color: '#ea2261', fontFamily: "'Source Code Pro', monospace", fontSize: '11px' }}>{run.error_message}</pre>
+                            <summary className="cursor-pointer text-danger font-medium">✗ Failed</summary>
+                            <pre className="mt-1 whitespace-pre-wrap text-danger font-mono text-[11px]">{run.error_message}</pre>
                           </details>
                         ) : (
-                          <span style={{ color: '#533afd', fontSize: '13px' }}>⟳ Running</span>
+                          <span className="text-accent font-medium">⟳ Running</span>
                         )}
                       </td>
-                      <td style={tdStyle}>
+                      <td className="px-4 py-3">
                         <Link
                           to={`/namespaces/${run.namespace}`}
-                          className="no-underline text-xs transition-colors"
-                          style={{ color: '#533afd' }}
-                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#4434d4' }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#533afd' }}
+                          className="no-underline text-xs font-medium text-accent hover:text-accent-hover transition-colors"
                         >
                           vector stats →
                         </Link>
@@ -205,15 +173,15 @@ export default function BatchRunsPage() {
                     </tr>
 
                     {expanded && (
-                      <tr key={`${run.id}-phases`} style={{ borderBottom: '1px solid #e5edf5', background: '#fafbff' }}>
-                        <td colSpan={8} style={{ padding: '8px 20px 12px' }}>
-                          <table className="w-full border-collapse" style={{ border: '1px solid #e5edf5', borderRadius: '4px', overflow: 'hidden' }}>
+                      <tr key={`${run.id}-phases`} className="border-b border-default">
+                        <td colSpan={8} className="px-5 py-3 bg-subtle">
+                          <table className="w-full border-collapse border border-default rounded-lg overflow-hidden">
                             <thead>
-                              <tr style={{ background: '#f5f6ff', borderBottom: '1px solid #e5edf5' }}>
-                                <th style={{ ...phaseTdStyle, color: '#273951', fontWeight: 400 }}>Phase</th>
-                                <th style={{ padding: '5px 12px', textAlign: 'left', fontSize: '11px', color: '#273951', fontWeight: 400 }}>Result</th>
-                                <th style={{ padding: '5px 12px', textAlign: 'left', fontSize: '11px', color: '#273951', fontWeight: 400 }}>Duration</th>
-                                <th style={{ padding: '5px 12px', textAlign: 'left', fontSize: '11px', color: '#273951', fontWeight: 400 }}>Counts</th>
+                              <tr className="bg-surface border-b border-default">
+                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted w-[110px]">Phase</th>
+                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Result</th>
+                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Duration</th>
+                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Counts</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -260,34 +228,4 @@ export default function BatchRunsPage() {
       )}
     </div>
   )
-}
-
-const thStyle: React.CSSProperties = {
-  padding: '10px 16px',
-  textAlign: 'left',
-  fontSize: '12px',
-  fontWeight: 400,
-  color: '#64748d',
-  letterSpacing: '0.02em',
-}
-
-const tdStyle: React.CSSProperties = {
-  padding: '10px 16px',
-  fontSize: '13px',
-  color: '#273951',
-  fontWeight: 300,
-}
-
-const monoStyle: React.CSSProperties = {
-  fontFamily: "'Source Code Pro', monospace",
-  fontWeight: 500,
-  fontSize: '12px',
-}
-
-const phaseTdStyle: React.CSSProperties = {
-  padding: '6px 12px',
-  textAlign: 'left',
-  fontSize: '11px',
-  fontWeight: 400,
-  width: '110px',
 }

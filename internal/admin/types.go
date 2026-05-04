@@ -186,6 +186,42 @@ type QdrantStatsResponse struct {
 	Collections map[string]QdrantCollectionStat `json:"collections"`
 }
 
+// TriggerBatchResponse is returned when an on-demand batch run completes.
+type TriggerBatchResponse struct {
+	BatchRunID int64  `json:"batch_run_id"`
+	Namespace  string `json:"namespace"`
+	StartedAt  string `json:"started_at"`
+	DurationMs int    `json:"duration_ms"`
+	Success    bool   `json:"success"`
+}
+
+// EventSummary is a single event row for the admin events list.
+type EventSummary struct {
+	ID         int64   `json:"id"`
+	Namespace  string  `json:"namespace"`
+	SubjectID  string  `json:"subject_id"`
+	ObjectID   string  `json:"object_id"`
+	Action     string  `json:"action"`
+	Weight     float64 `json:"weight"`
+	OccurredAt string  `json:"occurred_at"`
+}
+
+// EventsListResponse wraps a page of events with pagination metadata.
+type EventsListResponse struct {
+	Events []EventSummary `json:"events"`
+	Total  int            `json:"total"`
+	Limit  int            `json:"limit"`
+	Offset int            `json:"offset"`
+}
+
+// InjectEventRequest is the payload for the admin event injection endpoint.
+type InjectEventRequest struct {
+	SubjectID  string  `json:"subject_id"`
+	ObjectID   string  `json:"object_id"`
+	Action     string  `json:"action"`
+	OccurredAt *string `json:"occurred_at,omitempty"`
+}
+
 // SubjectStats holds raw DB data for a subject used internally by Service.
 type SubjectStats struct {
 	InteractionCount int

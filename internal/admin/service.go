@@ -1,16 +1,21 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/compute"
 )
 
 // adminRepo is the repository interface used by Service.
@@ -21,6 +26,7 @@ type adminRepo interface {
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
+	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
 }
 
 // Service implements admin business logic.
@@ -31,10 +37,12 @@ type Service struct {
 	redisClient  *goredis.Client
 	qdrantClient *qdrant.Client
 	httpClient   *http.Client
+	job          *compute.Job
+	runningBatch sync.Map // keyed by namespace name; prevents concurrent batch triggers
 }
 
 // NewService creates a new Service.
-func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client) *Service {
+func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job *compute.Job) *Service {
 	return &Service{
 		repo:         repo,
 		apiURL:       apiURL,
@@ -42,6 +50,7 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 		redisClient:  redisClient,
 		qdrantClient: qdrantClient,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
+		job:          job,
 	}
 }
 
@@ -351,4 +360,108 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 		CacheTTLSec: ttl,
 		GeneratedAt: raw.GeneratedAt,
 	}, nil
+}
+
+// errBatchRunning is returned when a concurrent batch trigger is attempted for the same namespace.
+var errBatchRunning = errors.New("batch already in progress")
+
+// TriggerBatch runs all batch phases for a namespace synchronously.
+// Returns 409-style errBatchRunning if a batch is already in progress for that namespace.
+// Returns 404-style nil,nil from GetNamespace when namespace does not exist.
+func (s *Service) TriggerBatch(ctx context.Context, ns string) (*TriggerBatchResponse, error) {
+	nsConfig, err := s.repo.GetNamespace(ctx, ns)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace: %w", err)
+	}
+	if nsConfig == nil {
+		return nil, nil // caller maps nil,nil → 404
+	}
+
+	if _, loaded := s.runningBatch.LoadOrStore(ns, true); loaded {
+		return nil, fmt.Errorf("%w for namespace %s", errBatchRunning, ns)
+	}
+	defer s.runningBatch.Delete(ns)
+
+	batchCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	start := time.Now()
+	s.job.RunNamespace(batchCtx, ns)
+
+	logs, err := s.repo.GetBatchRunLogs(ctx, ns, 1)
+	if err != nil || len(logs) == 0 {
+		return &TriggerBatchResponse{
+			Namespace:  ns,
+			StartedAt:  start.UTC().Format(time.RFC3339),
+			DurationMs: int(time.Since(start).Milliseconds()),
+			Success:    true,
+		}, nil
+	}
+
+	log := logs[0]
+	durMs := 0
+	if log.DurationMs != nil {
+		durMs = *log.DurationMs
+	}
+	return &TriggerBatchResponse{
+		BatchRunID: log.ID,
+		Namespace:  ns,
+		StartedAt:  log.StartedAt.UTC().Format(time.RFC3339),
+		DurationMs: durMs,
+		Success:    log.Success,
+	}, nil
+}
+
+// GetRecentEvents returns a paginated list of events for a namespace, newest first.
+func (s *Service) GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	events, total, err := s.repo.GetRecentEvents(ctx, ns, limit, offset, subjectID)
+	if err != nil {
+		return nil, fmt.Errorf("get recent events: %w", err)
+	}
+	return &EventsListResponse{
+		Events: events,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+	}, nil
+}
+
+// InjectEvent proxies a test event injection to cmd/api.
+func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error {
+	if req.OccurredAt == nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		req.OccurredAt = &now
+	}
+
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal inject event: %w", err)
+	}
+
+	url := s.apiURL + "/v1/namespaces/" + ns + "/events"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("build inject event request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
+
+	resp, err := s.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("inject event proxy: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
+
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // best-effort read for error context
+		return fmt.Errorf("inject event upstream returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
 }

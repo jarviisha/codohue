@@ -16,10 +16,13 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/jarviisha/codohue/internal/admin"
+	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/idmap"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
+	"github.com/jarviisha/codohue/internal/nsconfig"
 	adminui "github.com/jarviisha/codohue/web/admin"
 )
 
@@ -61,8 +64,18 @@ func run() error {
 		qdrantClient = nil
 	}
 
+	idmapRepo := idmap.NewRepository(db)
+	idmapSvc := idmap.NewService(idmapRepo)
+
+	nsConfigRepo := nsconfig.NewRepository(db)
+	nsConfigSvc := nsconfig.NewService(nsConfigRepo)
+
+	computeRepo := compute.NewRepository(db)
+	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
+	job := compute.NewJob(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, 5)
+
 	repo := admin.NewRepository(db)
-	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient)
+	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient, job)
 	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
 
 	r := chi.NewRouter()
@@ -86,6 +99,9 @@ func run() error {
 		r.Get("/api/admin/v1/trending/{ns}", h.GetTrending)
 		r.Get("/api/admin/v1/subjects/{ns}/{id}/profile", h.GetSubjectProfile)
 		r.Get("/api/admin/v1/namespaces/{ns}/qdrant-stats", h.GetQdrantStats)
+		r.Post("/api/admin/v1/namespaces/{ns}/batch-runs/trigger", h.TriggerBatch)
+		r.Get("/api/admin/v1/namespaces/{ns}/events", h.GetRecentEvents)
+		r.Post("/api/admin/v1/namespaces/{ns}/events", h.InjectEvent)
 	})
 
 	// Static file serving — React SPA embedded in the binary

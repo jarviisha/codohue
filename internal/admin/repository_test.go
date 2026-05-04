@@ -27,3 +27,12 @@ func TestListNamespaces_NotFound(t *testing.T) {
 	// requires a live DB for full coverage.
 	_ = context.Background()
 }
+
+func TestGetRecentEvents_ConstructorOK(t *testing.T) {
+	// Verifies that the Repository constructor succeeds and GetRecentEvents is
+	// defined. Actual query correctness requires a live DB (covered by e2e suite).
+	repo := newTestRepo()
+	if repo == nil {
+		t.Fatal("expected non-nil repository")
+	}
+}

@@ -153,6 +153,9 @@ Each capability is available under two URL styles: a legacy query-param style an
 | `POST`   | `/api/admin/v1/recommend/debug`        | session       | Debug recommendations for a subject                       |
 | `GET`    | `/api/admin/v1/subjects/{ns}/{id}/profile` | session   | Subject profile: interaction count, seen items, sparse vector NNZ |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/qdrant-stats` | session | Points count for `{ns}_subjects/objects/subjects_dense/objects_dense` |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/batch-runs/trigger` | session | Run batch phases for namespace immediately (synchronous) |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/events`     | session       | Paginated recent events (`?limit=&offset=&subject_id=`)           |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/events`     | session       | Inject a test event (proxied to `cmd/api`)                        |
 
 ### Database Schema
 
@@ -201,5 +204,5 @@ Every file that contains business logic (`service.go`, `repository.go`, `job.go`
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/001-web-admin-dashboard/plan.md
+at specs/002-admin-pipeline-controls/plan.md
 <!-- SPECKIT END -->
