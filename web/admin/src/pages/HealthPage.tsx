@@ -1,6 +1,7 @@
 import { useHealth } from '../hooks/useHealth'
 import StatusCard from '../components/StatusCard'
 import ErrorBanner from '../components/ErrorBanner'
+import { PageHeader } from '../components/ui'
 
 export default function HealthPage() {
   const { data, error, isLoading, dataUpdatedAt } = useHealth()
@@ -18,11 +19,7 @@ export default function HealthPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
-          System Health
-        </h2>
-      </div>
+      <PageHeader title="System Health" />
 
       {error && <ErrorBanner message="Could not reach the admin server." />}
       {isLoading && <p className="text-sm text-muted">Checking health…</p>}

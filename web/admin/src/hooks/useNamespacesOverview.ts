@@ -1,21 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../services/api'
-import type { BatchRunLog } from './useBatchRuns'
-import type { NamespaceConfig } from './useNamespaces'
-
-export type NamespaceStatus = 'active' | 'idle' | 'degraded' | 'cold'
-
-export interface NamespaceHealth {
-  config: NamespaceConfig
-  status: NamespaceStatus
-  active_events_24h: number
-  last_run: BatchRunLog | null
-}
+import { adminApi } from '../services/adminApi'
+import { queryKeys } from '../services/queryKeys'
 
 export function useNamespacesOverview() {
-  return useQuery<{ namespaces: NamespaceHealth[] }>({
-    queryKey: ['namespaces-overview'],
-    queryFn: () => api.get('/api/admin/v1/namespaces/overview'),
+  return useQuery({
+    queryKey: queryKeys.namespaces.overview(),
+    queryFn: adminApi.getNamespacesOverview,
     refetchInterval: 60_000,
   })
 }

@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useNamespacesOverview, type NamespaceHealth, type NamespaceStatus } from '../hooks/useNamespacesOverview'
+import { useNamespacesOverview } from '../hooks/useNamespacesOverview'
 import { useTriggerBatch } from '../hooks/useTriggerBatch'
 import ErrorBanner from '../components/ErrorBanner'
+import type { NamespaceHealth, NamespaceStatus } from '../types'
+import { Button, CodeBadge, EmptyState, PageHeader } from '../components/ui'
 
 const STATUS_META: Record<NamespaceStatus, { label: string; wrap: string; dot: string; text: string }> = {
   active:   { label: 'Active',   wrap: 'bg-success-bg border border-success/30',  dot: 'bg-success', text: 'text-success' },
@@ -30,7 +32,7 @@ function LastRunSummary({ health }: { health: NamespaceHealth }) {
     <span className="text-xs text-muted tabular-nums">
       {when} · {dur}
       {!run.success && run.error_message && (
-        <span className="ml-1 text-danger" title={run.error_message}>⚠</span>
+      <span className="ml-1 text-danger" title={run.error_message}>!</span>
       )}
     </span>
   )
@@ -62,19 +64,20 @@ function RunNowButton({ ns }: { ns: string }) {
   if (showDone) {
     return (
       <span className="flex-1 text-center py-1.5 px-3 text-sm font-semibold text-success bg-success-bg border border-success/30 rounded-md">
-        Done ✓
+        Done
       </span>
     )
   }
 
   return (
-    <button
+    <Button
       onClick={handleClick}
       disabled={trigger.isPending}
-      className="flex-1 py-1.5 px-3 text-sm font-medium cursor-pointer transition-colors duration-150 bg-transparent border border-default hover:border-strong hover:bg-surface-raised text-primary rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
+      size="sm"
+      className="flex-1"
     >
       {trigger.isPending ? 'Running…' : 'Run now'}
-    </button>
+    </Button>
   )
 }
 
@@ -86,9 +89,7 @@ function NamespaceCard({ health, onEdit }: { health: NamespaceHealth; onEdit: ()
   return (
     <div className={`bg-surface flex flex-col gap-4 p-5 rounded-lg border transition-shadow duration-150 hover:shadow-floating ${degraded ? 'border-danger/30' : 'border-default'}`}>
       <div className="flex justify-between items-start gap-2">
-        <code className="text-sm font-medium text-primary font-mono break-all">
-          {ns.namespace}
-        </code>
+        <CodeBadge className="text-sm text-primary break-all">{ns.namespace}</CodeBadge>
         <StatusBadge status={status} />
       </div>
 
@@ -115,12 +116,13 @@ function NamespaceCard({ health, onEdit }: { health: NamespaceHealth; onEdit: ()
       </div>
 
       <div className="flex gap-2">
-        <button
+        <Button
           onClick={onEdit}
-          className="flex-1 py-1.5 px-3 text-sm font-medium cursor-pointer transition-colors duration-150 bg-transparent border border-default hover:border-strong hover:bg-surface-raised text-primary rounded-md"
+          size="sm"
+          className="flex-1"
         >
           Edit config
-        </button>
+        </Button>
         <a
           href={`/namespaces/${ns.namespace}`}
           onClick={e => { e.preventDefault(); onEdit() }}
@@ -163,25 +165,22 @@ export default function NamespacesPage() {
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
-          Namespaces
-        </h2>
-        <button
-          onClick={() => navigate('/namespaces/new')}
-          className="bg-accent hover:bg-accent-hover active:bg-accent-active text-accent-text font-medium text-sm px-5 py-2.5 rounded-md border-0 cursor-pointer transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-focus"
-        >
-          + Create Namespace
-        </button>
-      </div>
+      <PageHeader
+        title="Namespaces"
+        actions={(
+          <Button variant="primary" onClick={() => navigate('/namespaces/new')}>
+            + Create Namespace
+          </Button>
+        )}
+      />
 
       {error && <ErrorBanner message="Failed to load namespaces." />}
       {isLoading && <p className="text-sm text-muted">Loading…</p>}
 
       {data && data.namespaces.length === 0 && (
-        <div className="p-10 text-center text-sm text-muted border border-dashed border-default rounded-lg">
+        <EmptyState>
           No namespaces yet — create one to get started.
-        </div>
+        </EmptyState>
       )}
 
       {data && data.namespaces.length > 0 && (

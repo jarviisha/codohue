@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { login, ApiError } from '../services/api'
+import { Button, Field, inputClass } from '../components/ui'
 
 export default function LoginPage() {
   const [apiKey, setApiKey] = useState('')
@@ -45,27 +46,25 @@ export default function LoginPage() {
             </div>
           )}
 
-          <div className="mb-5">
-            <label className="block mb-1.5 text-[13px] font-medium text-primary">
-              API Key
-            </label>
+          <Field label="API Key" className="mb-5">
             <input
               type="password"
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
               placeholder="Enter RECOMMENDER_API_KEY"
               required
-              className="w-full bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary placeholder:text-muted text-sm px-3 py-2.5 rounded-md focus:outline-none transition-shadow duration-100"
+              className={`${inputClass} w-full py-2.5`}
             />
-          </div>
+          </Field>
 
-          <button
+          <Button
             type="submit"
+            variant="primary"
             disabled={loading}
-            className="w-full py-2.5 text-sm font-medium text-accent-text bg-accent hover:bg-accent-hover active:bg-accent-active rounded-md border-0 cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus"
+            className="w-full"
           >
             {loading ? 'Signing in…' : 'Sign in'}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import NavLink from './NavLink'
 import { logout } from '../services/api'
+import { navRoutesForSection, navSections } from '../routes'
 
 function SunIcon() {
   return (
@@ -59,19 +60,17 @@ export default function Layout() {
           </button>
         </div>
 
-        {/* Nav items */}
         <div className="flex flex-col flex-1 px-3 py-4 gap-0.5 overflow-y-auto">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted px-3 pt-1 pb-1.5">System</p>
-          <NavLink to="/health">System Health</NavLink>
-
-          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted px-3 pt-4 pb-1.5">Config</p>
-          <NavLink to="/namespaces">Namespaces</NavLink>
-
-          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted px-3 pt-4 pb-1.5">Operations</p>
-          <NavLink to="/batch-runs">Batch Runs</NavLink>
-          <NavLink to="/events">Events</NavLink>
-          <NavLink to="/trending">Trending</NavLink>
-          <NavLink to="/debug">Recommend Debug</NavLink>
+          {navSections.map((section, index) => (
+            <div key={section}>
+              <p className={`text-[11px] font-semibold uppercase tracking-[0.06em] text-muted px-3 pb-1.5 ${index === 0 ? 'pt-1' : 'pt-4'}`}>
+                {section}
+              </p>
+              {navRoutesForSection(section).map(route => (
+                <NavLink key={route.path} to={`/${route.path}`}>{route.label}</NavLink>
+              ))}
+            </div>
+          ))}
         </div>
 
         {/* Sign out */}

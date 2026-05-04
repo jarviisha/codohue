@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 import { useBatchRuns } from '../hooks/useBatchRuns'
 import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
+import { CodeBadge, EmptyState, PageHeader, inputClass } from '../components/ui'
+import type { BatchRunLog } from '../types'
 
 interface PhaseRowProps {
   label: string
@@ -63,40 +65,42 @@ export default function BatchRunsPage() {
   function toggleRow(id: number) {
     setExpandedRows(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
       return next
     })
   }
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-8">
-        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
-          Batch Runs
-        </h2>
-        <select
-          value={nsFilter}
-          onChange={e => setNsFilter(e.target.value)}
-          className="bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary text-sm px-3 py-2 rounded-md focus:outline-none transition-shadow duration-100"
-        >
-          <option value="">All namespaces</option>
-          {nsData?.namespaces.map(ns => (
-            <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Batch Runs"
+        actions={(
+          <select
+            value={nsFilter}
+            onChange={e => setNsFilter(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">All namespaces</option>
+            {nsData?.namespaces.map(ns => (
+              <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
+            ))}
+          </select>
+        )}
+      />
 
       {error && <ErrorBanner message="Failed to load batch runs." />}
       {isLoading && <p className="text-sm text-muted">Loading…</p>}
 
       {data && data.runs.length === 0 && (
-        <div className="p-10 text-center text-sm text-muted border border-dashed border-default rounded-lg">
+        <EmptyState>
           No runs yet — run{' '}
-          <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm">
-            make run-cron
-          </code>{' '}
+          <CodeBadge>make run-cron</CodeBadge>{' '}
           to populate batch history.
-        </div>
+        </EmptyState>
       )}
 
       {data && data.runs.length > 0 && (
@@ -137,9 +141,7 @@ export default function BatchRunsPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{run.id}</td>
                       <td className="px-4 py-3 text-sm">
-                        <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium">
-                          {run.namespace}
-                        </code>
+                        <CodeBadge>{run.namespace}</CodeBadge>
                       </td>
                       <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{new Date(run.started_at).toLocaleString()}</td>
                       <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
@@ -151,16 +153,7 @@ export default function BatchRunsPage() {
                       </td>
                       <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{run.subjects_processed}</td>
                       <td className="px-4 py-3 text-sm">
-                        {run.success ? (
-                          <span className="text-success font-medium">✓ OK</span>
-                        ) : run.completed_at ? (
-                          <details>
-                            <summary className="cursor-pointer text-danger font-medium">✗ Failed</summary>
-                            <pre className="mt-1 whitespace-pre-wrap text-danger font-mono text-[11px]">{run.error_message}</pre>
-                          </details>
-                        ) : (
-                          <span className="text-accent font-medium">⟳ Running</span>
-                        )}
+                        <RunStatus run={run} />
                       </td>
                       <td className="px-4 py-3">
                         <Link
@@ -175,47 +168,11 @@ export default function BatchRunsPage() {
                     {expanded && (
                       <tr key={`${run.id}-phases`} className="border-b border-default">
                         <td colSpan={8} className="px-5 py-3 bg-subtle">
-                          <table className="w-full border-collapse border border-default rounded-lg overflow-hidden">
-                            <thead>
-                              <tr className="bg-surface border-b border-default">
-                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted w-[110px]">Phase</th>
-                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Result</th>
-                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Duration</th>
-                                <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Counts</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <PhaseRow
-                                label="1 · Sparse CF"
-                                ok={run.phase1_ok}
-                                durMs={run.phase1_duration_ms}
-                                counts={[
-                                  { label: 'subjects', value: run.phase1_subjects },
-                                  { label: 'objects', value: run.phase1_objects },
-                                ]}
-                                error={run.phase1_error}
-                              />
-                              <PhaseRow
-                                label="2 · Dense"
-                                ok={run.phase2_ok}
-                                durMs={run.phase2_duration_ms}
-                                counts={[
-                                  { label: 'items', value: run.phase2_items },
-                                  { label: 'subjects', value: run.phase2_subjects },
-                                ]}
-                                error={run.phase2_error}
-                                skipped={phase2Skipped}
-                              />
-                              <PhaseRow
-                                label="3 · Trending"
-                                ok={run.phase3_ok}
-                                durMs={run.phase3_duration_ms}
-                                counts={[{ label: 'items', value: run.phase3_items }]}
-                                error={run.phase3_error}
-                                skipped={phase3Skipped}
-                              />
-                            </tbody>
-                          </table>
+                          <PhaseBreakdown
+                            run={run}
+                            phase2Skipped={phase2Skipped}
+                            phase3Skipped={phase3Skipped}
+                          />
                         </td>
                       </tr>
                     )}
@@ -227,5 +184,76 @@ export default function BatchRunsPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function RunStatus({ run }: { run: BatchRunLog }) {
+  if (run.success) {
+    return <span className="text-success font-medium">✓ OK</span>
+  }
+
+  if (run.completed_at) {
+    return (
+      <details>
+        <summary className="cursor-pointer text-danger font-medium">✗ Failed</summary>
+        <pre className="mt-1 whitespace-pre-wrap text-danger font-mono text-[11px]">{run.error_message}</pre>
+      </details>
+    )
+  }
+
+  return <span className="text-accent font-medium">⟳ Running</span>
+}
+
+function PhaseBreakdown({
+  run,
+  phase2Skipped,
+  phase3Skipped,
+}: {
+  run: BatchRunLog
+  phase2Skipped: boolean
+  phase3Skipped: boolean
+}) {
+  return (
+    <table className="w-full border-collapse border border-default rounded-lg overflow-hidden">
+      <thead>
+        <tr className="bg-surface border-b border-default">
+          <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted w-[110px]">Phase</th>
+          <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Result</th>
+          <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Duration</th>
+          <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Counts</th>
+        </tr>
+      </thead>
+      <tbody>
+        <PhaseRow
+          label="1 · Sparse CF"
+          ok={run.phase1_ok}
+          durMs={run.phase1_duration_ms}
+          counts={[
+            { label: 'subjects', value: run.phase1_subjects },
+            { label: 'objects', value: run.phase1_objects },
+          ]}
+          error={run.phase1_error}
+        />
+        <PhaseRow
+          label="2 · Dense"
+          ok={run.phase2_ok}
+          durMs={run.phase2_duration_ms}
+          counts={[
+            { label: 'items', value: run.phase2_items },
+            { label: 'subjects', value: run.phase2_subjects },
+          ]}
+          error={run.phase2_error}
+          skipped={phase2Skipped}
+        />
+        <PhaseRow
+          label="3 · Trending"
+          ok={run.phase3_ok}
+          durMs={run.phase3_duration_ms}
+          counts={[{ label: 'items', value: run.phase3_items }]}
+          error={run.phase3_error}
+          skipped={phase3Skipped}
+        />
+      </tbody>
+    </table>
   )
 }

@@ -1,21 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../services/api'
-
-export interface QdrantCollectionStat {
-  exists: boolean
-  points_count: number
-  indexed_vectors_count: number
-}
-
-export interface QdrantStatsResponse {
-  namespace: string
-  collections: Record<string, QdrantCollectionStat>
-}
+import { adminApi } from '../services/adminApi'
+import { queryKeys } from '../services/queryKeys'
 
 export function useQdrantStats(ns: string) {
-  return useQuery<QdrantStatsResponse, Error>({
-    queryKey: ['qdrant-stats', ns],
-    queryFn: () => api.get(`/api/admin/v1/namespaces/${encodeURIComponent(ns)}/qdrant-stats`),
+  return useQuery({
+    queryKey: queryKeys.namespaces.qdrantStats(ns),
+    queryFn: () => adminApi.getQdrantStats(ns),
     enabled: !!ns && ns !== 'new',
     refetchInterval: 30_000,
   })

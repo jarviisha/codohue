@@ -1,17 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../services/api'
-
-export interface HealthData {
-  postgres: string
-  redis: string
-  qdrant: string
-  status: string
-}
+import { adminApi } from '../services/adminApi'
+import { queryKeys } from '../services/queryKeys'
 
 export function useHealth() {
-  return useQuery<HealthData>({
-    queryKey: ['health'],
-    queryFn: () => api.get<HealthData>('/api/admin/v1/health'),
+  return useQuery({
+    queryKey: queryKeys.health(),
+    queryFn: adminApi.getHealth,
     refetchInterval: 10_000,
     retry: false,
   })

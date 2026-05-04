@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useTrending } from '../hooks/useTrending'
 import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
+import { CodeBadge, EmptyState, PageHeader, inputClass } from '../components/ui'
 
 function formatTTL(ttlSec: number): string {
   if (ttlSec === -2) return 'no cache'
@@ -27,21 +28,21 @@ export default function TrendingPage() {
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-8">
-        <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0">
-          Trending Items
-        </h2>
-        <select
-          value={namespace}
-          onChange={e => setNamespace(e.target.value)}
-          className="bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary text-sm px-3 py-2 rounded-md focus:outline-none transition-shadow duration-100"
-        >
-          <option value="">Select namespace</option>
-          {nsData?.namespaces.map(ns => (
-            <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
-          ))}
-        </select>
-      </div>
+      <PageHeader
+        title="Trending Items"
+        actions={(
+          <select
+            value={namespace}
+            onChange={e => setNamespace(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Select namespace</option>
+            {nsData?.namespaces.map(ns => (
+              <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
+            ))}
+          </select>
+        )}
+      />
 
       {!namespace && <p className="text-sm text-muted">Select a namespace to view trending items.</p>}
       {error && <ErrorBanner message="Failed to load trending data." />}
@@ -65,13 +66,11 @@ export default function TrendingPage() {
           </div>
 
           {data.cache_ttl_sec === -2 ? (
-            <div className="p-10 text-center text-sm text-muted border border-dashed border-default rounded-lg">
+            <EmptyState>
               No trending data — run{' '}
-              <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm">
-                make run-cron
-              </code>{' '}
+              <CodeBadge>make run-cron</CodeBadge>{' '}
               to populate the trending cache.
-            </div>
+            </EmptyState>
           ) : data.items.length === 0 ? (
             <p className="text-sm text-muted">No items in trending window.</p>
           ) : (
@@ -90,9 +89,7 @@ export default function TrendingPage() {
                     <tr key={item.object_id} className="border-b border-default hover:bg-surface-raised">
                       <td className="px-4 py-3 text-sm text-muted tabular-nums">{i + 1}</td>
                       <td className="px-4 py-3 text-sm">
-                        <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium">
-                          {item.object_id}
-                        </code>
+                        <CodeBadge>{item.object_id}</CodeBadge>
                       </td>
                       <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
                         {item.score.toFixed(2)}

@@ -3,10 +3,9 @@ import { useRecommendDebug } from '../hooks/useRecommendDebug'
 import { useSubjectProfile } from '../hooks/useSubjectProfile'
 import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
+import { Button, CodeBadge, EmptyState, PageHeader, Panel, inputClass } from '../components/ui'
 
 const LIMITS = [5, 10, 20, 50]
-
-const inputClass = 'bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary placeholder:text-muted text-sm px-3 py-2 rounded-md focus:outline-none transition-shadow duration-100'
 
 export default function RecommendDebugPage() {
   const { data: nsData } = useNamespaceList()
@@ -27,9 +26,7 @@ export default function RecommendDebugPage() {
 
   return (
     <div>
-      <h2 className="text-[28px] font-semibold text-primary -tracking-[0.01em] leading-tight m-0 mb-8">
-        Recommendation Debug
-      </h2>
+      <PageHeader title="Recommendation Debug" />
 
       <form
         onSubmit={handleSubmit}
@@ -60,13 +57,14 @@ export default function RecommendDebugPage() {
             {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={isPending}
-          className="bg-accent hover:bg-accent-hover active:bg-accent-active text-accent-text text-sm font-medium px-5 py-2 rounded-md border-0 cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus"
+          className="py-2"
         >
           {isPending ? 'Fetching…' : 'Fetch'}
-        </button>
+        </Button>
       </form>
 
       {(debug.error || profile.error) && (
@@ -74,7 +72,7 @@ export default function RecommendDebugPage() {
       )}
 
       {profile.data && (
-        <div className="bg-surface border border-default rounded-lg p-5 mb-6">
+        <Panel className="mb-6">
           <h3 className="font-semibold m-0 mb-4 text-[11px] uppercase tracking-[0.06em] text-muted">
             Subject Profile
           </h3>
@@ -104,17 +102,12 @@ export default function RecommendDebugPage() {
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {profile.data.seen_items.map(id => (
-                  <code
-                    key={id}
-                    className="font-mono text-xs bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium"
-                  >
-                    {id}
-                  </code>
+                  <CodeBadge key={id} className="text-xs">{id}</CodeBadge>
                 ))}
               </div>
             </div>
           )}
-        </div>
+        </Panel>
       )}
 
       {debug.data && (
@@ -132,7 +125,7 @@ export default function RecommendDebugPage() {
           </div>
 
           {debug.data.items.length === 0 ? (
-            <p className="text-sm text-muted">No recommendations found for this subject.</p>
+            <EmptyState>No recommendations found for this subject.</EmptyState>
           ) : (
             <div className="bg-surface border border-default rounded-lg overflow-hidden">
               <table className="w-full border-collapse">
@@ -148,9 +141,7 @@ export default function RecommendDebugPage() {
                     <tr key={item.object_id} className="border-b border-default hover:bg-surface-raised">
                       <td className="px-4 py-3 text-sm text-muted tabular-nums">{item.rank}</td>
                       <td className="px-4 py-3 text-sm">
-                        <code className="font-mono text-[12px] bg-accent-subtle text-accent px-1.5 py-0.5 rounded-sm font-medium">
-                          {item.object_id}
-                        </code>
+                        <CodeBadge>{item.object_id}</CodeBadge>
                       </td>
                       <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
                         {item.score.toFixed(4)}

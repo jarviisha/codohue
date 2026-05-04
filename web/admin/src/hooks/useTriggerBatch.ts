@@ -1,21 +1,14 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { api } from '../services/api'
-
-export interface TriggerBatchResponse {
-  batch_run_id: number
-  namespace: string
-  started_at: string
-  duration_ms: number
-  success: boolean
-}
+import { adminApi } from '../services/adminApi'
+import { queryKeys } from '../services/queryKeys'
 
 export function useTriggerBatch(ns: string) {
   const queryClient = useQueryClient()
-  return useMutation<TriggerBatchResponse, Error>({
-    mutationFn: () => api.post(`/api/admin/v1/namespaces/${encodeURIComponent(ns)}/batch-runs/trigger`, {}),
+  return useMutation({
+    mutationFn: () => adminApi.triggerBatchRun(ns),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['batch-runs'] })
-      queryClient.invalidateQueries({ queryKey: ['namespaces-overview'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.batchRuns.list() })
+      queryClient.invalidateQueries({ queryKey: queryKeys.namespaces.overview() })
     },
   })
 }
