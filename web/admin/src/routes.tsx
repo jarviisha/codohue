@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
+import type { IconName } from './components/icons'
 import HealthPage from './pages/HealthPage'
-import NamespacesPage from './pages/NamespacesPage'
 import NamespaceDetailPage from './pages/NamespaceDetailPage'
+import NamespaceOverviewPage from './pages/NamespaceOverviewPage'
 import RecommendDebugPage from './pages/RecommendDebugPage'
 import BatchRunsPage from './pages/BatchRunsPage'
 import TrendingPage from './pages/TrendingPage'
@@ -10,25 +11,53 @@ import EventsPage from './pages/EventsPage'
 export interface AdminRoute {
   path: string
   label: string
-  section?: string
   element: ReactNode
   nav?: boolean
+  icon?: IconName
 }
 
 export const adminRoutes: AdminRoute[] = [
   {
-    path: 'health',
-    label: 'System Health',
-    section: 'System',
-    element: <HealthPage />,
+    path: 'overview',
+    label: 'Overview',
+    element: <NamespaceOverviewPage />,
     nav: true,
+    icon: 'home',
   },
   {
-    path: 'namespaces',
-    label: 'Namespaces',
-    section: 'Config',
-    element: <NamespacesPage />,
+    path: 'batch-runs',
+    label: 'Batch Runs',
+    element: <BatchRunsPage />,
     nav: true,
+    icon: 'clock-hour-11',
+  },
+  {
+    path: 'events',
+    label: 'Events',
+    element: <EventsPage />,
+    nav: true,
+    icon: 'bell',
+  },
+  {
+    path: 'trending',
+    label: 'Trending',
+    element: <TrendingPage />,
+    nav: true,
+    icon: 'arrow-big-up-line',
+  },
+  {
+    path: 'debug',
+    label: 'Recommend Debug',
+    element: <RecommendDebugPage />,
+    nav: true,
+    icon: 'search',
+  },
+  {
+    path: 'health',
+    label: 'System Health',
+    element: <HealthPage />,
+    nav: true,
+    icon: 'compass',
   },
   {
     path: 'namespaces/new',
@@ -40,38 +69,6 @@ export const adminRoutes: AdminRoute[] = [
     label: 'Edit Namespace',
     element: <NamespaceDetailPage />,
   },
-  {
-    path: 'batch-runs',
-    label: 'Batch Runs',
-    section: 'Operations',
-    element: <BatchRunsPage />,
-    nav: true,
-  },
-  {
-    path: 'events',
-    label: 'Events',
-    section: 'Operations',
-    element: <EventsPage />,
-    nav: true,
-  },
-  {
-    path: 'trending',
-    label: 'Trending',
-    section: 'Operations',
-    element: <TrendingPage />,
-    nav: true,
-  },
-  {
-    path: 'debug',
-    label: 'Recommend Debug',
-    section: 'Operations',
-    element: <RecommendDebugPage />,
-    nav: true,
-  },
 ]
 
-export const navSections = ['System', 'Config', 'Operations'] as const
-
-export function navRoutesForSection(section: string): AdminRoute[] {
-  return adminRoutes.filter(route => route.nav && route.section === section)
-}
+export const navRoutes = adminRoutes.filter(r => r.nav)

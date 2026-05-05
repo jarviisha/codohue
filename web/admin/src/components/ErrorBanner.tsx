@@ -7,7 +7,7 @@ export default function ErrorBanner({ message, onDismiss }: Props) {
   return (
     <div
       role="alert"
-      className="flex justify-between items-center px-4 py-3 mb-4 rounded-lg bg-danger-bg border border-danger/25"
+      className="flex justify-between items-center px-4 py-3 mb-4 rounded-xl bg-danger-bg border border-danger/25"
     >
       <span className="text-sm font-medium text-danger">{message}</span>
       {onDismiss && (

@@ -16,8 +16,8 @@ const variantClasses: Record<ButtonVariant, string> = {
 }
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'px-3 py-1.5 text-sm',
-  md: 'px-5 py-2.5 text-sm',
+  sm: 'px-2 py-1 text-sm',
+  md: 'px-4 py-2 text-sm',
 }
 
 export default function Button({
@@ -29,7 +29,7 @@ export default function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`${variantClasses[variant]} ${sizeClasses[size]} font-medium rounded-md cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus ${className}`}
+      className={`${variantClasses[variant]} ${sizeClasses[size]} font-medium rounded cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus ${className}`}
       {...props}
     >
       {children}

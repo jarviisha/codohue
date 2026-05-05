@@ -51,7 +51,7 @@ export default function NamespaceDetailPage() {
       : null
 
   return (
-    <div className="max-w-[560px]">
+    <div className="max-w-140">
       <PageHeader title={isNew ? 'Create Namespace' : `Edit: ${ns}`} />
 
       {newKey && (
@@ -208,7 +208,7 @@ function CreatedApiKeyPanel({ apiKey, onDone }: { apiKey: string; onDone: () => 
       <p className="text-sm font-medium text-primary m-0 mb-2">
         Namespace created. API key (shown once only):
       </p>
-      <pre className="text-sm break-all m-0 mb-4 p-3 rounded-lg font-mono font-medium bg-accent-subtle text-accent border border-accent/20">
+      <pre className="text-sm break-all m-0 mb-4 p-3 rounded-xl font-mono font-medium bg-accent-subtle text-accent border border-accent/20">
         {apiKey}
       </pre>
       <Button variant="primary" onClick={onDone}>
@@ -245,7 +245,7 @@ function QdrantStatsPanel({ ns, stats }: { ns: string; stats: Record<string, Qdr
           return (
             <div
               key={key}
-              className="flex flex-col p-3 bg-subtle border border-default rounded-lg"
+              className="flex flex-col p-3 bg-subtle border border-default rounded-xl"
             >
               <div className="text-xs text-muted mb-1 truncate" title={key}>{label}</div>
               {col?.exists ? (

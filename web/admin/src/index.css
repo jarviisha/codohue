@@ -2,7 +2,7 @@
 
 /* ─── Semantic token layer ─── */
 :root {
-  --bg-base:           #F8FAFC;
+  --bg-base:           #FFFFFF;
   --bg-subtle:         #F1F5F9;
   --bg-surface:        #FFFFFF;
   --bg-surface-raised: #F1F5F9;
@@ -49,7 +49,7 @@
   --danger-bg:         #2A0A0A;
 }
 
-/* ─── Static theme values (fonts, shadows) ─── */
+/* ─── Static theme values (fonts, shadows, layout) ─── */
 @theme {
   --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', Menlo, 'Courier New', monospace;
@@ -58,6 +58,10 @@
   --shadow-floating: 0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.08);
   --shadow-overlay:  0 20px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.10);
   --shadow-focus:    0 0 0 3px rgb(8 102 255 / 0.25);
+
+  /* Layout widths — semantic tokens for design-spec measurements */
+  --spacing-90:  22.5rem;  /* 360px — login card width: w-90 */
+  --spacing-140: 35rem;    /* 560px — form page max-width: max-w-140 */
 }
 
 /* ─── Dynamic color tokens — respond to .dark via CSS vars ─── */

@@ -30,13 +30,13 @@ export default function HealthPage() {
             <ErrorBanner message="Could not reach the API server. Check that cmd/api is running." />
           )}
 
-          <div className={`inline-flex items-center gap-2 px-4 py-2 mb-6 text-sm font-medium rounded-lg ${statusBadgeClass}`}>
+          <div className={`inline-flex items-center gap-2 px-4 py-2 mb-6 text-sm font-medium rounded ${statusBadgeClass}`}>
             <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass}`} aria-hidden="true" />
             <span>
               Overall status: <strong className="font-semibold">{data.status}</strong>
             </span>
             {dataUpdatedAt > 0 && (
-              <span className="text-xs text-muted ml-2">
+              <span className="text-xs text-muted ml-2 normal-nums">
                 checked {new Date(dataUpdatedAt).toLocaleTimeString()}
               </span>
             )}

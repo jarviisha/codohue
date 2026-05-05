@@ -27,9 +27,9 @@ export default function LoginPage() {
 
   return (
     <div className="flex justify-center items-center min-h-screen bg-base">
-      <div className="w-[360px]">
+      <div className="w-90">
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-primary -tracking-[0.02em] leading-tight m-0 mb-2">
+          <h1 className="text-4xl font-bold text-primary tracking-[-0.02em] leading-tight m-0 mb-2">
             Codohue
             <span className="text-accent ml-2 font-semibold">Admin</span>
           </h1>
@@ -41,7 +41,7 @@ export default function LoginPage() {
           className="bg-surface border border-default rounded-xl p-8 shadow-overlay"
         >
           {error && (
-            <div className="px-4 py-3 mb-5 text-sm font-medium rounded-lg bg-danger-bg border border-danger/25 text-danger">
+            <div className="px-4 py-3 mb-5 text-sm font-medium rounded-xl bg-danger-bg border border-danger/25 text-danger">
               {error}
             </div>
           )}
