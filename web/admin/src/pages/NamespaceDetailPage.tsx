@@ -208,7 +208,7 @@ function CreatedApiKeyPanel({ apiKey, onDone }: { apiKey: string; onDone: () => 
       <p className="text-sm font-medium text-primary m-0 mb-2">
         Namespace created. API key (shown once only):
       </p>
-      <pre className="text-sm break-all m-0 mb-4 p-3 rounded-xl font-mono font-medium bg-accent-subtle text-accent border border-accent/20">
+      <pre className="text-sm break-all m-0 mb-4 p-3 rounded-xl font-medium bg-accent-subtle text-accent border border-accent/20">
         {apiKey}
       </pre>
       <Button variant="primary" onClick={onDone}>
@@ -250,7 +250,7 @@ function QdrantStatsPanel({ ns, stats }: { ns: string; stats: Record<string, Qdr
               <div className="text-xs text-muted mb-1 truncate" title={key}>{label}</div>
               {col?.exists ? (
                 <>
-                  <div className="text-[22px] font-bold text-primary tabular-nums -tracking-[0.02em]">
+                  <div className="text-[22px] font-bold text-primary tabular-nums tracking-[-0.02em]">
                     {col.points_count.toLocaleString()}
                   </div>
                   <div className="text-xs text-muted mt-0.5">pts</div>

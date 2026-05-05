@@ -51,10 +51,8 @@
 
 /* ─── Static theme values (fonts, shadows, layout) ─── */
 @theme {
-  --font-sans: 'Inter', -apple-system, system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', Menlo, 'Courier New', monospace;
-
-  --shadow-raised:   0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.06);
+  --font-sans: 'Google Sans Flex', -apple-system, system-ui, sans-serif;
+--shadow-raised:   0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.06);
   --shadow-floating: 0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.08);
   --shadow-overlay:  0 20px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.10);
   --shadow-focus:    0 0 0 3px rgb(8 102 255 / 0.25);
@@ -99,13 +97,13 @@ html {
 }
 
 body {
-  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  font-family: 'Google Sans Flex', -apple-system, system-ui, sans-serif;
   color: var(--text-secondary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
 code, pre {
-  font-family: 'JetBrains Mono', Menlo, 'Courier New', monospace;
+  font-family: 'Google Sans Code', Menlo, 'Courier New', monospace;
   font-feature-settings: normal;
 }

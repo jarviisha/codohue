@@ -47,8 +47,8 @@ type PhaseResults struct {
 }
 
 type batchLogger interface {
-	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time) (int64, error)
-	UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string) error
+	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource string) (int64, error)
+	UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string, logLines []LogEntry) error
 	UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error
 }
 
@@ -130,7 +130,7 @@ func (j *Job) runOnce(ctx context.Context) {
 	}
 
 	for _, ns := range namespaces {
-		j.RunNamespace(ctx, ns)
+		j.RunNamespace(ctx, ns, "cron")
 	}
 
 	elapsed := time.Since(start)
@@ -139,13 +139,15 @@ func (j *Job) runOnce(ctx context.Context) {
 }
 
 // RunNamespace runs all batch phases for a single namespace and writes batch_run_logs.
-func (j *Job) RunNamespace(ctx context.Context, ns string) {
+// triggerSource is "cron" for scheduled runs or "manual" for admin-triggered runs.
+func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource string) {
 	nsStart := time.Now()
+	cap := &LogCapture{}
 
 	var logID int64
 	if j.batchLog != nil {
 		var err error
-		logID, err = j.batchLog.InsertBatchRunLog(ctx, ns, nsStart)
+		logID, err = j.batchLog.InsertBatchRunLog(ctx, ns, nsStart, triggerSource)
 		if err != nil {
 			slog.Warn("could not insert batch_run_log", "namespace", ns, "error", err)
 		}
@@ -157,42 +159,63 @@ func (j *Job) RunNamespace(ctx context.Context, ns string) {
 	cfg, err := j.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
 		slog.Error("get ns config failed", "namespace", ns, "error", err)
+		cap.Error(fmt.Sprintf("config load failed: %v", err))
 		runErr = err
+	} else if cfg != nil {
+		cap.Info(fmt.Sprintf("config loaded — strategy: %s, lambda: %.3f", cfg.DenseStrategy, cfg.Lambda))
 	}
 
 	if runErr == nil {
+		cap.Info("phase 1 · sparse CF starting")
 		t0 := time.Now()
-		subjects, objects, err := j.runPhase1(ctx, ns, cfg)
-		p := &PhaseResult{OK: err == nil, DurationMs: int(time.Since(t0).Milliseconds()), Count1: subjects, Count2: objects}
+		subjects, objects, err := j.runPhase1(ctx, ns, cfg, cap)
+		durMs := int(time.Since(t0).Milliseconds())
+		p := &PhaseResult{OK: err == nil, DurationMs: durMs, Count1: subjects, Count2: objects}
 		if err != nil {
 			slog.Error("phase 1 failed", "namespace", ns, "error", err)
+			cap.Error(fmt.Sprintf("phase 1 · sparse CF failed (%dms): %v", durMs, err))
 			p.Error = err.Error()
 			runErr = err
+		} else {
+			cap.Info(fmt.Sprintf("phase 1 · sparse CF done (%dms) — subjects: %d, objects: %d", durMs, subjects, objects))
 		}
 		phases.Phase1 = p
 	}
 
 	if runErr == nil && cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
+		cap.Info(fmt.Sprintf("phase 2 · dense starting (strategy: %s)", cfg.DenseStrategy))
 		t0 := time.Now()
-		items, subjectCount, err := j.runPhase2Dense(ctx, ns, cfg)
-		p := &PhaseResult{OK: err == nil, DurationMs: int(time.Since(t0).Milliseconds()), Count1: items, Count2: subjectCount}
+		items, subjectCount, err := j.runPhase2Dense(ctx, ns, cfg, cap)
+		durMs := int(time.Since(t0).Milliseconds())
+		p := &PhaseResult{OK: err == nil, DurationMs: durMs, Count1: items, Count2: subjectCount}
 		if err != nil {
 			slog.Error("phase 2 dense failed", "namespace", ns, "error", err)
+			cap.Error(fmt.Sprintf("phase 2 · dense failed (%dms): %v", durMs, err))
 			p.Error = err.Error()
-			// non-fatal; continue to phase 3
+		} else {
+			cap.Info(fmt.Sprintf("phase 2 · dense done (%dms) — items: %d, subjects: %d", durMs, items, subjectCount))
 		}
 		phases.Phase2 = p
+	} else if cfg != nil && (cfg.DenseStrategy == "byoe" || cfg.DenseStrategy == "disabled") {
+		cap.Info(fmt.Sprintf("phase 2 · dense skipped (strategy: %s)", cfg.DenseStrategy))
 	}
 
 	if j.redis != nil {
+		cap.Info("phase 3 · trending starting")
 		t0 := time.Now()
-		items, err := j.runPhase3Trending(ctx, ns, cfg)
-		p := &PhaseResult{OK: err == nil, DurationMs: int(time.Since(t0).Milliseconds()), Count1: items}
+		items, err := j.runPhase3Trending(ctx, ns, cfg, cap)
+		durMs := int(time.Since(t0).Milliseconds())
+		p := &PhaseResult{OK: err == nil, DurationMs: durMs, Count1: items}
 		if err != nil {
 			slog.Error("phase 3 trending failed", "namespace", ns, "error", err)
+			cap.Error(fmt.Sprintf("phase 3 · trending failed (%dms): %v", durMs, err))
 			p.Error = err.Error()
+		} else {
+			cap.Info(fmt.Sprintf("phase 3 · trending done (%dms) — items: %d", durMs, items))
 		}
 		phases.Phase3 = p
+	} else {
+		cap.Info("phase 3 · trending skipped (no Redis)")
 	}
 
 	subjects := 0
@@ -200,14 +223,20 @@ func (j *Job) RunNamespace(ctx context.Context, ns string) {
 		subjects = phases.Phase1.Count1
 	}
 
+	totalMs := int(time.Since(nsStart).Milliseconds())
+	if runErr != nil {
+		cap.Error(fmt.Sprintf("run failed in %dms: %v", totalMs, runErr))
+	} else {
+		cap.Info(fmt.Sprintf("run complete in %dms", totalMs))
+	}
+
 	if j.batchLog != nil && logID > 0 {
 		now := time.Now()
-		durMs := int(time.Since(nsStart).Milliseconds())
 		errMsg := ""
 		if runErr != nil {
 			errMsg = runErr.Error()
 		}
-		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, durMs, subjects, runErr == nil, errMsg); err != nil {
+		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, totalMs, subjects, runErr == nil, errMsg, cap.Entries()); err != nil {
 			slog.Warn("could not update batch_run_log", "namespace", ns, "error", err)
 		}
 		if err := j.batchLog.UpdateBatchRunPhases(ctx, logID, phases); err != nil {
@@ -218,12 +247,13 @@ func (j *Job) RunNamespace(ctx context.Context, ns string) {
 
 // runPhase1 recomputes CF sparse vectors for a namespace.
 // Returns the number of subjects and objects upserted to Qdrant.
-func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) (subjects, objects int, err error) {
+func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig, cap *LogCapture) (subjects, objects int, err error) {
 	start := time.Now()
 
 	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
 		return 0, 0, fmt.Errorf("ensure collections: %w", err)
 	}
+	cap.Info("Qdrant collections ensured")
 
 	lambda := defaultLambda
 	if cfg != nil && cfg.Lambda > 0 {
@@ -241,6 +271,7 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceC
 		"objects", objects,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
+	cap.Info(fmt.Sprintf("sparse vectors computed — subjects: %d, objects: %d, lambda: %.3f", subjects, objects, lambda))
 	return subjects, objects, nil
 }
 
@@ -260,7 +291,7 @@ const item2vecLargeEventThreshold = 500_000
 // For corpora beyond ~500K events, consider: (a) increasing BATCH_INTERVAL_MINUTES so
 // fewer retrains happen per hour, (b) switching dense_strategy to "svd" (cheaper full
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
-func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) (items, subjectCount int, err error) {
+func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig, cap *LogCapture) (items, subjectCount int, err error) {
 	start := time.Now()
 
 	embeddingDim := 64
@@ -272,20 +303,20 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 		distance = "cosine"
 	}
 
-	// Scaffold dense collections if not present.
 	if err := j.ensureDenseCollectionsFn(ctx, ns, uint64(embeddingDim), distance); err != nil {
 		return 0, 0, fmt.Errorf("ensure dense collections: %w", err)
 	}
 
-	// Fetch all namespace events (shared data pull for both item and user vectors).
 	events, err := j.repo.GetAllNamespaceEvents(ctx, ns)
 	if err != nil {
 		return 0, 0, fmt.Errorf("get namespace events: %w", err)
 	}
 	if len(events) == 0 {
 		slog.Info("phase 2: no events, skipping dense computation", "namespace", ns)
+		cap.Info("no events — dense computation skipped")
 		return 0, 0, nil
 	}
+	cap.Info(fmt.Sprintf("fetched %d events for embedding", len(events)))
 
 	var itemVecs map[string][]float32
 
@@ -294,15 +325,10 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 		if len(events) > item2vecLargeEventThreshold {
 			slog.Warn("phase 2 item2vec: large event corpus — full retrain may be slow; consider increasing BATCH_INTERVAL_MINUTES or switching to SVD",
 				"namespace", ns, "events", len(events), "threshold", item2vecLargeEventThreshold)
+			cap.Warn(fmt.Sprintf("large corpus (%d events) — item2vec retrain may be slow", len(events)))
 		}
 		seqs := BuildInteractionSequences(events)
-		i2vCfg := Item2VecConfig{
-			Dim:        embeddingDim,
-			Window:     5,
-			MinCount:   5,
-			Epochs:     10,
-			NegSamples: 5,
-		}
+		i2vCfg := Item2VecConfig{Dim: embeddingDim, Window: 5, MinCount: 5, Epochs: 10, NegSamples: 5}
 		itemVecs = TrainItem2Vec(seqs, i2vCfg)
 
 	case "svd":
@@ -314,21 +340,22 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 
 	if len(itemVecs) == 0 {
 		slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseStrategy)
+		cap.Warn("no item vectors produced")
 		return 0, 0, nil
 	}
+	cap.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
 
-	// Upsert item dense vectors.
 	if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseStrategy, itemVecs); err != nil {
 		return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
 	}
 
-	// Compute subject (user) dense vectors via mean pooling of item vectors.
 	subjectVecs := UserDenseVectors(events, itemVecs)
 	if len(subjectVecs) > 0 {
 		if err := j.upsertSubjectDenseFn(ctx, ns, cfg.DenseStrategy, subjectVecs); err != nil {
 			return 0, 0, fmt.Errorf("upsert subject dense vectors: %w", err)
 		}
 	}
+	cap.Info(fmt.Sprintf("upserted %d item + %d subject vectors to Qdrant", len(itemVecs), len(subjectVecs)))
 
 	slog.Info("phase 2 dense complete",
 		"namespace", ns,
@@ -342,7 +369,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 
 // runPhase3Trending computes trending scores for a namespace and caches them in Redis.
 // Returns the number of trending items computed.
-func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig) (items int, err error) {
+func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig, cap *LogCapture) (items int, err error) {
 	start := time.Now()
 
 	windowHours := 24
@@ -369,11 +396,14 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.Na
 	}
 	if len(events) == 0 {
 		slog.Info("phase 3 trending: no events in window", "namespace", ns, "window_hours", windowHours)
+		cap.Info(fmt.Sprintf("no events in %dh window — trending skipped", windowHours))
 		return 0, nil
 	}
+	cap.Info(fmt.Sprintf("scoring %d events in %dh window (λ: %.3f)", len(events), windowHours, lambdaTrending))
 
 	scores := TrendingScores(events, actionWeights, lambdaTrending, windowHours)
 	if len(scores) == 0 {
+		cap.Warn("no trending scores produced")
 		return 0, nil
 	}
 
@@ -381,6 +411,7 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.Na
 	if err := j.storeTrendingFn(ctx, ns, scores, ttl); err != nil {
 		return 0, fmt.Errorf("store trending: %w", err)
 	}
+	cap.Info(fmt.Sprintf("stored %d trending items to Redis (TTL: %ds)", len(scores), ttlSeconds))
 
 	metrics.TrendingItemsTotal.WithLabelValues(ns).Set(float64(len(scores)))
 	slog.Info("phase 3 trending complete",

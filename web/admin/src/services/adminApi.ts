@@ -50,9 +50,11 @@ export const adminApi = {
   getQdrantStats: (namespace: string) =>
     api.get<QdrantStatsResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/qdrant-stats`),
 
-  listBatchRuns: (namespace?: string) => {
-    const params = namespace ? `?namespace=${encodeURIComponent(namespace)}` : ''
-    return api.get<BatchRunsResponse>(`/api/admin/v1/batch-runs${params}`)
+  listBatchRuns: (namespace?: string, limit = 20, offset = 0, status = '') => {
+    const p = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    if (namespace) p.set('namespace', namespace)
+    if (status) p.set('status', status)
+    return api.get<BatchRunsResponse>(`/api/admin/v1/batch-runs?${p}`)
   },
 
   triggerBatchRun: (namespace: string) =>

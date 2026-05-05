@@ -67,8 +67,8 @@ func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ io.Reader) (*Na
 	return f.upsertResp, f.upsertStatus, f.upsertErr
 }
 
-func (f *fakeSvc) GetBatchRuns(_ context.Context, _ string, _ int) ([]BatchRunLog, error) {
-	return f.batchRuns, f.batchRunsErr
+func (f *fakeSvc) GetBatchRuns(_ context.Context, _, _ string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
+	return f.batchRuns, len(f.batchRuns), BatchRunStats{Total: len(f.batchRuns)}, f.batchRunsErr
 }
 
 func (f *fakeSvc) DebugRecommend(_ context.Context, _ *RecommendDebugRequest) (*RecommendDebugResponse, int, error) {

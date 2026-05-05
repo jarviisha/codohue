@@ -9,7 +9,7 @@ export const queryKeys = {
   },
 
   batchRuns: {
-    list: (namespace?: string) => ['batch-runs', namespace ?? ''] as const,
+    list: (namespace?: string, offset = 0, status = '') => ['batch-runs', namespace ?? '', offset, status] as const,
   },
 
   events: {

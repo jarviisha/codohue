@@ -21,6 +21,13 @@ type NamespaceConfig struct {
 	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
+// LogEntry is a single captured log line from a batch run.
+type LogEntry struct {
+	Ts    string `json:"ts"`
+	Level string `json:"level"`
+	Msg   string `json:"msg"`
+}
+
 // BatchRunLog is one cron batch cycle record for a namespace.
 type BatchRunLog struct {
 	ID                int64      `json:"id"`
@@ -31,6 +38,8 @@ type BatchRunLog struct {
 	SubjectsProcessed int        `json:"subjects_processed"`
 	Success           bool       `json:"success"`
 	ErrorMessage      *string    `json:"error_message"`
+	TriggerSource     string     `json:"trigger_source"`
+	LogLines          []LogEntry `json:"log_lines"`
 
 	// Per-phase breakdown (nil when the phase was skipped or the row predates migration 007).
 	Phase1OK       *bool   `json:"phase1_ok"`
@@ -113,9 +122,20 @@ type RecommendDebugResponse struct {
 	GeneratedAt time.Time            `json:"generated_at"`
 }
 
+// BatchRunStats holds aggregate counts across all statuses for a namespace.
+type BatchRunStats struct {
+	Total   int `json:"total"`
+	Running int `json:"running"`
+	OK      int `json:"ok"`
+	Failed  int `json:"failed"`
+}
+
 // BatchRunsResponse is the response for GET /api/admin/v1/batch-runs.
 type BatchRunsResponse struct {
-	Runs []BatchRunLog `json:"runs"`
+	Runs   []BatchRunLog `json:"runs"`
+	Total  int           `json:"total"`
+	Offset int           `json:"offset"`
+	Stats  BatchRunStats `json:"stats"`
 }
 
 // TrendingAdminResponse is the response for GET /api/admin/v1/trending/{ns}.

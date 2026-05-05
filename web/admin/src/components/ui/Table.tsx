@@ -29,7 +29,7 @@ export function Th({
   return (
     <th
       className={[
-        'text-[11px] font-semibold uppercase tracking-[0.06em] text-muted pb-2.5',
+        'px-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted pb-2.5',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
         className,
       ]
@@ -61,7 +61,7 @@ export function Tr({
     <tr
       className={[
         'border-b border-default last:border-0',
-        hoverable && 'hover:bg-surface-raised',
+        hoverable && 'hover:bg-accent/10',
         className,
       ]
         .filter(Boolean)
@@ -90,10 +90,10 @@ export function Td({
   return (
     <td
       className={[
-        'py-2.5 text-sm',
-        muted ? 'text-muted' : 'text-primary',
+        'px-2 py-2.5 text-sm',
+        muted ? 'text-muted' : 'text-secondary',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : '',
-        mono ? 'font-mono tabular-nums' : '',
+        mono ? 'tabular-nums' : '',
         className,
       ]
         .filter(Boolean)

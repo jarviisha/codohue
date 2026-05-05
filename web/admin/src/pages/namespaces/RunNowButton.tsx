@@ -17,7 +17,6 @@ export default function RunNowButton({ ns }: { ns: string }) {
       onClick={handleClick}
       disabled={trigger.isPending}
       size="sm"
-      className="flex-1"
     >
       {trigger.isPending ? 'Running…' : 'Run now'}
     </Button>

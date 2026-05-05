@@ -1,4 +1,5 @@
 export { default as Button } from './Button'
+export { default as Modal } from './Modal'
 export { default as CodeBadge } from './CodeBadge'
 export { default as EmptyState } from './EmptyState'
 export { default as Field, inputClass } from './Field'

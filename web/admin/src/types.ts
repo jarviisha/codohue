@@ -54,6 +54,12 @@ export interface NamespacesOverviewResponse {
   namespaces: NamespaceHealth[]
 }
 
+export interface LogEntry {
+  ts: string
+  level: 'info' | 'warn' | 'error'
+  msg: string
+}
+
 export interface BatchRunLog {
   id: number
   namespace: string
@@ -63,6 +69,8 @@ export interface BatchRunLog {
   subjects_processed: number
   success: boolean
   error_message: string | null
+  trigger_source: 'cron' | 'manual'
+  log_lines: LogEntry[]
 
   phase1_ok: boolean | null
   phase1_duration_ms: number | null
@@ -82,8 +90,18 @@ export interface BatchRunLog {
   phase3_error: string | null
 }
 
+export interface BatchRunStats {
+  total: number
+  running: number
+  ok: number
+  failed: number
+}
+
 export interface BatchRunsResponse {
   runs: BatchRunLog[]
+  total: number
+  offset: number
+  stats: BatchRunStats
 }
 
 export interface EventSummary {

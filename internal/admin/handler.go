@@ -21,7 +21,7 @@ type adminSvc interface {
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
 	GetNamespacesOverview(ctx context.Context) (*NamespacesOverviewResponse, error)
 	UpsertNamespace(ctx context.Context, namespace string, body io.Reader) (*NamespaceUpsertResponse, int, error)
-	GetBatchRuns(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error)
+	GetBatchRuns(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
 	DebugRecommend(ctx context.Context, req *RecommendDebugRequest) (*RecommendDebugResponse, int, error)
 	GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error)
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
@@ -172,11 +172,19 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 			limit = l
 		}
 	}
-	if limit > 50 {
-		limit = 50
+	if limit > 100 {
+		limit = 100
+	}
+	offset := 0
+	if oStr := q.Get("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
 	}
 
-	runs, err := h.svc.GetBatchRuns(r.Context(), ns, limit)
+	status := q.Get("status")
+
+	runs, total, stats, err := h.svc.GetBatchRuns(r.Context(), ns, status, limit, offset)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get batch runs")
 		return
@@ -184,7 +192,7 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []BatchRunLog{}
 	}
-	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Runs: runs})
+	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Runs: runs, Total: total, Offset: offset, Stats: stats})
 }
 
 // DebugRecommend handles POST /api/admin/v1/recommend/debug.

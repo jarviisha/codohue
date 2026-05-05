@@ -41,7 +41,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between py-2.5 border-b border-default last:border-0">
       <span className="text-sm text-muted">{label}</span>
-      <span className="text-sm font-medium text-primary font-mono tabular-nums">{value}</span>
+      <span className="text-sm font-medium text-primary tabular-nums">{value}</span>
     </div>
   )
 }
@@ -76,7 +76,7 @@ export default function NamespaceOverviewPage() {
       <span className="text-sm text-muted">{label}</span>
       {qdrantData
         ? stat?.exists
-          ? <span className="text-sm font-medium text-primary tabular-nums font-mono">{fmt(stat.points_count)} pts</span>
+          ? <span className="text-sm font-medium text-primary tabular-nums">{fmt(stat.points_count)} pts</span>
           : <span className="text-xs text-muted italic">not created</span>
         : <span className="text-xs text-muted">—</span>
       }
@@ -164,8 +164,8 @@ export default function NamespaceOverviewPage() {
             <Tbody>
               {recentRuns.map(run => (
                 <Tr key={run.id}>
-                  <Td mono>{new Date(run.started_at).toLocaleString()}</Td>
-                  <Td muted mono>{run.duration_ms != null ? `${run.duration_ms} ms` : '—'}</Td>
+                  <Td muted mono>{new Date(run.started_at).toLocaleString()}</Td>
+                  <Td mono>{run.duration_ms != null ? `${run.duration_ms} ms` : '—'}</Td>
                   <Td muted mono>{fmt(run.subjects_processed)}</Td>
                   <Td><RunStatusCell run={run} /></Td>
                 </Tr>

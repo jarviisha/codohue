@@ -49,7 +49,7 @@ export default function NamespaceCard({ health, onEdit, onSelect, isActive }: Pr
         {degraded && health.last_run?.error_message && (
           <details className="mt-1.5">
             <summary className="text-xs cursor-pointer font-medium text-danger">show error</summary>
-            <pre className="mt-1 text-xs whitespace-pre-wrap leading-tight text-danger font-mono">
+            <pre className="mt-1 text-xs whitespace-pre-wrap leading-tight text-danger">
               {health.last_run.error_message}
             </pre>
           </details>

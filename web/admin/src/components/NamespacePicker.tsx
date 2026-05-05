@@ -85,7 +85,7 @@ export default function NamespacePicker() {
 
         <span className="flex-1 min-w-0 text-left">
           {isLoading ? (
-            <span className="block font-medium text-muted font-mono">Loading…</span>
+            <span className="block font-medium text-muted">Loading…</span>
           ) : namespace ? (
             <>
               <span className="block truncate text-sm font-semibold text-primary leading-snug">
@@ -93,7 +93,7 @@ export default function NamespacePicker() {
               </span>
             </>
           ) : (
-            <span className="block text-[13px] text-muted font-mono">Select namespace…</span>
+            <span className="block text-[13px] text-muted">Select namespace…</span>
           )}
         </span>
 

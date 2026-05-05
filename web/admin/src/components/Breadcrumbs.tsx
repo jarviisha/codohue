@@ -29,7 +29,7 @@ export default function Breadcrumbs() {
   const location = useLocation()
   const crumbs = buildBreadcrumbs(location.pathname)
 
-  if (crumbs.length === 0) return null
+  if (crumbs.length <= 1) return null
 
   return (
     <nav aria-label="Breadcrumb" className="mb-6">

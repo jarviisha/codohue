@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -180,13 +181,13 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 }
 
 // InsertBatchRunLog inserts a new in-progress batch run log row and returns its ID.
-func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time) (int64, error) {
+func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource string) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO batch_run_logs (namespace, started_at, subjects_processed, success)
-		VALUES ($1, $2, 0, FALSE)
+		INSERT INTO batch_run_logs (namespace, started_at, subjects_processed, success, trigger_source)
+		VALUES ($1, $2, 0, FALSE, $3)
 		RETURNING id
-	`, namespace, startedAt).Scan(&id)
+	`, namespace, startedAt, triggerSource).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert batch_run_log: %w", err)
 	}
@@ -194,16 +195,20 @@ func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, st
 }
 
 // UpdateBatchRunLog updates a batch run log row on completion or failure.
-func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs, subjectsProcessed int, success bool, errMsg string) error {
+func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs, subjectsProcessed int, success bool, errMsg string, logLines []LogEntry) error {
 	var errMsgPtr *string
 	if errMsg != "" {
 		errMsgPtr = &errMsg
 	}
-	_, err := r.db.Exec(ctx, `
+	logJSON, err := json.Marshal(logLines)
+	if err != nil {
+		logJSON = []byte("[]")
+	}
+	_, err = r.db.Exec(ctx, `
 		UPDATE batch_run_logs
-		SET completed_at = $2, duration_ms = $3, subjects_processed = $4, success = $5, error_message = $6
+		SET completed_at = $2, duration_ms = $3, subjects_processed = $4, success = $5, error_message = $6, log_lines = $7
 		WHERE id = $1
-	`, id, completedAt, durationMs, subjectsProcessed, success, errMsgPtr)
+	`, id, completedAt, durationMs, subjectsProcessed, success, errMsgPtr, logJSON)
 	if err != nil {
 		return fmt.Errorf("update batch_run_log %d: %w", id, err)
 	}

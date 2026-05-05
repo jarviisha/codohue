@@ -22,7 +22,7 @@ import (
 type adminRepo interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
-	GetBatchRunLogs(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error)
+	GetBatchRunLogs(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
@@ -107,9 +107,9 @@ func (s *Service) UpsertNamespace(ctx context.Context, namespace string, body io
 	return &result, resp.StatusCode, nil
 }
 
-// GetBatchRuns returns recent batch run logs.
-func (s *Service) GetBatchRuns(ctx context.Context, namespace string, limit int) ([]BatchRunLog, error) {
-	return s.repo.GetBatchRunLogs(ctx, namespace, limit)
+// GetBatchRuns returns paginated batch run logs, filtered total, and aggregate stats.
+func (s *Service) GetBatchRuns(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
+	return s.repo.GetBatchRunLogs(ctx, namespace, status, limit, offset)
 }
 
 // GetNamespacesOverview returns all namespaces with computed health status.
@@ -386,9 +386,9 @@ func (s *Service) TriggerBatch(ctx context.Context, ns string) (*TriggerBatchRes
 	defer cancel()
 
 	start := time.Now()
-	s.job.RunNamespace(batchCtx, ns)
+	s.job.RunNamespace(batchCtx, ns, "manual")
 
-	logs, err := s.repo.GetBatchRunLogs(ctx, ns, 1)
+	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", 1, 0)
 	if err != nil || len(logs) == 0 {
 		return &TriggerBatchResponse{
 			Namespace:  ns,
