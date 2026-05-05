@@ -3,8 +3,9 @@ import { useNamespaceList } from '../hooks/useNamespaces'
 import { useEvents } from '../hooks/useEvents'
 import { useInjectEvent } from '../hooks/useInjectEvent'
 import ErrorBanner from '../components/ErrorBanner'
-import { Button, CodeBadge, EmptyState, PageHeader, Panel, inputClass } from '../components/ui'
+import { Button, CodeBadge, EmptyState, PageHeader, Panel, Table, Thead, Th, Tbody, Tr, Td, inputClass } from '../components/ui'
 import type { EventSummary } from '../types'
+import { useActiveNamespace } from '../context/NamespaceContext'
 
 const DEFAULT_ACTIONS = ['VIEW', 'LIKE', 'COMMENT', 'SHARE', 'SKIP']
 const PAGE_SIZE = 50
@@ -18,8 +19,8 @@ function formatTime(iso: string): string {
 }
 
 export default function EventsPage() {
+  const { namespace } = useActiveNamespace()
   const { data: nsData } = useNamespaceList()
-  const [namespace, setNamespace] = useState('')
   const [offset, setOffset] = useState(0)
   const [subjectFilter, setSubjectFilter] = useState('')
   const [appliedSubject, setAppliedSubject] = useState('')
@@ -67,32 +68,14 @@ export default function EventsPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Events"
-        actions={(
-          <select
-            value={namespace}
-            onChange={e => { setNamespace(e.target.value); setOffset(0); setAppliedSubject(''); setSubjectFilter('') }}
-            className={inputClass}
-          >
-            <option value="">Select namespace</option>
-            {nsData?.namespaces.map(ns => (
-              <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
-            ))}
-          </select>
-        )}
-      />
-
-      {!namespace && (
-        <p className="text-sm text-muted">Select a namespace to view and inject events.</p>
-      )}
+      <PageHeader title="Events" />
 
       {namespace && (
         <>
           <Panel title="Inject Test Event" className="mb-6">
             {inject.error && <ErrorBanner message={inject.error.message} />}
             {injectSuccess && (
-              <div className="flex items-center gap-2 px-4 py-3 mb-4 rounded-lg bg-success-bg border border-success/30 text-success text-sm font-medium">
+              <div className="flex items-center gap-2 px-4 py-3 mb-4 rounded-xl bg-success-bg border border-success/30 text-success text-sm font-medium">
                 Event injected successfully.
               </div>
             )}
@@ -222,34 +205,28 @@ function SubjectFilter({ value, applied, onChange, onApply, onClear }: SubjectFi
 
 function EventsTable({ events }: { events: EventSummary[] }) {
   return (
-    <div className="bg-surface border border-default rounded-lg overflow-hidden">
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="bg-subtle border-b-2 border-default">
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Time</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Subject ID</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Object ID</th>
-            <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Action</th>
-            <th className="px-4 py-2.5 text-right text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Weight</th>
-          </tr>
-        </thead>
-        <tbody>
+    <Panel>
+      <Table>
+        <Thead>
+          <Th>Time</Th>
+          <Th>Subject ID</Th>
+          <Th>Object ID</Th>
+          <Th>Action</Th>
+          <Th align="right">Weight</Th>
+        </Thead>
+        <Tbody>
           {events.map(ev => (
-            <tr key={ev.id} className="border-b border-default hover:bg-surface-raised">
-              <td className="px-4 py-2.5 text-xs text-muted tabular-nums whitespace-nowrap">{formatTime(ev.occurred_at)}</td>
-              <td className="px-4 py-2.5 text-sm">
-                <CodeBadge>{ev.subject_id}</CodeBadge>
-              </td>
-              <td className="px-4 py-2.5 text-sm">
-                <CodeBadge>{ev.object_id}</CodeBadge>
-              </td>
-              <td className="px-4 py-2.5 text-sm text-primary font-medium">{ev.action}</td>
-              <td className="px-4 py-2.5 text-sm text-primary text-right tabular-nums">{ev.weight.toFixed(2)}</td>
-            </tr>
+            <Tr key={ev.id} hoverable>
+              <Td muted mono className="whitespace-nowrap">{formatTime(ev.occurred_at)}</Td>
+              <Td><CodeBadge>{ev.subject_id}</CodeBadge></Td>
+              <Td><CodeBadge>{ev.object_id}</CodeBadge></Td>
+              <Td className="font-medium">{ev.action}</Td>
+              <Td align="right" mono>{ev.weight.toFixed(2)}</Td>
+            </Tr>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </Tbody>
+      </Table>
+    </Panel>
   )
 }
 

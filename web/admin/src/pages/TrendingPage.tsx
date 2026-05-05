@@ -1,8 +1,7 @@
-import { useState } from 'react'
 import { useTrending } from '../hooks/useTrending'
-import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
-import { CodeBadge, EmptyState, PageHeader, inputClass } from '../components/ui'
+import { CodeBadge, EmptyState, PageHeader, Panel, Table, Thead, Th, Tbody, Tr, Td } from '../components/ui'
+import { useActiveNamespace } from '../context/NamespaceContext'
 
 function formatTTL(ttlSec: number): string {
   if (ttlSec === -2) return 'no cache'
@@ -15,51 +14,34 @@ function formatTTL(ttlSec: number): string {
 function TTLBadge({ ttl }: { ttl: number }) {
   const missing = ttl === -2
   return (
-    <span className={`text-xs font-semibold uppercase tracking-[0.04em] px-2 py-0.5 rounded-sm tabular-nums ${missing ? 'bg-danger-bg border border-danger/25 text-danger' : 'bg-success-bg border border-success/30 text-success'}`}>
+    <span className={`text-xs font-semibold uppercase tracking-[0.04em] px-2 py-0.5 rounded-full tabular-nums ${missing ? 'bg-danger-bg border border-danger/25 text-danger' : 'bg-success-bg border border-success/30 text-success'}`}>
       {formatTTL(ttl)}
     </span>
   )
 }
 
 export default function TrendingPage() {
-  const { data: nsData } = useNamespaceList()
-  const [namespace, setNamespace] = useState('')
+  const { namespace } = useActiveNamespace()
   const { data, error, isLoading } = useTrending(namespace)
 
   return (
     <div>
-      <PageHeader
-        title="Trending Items"
-        actions={(
-          <select
-            value={namespace}
-            onChange={e => setNamespace(e.target.value)}
-            className={inputClass}
-          >
-            <option value="">Select namespace</option>
-            {nsData?.namespaces.map(ns => (
-              <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
-            ))}
-          </select>
-        )}
-      />
-
-      {!namespace && <p className="text-sm text-muted">Select a namespace to view trending items.</p>}
+      <PageHeader title="Trending Items" />
       {error && <ErrorBanner message="Failed to load trending data." />}
       {isLoading && <p className="text-sm text-muted">Loading…</p>}
 
       {data && (
         <>
           <div className="flex gap-4 mb-6 flex-wrap">
-            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-lg min-w-[100px]">
+            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-xl min-w-24">
               <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-1">Window</span>
               <span className="text-sm font-semibold text-primary tabular-nums">{data.window_hours}h</span>
             </div>
-            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-lg min-w-[100px]">
+            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-xl min-w-24">
               <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-1">Total items</span>
               <span className="text-sm font-semibold text-primary tabular-nums">{data.total}</span>
             </div>
-            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-lg min-w-[100px]">
+            <div className="flex flex-col px-4 py-3 bg-surface border border-default rounded-xl min-w-24">
               <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted mb-1">Cache TTL</span>
               <TTLBadge ttl={data.cache_ttl_sec} />
             </div>
@@ -74,34 +56,26 @@ export default function TrendingPage() {
           ) : data.items.length === 0 ? (
             <p className="text-sm text-muted">No items in trending window.</p>
           ) : (
-            <div className="bg-surface border border-default rounded-lg overflow-hidden">
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr className="bg-subtle border-b-2 border-default">
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">#</th>
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Object ID</th>
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Score</th>
-                    <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Cache TTL</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <Panel>
+              <Table>
+                <Thead>
+                  <Th>#</Th>
+                  <Th>Object ID</Th>
+                  <Th>Score</Th>
+                  <Th>Cache TTL</Th>
+                </Thead>
+                <Tbody>
                   {data.items.map((item, i) => (
-                    <tr key={item.object_id} className="border-b border-default hover:bg-surface-raised">
-                      <td className="px-4 py-3 text-sm text-muted tabular-nums">{i + 1}</td>
-                      <td className="px-4 py-3 text-sm">
-                        <CodeBadge>{item.object_id}</CodeBadge>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
-                        {item.score.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-sm">
-                        <TTLBadge ttl={item.cache_ttl_sec} />
-                      </td>
-                    </tr>
+                    <Tr key={item.object_id} hoverable>
+                      <Td muted mono>{i + 1}</Td>
+                      <Td><CodeBadge>{item.object_id}</CodeBadge></Td>
+                      <Td mono>{item.score.toFixed(2)}</Td>
+                      <Td><TTLBadge ttl={item.cache_ttl_sec} /></Td>
+                    </Tr>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </Tbody>
+              </Table>
+            </Panel>
           )}
         </>
       )}

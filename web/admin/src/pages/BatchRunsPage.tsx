@@ -1,10 +1,10 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useBatchRuns } from '../hooks/useBatchRuns'
-import { useNamespaceList } from '../hooks/useNamespaces'
 import ErrorBanner from '../components/ErrorBanner'
-import { CodeBadge, EmptyState, PageHeader, inputClass } from '../components/ui'
+import { CodeBadge, EmptyState, PageHeader, Panel, Table, Thead, Th, Tbody, Tr, Td } from '../components/ui'
 import type { BatchRunLog } from '../types'
+import { useActiveNamespace } from '../context/NamespaceContext'
 
 interface PhaseRowProps {
   label: string
@@ -19,7 +19,7 @@ function PhaseRow({ label, ok, durMs, counts, error, skipped }: PhaseRowProps) {
   if (skipped) {
     return (
       <tr className="border-t border-default">
-        <td className="px-3 py-1.5 text-[11px] text-primary w-[110px]">{label}</td>
+        <td className="px-3 py-1.5 text-[11px] text-primary w-28">{label}</td>
         <td colSpan={3} className="px-3 py-1.5 text-xs text-muted italic">skipped</td>
       </tr>
     )
@@ -27,14 +27,14 @@ function PhaseRow({ label, ok, durMs, counts, error, skipped }: PhaseRowProps) {
   if (ok == null) {
     return (
       <tr className="border-t border-default">
-        <td className="px-3 py-1.5 text-[11px] text-primary w-[110px]">{label}</td>
+        <td className="px-3 py-1.5 text-[11px] text-primary w-28">{label}</td>
         <td colSpan={3} className="px-3 py-1.5 text-xs text-muted italic">no data</td>
       </tr>
     )
   }
   return (
     <tr className="border-t border-default">
-      <td className="px-3 py-1.5 text-[11px] text-primary w-[110px]">{label}</td>
+      <td className="px-3 py-1.5 text-[11px] text-primary w-28">{label}</td>
       <td className="px-3 py-1.5 text-xs font-medium">
         {ok
           ? <span className="text-success">✓ OK</span>
@@ -57,10 +57,9 @@ function PhaseRow({ label, ok, durMs, counts, error, skipped }: PhaseRowProps) {
 }
 
 export default function BatchRunsPage() {
-  const { data: nsData } = useNamespaceList()
-  const [nsFilter, setNsFilter] = useState('')
+  const { namespace } = useActiveNamespace()
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
-  const { data, error, isLoading } = useBatchRuns(nsFilter || undefined)
+  const { data, error, isLoading } = useBatchRuns(namespace || undefined)
 
   function toggleRow(id: number) {
     setExpandedRows(prev => {
@@ -76,21 +75,7 @@ export default function BatchRunsPage() {
 
   return (
     <div>
-      <PageHeader
-        title="Batch Runs"
-        actions={(
-          <select
-            value={nsFilter}
-            onChange={e => setNsFilter(e.target.value)}
-            className={inputClass}
-          >
-            <option value="">All namespaces</option>
-            {nsData?.namespaces.map(ns => (
-              <option key={ns.namespace} value={ns.namespace}>{ns.namespace}</option>
-            ))}
-          </select>
-        )}
-      />
+      <PageHeader title="Batch Runs" />
 
       {error && <ErrorBanner message="Failed to load batch runs." />}
       {isLoading && <p className="text-sm text-muted">Loading…</p>}
@@ -104,21 +89,19 @@ export default function BatchRunsPage() {
       )}
 
       {data && data.runs.length > 0 && (
-        <div className="bg-surface border border-default rounded-lg overflow-hidden">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="bg-subtle border-b-2 border-default">
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted w-8"></th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">ID</th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Namespace</th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Started</th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Duration</th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Subjects</th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Status</th>
-                <th className="px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"></th>
-              </tr>
-            </thead>
-            <tbody>
+        <Panel>
+          <Table>
+            <Thead>
+              <Th className="w-8" />
+              <Th>ID</Th>
+              <Th>Namespace</Th>
+              <Th>Started</Th>
+              <Th>Duration</Th>
+              <Th>Subjects</Th>
+              <Th>Status</Th>
+              <Th />
+            </Thead>
+            <Tbody>
               {data.runs.map(run => {
                 const hasPhases = run.phase1_ok != null || run.phase2_ok != null || run.phase3_ok != null
                 const expanded = expandedRows.has(run.id)
@@ -126,9 +109,9 @@ export default function BatchRunsPage() {
                 const phase3Skipped = run.phase3_ok == null && run.phase1_ok != null
 
                 return (
-                  <>
-                    <tr key={run.id} className="border-b border-default hover:bg-surface-raised">
-                      <td className="px-4 py-3">
+                  <Fragment key={run.id}>
+                    <Tr hoverable>
+                      <Td>
                         {hasPhases && (
                           <button
                             onClick={() => toggleRow(run.id)}
@@ -138,36 +121,36 @@ export default function BatchRunsPage() {
                             {expanded ? '▾' : '▸'}
                           </button>
                         )}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{run.id}</td>
-                      <td className="px-4 py-3 text-sm">
+                      </Td>
+                      <Td mono>{run.id}</Td>
+                      <Td>
                         <CodeBadge>{run.namespace}</CodeBadge>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{new Date(run.started_at).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">
+                      </Td>
+                      <Td mono>{new Date(run.started_at).toLocaleString()}</Td>
+                      <Td mono>
                         {run.duration_ms != null
                           ? `${run.duration_ms} ms`
                           : run.completed_at
                             ? '–'
-                            : <em className="text-muted not-italic text-accent">in progress</em>}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-primary font-mono tabular-nums">{run.subjects_processed}</td>
-                      <td className="px-4 py-3 text-sm">
+                            : <em className="not-italic text-accent">in progress</em>}
+                      </Td>
+                      <Td mono>{run.subjects_processed}</Td>
+                      <Td>
                         <RunStatus run={run} />
-                      </td>
-                      <td className="px-4 py-3">
+                      </Td>
+                      <Td>
                         <Link
                           to={`/namespaces/${run.namespace}`}
                           className="no-underline text-xs font-medium text-accent hover:text-accent-hover transition-colors"
                         >
                           vector stats →
                         </Link>
-                      </td>
-                    </tr>
+                      </Td>
+                    </Tr>
 
                     {expanded && (
-                      <tr key={`${run.id}-phases`} className="border-b border-default">
-                        <td colSpan={8} className="px-5 py-3 bg-subtle">
+                      <tr className="border-b border-default last:border-0">
+                        <td colSpan={8} className="py-3 bg-subtle">
                           <PhaseBreakdown
                             run={run}
                             phase2Skipped={phase2Skipped}
@@ -176,12 +159,12 @@ export default function BatchRunsPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
-            </tbody>
-          </table>
-        </div>
+            </Tbody>
+          </Table>
+        </Panel>
       )}
     </div>
   )
@@ -214,10 +197,10 @@ function PhaseBreakdown({
   phase3Skipped: boolean
 }) {
   return (
-    <table className="w-full border-collapse border border-default rounded-lg overflow-hidden">
+    <table className="w-full border-collapse border border-default rounded-xl overflow-hidden">
       <thead>
         <tr className="bg-surface border-b border-default">
-          <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted w-[110px]">Phase</th>
+          <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted w-28">Phase</th>
           <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Result</th>
           <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Duration</th>
           <th className="px-3 py-1.5 text-left text-[11px] font-semibold text-muted">Counts</th>
