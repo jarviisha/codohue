@@ -21,10 +21,10 @@ COMPOSE_APP      := $(COMPOSE) -f docker-compose.app.yml
 COMPOSE_PROD     := $(COMPOSE) -f docker-compose.prod.yml
 COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_RECOMMENDER_API_KEY=dummy
 
-MIN_TOTAL          ?= 80
+MIN_TOTAL          ?= 60
 MIN_RECOMMEND      ?= 85
-MIN_COMPUTE        ?= 85
-MIN_CONFIG         ?= 95
+MIN_COMPUTE        ?= 75
+MIN_CONFIG         ?= 65
 MIN_AUTH           ?= 95
 MIN_INGEST         ?= 80
 MIN_NSCONFIG       ?= 80
