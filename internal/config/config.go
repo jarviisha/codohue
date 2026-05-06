@@ -1,12 +1,24 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 
 	"github.com/joho/godotenv"
 )
+
+// loadDotenv loads a .env file from the working directory if present.
+// A missing file is expected when running in Docker (env vars are injected
+// via env_file) and is silently ignored. Other errors (parse, permission)
+// still surface so misconfigured files don't fail open.
+func loadDotenv() {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Printf("warning: failed to load .env: %v\n", err)
+	}
+}
 
 // AppConfig holds all application configuration loaded from environment variables.
 type AppConfig struct {
@@ -45,10 +57,7 @@ func LoadCron() (*AppConfig, error) {
 
 // loadBase loads the config fields shared by all binaries and validates them.
 func loadBase() (*AppConfig, error) {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("No .env file found, relying on environment variables")
-	}
+	loadDotenv()
 
 	cfg := &AppConfig{
 		DatabaseURL: getEnv("DATABASE_URL", ""),
@@ -72,6 +81,48 @@ func loadBase() (*AppConfig, error) {
 		return nil, fmt.Errorf("invalid BATCH_INTERVAL_MINUTES: %w", err)
 	}
 	cfg.BatchIntervalMinutes = batchInterval
+
+	return cfg, nil
+}
+
+// AdminConfig holds configuration for the admin dashboard binary.
+type AdminConfig struct {
+	DatabaseURL       string
+	RedisURL          string
+	RecommenderAPIKey string
+	APIURL            string // internal URL of cmd/api for proxying
+	AdminPort         string // HTTP listen port (default: "2002")
+	LogFormat         string // "json" | "text" (default: "text")
+	QdrantHost        string
+	QdrantPort        int
+}
+
+// LoadAdmin reads and validates configuration for the admin binary.
+func LoadAdmin() (*AdminConfig, error) {
+	loadDotenv()
+
+	cfg := &AdminConfig{
+		DatabaseURL:       getEnv("DATABASE_URL", ""),
+		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379"),
+		RecommenderAPIKey: getEnv("RECOMMENDER_API_KEY", ""),
+		APIURL:            getEnv("API_URL", "http://localhost:2001"),
+		AdminPort:         getEnv("ADMIN_PORT", "2002"),
+		LogFormat:         getEnv("LOG_FORMAT", "text"),
+		QdrantHost:        getEnv("QDRANT_HOST", "localhost"),
+	}
+
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+	if cfg.RecommenderAPIKey == "" {
+		return nil, fmt.Errorf("RECOMMENDER_API_KEY is required")
+	}
+
+	qdrantPort, err := strconv.Atoi(getEnv("QDRANT_PORT", "6334"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid QDRANT_PORT: %w", err)
+	}
+	cfg.QdrantPort = qdrantPort
 
 	return cfg, nil
 }

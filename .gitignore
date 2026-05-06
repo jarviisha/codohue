@@ -35,6 +35,10 @@ Thumbs.db
 dist/
 build/
 
+# React frontend
+web/admin/node_modules/
+web/admin/dist/
+
 # Logs
 *.log
 

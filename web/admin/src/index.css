@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+/* ─── Semantic token layer ─── */
+:root {
+  --bg-base:           #FFFFFF;
+  --bg-subtle:         #F1F5F9;
+  --bg-surface:        #FFFFFF;
+  --bg-surface-raised: #F1F5F9;
+  --border-default:    #E2E8F0;
+  --border-strong:     #CBD5E1;
+  --text-primary:      #0F172A;
+  --text-secondary:    #475569;
+  --text-muted:        #94A3B8;
+  --text-disabled:     #CBD5E1;
+  --accent:            #0866FF;
+  --accent-hover:      #0052CC;
+  --accent-active:     #0040AA;
+  --accent-subtle:     #EBF3FF;
+  --accent-text:       #FFFFFF;
+  --success:           #10B981;
+  --success-bg:        #ECFDF5;
+  --warning:           #F59E0B;
+  --warning-bg:        #FFFBEB;
+  --danger:            #EF4444;
+  --danger-bg:         #FEF2F2;
+}
+
+.dark {
+  --bg-base:           #0B1120;
+  --bg-subtle:         #0F1A2E;
+  --bg-surface:        #101C33;
+  --bg-surface-raised: #152240;
+  --border-default:    #1E3A5F;
+  --border-strong:     #2A4F7A;
+  --text-primary:      #F1F5F9;
+  --text-secondary:    #94A3B8;
+  --text-muted:        #4A6380;
+  --text-disabled:     #243A55;
+  --accent:            #0866FF;
+  --accent-hover:      #0052CC;
+  --accent-active:     #0040AA;
+  --accent-subtle:     #001A4D;
+  --accent-text:       #FFFFFF;
+  --success:           #34D399;
+  --success-bg:        #052E1F;
+  --warning:           #FBBF24;
+  --warning-bg:        #2D1B00;
+  --danger:            #F87171;
+  --danger-bg:         #2A0A0A;
+}
+
+/* ─── Static theme values (fonts, shadows, layout) ─── */
+@theme {
+  --font-sans: 'Google Sans Flex', -apple-system, system-ui, sans-serif;
+--shadow-raised:   0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.06);
+  --shadow-floating: 0 4px 6px -1px rgb(0 0 0 / 0.10), 0 2px 4px -2px rgb(0 0 0 / 0.08);
+  --shadow-overlay:  0 20px 25px -5px rgb(0 0 0 / 0.15), 0 8px 10px -6px rgb(0 0 0 / 0.10);
+  --shadow-focus:    0 0 0 3px rgb(8 102 255 / 0.25);
+
+  /* Layout widths — semantic tokens for design-spec measurements */
+  --spacing-90:  22.5rem;  /* 360px — login card width: w-90 */
+  --spacing-140: 35rem;    /* 560px — form page max-width: max-w-140 */
+}
+
+/* ─── Dynamic color tokens — respond to .dark via CSS vars ─── */
+@theme inline {
+  --color-base:           var(--bg-base);
+  --color-subtle:         var(--bg-subtle);
+  --color-surface:        var(--bg-surface);
+  --color-surface-raised: var(--bg-surface-raised);
+  --color-default:        var(--border-default);
+  --color-strong:         var(--border-strong);
+  --color-primary:        var(--text-primary);
+  --color-secondary:      var(--text-secondary);
+  --color-muted:          var(--text-muted);
+  --color-disabled:       var(--text-disabled);
+  --color-accent:         var(--accent);
+  --color-accent-hover:   var(--accent-hover);
+  --color-accent-active:  var(--accent-active);
+  --color-accent-subtle:  var(--accent-subtle);
+  --color-accent-text:    var(--accent-text);
+  --color-success:        var(--success);
+  --color-success-bg:     var(--success-bg);
+  --color-warning:        var(--warning);
+  --color-warning-bg:     var(--warning-bg);
+  --color-danger:         var(--danger);
+  --color-danger-bg:      var(--danger-bg);
+}
+
+/* ─── Base styles ─── */
+*, *::before, *::after {
+  font-feature-settings: "cv11", "ss01";
+}
+
+html {
+  background-color: var(--bg-base);
+}
+
+body {
+  font-family: 'Google Sans Flex', -apple-system, system-ui, sans-serif;
+  color: var(--text-secondary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, pre {
+  font-family: 'Google Sans Code', Menlo, 'Courier New', monospace;
+  font-feature-settings: normal;
+}

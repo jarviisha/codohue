@@ -2,7 +2,9 @@ package compute
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -176,4 +178,106 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 		return ns, fmt.Errorf("iterate active namespaces: %w", err)
 	}
 	return ns, nil
+}
+
+// InsertBatchRunLog inserts a new in-progress batch run log row and returns its ID.
+func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource string) (int64, error) {
+	var id int64
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO batch_run_logs (namespace, started_at, subjects_processed, success, trigger_source)
+		VALUES ($1, $2, 0, FALSE, $3)
+		RETURNING id
+	`, namespace, startedAt, triggerSource).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("insert batch_run_log: %w", err)
+	}
+	return id, nil
+}
+
+// UpdateBatchRunLog updates a batch run log row on completion or failure.
+func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs, subjectsProcessed int, success bool, errMsg string, logLines []LogEntry) error {
+	var errMsgPtr *string
+	if errMsg != "" {
+		errMsgPtr = &errMsg
+	}
+	logJSON, err := json.Marshal(logLines)
+	if err != nil {
+		logJSON = []byte("[]")
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE batch_run_logs
+		SET completed_at = $2, duration_ms = $3, subjects_processed = $4, success = $5, error_message = $6, log_lines = $7
+		WHERE id = $1
+	`, id, completedAt, durationMs, subjectsProcessed, success, errMsgPtr, logJSON)
+	if err != nil {
+		return fmt.Errorf("update batch_run_log %d: %w", id, err)
+	}
+	return nil
+}
+
+// UpdateBatchRunPhases writes per-phase metrics into an existing batch_run_logs row.
+func (r *Repository) UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error {
+	nullStr := func(s string) *string {
+		if s == "" {
+			return nil
+		}
+		return &s
+	}
+	nullInt := func(v int, present bool) *int {
+		if !present {
+			return nil
+		}
+		return &v
+	}
+	nullBool := func(v bool, present bool) *bool {
+		if !present {
+			return nil
+		}
+		return &v
+	}
+
+	var (
+		p1ok, p2ok, p3ok     *bool
+		p1ms, p1sub, p1obj   *int
+		p2ms, p2items, p2sub *int
+		p3ms, p3items        *int
+		p1err, p2err, p3err  *string
+	)
+
+	if p := phases.Phase1; p != nil {
+		p1ok = nullBool(p.OK, true)
+		p1ms = nullInt(p.DurationMs, true)
+		p1sub = nullInt(p.Count1, true)
+		p1obj = nullInt(p.Count2, true)
+		p1err = nullStr(p.Error)
+	}
+	if p := phases.Phase2; p != nil {
+		p2ok = nullBool(p.OK, true)
+		p2ms = nullInt(p.DurationMs, true)
+		p2items = nullInt(p.Count1, true)
+		p2sub = nullInt(p.Count2, true)
+		p2err = nullStr(p.Error)
+	}
+	if p := phases.Phase3; p != nil {
+		p3ok = nullBool(p.OK, true)
+		p3ms = nullInt(p.DurationMs, true)
+		p3items = nullInt(p.Count1, true)
+		p3err = nullStr(p.Error)
+	}
+
+	_, err := r.db.Exec(ctx, `
+		UPDATE batch_run_logs
+		SET phase1_ok = $2,  phase1_duration_ms = $3,  phase1_subjects = $4,  phase1_objects = $5,  phase1_error = $6,
+		    phase2_ok = $7,  phase2_duration_ms = $8,  phase2_items    = $9,  phase2_subjects = $10, phase2_error = $11,
+		    phase3_ok = $12, phase3_duration_ms = $13, phase3_items    = $14, phase3_error    = $15
+		WHERE id = $1
+	`, id,
+		p1ok, p1ms, p1sub, p1obj, p1err,
+		p2ok, p2ms, p2items, p2sub, p2err,
+		p3ok, p3ms, p3items, p3err,
+	)
+	if err != nil {
+		return fmt.Errorf("update batch_run_phases %d: %w", id, err)
+	}
+	return nil
 }

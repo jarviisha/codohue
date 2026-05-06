@@ -70,6 +70,20 @@ jobs:
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:latest
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.event.workflow_run.head_branch }}
 
+      - name: Build and push Admin image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.admin
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:${{ github.event.workflow_run.head_branch }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:latest
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:${{ github.event.workflow_run.head_branch }}
+
       - name: Build and push Migrate image
         uses: docker/build-push-action@v6
         with:

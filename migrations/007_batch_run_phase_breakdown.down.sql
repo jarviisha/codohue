@@ -1,0 +1,15 @@
+ALTER TABLE batch_run_logs
+  DROP COLUMN IF EXISTS phase1_ok,
+  DROP COLUMN IF EXISTS phase1_duration_ms,
+  DROP COLUMN IF EXISTS phase1_subjects,
+  DROP COLUMN IF EXISTS phase1_objects,
+  DROP COLUMN IF EXISTS phase1_error,
+  DROP COLUMN IF EXISTS phase2_ok,
+  DROP COLUMN IF EXISTS phase2_duration_ms,
+  DROP COLUMN IF EXISTS phase2_items,
+  DROP COLUMN IF EXISTS phase2_subjects,
+  DROP COLUMN IF EXISTS phase2_error,
+  DROP COLUMN IF EXISTS phase3_ok,
+  DROP COLUMN IF EXISTS phase3_duration_ms,
+  DROP COLUMN IF EXISTS phase3_items,
+  DROP COLUMN IF EXISTS phase3_error;

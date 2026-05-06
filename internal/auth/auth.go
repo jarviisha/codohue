@@ -26,25 +26,24 @@ func ExtractBearerToken(r *http.Request) string {
 
 // ValidateNamespaceKey returns true if the token is authorized for the given namespace.
 // It accepts the token when:
-//   - The namespace has a key and the token matches its bcrypt hash, OR
-//   - The namespace has no key configured and the token matches the admin key (fallback
-//     for clients not yet provisioned with a namespace key).
+//   - The token matches the global admin key (always accepted), OR
+//   - The namespace has a key and the token matches its bcrypt hash.
 func ValidateNamespaceKey(ctx context.Context, token, adminKey string, getHash KeyHashFn, namespace string) bool {
 	if token == "" {
 		return false
 	}
 
+	// Admin key is always accepted — it supersedes namespace-scoped keys.
+	if token == adminKey {
+		return true
+	}
+
 	hash, err := getHash(ctx, namespace)
-	if err != nil {
+	if err != nil || hash == "" {
 		return false
 	}
 
-	if hash != "" {
-		return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil
-	}
-
-	// Namespace has no key yet — accept admin key as fallback.
-	return token == adminKey
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil
 }
 
 // RequireAdmin returns middleware that allows only requests carrying the global admin key.
