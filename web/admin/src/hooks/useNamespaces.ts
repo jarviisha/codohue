@@ -23,8 +23,10 @@ export function useUpsertNamespace() {
   return useMutation({
     mutationFn: ({ ns, payload }: { ns: string; payload: UpsertNamespacePayload }) =>
       adminApi.upsertNamespace(ns, payload),
-    onSuccess: () => {
+    onSuccess: (_result, { ns }) => {
       qc.invalidateQueries({ queryKey: queryKeys.namespaces.list() })
+      qc.invalidateQueries({ queryKey: queryKeys.namespaces.overview() })
+      qc.invalidateQueries({ queryKey: queryKeys.namespaces.detail(ns) })
     },
   })
 }

@@ -7,7 +7,7 @@ export function useTriggerBatch(ns: string) {
   return useMutation({
     mutationFn: () => adminApi.triggerBatchRun(ns),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.batchRuns.list() })
+      queryClient.invalidateQueries({ queryKey: ['batch-runs'] })
       queryClient.invalidateQueries({ queryKey: queryKeys.namespaces.overview() })
     },
   })

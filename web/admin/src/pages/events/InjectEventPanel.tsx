@@ -52,39 +52,27 @@ export default function InjectEventPanel({
       )}
       <form onSubmit={handleSubmit}>
         <Toolbar>
-          <FormControl
-            label="Subject ID"
-            htmlFor="inject-subject-id"
-            labelClassName="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"
-          >
+          <FormControl label="Subject ID" htmlFor="inject-subject-id">
             <TextInput
               id="inject-subject-id"
               value={subject}
               onChange={e => setSubject(e.target.value)}
               placeholder="user-1"
-              className="w-48 py-2.5"
+              className="w-full py-2.5 sm:w-48"
               required
             />
           </FormControl>
-          <FormControl
-            label="Object ID"
-            htmlFor="inject-object-id"
-            labelClassName="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"
-          >
+          <FormControl label="Object ID" htmlFor="inject-object-id">
             <TextInput
               id="inject-object-id"
               value={object}
               onChange={e => setObject(e.target.value)}
               placeholder="item-42"
-              className="w-48 py-2.5"
+              className="w-full py-2.5 sm:w-48"
               required
             />
           </FormControl>
-          <FormControl
-            label="Action"
-            htmlFor="inject-action"
-            labelClassName="text-[11px] font-semibold uppercase tracking-[0.06em] text-muted"
-          >
+          <FormControl label="Action" htmlFor="inject-action">
             <Select
               id="inject-action"
               value={action}

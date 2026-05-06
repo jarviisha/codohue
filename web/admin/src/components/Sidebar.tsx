@@ -8,7 +8,12 @@ import { useActiveNamespace } from '../context/useActiveNamespace'
 import { Button } from './ui'
 
 export default function Sidebar() {
-  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  const [dark, setDark] = useState(() => {
+    const savedTheme = localStorage.getItem('theme')
+    if (savedTheme === 'dark') return true
+    if (savedTheme === 'light') return false
+    return document.documentElement.classList.contains('dark')
+  })
   const { namespace } = useActiveNamespace()
 
   useEffect(() => {
@@ -29,7 +34,7 @@ export default function Sidebar() {
   return (
     <nav
       aria-label="Main navigation"
-      className="fixed left-0 top-0 flex h-screen w-64 shrink-0 flex-col border-r border-default bg-surface px-3"
+      className="flex w-full shrink-0 flex-col border-b border-default bg-surface px-3 md:fixed md:left-0 md:top-0 md:h-screen md:w-64 md:border-b-0 md:border-r"
     >
       <div className="flex h-14 items-center px-3">
         <div className="min-w-0">

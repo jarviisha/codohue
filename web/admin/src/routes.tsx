@@ -7,6 +7,7 @@ import RecommendDebugPage from './pages/RecommendDebugPage'
 import BatchRunsPage from './pages/BatchRunsPage'
 import TrendingPage from './pages/TrendingPage'
 import EventsPage from './pages/EventsPage'
+import NamespacesPage from './pages/NamespacesPage'
 
 export interface AdminRoute {
   path: string
@@ -58,6 +59,11 @@ export const adminRoutes: AdminRoute[] = [
     element: <HealthPage />,
     nav: true,
     icon: 'compass',
+  },
+  {
+    path: 'namespaces',
+    label: 'Namespaces',
+    element: <NamespacesPage />,
   },
   {
     path: 'namespaces/new',

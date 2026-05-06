@@ -13,10 +13,10 @@ export default function Layout() {
   const needsNs = !ROUTES_WITHOUT_NS.some(p => location.pathname.startsWith(p))
 
   return (
-    <div className="flex min-h-screen bg-base">
+    <div className="min-h-screen bg-base">
       <Sidebar />
-      <main className="ml-64 min-h-screen flex-1 bg-base">
-        <div className="max-w-7xl mx-auto px-8 py-8">
+      <main className="min-h-screen bg-base md:ml-64">
+        <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 md:px-8 md:py-8">
           {needsNs && !namespace ? (
             <EmptyState className="mt-16">
               Select a namespace from the sidebar to continue.

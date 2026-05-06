@@ -27,45 +27,42 @@ export default function RecommendDebugPage() {
     <PageShell>
       <PageHeader title="Recommendation Debug" />
 
-      <form
-        onSubmit={handleSubmit}
-        className="rounded-lg border border-default bg-surface p-5"
-      >
-        <Toolbar>
-          <FormControl label="Subject ID" htmlFor="debug-subject-id">
-            <TextInput
-              id="debug-subject-id"
-              required
-              value={subjectID}
-              onChange={e => setSubjectID(e.target.value)}
-              placeholder="e.g. user-123"
-            />
-          </FormControl>
-          <FormControl label="Limit" htmlFor="debug-limit">
-            <Select id="debug-limit" value={limit} onChange={e => setLimit(+e.target.value)} className="w-20">
-              {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
-            </Select>
-          </FormControl>
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={isPending}
-            className="py-2"
-          >
-            {isPending ? 'Fetching...' : 'Fetch'}
-          </Button>
-        </Toolbar>
-      </form>
+      <Panel>
+        <form onSubmit={handleSubmit}>
+          <Toolbar>
+            <FormControl label="Subject ID" htmlFor="debug-subject-id">
+              <TextInput
+                id="debug-subject-id"
+                required
+                value={subjectID}
+                onChange={e => setSubjectID(e.target.value)}
+                placeholder="e.g. user-123"
+                className="w-full sm:w-64"
+              />
+            </FormControl>
+            <FormControl label="Limit" htmlFor="debug-limit">
+              <Select id="debug-limit" value={limit} onChange={e => setLimit(+e.target.value)} className="w-20">
+                {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
+              </Select>
+            </FormControl>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={isPending}
+              className="py-2"
+            >
+              {isPending ? 'Fetching...' : 'Fetch'}
+            </Button>
+          </Toolbar>
+        </form>
+      </Panel>
 
       {(debug.error || profile.error) && (
         <ErrorBanner message={debug.error?.message ?? profile.error?.message ?? 'Unknown error'} />
       )}
 
       {profile.data && (
-        <Panel className="mb-6">
-          <h3 className="font-semibold m-0 mb-4 text-[11px] uppercase tracking-[0.06em] text-muted">
-            Subject Profile
-          </h3>
+        <Panel title="Subject Profile" className="mb-6">
           <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
               { label: 'Total interactions', value: profile.data.interaction_count },
