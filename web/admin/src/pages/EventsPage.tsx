@@ -3,16 +3,15 @@ import { useNamespaceList } from '../hooks/useNamespaces'
 import { useEvents } from '../hooks/useEvents'
 import { useInjectEvent } from '../hooks/useInjectEvent'
 import ErrorBanner from '../components/ErrorBanner'
-import { CodeBadge, EmptyState, LoadingState, PageHeader, PageShell } from '../components/ui'
+import { EmptyState, LoadingState, PageHeader, PageShell } from '../components/ui'
 import { useActiveNamespace } from '../context/useActiveNamespace'
-import EventsPagination from './events/EventsPagination'
 import EventsTable from './events/EventsTable'
 import InjectEventPanel, { type InjectEventPayload } from './events/InjectEventPanel'
 import SubjectFilter from './events/SubjectFilter'
-import { formatCount } from '../utils/format'
+import SummaryStrip from './events/SummaryStrip'
 
 const DEFAULT_ACTIONS = ['VIEW', 'LIKE', 'COMMENT', 'SHARE', 'SKIP']
-const PAGE_SIZE = 50
+const PAGE_SIZE = 20
 
 export default function EventsPage() {
   const { namespace } = useActiveNamespace()
@@ -21,11 +20,10 @@ export default function EventsPage() {
   const [subjectFilter, setSubjectFilter] = useState('')
   const [appliedSubject, setAppliedSubject] = useState('')
 
-  const { data, error, isLoading, isFetching } = useEvents(namespace, PAGE_SIZE, offset, appliedSubject)
+  const { data, error, isLoading } = useEvents(namespace, PAGE_SIZE, offset, appliedSubject)
   const inject = useInjectEvent(namespace)
 
   const total = data?.total ?? 0
-  const pageStart = total === 0 ? 0 : offset + 1
   const pageEnd = Math.min(offset + PAGE_SIZE, total)
 
   const nsConfig = nsData?.namespaces.find(n => n.namespace === namespace)
@@ -71,17 +69,11 @@ export default function EventsPage() {
 
           {error && <ErrorBanner message="Failed to load events." />}
 
-          {data && (
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs text-muted m-0">
-                {total === 0 ? 'No events' : `Showing ${pageStart}–${pageEnd} of ${formatCount(total)} total`}
-                {appliedSubject && <span className="ml-1">for subject <CodeBadge>{appliedSubject}</CodeBadge></span>}
-                {isFetching && <span className="ml-2 text-muted">Refreshing...</span>}
-              </p>
-            </div>
-          )}
-
           {isLoading && !data && <LoadingState />}
+
+          {data && total > 0 && (
+            <SummaryStrip events={data.events} total={total} subjectFilter={appliedSubject} />
+          )}
 
           {data && data.events.length === 0 && (
             <EmptyState>
@@ -90,16 +82,15 @@ export default function EventsPage() {
           )}
 
           {data && data.events.length > 0 && (
-            <EventsTable events={data.events} />
-          )}
-
-          {data && total > PAGE_SIZE && (
-            <EventsPagination
+            <EventsTable
+              events={data.events}
               offset={offset}
+              pageSize={PAGE_SIZE}
               pageEnd={pageEnd}
               total={total}
-              onPrevious={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-              onNext={() => setOffset(offset + PAGE_SIZE)}
+              subjectFilter={appliedSubject}
+              onPreviousPage={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+              onNextPage={() => setOffset(offset + PAGE_SIZE)}
             />
           )}
         </>
