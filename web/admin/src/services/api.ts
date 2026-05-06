@@ -12,7 +12,18 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+interface RequestOptions {
+  redirectOnUnauthorized?: boolean
+}
+
+async function request<T>(
+  method: string,
+  path: string,
+  body?: unknown,
+  options: RequestOptions = {},
+): Promise<T> {
+  const redirectOnUnauthorized = options.redirectOnUnauthorized ?? true
+
   const res = await fetch(BASE + path, {
     method,
     credentials: 'include',
@@ -20,7 +31,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     body: body ? JSON.stringify(body) : undefined,
   })
 
-  if (res.status === 401) {
+  if (res.status === 401 && redirectOnUnauthorized) {
     window.location.href = '/login'
     throw new ApiError(401, 'unauthorized', 'Session expired')
   }
@@ -43,7 +54,7 @@ export const api = {
 }
 
 export async function login(apiKey: string): Promise<void> {
-  await request('POST', '/api/auth/login', { api_key: apiKey })
+  await request('POST', '/api/auth/login', { api_key: apiKey }, { redirectOnUnauthorized: false })
 }
 
 export async function logout(): Promise<void> {
