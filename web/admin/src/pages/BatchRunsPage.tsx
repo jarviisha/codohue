@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { BATCH_PAGE_SIZE, useBatchRuns } from '../hooks/useBatchRuns'
 import { useTriggerBatch } from '../hooks/useTriggerBatch'
 import ErrorBanner from '../components/ErrorBanner'
@@ -20,15 +20,14 @@ import SummaryStrip from './batch-runs/SummaryStrip'
 
 export default function BatchRunsPage() {
   const { namespace } = useActiveNamespace()
+
+  return <BatchRunsContent key={namespace ?? 'none'} namespace={namespace} />
+}
+
+function BatchRunsContent({ namespace }: { namespace: string | null }) {
   const [selectedRun, setSelectedRun] = useState<BatchRunLog | null>(null)
   const [page, setPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-
-  useEffect(() => {
-    setPage(0)
-    setStatusFilter('all')
-    setSelectedRun(null)
-  }, [namespace])
 
   const { data, error, isLoading } = useBatchRuns(
     namespace || undefined,
