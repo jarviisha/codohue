@@ -38,6 +38,7 @@ build/
 # React frontend
 web/admin/node_modules/
 web/admin/dist/
+web/admin/.vite/
 
 # Logs
 *.log
