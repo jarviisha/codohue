@@ -19,8 +19,13 @@ type LogCapture struct {
 	entries []LogEntry
 }
 
-func (c *LogCapture) Info(msg string)  { c.add("info", msg) }
-func (c *LogCapture) Warn(msg string)  { c.add("warn", msg) }
+// Info records an informational log entry.
+func (c *LogCapture) Info(msg string) { c.add("info", msg) }
+
+// Warn records a warning log entry.
+func (c *LogCapture) Warn(msg string) { c.add("warn", msg) }
+
+// Error records an error log entry.
 func (c *LogCapture) Error(msg string) { c.add("error", msg) }
 
 func (c *LogCapture) add(level, msg string) {

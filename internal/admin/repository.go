@@ -137,17 +137,16 @@ func (r *Repository) GetSubjectStats(ctx context.Context, namespace, subjectID s
 	return &stats, nil
 }
 
-// GetBatchRunLogs returns recent batch run history.
-// statusFilter maps API status values to SQL WHERE clauses.
 var statusFilter = map[string]string{
 	"running": "completed_at IS NULL",
 	"ok":      "success = TRUE",
 	"failed":  "completed_at IS NOT NULL AND success = FALSE",
 }
 
+// GetBatchRunLogs returns recent batch run history.
 // If namespace is non-empty, results are filtered to that namespace.
-// status filters by run state: "running", "ok", "failed", or "" for all.
-// Limit is capped at 100. Returns rows, filtered total, aggregate stats, error.
+// Status filters by run state: "running", "ok", "failed", or "" for all.
+// Limit is capped at 100.
 func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
