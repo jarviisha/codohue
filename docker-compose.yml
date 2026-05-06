@@ -17,15 +17,16 @@ services:
       target: api
     container_name: codohue-api
     ports:
-      - "2001:2001"
+      - "${API_PORT:-2001}:${API_PORT:-2001}"
     environment:
       - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
-      - RECOMMENDER_API_KEY=dev-secret-key
-      - BATCH_INTERVAL_MINUTES=5
-      - LOG_FORMAT=text
+      - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY:-dev-secret-key}
+      - BATCH_INTERVAL_MINUTES=${BATCH_INTERVAL_MINUTES:-5}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - API_PORT=${API_PORT:-2001}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -36,10 +37,32 @@ services:
       qdrant:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:2001/healthz"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${API_PORT:-2001}/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+  cron:
+    build:
+      context: .
+      target: cron
+    container_name: codohue-cron
+    environment:
+      - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - BATCH_INTERVAL_MINUTES=${BATCH_INTERVAL_MINUTES:-5}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
 
   admin:
     build:
@@ -47,14 +70,16 @@ services:
       dockerfile: Dockerfile.admin
     container_name: codohue-admin
     ports:
-      - "2002:2002"
+      - "${ADMIN_PORT:-2002}:${ADMIN_PORT:-2002}"
     environment:
       - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
       - REDIS_URL=redis://redis:6379
-      - RECOMMENDER_API_KEY=dev-secret-key
-      - API_URL=http://api:2001
-      - ADMIN_PORT=2002
-      - LOG_FORMAT=text
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY:-dev-secret-key}
+      - API_URL=http://api:${API_PORT:-2001}
+      - ADMIN_PORT=${ADMIN_PORT:-2002}
+      - LOG_FORMAT=${LOG_FORMAT:-text}
     depends_on:
       api:
         condition: service_healthy

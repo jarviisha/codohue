@@ -43,6 +43,28 @@ services:
       qdrant:
         condition: service_started
 
+  admin:
+    image: ghcr.io/jarviisha/codohue/admin:latest
+    restart: unless-stopped
+    ports:
+      - "2002:2002"
+    environment:
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - RECOMMENDER_API_KEY=${CODOHUE_RECOMMENDER_API_KEY:?set CODOHUE_RECOMMENDER_API_KEY to the production admin API key}
+      - API_URL=http://api:2001
+      - ADMIN_PORT=2002
+      - LOG_FORMAT=json
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+
   migrate:
     image: ghcr.io/jarviisha/codohue/migrate:latest
     restart: on-failure

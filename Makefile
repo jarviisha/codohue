@@ -1,41 +1,55 @@
-BIN_DIR    := ./tmp
-API_BIN    := $(BIN_DIR)/api
-CRON_BIN   := $(BIN_DIR)/cron
-ADMIN_BIN  := $(BIN_DIR)/admin
+BIN_DIR := ./tmp
 
-# Go modules in this repo. Targets that should cover the whole workspace
-# (lint, fmt, test, test-race) iterate over this list.
-GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
-
-LINT_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
+API_BIN   := $(BIN_DIR)/api
+CRON_BIN  := $(BIN_DIR)/cron
+ADMIN_BIN := $(BIN_DIR)/admin
 
 MIGRATIONS_DIR := ./migrations
-COVERAGE_DIR := $(BIN_DIR)/coverage
+COVERAGE_DIR   := $(BIN_DIR)/coverage
+
 COVERAGE_UNIT_OUT := $(COVERAGE_DIR)/unit.out
 COVERAGE_RACE_OUT := $(COVERAGE_DIR)/race.out
 
-MIN_TOTAL ?= 80
-MIN_RECOMMEND ?= 85
-MIN_COMPUTE ?= 85
-MIN_CONFIG ?= 95
-MIN_AUTH ?= 95
-MIN_INGEST ?= 80
-MIN_NSCONFIG ?= 80
-MIN_IDMAP ?= 90
-MIN_INFRA_REDIS ?= 95
-MIN_INFRA_QDRANT ?= 75
+# Go modules covered by workspace-wide lint, format, and test targets.
+GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
+
+GO_CACHE_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp
+LINT_ENV     := $(GO_CACHE_ENV) GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
+
+COMPOSE          := docker compose
+COMPOSE_APP      := $(COMPOSE) -f docker-compose.app.yml
+COMPOSE_PROD     := $(COMPOSE) -f docker-compose.prod.yml
+COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_RECOMMENDER_API_KEY=dummy
+
+MIN_TOTAL          ?= 80
+MIN_RECOMMEND      ?= 85
+MIN_COMPUTE        ?= 85
+MIN_CONFIG         ?= 95
+MIN_AUTH           ?= 95
+MIN_INGEST         ?= 80
+MIN_NSCONFIG       ?= 80
+MIN_IDMAP          ?= 90
+MIN_INFRA_REDIS    ?= 95
+MIN_INFRA_QDRANT   ?= 75
 MIN_INFRA_POSTGRES ?= 85
-MIN_CMD_API ?= 40
-MIN_CMD_CRON ?= 45
+MIN_CMD_API        ?= 40
+MIN_CMD_CRON       ?= 45
 
-.PHONY: build build-api build-cron build-admin run run-cron run-admin dev dev-admin dev-all lint fmt \
-        test test-pkg test-verbose test-race test-e2e test-e2e-api test-e2e-heavy \
-        coverage coverage-unit coverage-race coverage-report coverage-html coverage-check coverage-check-pkg coverage-check-all coverage-clean \
-        up up-d up-infra up-app up-app-d down-app logs logs-cron logs-app \
-        migrate migrate-up migrate-down migrate-version migrate-create \
-        clean
+.PHONY: \
+	build build-api build-cron build-admin \
+	run run-cron run-admin dev dev-admin dev-all \
+	up up-all up-d up-infra up-app up-app-d down down-v down-app \
+	logs logs-api logs-cron logs-admin logs-app \
+	compose-check compose-check-app compose-check-prod \
+	lint fmt \
+	test test-pkg test-verbose test-race \
+	coverage coverage-unit coverage-race coverage-report coverage-html \
+	coverage-check coverage-check-pkg coverage-check-all coverage-clean \
+	test-e2e test-e2e-api test-e2e-heavy \
+	migrate migrate-up migrate-down migrate-version migrate-create \
+	clean
 
-# ── Build ──────────────────────────────────────────────────────────────────────
+# Build
 
 build: build-api build-cron build-admin
 
@@ -49,30 +63,23 @@ build-admin:
 	cd web/admin && npm run build
 	go build -o $(ADMIN_BIN) ./cmd/admin
 
-# ── Run ────────────────────────────────────────────────────────────────────────
+# Run and development
 
-## Run the API server directly (requires infra to be up)
 run:
 	go run ./cmd/api
 
-## Run one cron cycle manually (requires infra to be up)
 run-cron:
 	go run ./cmd/cron
 
-## Run admin dashboard (requires infra + cmd/api up; run make build-admin first)
 run-admin:
 	go run ./cmd/admin
 
-## Run the API with live reload via air
 dev:
 	air
 
-## Run admin web dev server with hot reload (proxies /api to :2002; requires run-admin up)
 dev-admin:
 	cd web/admin && npm run dev
 
-## Run full admin dev stack: API (air live reload) + admin server + Vite frontend; Ctrl+C stops all
-## Requires infra to be up: make up-infra first
 dev-all:
 	@go build -o $(ADMIN_BIN) ./cmd/admin
 	@trap 'kill 0' SIGINT SIGTERM; \
@@ -81,46 +88,54 @@ dev-all:
 	(cd web/admin && npm run dev) & \
 	wait
 
-# ── Docker ─────────────────────────────────────────────────────────────────────
+# Docker
 
-## Start the full stack (api + postgres + redis + qdrant)
-up:
-	docker compose up
+up up-all:
+	$(COMPOSE) up
 
 up-d:
-	docker compose up -d
+	$(COMPOSE) up -d
 
-## Start infra only (postgres + redis + qdrant), without the API
 up-infra:
-	docker compose up -d postgres redis qdrant
+	$(COMPOSE) up -d postgres redis qdrant
 
-## Start only API and cron; connect them to external infra from .env/environment
 up-app:
-	docker compose -f docker-compose.app.yml up --build
+	$(COMPOSE_APP) up --build
 
 up-app-d:
-	docker compose -f docker-compose.app.yml up -d --build
-
-down-app:
-	docker compose -f docker-compose.app.yml down
+	$(COMPOSE_APP) up -d --build
 
 down:
-	docker compose down
+	$(COMPOSE) down
 
-## Stop the stack and remove volumes (full local data reset)
 down-v:
-	docker compose down -v
+	$(COMPOSE) down -v
 
-logs:
-	docker compose logs -f api
+down-app:
+	$(COMPOSE_APP) down
+
+logs logs-api:
+	$(COMPOSE) logs -f api
 
 logs-cron:
-	docker compose logs -f cron
+	$(COMPOSE) logs -f cron
+
+logs-admin:
+	$(COMPOSE) logs -f admin
 
 logs-app:
-	docker compose -f docker-compose.app.yml logs -f
+	$(COMPOSE_APP) logs -f
 
-# ── Lint & Format ──────────────────────────────────────────────────────────────
+compose-check: compose-check-app compose-check-prod
+	$(COMPOSE) config --quiet
+
+compose-check-app:
+	$(COMPOSE_APP) config --quiet
+
+compose-check-prod:
+	$(COMPOSE_PROD_ENV) $(COMPOSE_PROD) config --quiet
+
+# Lint and format
 
 lint:
 	@for m in $(GO_MODULES); do \
@@ -134,7 +149,7 @@ fmt:
 		(cd $$m && $(LINT_ENV) golangci-lint fmt ./...) || exit 1; \
 	done
 
-# ── Test ───────────────────────────────────────────────────────────────────────
+# Tests
 
 test:
 	@for m in $(GO_MODULES); do \
@@ -142,8 +157,6 @@ test:
 		(cd $$m && go test ./...) || exit 1; \
 	done
 
-## Run tests for a specific package, for example:
-##   make test-pkg PKG=./internal/ingest/...
 test-pkg:
 	go test $(PKG)
 
@@ -156,47 +169,46 @@ test-verbose:
 test-race:
 	@for m in $(GO_MODULES); do \
 		echo "==> test -race $$m"; \
-		(cd $$m && env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go test -race ./...) || exit 1; \
+		(cd $$m && $(GO_CACHE_ENV) go test -race ./...) || exit 1; \
 	done
+
+# Coverage
 
 coverage: coverage-unit
 
 coverage-unit:
 	mkdir -p $(COVERAGE_DIR)
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go test -count=1 ./... -coverpkg=./... -coverprofile=$(COVERAGE_UNIT_OUT)
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go tool cover -func=$(COVERAGE_UNIT_OUT) | tail -n 1
+	$(GO_CACHE_ENV) go test -count=1 ./... -coverpkg=./... -coverprofile=$(COVERAGE_UNIT_OUT)
+	$(GO_CACHE_ENV) go tool cover -func=$(COVERAGE_UNIT_OUT) | tail -n 1
 
 coverage-race:
 	mkdir -p $(COVERAGE_DIR)
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go test -count=1 -race ./... -coverpkg=./... -coverprofile=$(COVERAGE_RACE_OUT)
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go tool cover -func=$(COVERAGE_RACE_OUT) | tail -n 1
+	$(GO_CACHE_ENV) go test -count=1 -race ./... -coverpkg=./... -coverprofile=$(COVERAGE_RACE_OUT)
+	$(GO_CACHE_ENV) go tool cover -func=$(COVERAGE_RACE_OUT) | tail -n 1
 
-## Print per-function coverage. Default input: tmp/coverage/unit.out
 coverage-report:
 	@if [ ! -f "$(or $(OUT),$(COVERAGE_UNIT_OUT))" ]; then \
 		echo "coverage profile not found: $(or $(OUT),$(COVERAGE_UNIT_OUT))"; \
 		echo "run 'make coverage-unit' first or pass OUT=/path/to/profile.out"; \
 		exit 1; \
 	fi
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go tool cover -func=$(or $(OUT),$(COVERAGE_UNIT_OUT))
+	$(GO_CACHE_ENV) go tool cover -func=$(or $(OUT),$(COVERAGE_UNIT_OUT))
 
-## Open an HTML coverage report. Default input: tmp/coverage/unit.out
 coverage-html:
 	@if [ ! -f "$(or $(OUT),$(COVERAGE_UNIT_OUT))" ]; then \
 		echo "coverage profile not found: $(or $(OUT),$(COVERAGE_UNIT_OUT))"; \
 		echo "run 'make coverage-unit' first or pass OUT=/path/to/profile.out"; \
 		exit 1; \
 	fi
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go tool cover -html=$(or $(OUT),$(COVERAGE_UNIT_OUT))
+	$(GO_CACHE_ENV) go tool cover -html=$(or $(OUT),$(COVERAGE_UNIT_OUT))
 
-## Check total coverage against MIN_TOTAL. Default profile: tmp/coverage/unit.out
 coverage-check:
 	@if [ ! -f "$(or $(OUT),$(COVERAGE_UNIT_OUT))" ]; then \
 		echo "coverage profile not found: $(or $(OUT),$(COVERAGE_UNIT_OUT))"; \
 		echo "run 'make coverage-unit' first or pass OUT=/path/to/profile.out"; \
 		exit 1; \
 	fi
-	@actual=$$(env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go tool cover -func=$(or $(OUT),$(COVERAGE_UNIT_OUT)) | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
+	@actual=$$($(GO_CACHE_ENV) go tool cover -func=$(or $(OUT),$(COVERAGE_UNIT_OUT)) | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
 	min=$${MIN_TOTAL:-60}; \
 	awk 'BEGIN { exit !('"$$actual"' >= '"$$min"') }' || { \
 		echo "coverage check failed: total=$$actual% min=$$min%"; \
@@ -204,8 +216,6 @@ coverage-check:
 	}; \
 	echo "coverage check passed: total=$$actual% min=$$min%"
 
-## Check a single package against MIN by running package-local coverage.
-## Example: make coverage-check-pkg PKG=./internal/recommend/... MIN=70
 coverage-check-pkg:
 	@if [ -z "$(PKG)" ]; then \
 		echo "PKG is required, for example: make coverage-check-pkg PKG=./internal/recommend/... MIN=70"; \
@@ -214,8 +224,8 @@ coverage-check-pkg:
 	@mkdir -p $(COVERAGE_DIR)
 	@pkg_slug=$$(printf '%s' "$(PKG)" | tr '/.' '__'); \
 	profile="$(COVERAGE_DIR)/pkg-check-$${pkg_slug}.out"; \
-	env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go test -count=1 $(PKG) -coverprofile=$$profile >/dev/null; \
-	actual=$$(env GOCACHE=/tmp/go-build GOTMPDIR=/tmp go tool cover -func=$$profile | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
+	$(GO_CACHE_ENV) go test -count=1 $(PKG) -coverprofile=$$profile >/dev/null; \
+	actual=$$($(GO_CACHE_ENV) go tool cover -func=$$profile | awk '/^total:/ {gsub("%","",$$3); print $$3}'); \
 	min=$${MIN:-70}; \
 	awk 'BEGIN { exit !('"$$actual"' >= '"$$min"') }' || { \
 		echo "coverage check failed: pkg=$(PKG) total=$$actual% min=$$min%"; \
@@ -223,7 +233,6 @@ coverage-check-pkg:
 	}; \
 	echo "coverage check passed: pkg=$(PKG) total=$$actual% min=$$min%"
 
-## Check repository total and critical packages against default thresholds.
 coverage-check-all: coverage-unit
 	$(MAKE) coverage-check MIN_TOTAL=$(MIN_TOTAL)
 	$(MAKE) coverage-check-pkg PKG=./internal/recommend/... MIN=$(MIN_RECOMMEND)
@@ -242,46 +251,37 @@ coverage-check-all: coverage-unit
 coverage-clean:
 	rm -rf $(COVERAGE_DIR)
 
-## E2E tests require infra to be running (make up-infra) and migrations applied (make migrate-up).
-## Full sequence:
-##   make up-infra && make migrate-up && make test-e2e
-## This target builds both binaries because the heavy suites execute `tmp/cron`.
+# End-to-end tests
+
 test-e2e: build
 	go test -v -tags=e2e -timeout=120s ./e2e/...
 
-## API-only E2E coverage for health, config, embedding, recommendation, ranking, and trending.
 test-e2e-api: build-api
 	go test -v -tags=e2e -timeout=120s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
 
-## Heavier E2E coverage that exercises Redis Streams ingest, cron recompute, and hybrid/computed artifacts.
 test-e2e-heavy: build
 	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid'
 
-# ── Migrations ─────────────────────────────────────────────────────────────────
+# Migrations
 
-## Apply all pending migrations
+migrate: migrate-up
+
 migrate-up:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	migrate -path $(MIGRATIONS_DIR) -database "$$DATABASE_URL" up
 
-## Roll back one migration step
 migrate-down:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	migrate -path $(MIGRATIONS_DIR) -database "$$DATABASE_URL" down 1
 
-## Show the current migration version
 migrate-version:
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 	migrate -path $(MIGRATIONS_DIR) -database "$$DATABASE_URL" version
 
-## Create a new migration file, for example:
-##   make migrate-create NAME=add_indexes
 migrate-create:
 	migrate -path $(MIGRATIONS_DIR) -ext sql -seq create $(NAME)
 
-migrate: migrate-up
-
-# ── Clean ──────────────────────────────────────────────────────────────────────
+# Clean
 
 clean:
 	rm -rf $(BIN_DIR)
