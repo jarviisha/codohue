@@ -35,7 +35,7 @@ services:
   admin:
     build:
       context: .
-      dockerfile: Dockerfile.admin
+      target: admin
     container_name: codohue-admin
     network_mode: host
     extra_hosts:

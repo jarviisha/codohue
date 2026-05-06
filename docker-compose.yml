@@ -67,7 +67,7 @@ services:
   admin:
     build:
       context: .
-      dockerfile: Dockerfile.admin
+      target: admin
     container_name: codohue-admin
     ports:
       - "${ADMIN_PORT:-2002}:${ADMIN_PORT:-2002}"

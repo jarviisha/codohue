@@ -74,7 +74,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.admin
+          target: admin
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
