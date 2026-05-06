@@ -29,6 +29,8 @@ type adminSvc interface {
 	TriggerBatch(ctx context.Context, ns string) (*TriggerBatchResponse, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
 	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
+	SeedDemoDataset(ctx context.Context) (*DemoDatasetResponse, error)
+	ClearDemoDataset(ctx context.Context) (*DemoDatasetResponse, error)
 }
 
 // Handler handles HTTP requests for the admin API.
@@ -362,4 +364,24 @@ func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+}
+
+// SeedDemoDataset handles POST /api/admin/v1/demo.
+func (h *Handler) SeedDemoDataset(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.SeedDemoDataset(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not seed demo dataset")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusCreated, result)
+}
+
+// ClearDemoDataset handles DELETE /api/admin/v1/demo.
+func (h *Handler) ClearDemoDataset(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.ClearDemoDataset(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not clear demo dataset")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }

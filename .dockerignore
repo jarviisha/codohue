@@ -18,6 +18,9 @@ bin
 coverage
 uploads
 
+web/admin/node_modules
+web/admin/dist
+
 *.log
 *.out
 *.test

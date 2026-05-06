@@ -242,6 +242,14 @@ type InjectEventRequest struct {
 	OccurredAt *string `json:"occurred_at,omitempty"`
 }
 
+// DemoDatasetResponse is returned after seeding or clearing the bundled demo dataset.
+type DemoDatasetResponse struct {
+	Namespace     string `json:"namespace"`
+	EventsCreated int    `json:"events_created,omitempty"`
+	EventsDeleted int    `json:"events_deleted,omitempty"`
+	APIKey        string `json:"api_key,omitempty"`
+}
+
 // SubjectStats holds raw DB data for a subject used internally by Service.
 type SubjectStats struct {
 	InteractionCount int

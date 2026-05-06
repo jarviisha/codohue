@@ -96,6 +96,8 @@ func run() error {
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
 		r.Post("/api/admin/v1/recommend/debug", h.DebugRecommend)
+		r.Post("/api/admin/v1/demo", h.SeedDemoDataset)
+		r.Delete("/api/admin/v1/demo", h.ClearDemoDataset)
 		r.Get("/api/admin/v1/trending/{ns}", h.GetTrending)
 		r.Get("/api/admin/v1/subjects/{ns}/{id}/profile", h.GetSubjectProfile)
 		r.Get("/api/admin/v1/namespaces/{ns}/qdrant-stats", h.GetQdrantStats)

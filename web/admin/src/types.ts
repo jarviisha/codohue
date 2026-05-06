@@ -132,6 +132,13 @@ export interface MutationOkResponse {
   ok: boolean
 }
 
+export interface DemoDatasetResponse {
+  namespace: string
+  events_created?: number
+  events_deleted?: number
+  api_key?: string
+}
+
 export interface HealthData {
   postgres: string
   redis: string

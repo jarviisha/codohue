@@ -1,6 +1,7 @@
 import { api } from './api'
 import type {
   BatchRunsResponse,
+  DemoDatasetResponse,
   EventsListResponse,
   HealthData,
   InjectEventRequest,
@@ -46,6 +47,10 @@ export const adminApi = {
 
   getNamespacesOverview: () =>
     api.get<NamespacesOverviewResponse>('/api/admin/v1/namespaces/overview'),
+
+  seedDemoDataset: () => api.post<DemoDatasetResponse>('/api/admin/v1/demo', {}),
+
+  clearDemoDataset: () => api.delete<DemoDatasetResponse>('/api/admin/v1/demo'),
 
   getQdrantStats: (namespace: string) =>
     api.get<QdrantStatsResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/qdrant-stats`),

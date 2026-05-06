@@ -29,6 +29,12 @@ type fakeRepo struct {
 	events               []EventSummary
 	eventsTotal          int
 	eventsErr            error
+	seededEvents         []demoEvent
+	seededNamespace      string
+	seedErr              error
+	clearNamespace       string
+	clearDeleted         int
+	clearErr             error
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -63,6 +69,17 @@ func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*Subj
 
 func (f *fakeRepo) GetRecentEvents(_ context.Context, _ string, _, _ int, _ string) ([]EventSummary, int, error) {
 	return f.events, f.eventsTotal, f.eventsErr
+}
+
+func (f *fakeRepo) SeedDemoEvents(_ context.Context, namespace string, events []demoEvent, _ time.Time) (int, error) {
+	f.seededNamespace = namespace
+	f.seededEvents = events
+	return len(events), f.seedErr
+}
+
+func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {
+	f.clearNamespace = namespace
+	return f.clearDeleted, f.clearErr
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────

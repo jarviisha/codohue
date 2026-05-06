@@ -27,6 +27,8 @@ type adminRepo interface {
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
+	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
+	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
 }
 
 // Service implements admin business logic.
@@ -462,6 +464,97 @@ func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventReq
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // best-effort read for error context
 		return fmt.Errorf("inject event upstream returned %d: %s", resp.StatusCode, string(body))
+	}
+	return nil
+}
+
+// SeedDemoDataset creates the bundled demo namespace and loads deterministic sample events.
+func (s *Service) SeedDemoDataset(ctx context.Context) (*DemoDatasetResponse, error) {
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(demoNamespaceConfig); err != nil {
+		return nil, fmt.Errorf("encode demo namespace config: %w", err)
+	}
+
+	upsert, statusCode, err := s.UpsertNamespace(ctx, demoNamespace, &body)
+	if err != nil {
+		return nil, fmt.Errorf("create demo namespace: %w", err)
+	}
+	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("create demo namespace returned %d", statusCode)
+	}
+
+	created, err := s.repo.SeedDemoEvents(ctx, demoNamespace, demoDataset, time.Now().UTC())
+	if err != nil {
+		return nil, fmt.Errorf("seed demo events: %w", err)
+	}
+
+	resp := &DemoDatasetResponse{
+		Namespace:     demoNamespace,
+		EventsCreated: created,
+	}
+	if upsert != nil && upsert.APIKey != nil {
+		resp.APIKey = *upsert.APIKey
+	}
+	return resp, nil
+}
+
+// ClearDemoDataset removes the bundled demo namespace and its generated data.
+func (s *Service) ClearDemoDataset(ctx context.Context) (*DemoDatasetResponse, error) {
+	deleted, err := s.repo.ClearNamespaceData(ctx, demoNamespace)
+	if err != nil {
+		return nil, fmt.Errorf("clear demo postgres data: %w", err)
+	}
+
+	if s.redisClient != nil {
+		if err := s.clearDemoRedis(ctx); err != nil {
+			return nil, fmt.Errorf("clear demo redis data: %w", err)
+		}
+	}
+
+	if s.qdrantClient != nil {
+		if err := s.clearDemoQdrant(ctx); err != nil {
+			return nil, fmt.Errorf("clear demo qdrant data: %w", err)
+		}
+	}
+
+	return &DemoDatasetResponse{Namespace: demoNamespace, EventsDeleted: deleted}, nil
+}
+
+func (s *Service) clearDemoRedis(ctx context.Context) error {
+	keys := []string{"trending:" + demoNamespace}
+	iter := s.redisClient.Scan(ctx, 0, "rec:"+demoNamespace+":*", 100).Iterator()
+	for iter.Next(ctx) {
+		keys = append(keys, iter.Val())
+	}
+	if err := iter.Err(); err != nil {
+		return fmt.Errorf("scan recommendation cache: %w", err)
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	if err := s.redisClient.Del(ctx, keys...).Err(); err != nil {
+		return fmt.Errorf("delete redis keys: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) clearDemoQdrant(ctx context.Context) error {
+	for _, collection := range []string{
+		demoNamespace + "_subjects",
+		demoNamespace + "_objects",
+		demoNamespace + "_subjects_dense",
+		demoNamespace + "_objects_dense",
+	} {
+		exists, err := s.qdrantClient.CollectionExists(ctx, collection)
+		if err != nil {
+			return fmt.Errorf("check collection %q: %w", collection, err)
+		}
+		if !exists {
+			continue
+		}
+		if err := s.qdrantClient.DeleteCollection(ctx, collection); err != nil {
+			return fmt.Errorf("delete collection %q: %w", collection, err)
+		}
 	}
 	return nil
 }

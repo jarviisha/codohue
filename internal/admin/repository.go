@@ -361,3 +361,67 @@ func (r *Repository) GetRecentEvents(ctx context.Context, ns string, limit, offs
 	}
 	return out, total, nil
 }
+
+// SeedDemoEvents replaces the events for the demo namespace with the bundled fixture.
+func (r *Repository) SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin seed demo tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // commit path below owns successful completion
+
+	if _, err := tx.Exec(ctx, `DELETE FROM events WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete existing demo events: %w", err)
+	}
+
+	for _, e := range events {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO events (namespace, subject_id, object_id, action, weight, occurred_at, object_created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			namespace,
+			e.SubjectID,
+			e.ObjectID,
+			e.Action,
+			e.Weight,
+			demoOccurredAt(now, e.DaysAgo),
+			demoOccurredAt(now, e.DaysAgo+14),
+		); err != nil {
+			return 0, fmt.Errorf("insert demo event: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit seed demo tx: %w", err)
+	}
+	return len(events), nil
+}
+
+// ClearNamespaceData removes all PostgreSQL-owned state for a namespace.
+func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (int, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin clear namespace tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // commit path below owns successful completion
+
+	tag, err := tx.Exec(ctx, `DELETE FROM events WHERE namespace = $1`, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("delete events: %w", err)
+	}
+	eventsDeleted := int(tag.RowsAffected())
+
+	if _, err := tx.Exec(ctx, `DELETE FROM batch_run_logs WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete batch run logs: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM id_mappings WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete id mappings: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM namespace_configs WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete namespace config: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit clear namespace tx: %w", err)
+	}
+	return eventsDeleted, nil
+}

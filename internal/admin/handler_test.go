@@ -45,6 +45,8 @@ type fakeSvc struct {
 	eventsResp      *EventsListResponse
 	eventsErr       error
 	injectErr       error
+	demoResp        *DemoDatasetResponse
+	demoErr         error
 }
 
 func (f *fakeSvc) GetHealth(_ context.Context) (*HealthResponse, int, error) {
@@ -97,6 +99,14 @@ func (f *fakeSvc) GetRecentEvents(_ context.Context, _ string, _, _ int, _ strin
 
 func (f *fakeSvc) InjectEvent(_ context.Context, _ string, _ InjectEventRequest) error {
 	return f.injectErr
+}
+
+func (f *fakeSvc) SeedDemoDataset(_ context.Context) (*DemoDatasetResponse, error) {
+	return f.demoResp, f.demoErr
+}
+
+func (f *fakeSvc) ClearDemoDataset(_ context.Context) (*DemoDatasetResponse, error) {
+	return f.demoResp, f.demoErr
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -699,5 +709,45 @@ func TestInjectEvent_UpstreamError(t *testing.T) {
 	h.InjectEvent(rec, r)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+}
+
+// ─── Demo dataset handler tests ───────────────────────────────────────────────
+
+func TestSeedDemoDataset_OK(t *testing.T) {
+	h := newTestHandler(&fakeSvc{demoResp: &DemoDatasetResponse{Namespace: "demo", EventsCreated: 25}})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/admin/v1/demo", http.NoBody)
+
+	h.SeedDemoDataset(rec, r)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp DemoDatasetResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Namespace != "demo" || resp.EventsCreated != 25 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestClearDemoDataset_OK(t *testing.T) {
+	h := newTestHandler(&fakeSvc{demoResp: &DemoDatasetResponse{Namespace: "demo", EventsDeleted: 25}})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/admin/v1/demo", http.NoBody)
+
+	h.ClearDemoDataset(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp DemoDatasetResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Namespace != "demo" || resp.EventsDeleted != 25 {
+		t.Fatalf("unexpected response: %+v", resp)
 	}
 }
