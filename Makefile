@@ -96,6 +96,9 @@ up up-all:
 up-d:
 	$(COMPOSE) up -d
 
+up-build-d:
+	$(COMPOSE) up -d --build
+
 up-infra:
 	$(COMPOSE) up -d postgres redis qdrant
 

@@ -1,12 +1,24 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 
 	"github.com/joho/godotenv"
 )
+
+// loadDotenv loads a .env file from the working directory if present.
+// A missing file is expected when running in Docker (env vars are injected
+// via env_file) and is silently ignored. Other errors (parse, permission)
+// still surface so misconfigured files don't fail open.
+func loadDotenv() {
+	if err := godotenv.Load(); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Printf("warning: failed to load .env: %v\n", err)
+	}
+}
 
 // AppConfig holds all application configuration loaded from environment variables.
 type AppConfig struct {
@@ -45,10 +57,7 @@ func LoadCron() (*AppConfig, error) {
 
 // loadBase loads the config fields shared by all binaries and validates them.
 func loadBase() (*AppConfig, error) {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("No .env file found, relying on environment variables")
-	}
+	loadDotenv()
 
 	cfg := &AppConfig{
 		DatabaseURL: getEnv("DATABASE_URL", ""),
@@ -90,10 +99,7 @@ type AdminConfig struct {
 
 // LoadAdmin reads and validates configuration for the admin binary.
 func LoadAdmin() (*AdminConfig, error) {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("No .env file found, relying on environment variables")
-	}
+	loadDotenv()
 
 	cfg := &AdminConfig{
 		DatabaseURL:       getEnv("DATABASE_URL", ""),
