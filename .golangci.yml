@@ -2,8 +2,6 @@ version: "2"
 
 run:
   timeout: 5m
-  exclude-dirs:
-    - web/admin/node_modules
 
 linters:
   default: none
@@ -69,6 +67,8 @@ linters:
         - "-ST1003" # naming: too opinionated for generated/proto code
 
   exclusions:
+    paths:
+      - web/admin/node_modules
     rules:
       - path: "_test\\.go$"
         linters:
@@ -77,15 +77,13 @@ linters:
       - path: "cmd/"
         linters:
           - revive
-      - path: "web/admin/node_modules/"
-        linters:
-          - errcheck
-          - gocritic
-          - wrapcheck
 
 formatters:
   enable:
     - goimports # import grouping and formatting
+  exclusions:
+    paths:
+      - web/admin/node_modules
 
 issues:
   max-issues-per-linter: 0
