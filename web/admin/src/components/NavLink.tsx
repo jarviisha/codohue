@@ -5,13 +5,15 @@ import type { IconName } from './icons'
 interface Props {
   to: string
   icon?: IconName
+  end?: boolean
   children: React.ReactNode
 }
 
-export default function NavLink({ to, icon, children }: Props) {
+export default function NavLink({ to, icon, end = false, children }: Props) {
   return (
     <RouterNavLink
       to={to}
+      end={end}
       className={({ isActive }) =>
         `flex h-9 items-center gap-2.5 rounded-lg border px-3 text-sm font-medium no-underline transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-focus ${
           isActive

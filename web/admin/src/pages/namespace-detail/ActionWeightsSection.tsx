@@ -1,4 +1,4 @@
-import { FormControl, FormSection, NumberInput } from '../../components/ui'
+import { FormControl, NumberInput, Panel } from '../../components/ui'
 import type { NamespaceFormState } from '../namespaceForm'
 
 export default function ActionWeightsSection({
@@ -9,7 +9,7 @@ export default function ActionWeightsSection({
   onChange: (action: string, value: string) => void
 }) {
   return (
-    <FormSection title="Action Weights">
+    <Panel title="Action Weights" bodyClassName="flex flex-col gap-3">
       {Object.entries(weights).map(([action, weight]) => {
         const id = `action-weight-${action.toLowerCase()}`
         return (
@@ -24,6 +24,6 @@ export default function ActionWeightsSection({
           </FormControl>
         )
       })}
-    </FormSection>
+    </Panel>
   )
 }

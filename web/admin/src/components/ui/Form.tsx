@@ -1,9 +1,8 @@
 import type {
-  InputHTMLAttributes,
   ReactNode,
-  SelectHTMLAttributes,
 } from 'react'
-import { inputClass } from './formClasses'
+import Dropdown, { type DropdownProps } from './Dropdown'
+import Input, { type InputProps } from './Input'
 
 interface FormControlProps {
   label: ReactNode
@@ -65,10 +64,10 @@ export function FormSection({
 export function TextInput({
   className = '',
   ...props
-}: InputHTMLAttributes<HTMLInputElement>) {
+}: InputProps) {
   return (
-    <input
-      className={`${inputClass} ${className}`}
+    <Input
+      className={className}
       {...props}
     />
   )
@@ -77,11 +76,12 @@ export function TextInput({
 export function NumberInput({
   className = '',
   ...props
-}: InputHTMLAttributes<HTMLInputElement>) {
+}: InputProps) {
   return (
-    <input
+    <Input
       type="number"
-      className={`${inputClass} w-24 tabular-nums ${className}`}
+      inputSize="compact"
+      className={className}
       {...props}
     />
   )
@@ -91,13 +91,13 @@ export function Select({
   className = '',
   children,
   ...props
-}: SelectHTMLAttributes<HTMLSelectElement>) {
+}: DropdownProps) {
   return (
-    <select
-      className={`${inputClass} ${className}`}
+    <Dropdown
+      className={className}
       {...props}
     >
       {children}
-    </select>
+    </Dropdown>
   )
 }

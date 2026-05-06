@@ -53,8 +53,8 @@ export default function NamespaceDetailPage() {
       : null
 
   return (
-    <PageShell constrained>
-      <PageHeader title={isNew ? 'Create Namespace' : `Edit: ${ns}`} />
+    <PageShell>
+      <PageHeader title={isNew ? 'Create Namespace' : `Namespace Settings: ${ns}`} />
 
       {newKey && (
         <CreatedApiKeyPanel apiKey={newKey} onDone={() => navigate('/namespaces')} />

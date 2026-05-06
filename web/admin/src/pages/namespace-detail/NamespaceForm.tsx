@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, FormControl, TextInput } from '../../components/ui'
+import { Button, FormControl, Panel, TextInput } from '../../components/ui'
 import type { NamespaceFormState } from '../namespaceForm'
 import ActionWeightsSection from './ActionWeightsSection'
 import DenseHybridSection from './DenseHybridSection'
@@ -49,24 +49,28 @@ export default function NamespaceForm({
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
       {isNew && (
-        <FormControl label="Namespace name" htmlFor="namespace-name">
-          <TextInput
-            id="namespace-name"
-            required
-            value={form.name}
-            onChange={e => update('name', e.target.value)}
-            placeholder="e.g. my_feed"
-            className="w-full"
-          />
-        </FormControl>
+        <Panel title="Namespace Identity" bodyClassName="max-w-140">
+          <FormControl label="Namespace name" htmlFor="namespace-name">
+            <TextInput
+              id="namespace-name"
+              required
+              value={form.name}
+              onChange={e => update('name', e.target.value)}
+              placeholder="e.g. my_feed"
+              className="w-full"
+            />
+          </FormControl>
+        </Panel>
       )}
 
-      <ActionWeightsSection weights={form.action_weights} onChange={updateWeight} />
-      <ScoringSection form={form} onNumberChange={updateNumber} />
-      <DenseHybridSection form={form} onFieldChange={update} onNumberChange={updateNumber} />
-      <TrendingSection form={form} onNumberChange={updateNumber} />
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <ActionWeightsSection weights={form.action_weights} onChange={updateWeight} />
+        <ScoringSection form={form} onNumberChange={updateNumber} />
+        <DenseHybridSection form={form} onFieldChange={update} onNumberChange={updateNumber} />
+        <TrendingSection form={form} onNumberChange={updateNumber} />
+      </div>
 
-      <div className="flex gap-3">
+      <div className="flex items-center gap-3 border-t border-default pt-4">
         <Button type="submit" variant="primary" disabled={isPending}>
           {isPending ? 'Saving...' : 'Save'}
         </Button>

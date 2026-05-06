@@ -38,11 +38,8 @@ export default function Sidebar() {
     >
       <div className="flex h-14 items-center px-3">
         <div className="min-w-0">
-          <span className="block text-base font-semibold leading-tight text-primary">
-            Codohue
-          </span>
-          <span className="block text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
-            Admin
+          <span className="block text-xl font-semibold leading-tight text-primary">
+            @codohue
           </span>
         </div>
       </div>
@@ -52,6 +49,9 @@ export default function Sidebar() {
           Namespace
         </p>
         <NamespacePicker />
+        <div className="mt-2">
+          <NavLink to="/namespaces" icon="world" end>Manage namespaces</NavLink>
+        </div>
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto py-4">

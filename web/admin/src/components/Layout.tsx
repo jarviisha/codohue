@@ -11,6 +11,7 @@ export default function Layout() {
   const location = useLocation()
 
   const needsNs = !ROUTES_WITHOUT_NS.some(p => location.pathname.startsWith(p))
+  const hideBreadcrumbs = /^\/namespaces\/[^/]+$/.test(location.pathname)
 
   return (
     <div className="min-h-screen bg-base">
@@ -23,7 +24,7 @@ export default function Layout() {
             </EmptyState>
           ) : (
             <>
-              <Breadcrumbs />
+              {!hideBreadcrumbs && <Breadcrumbs />}
               <Outlet />
             </>
           )}

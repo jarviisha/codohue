@@ -1,4 +1,4 @@
-import { FormControl, FormSection, NumberInput, Select } from '../../components/ui'
+import { FormControl, NumberInput, Panel, Select } from '../../components/ui'
 import type { NamespaceFormState } from '../namespaceForm'
 import type { UpdateNamespaceField, UpdateNamespaceNumber } from './types'
 
@@ -12,7 +12,7 @@ export default function DenseHybridSection({
   onNumberChange: UpdateNamespaceNumber
 }) {
   return (
-    <FormSection title="Dense Hybrid">
+    <Panel title="Dense Hybrid" bodyClassName="flex flex-col gap-3">
       <FormControl label="Strategy" htmlFor="dense-strategy">
         <Select id="dense-strategy" value={form.dense_strategy} onChange={e => onFieldChange('dense_strategy', e.target.value)} className="w-full">
           <option value="item2vec">item2vec</option>
@@ -30,6 +30,6 @@ export default function DenseHybridSection({
           <option value="dot">dot</option>
         </Select>
       </FormControl>
-    </FormSection>
+    </Panel>
   )
 }

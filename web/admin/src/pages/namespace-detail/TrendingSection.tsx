@@ -1,4 +1,4 @@
-import { FormControl, FormSection, NumberInput } from '../../components/ui'
+import { FormControl, NumberInput, Panel } from '../../components/ui'
 import type { NamespaceFormState } from '../namespaceForm'
 import type { UpdateNamespaceNumber } from './types'
 
@@ -10,7 +10,7 @@ export default function TrendingSection({
   onNumberChange: UpdateNamespaceNumber
 }) {
   return (
-    <FormSection title="Trending">
+    <Panel title="Trending" bodyClassName="flex flex-col gap-3">
       <FormControl label="Window (hours)" htmlFor="trending-window" inline>
         <NumberInput id="trending-window" min={1} value={form.trending_window} onChange={e => onNumberChange('trending_window', e.target.value)} />
       </FormControl>
@@ -20,6 +20,6 @@ export default function TrendingSection({
       <FormControl label="Lambda trending" htmlFor="lambda-trending" inline>
         <NumberInput id="lambda-trending" step="0.01" value={form.lambda_trending} onChange={e => onNumberChange('lambda_trending', e.target.value)} />
       </FormControl>
-    </FormSection>
+    </Panel>
   )
 }

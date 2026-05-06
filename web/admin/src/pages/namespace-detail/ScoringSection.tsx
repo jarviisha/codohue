@@ -1,4 +1,4 @@
-import { FormControl, FormSection, NumberInput } from '../../components/ui'
+import { FormControl, NumberInput, Panel } from '../../components/ui'
 import type { NamespaceFormState } from '../namespaceForm'
 import type { UpdateNamespaceNumber } from './types'
 
@@ -10,7 +10,7 @@ export default function ScoringSection({
   onNumberChange: UpdateNamespaceNumber
 }) {
   return (
-    <FormSection title="Scoring Parameters">
+    <Panel title="Scoring Parameters" bodyClassName="flex flex-col gap-3">
       <FormControl label="Lambda (time decay)" htmlFor="scoring-lambda" inline>
         <NumberInput id="scoring-lambda" step="0.001" value={form.lambda} onChange={e => onNumberChange('lambda', e.target.value)} />
       </FormControl>
@@ -26,6 +26,6 @@ export default function ScoringSection({
       <FormControl label="Seen items days" htmlFor="seen-items-days" inline>
         <NumberInput id="seen-items-days" min={1} value={form.seen_items_days} onChange={e => onNumberChange('seen_items_days', e.target.value)} />
       </FormControl>
-    </FormSection>
+    </Panel>
   )
 }
