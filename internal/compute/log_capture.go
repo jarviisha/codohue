@@ -24,6 +24,9 @@ func (c *LogCapture) Warn(msg string)  { c.add("warn", msg) }
 func (c *LogCapture) Error(msg string) { c.add("error", msg) }
 
 func (c *LogCapture) add(level, msg string) {
+	if c == nil {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = append(c.entries, LogEntry{

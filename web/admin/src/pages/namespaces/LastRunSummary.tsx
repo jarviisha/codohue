@@ -1,10 +1,11 @@
 import type { NamespaceHealth } from '../../types'
+import { formatDateTime, formatDurationMs } from '../../utils/format'
 
 export default function LastRunSummary({ health }: { health: NamespaceHealth }) {
   const run = health.last_run
   if (!run) return <span className="text-xs text-muted">No runs yet</span>
-  const when = new Date(run.started_at).toLocaleString()
-  const dur = run.duration_ms != null ? `${run.duration_ms} ms` : '—'
+  const when = formatDateTime(run.started_at)
+  const dur = formatDurationMs(run.duration_ms)
   return (
     <span className="text-xs text-muted tabular-nums">
       {when} · {dur}

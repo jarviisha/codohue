@@ -2,7 +2,7 @@ import type { ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react'
 
 export function Table({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <table className={['w-full border-collapse', className].filter(Boolean).join(' ')}>
+    <table className={['w-full min-w-full border-separate border-spacing-0 text-left', className].filter(Boolean).join(' ')}>
       {children}
     </table>
   )
@@ -11,7 +11,7 @@ export function Table({ children, className }: { children: ReactNode; className?
 export function Thead({ children }: { children: ReactNode }) {
   return (
     <thead>
-      <tr className="border-b border-default">{children}</tr>
+      <tr>{children}</tr>
     </thead>
   )
 }
@@ -29,7 +29,7 @@ export function Th({
   return (
     <th
       className={[
-        'px-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted pb-2.5',
+        'border-b border-default px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted first:rounded-tl-lg last:rounded-tr-lg',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
         className,
       ]
@@ -60,8 +60,8 @@ export function Tr({
   return (
     <tr
       className={[
-        'border-b border-default last:border-0',
-        hoverable && 'hover:bg-accent/10',
+        'group [&:last-child>td]:border-b-0',
+        hoverable && 'hover:bg-surface-raised',
         className,
       ]
         .filter(Boolean)
@@ -90,8 +90,8 @@ export function Td({
   return (
     <td
       className={[
-        'px-2 py-2.5 text-sm',
-        muted ? 'text-muted' : 'text-secondary',
+        'border-b border-default/80 px-3 py-3 text-sm transition-colors duration-100',
+        muted ? 'text-muted' : 'text-secondary group-hover:text-primary',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : '',
         mono ? 'tabular-nums' : '',
         className,

@@ -1,33 +1,22 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useNamespacesOverview } from '../hooks/useNamespacesOverview'
-import { useActiveNamespace } from '../context/NamespaceContext'
+import { useActiveNamespace } from '../context/useActiveNamespace'
 import { STATUS_META } from '../pages/namespaces/statusMeta'
 import Icon from './Icon'
-
-const AVATAR_PALETTE = [
-  '#6366F1', '#8B5CF6', '#EC4899', '#F59E0B',
-  '#10B981', '#3B82F6', '#EF4444', '#14B8A6',
-]
-
-function nsAvatarColor(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffff
-  return AVATAR_PALETTE[Math.abs(h) % AVATAR_PALETTE.length]
-}
 
 function NsAvatar({ name, statusDot, size = 28 }: { name: string; statusDot?: string; size?: number }) {
   return (
     <span className="relative shrink-0" style={{ width: size, height: size }}>
       <span
-        className="flex items-center justify-center rounded font-bold text-white uppercase leading-none w-full h-full"
-        style={{ background: nsAvatarColor(name), fontSize: Math.round(size * 0.46) }}
+        className="flex h-full w-full items-center justify-center rounded border border-default bg-subtle font-semibold uppercase leading-none text-secondary"
+        style={{ fontSize: Math.round(size * 0.42) }}
       >
         {name[0]}
       </span>
       {statusDot && (
         <span
-          className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border-2 border-base ${statusDot}`}
+          className={`absolute -bottom-0.5 -right-0.5 size-2 rounded-full border-2 border-surface ${statusDot}`}
         />
       )}
     </span>
@@ -68,24 +57,26 @@ export default function NamespacePicker() {
     <div ref={ref} className="relative">
       {/* Trigger */}
       <button
+        type="button"
         onClick={() => setOpen(o => !o)}
-        className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded border transition-colors duration-150 cursor-pointer focus:outline-none focus:shadow-focus ${
+        aria-expanded={open}
+        className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border bg-surface px-3 py-2.5 text-left transition-colors duration-150 focus:outline-none focus:shadow-focus ${
           namespace
-            ? 'border-default hover:border-accent/60'
+            ? 'border-default hover:border-strong'
             : 'border-default hover:border-strong'
         }`}
       >
         {namespace ? (
           <NsAvatar name={namespace} size={36} statusDot={activeStatus ? STATUS_META[activeStatus].dot : undefined} />
         ) : (
-          <span className="w-7.5 h-7.5 flex items-center justify-center rounded bg-surface-raised border border-default shrink-0 text-muted">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded border border-default bg-subtle text-muted">
             <Icon name="chevron-down" size={12} />
           </span>
         )}
 
         <span className="flex-1 min-w-0 text-left">
           {isLoading ? (
-            <span className="block font-medium text-muted">Loading…</span>
+            <span className="block text-sm font-medium text-muted">Loading...</span>
           ) : namespace ? (
             <>
               <span className="block truncate text-sm font-semibold text-primary leading-snug">
@@ -93,7 +84,7 @@ export default function NamespacePicker() {
               </span>
             </>
           ) : (
-            <span className="block text-[13px] text-muted">Select namespace…</span>
+            <span className="block text-sm font-medium text-muted">Select namespace...</span>
           )}
         </span>
 
@@ -106,27 +97,28 @@ export default function NamespacePicker() {
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 bg-surface border border-default rounded shadow-floating overflow-hidden z-50">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-default bg-surface shadow-floating">
           {isLoading && (
-            <p className="px-3 py-2.5 text-xs text-muted m-0">Loading…</p>
+            <p className="m-0 px-3 py-2.5 text-xs text-muted">Loading...</p>
           )}
 
           {!isLoading && (!data || data.namespaces.length === 0) && (
-            <p className="px-3 py-2.5 text-xs text-muted m-0">No namespaces yet.</p>
+            <p className="m-0 px-3 py-2.5 text-xs text-muted">No namespaces yet.</p>
           )}
 
           {data && data.namespaces.length > 0 && (
-            <ul className="max-h-60 overflow-y-auto list-none m-0 p-0">
+            <ul className="m-0 max-h-60 list-none overflow-y-auto p-1">
               {data.namespaces.map(({ config, status }) => {
                 const isActive = config.namespace === namespace
                 return (
                   <li key={config.namespace} className="m-0 p-0">
                     <button
+                      type="button"
                       onClick={() => handleSelect(config.namespace)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer border-0 transition-colors duration-100 ${
+                      className={`flex w-full cursor-pointer items-center gap-2.5 rounded border px-2.5 py-2 transition-colors duration-100 focus-visible:outline-none focus-visible:shadow-focus ${
                         isActive
-                          ? 'bg-accent-subtle'
-                          : 'bg-transparent hover:bg-surface-raised'
+                          ? 'border-accent/20 bg-accent-subtle'
+                          : 'border-transparent bg-transparent hover:bg-surface-raised'
                       }`}
                     >
                       <NsAvatar name={config.namespace} size={24} />
@@ -149,9 +141,9 @@ export default function NamespacePicker() {
             <Link
               to="/namespaces/new"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted hover:text-primary hover:bg-surface-raised no-underline transition-colors duration-100"
+              className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted no-underline transition-colors duration-100 hover:bg-surface-raised hover:text-primary"
             >
-              <span className="w-5 h-5 flex items-center justify-center rounded border border-default text-sm leading-none font-semibold shrink-0">+</span>
+              <span className="flex size-5 shrink-0 items-center justify-center rounded border border-default text-sm font-semibold leading-none">+</span>
               New namespace
             </Link>
           </div>

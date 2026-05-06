@@ -32,8 +32,8 @@ export default function Breadcrumbs() {
   if (crumbs.length <= 1) return null
 
   return (
-    <nav aria-label="Breadcrumb" className="mb-6">
-      <ol className="flex items-center gap-2 text-xs text-muted">
+    <nav aria-label="Breadcrumb" className="mb-4">
+      <ol className="m-0 flex list-none items-center gap-2 p-0 text-xs text-muted">
         {crumbs.map((crumb, index) => {
           const isLast = index === crumbs.length - 1
           return (
@@ -41,7 +41,10 @@ export default function Breadcrumbs() {
               {isLast ? (
                 <span className="text-secondary font-medium">{crumb.label}</span>
               ) : (
-                <Link to={crumb.to} className="hover:text-primary transition-colors duration-150">
+                <Link
+                  to={crumb.to}
+                  className="rounded text-muted no-underline transition-colors duration-150 hover:text-primary focus-visible:outline-none focus-visible:shadow-focus"
+                >
                   {crumb.label}
                 </Link>
               )}

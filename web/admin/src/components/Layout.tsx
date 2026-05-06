@@ -1,7 +1,8 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Breadcrumbs from './Breadcrumbs'
-import { useActiveNamespace } from '../context/NamespaceContext'
+import { useActiveNamespace } from '../context/useActiveNamespace'
+import { EmptyState } from './ui'
 
 const ROUTES_WITHOUT_NS = ['/namespaces', '/health']
 
@@ -14,15 +15,12 @@ export default function Layout() {
   return (
     <div className="flex min-h-screen bg-base">
       <Sidebar />
-      <main className="flex-1 bg-base min-h-screen ml-64">
+      <main className="ml-64 min-h-screen flex-1 bg-base">
         <div className="max-w-7xl mx-auto px-8 py-8">
           {needsNs && !namespace ? (
-            <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
-              <p className="text-sm font-semibold text-primary m-0">No namespace selected</p>
-              <p className="text-sm text-muted m-0">
-                Select a namespace from the sidebar to continue.
-              </p>
-            </div>
+            <EmptyState className="mt-16">
+              Select a namespace from the sidebar to continue.
+            </EmptyState>
           ) : (
             <>
               <Breadcrumbs />

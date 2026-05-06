@@ -1,23 +1,25 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost'
-type ButtonSize = 'sm' | 'md'
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
+type ButtonSize = 'sm' | 'md' | 'icon'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
-  children: ReactNode
+  children?: ReactNode
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-accent hover:bg-accent-hover active:bg-accent-active text-accent-text border-0',
   secondary: 'bg-transparent border border-default hover:border-strong hover:bg-surface-raised text-primary',
   ghost: 'bg-transparent border-0 text-secondary hover:bg-surface-raised hover:text-primary',
+  danger: 'bg-danger-bg border border-danger/25 text-danger hover:bg-danger-bg hover:border-danger/40',
 }
 
 const sizeClasses: Record<ButtonSize, string> = {
   sm: 'px-2 py-1 text-sm',
   md: 'px-4 py-2 text-sm',
+  icon: 'size-8 p-0 inline-flex items-center justify-center',
 }
 
 export default function Button({

@@ -1,7 +1,8 @@
 import { useHealth } from '../hooks/useHealth'
 import StatusCard from '../components/StatusCard'
 import ErrorBanner from '../components/ErrorBanner'
-import { PageHeader } from '../components/ui'
+import { Badge, LoadingState, PageHeader, PageShell } from '../components/ui'
+import { formatTimeOfDay } from '../utils/format'
 
 export default function HealthPage() {
   const { data, error, isLoading, dataUpdatedAt } = useHealth()
@@ -9,20 +10,14 @@ export default function HealthPage() {
   const overallOk = data?.status === 'ok'
   const overallDegraded = data?.status === 'degraded'
 
-  const statusBadgeClass = overallOk
-    ? 'bg-success-bg border border-success/30 text-success'
-    : overallDegraded
-      ? 'bg-warning-bg border border-warning/30 text-warning'
-      : 'bg-danger-bg border border-danger/25 text-danger'
-
-  const statusDotClass = overallOk ? 'bg-success' : overallDegraded ? 'bg-warning' : 'bg-danger'
+  const statusTone = overallOk ? 'success' : overallDegraded ? 'warning' : 'danger'
 
   return (
-    <div>
+    <PageShell>
       <PageHeader title="System Health" />
 
       {error && <ErrorBanner message="Could not reach the admin server." />}
-      {isLoading && <p className="text-sm text-muted">Checking health…</p>}
+      {isLoading && <LoadingState label="Checking health..." />}
 
       {data && (
         <>
@@ -30,20 +25,19 @@ export default function HealthPage() {
             <ErrorBanner message="Could not reach the API server. Check that cmd/api is running." />
           )}
 
-          <div className={`inline-flex items-center gap-2 px-4 py-2 mb-6 text-sm font-medium rounded ${statusBadgeClass}`}>
-            <span className={`w-2 h-2 rounded-full shrink-0 ${statusDotClass}`} aria-hidden="true" />
-            <span>
+          <div>
+            <Badge tone={statusTone} size="md" dot className="normal-case tracking-normal">
               Overall status: <strong className="font-semibold">{data.status}</strong>
-            </span>
-            {dataUpdatedAt > 0 && (
-              <span className="text-xs text-muted ml-2 normal-nums">
-                checked {new Date(dataUpdatedAt).toLocaleTimeString()}
-              </span>
-            )}
+              {dataUpdatedAt > 0 && (
+                <span className="ml-2 text-xs text-muted normal-nums">
+                  checked {formatTimeOfDay(dataUpdatedAt)}
+                </span>
+              )}
+            </Badge>
           </div>
 
           {data.status !== 'error' && (
-            <div className="flex gap-3 flex-wrap">
+            <div className="flex flex-wrap gap-3">
               <StatusCard name="PostgreSQL" status={data.postgres} />
               <StatusCard name="Redis" status={data.redis} />
               <StatusCard name="Qdrant" status={data.qdrant} />
@@ -51,6 +45,6 @@ export default function HealthPage() {
           )}
         </>
       )}
-    </div>
+    </PageShell>
   )
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { login, ApiError } from '../services/api'
-import { Button, Field, inputClass } from '../components/ui'
+import { Button, FormControl, TextInput } from '../components/ui'
 
 export default function LoginPage() {
   const [apiKey, setApiKey] = useState('')
@@ -29,7 +29,7 @@ export default function LoginPage() {
     <div className="flex justify-center items-center min-h-screen bg-base">
       <div className="w-90">
         <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-primary tracking-[-0.02em] leading-tight m-0 mb-2">
+          <h1 className="text-4xl font-bold text-primary leading-tight m-0 mb-2">
             Codohue
             <span className="text-accent ml-2 font-semibold">Admin</span>
           </h1>
@@ -38,24 +38,25 @@ export default function LoginPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="bg-surface border border-default rounded-xl p-8 shadow-overlay"
+          className="bg-surface border border-default rounded-lg p-8 shadow-overlay"
         >
           {error && (
-            <div className="px-4 py-3 mb-5 text-sm font-medium rounded-xl bg-danger-bg border border-danger/25 text-danger">
+            <div className="px-4 py-3 mb-5 text-sm font-medium rounded-lg bg-danger-bg border border-danger/25 text-danger">
               {error}
             </div>
           )}
 
-          <Field label="API Key" className="mb-5">
-            <input
+          <FormControl label="API Key" htmlFor="login-api-key" className="mb-5">
+            <TextInput
+              id="login-api-key"
               type="password"
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
               placeholder="Enter RECOMMENDER_API_KEY"
               required
-              className={`${inputClass} w-full py-2.5`}
+              className="w-full py-2.5"
             />
-          </Field>
+          </FormControl>
 
           <Button
             type="submit"
@@ -63,7 +64,7 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full"
           >
-            {loading ? 'Signing in…' : 'Sign in'}
+            {loading ? 'Signing in...' : 'Sign in'}
           </Button>
         </form>
       </div>

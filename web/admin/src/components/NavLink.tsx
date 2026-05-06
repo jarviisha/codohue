@@ -13,10 +13,10 @@ export default function NavLink({ to, icon, children }: Props) {
     <RouterNavLink
       to={to}
       className={({ isActive }) =>
-        `flex items-center gap-2.5 h-9 px-3 text-sm font-medium rounded no-underline transition-colors duration-150 ${
+        `flex h-9 items-center gap-2.5 rounded-lg border px-3 text-sm font-medium no-underline transition-colors duration-150 focus-visible:outline-none focus-visible:shadow-focus ${
           isActive
-            ? 'bg-accent-subtle text-accent'
-            : 'text-secondary hover:bg-surface-raised hover:text-primary'
+            ? 'border-accent/20 bg-accent-subtle text-accent'
+            : 'border-transparent text-secondary hover:bg-surface-raised hover:text-primary'
         }`
       }
     >

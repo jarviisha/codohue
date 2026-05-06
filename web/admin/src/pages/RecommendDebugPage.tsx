@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useRecommendDebug } from '../hooks/useRecommendDebug'
 import { useSubjectProfile } from '../hooks/useSubjectProfile'
 import ErrorBanner from '../components/ErrorBanner'
-import { Button, CodeBadge, EmptyState, PageHeader, Panel, Table, Thead, Th, Tbody, Tr, Td, inputClass } from '../components/ui'
-import { useActiveNamespace } from '../context/NamespaceContext'
+import { Badge, Button, CodeBadge, EmptyState, FormControl, MetricTile, PageHeader, PageShell, Panel, Select, Table, Thead, Th, Tbody, Tr, Td, TextInput, Toolbar } from '../components/ui'
+import { useActiveNamespace } from '../context/useActiveNamespace'
 
 const LIMITS = [5, 10, 20, 50]
 
@@ -24,37 +24,37 @@ export default function RecommendDebugPage() {
   const isPending = debug.isPending || profile.isPending
 
   return (
-    <div>
+    <PageShell>
       <PageHeader title="Recommendation Debug" />
 
       <form
         onSubmit={handleSubmit}
-        className="bg-surface border border-default rounded-xl flex gap-4 flex-wrap items-end p-5 mb-6"
+        className="rounded-lg border border-default bg-surface p-5"
       >
-        <div>
-          <label className="block text-[13px] font-medium text-primary mb-1.5">Subject ID</label>
-          <input
-            required
-            value={subjectID}
-            onChange={e => setSubjectID(e.target.value)}
-            placeholder="e.g. user-123"
-            className={inputClass}
-          />
-        </div>
-        <div>
-          <label className="block text-[13px] font-medium text-primary mb-1.5">Limit</label>
-          <select value={limit} onChange={e => setLimit(+e.target.value)} className={`${inputClass} w-20`}>
-            {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
-        </div>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={isPending}
-          className="py-2"
-        >
-          {isPending ? 'Fetching…' : 'Fetch'}
-        </Button>
+        <Toolbar>
+          <FormControl label="Subject ID" htmlFor="debug-subject-id">
+            <TextInput
+              id="debug-subject-id"
+              required
+              value={subjectID}
+              onChange={e => setSubjectID(e.target.value)}
+              placeholder="e.g. user-123"
+            />
+          </FormControl>
+          <FormControl label="Limit" htmlFor="debug-limit">
+            <Select id="debug-limit" value={limit} onChange={e => setLimit(+e.target.value)} className="w-20">
+              {LIMITS.map(l => <option key={l} value={l}>{l}</option>)}
+            </Select>
+          </FormControl>
+          <Button
+            type="submit"
+            variant="primary"
+            disabled={isPending}
+            className="py-2"
+          >
+            {isPending ? 'Fetching...' : 'Fetch'}
+          </Button>
+        </Toolbar>
       </form>
 
       {(debug.error || profile.error) && (
@@ -66,7 +66,7 @@ export default function RecommendDebugPage() {
           <h3 className="font-semibold m-0 mb-4 text-[11px] uppercase tracking-[0.06em] text-muted">
             Subject Profile
           </h3>
-          <div className="grid grid-cols-3 gap-3 mb-4">
+          <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
               { label: 'Total interactions', value: profile.data.interaction_count },
               { label: `Seen items (last ${profile.data.seen_items_days}d)`, value: profile.data.seen_items.length },
@@ -76,12 +76,13 @@ export default function RecommendDebugPage() {
                 empty: 'not indexed',
               },
             ].map(({ label, value, empty }) => (
-              <div key={label} className="flex flex-col p-4 bg-subtle border border-default rounded-xl">
-                <span className="text-xs text-muted mb-1">{label}</span>
-                {value != null
-                  ? <span className="text-2xl font-bold text-primary tabular-nums tracking-[-0.02em]">{value}</span>
-                  : <span className="text-sm text-muted mt-1">{empty}</span>}
-              </div>
+              <MetricTile
+                key={label}
+                label={label}
+                value={value != null ? value : empty}
+                valueClassName={value != null ? 'text-2xl' : 'text-sm'}
+                className="bg-subtle"
+              />
             ))}
           </div>
 
@@ -106,9 +107,9 @@ export default function RecommendDebugPage() {
             <span className="text-sm text-secondary">
               Subject: <strong className="text-primary font-semibold">{debug.data.subject_id}</strong>
             </span>
-            <span className="text-[11px] font-semibold uppercase tracking-[0.04em] bg-accent-subtle text-accent border border-accent/20 px-2 py-0.5 rounded-full">
+            <Badge tone="accent">
               {debug.data.source}
-            </span>
+            </Badge>
             <span className="text-sm text-secondary tabular-nums">
               Total: <strong className="text-primary font-semibold">{debug.data.total}</strong>
             </span>
@@ -117,7 +118,7 @@ export default function RecommendDebugPage() {
           {debug.data.items.length === 0 ? (
             <EmptyState>No recommendations found for this subject.</EmptyState>
           ) : (
-            <Panel>
+            <Panel bodyClassName="overflow-x-auto">
               <Table>
                 <Thead>
                   <Th>Rank</Th>
@@ -138,6 +139,6 @@ export default function RecommendDebugPage() {
           )}
         </div>
       )}
-    </div>
+    </PageShell>
   )
 }

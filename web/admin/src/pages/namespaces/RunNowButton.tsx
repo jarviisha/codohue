@@ -18,7 +18,7 @@ export default function RunNowButton({ ns }: { ns: string }) {
       disabled={trigger.isPending}
       size="sm"
     >
-      {trigger.isPending ? 'Running…' : 'Run now'}
+      {trigger.isPending ? 'Running...' : 'Run now'}
     </Button>
   )
 }

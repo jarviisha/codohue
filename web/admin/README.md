@@ -36,6 +36,10 @@ npm run build
 - `src/types.ts`: admin API request and response contracts.
 - `src/routes.tsx`: route and sidebar navigation config.
 
+## Design Contract
+
+Use [`DESIGN_CONTRACT.md`](./DESIGN_CONTRACT.md) as the source of truth for admin UI layout, spacing, component usage, state patterns, and refactor checks.
+
 ## Auth
 
 Login uses `POST /api/auth/login` with the configured admin API key. Auth state is maintained by the backend via cookies, and admin API requests include credentials.

@@ -1,13 +1,7 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { NamespaceContext } from './namespaceContextValue'
 
 const STORAGE_KEY = 'codohue_active_ns'
-
-interface NamespaceContextValue {
-  namespace: string
-  setNamespace: (ns: string) => void
-}
-
-const NamespaceContext = createContext<NamespaceContextValue | null>(null)
 
 export function NamespaceProvider({ children }: { children: ReactNode }) {
   const [namespace, setNamespaceState] = useState(() => localStorage.getItem(STORAGE_KEY) ?? '')
@@ -22,10 +16,4 @@ export function NamespaceProvider({ children }: { children: ReactNode }) {
       {children}
     </NamespaceContext.Provider>
   )
-}
-
-export function useActiveNamespace() {
-  const ctx = useContext(NamespaceContext)
-  if (!ctx) throw new Error('useActiveNamespace must be used inside NamespaceProvider')
-  return ctx
 }

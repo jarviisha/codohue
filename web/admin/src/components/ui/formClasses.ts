@@ -1,0 +1,1 @@
+export const inputClass = 'bg-surface border border-default hover:border-strong focus:border-accent focus:shadow-focus text-primary placeholder:text-muted text-sm px-3 py-2 rounded-lg focus:outline-none transition-shadow duration-100'

@@ -4,7 +4,8 @@ import NamespacePicker from './NamespacePicker'
 import Icon from './Icon'
 import { logout } from '../services/api'
 import { navRoutes } from '../routes'
-import { useActiveNamespace } from '../context/NamespaceContext'
+import { useActiveNamespace } from '../context/useActiveNamespace'
+import { Button } from './ui'
 
 export default function Sidebar() {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -28,47 +29,58 @@ export default function Sidebar() {
   return (
     <nav
       aria-label="Main navigation"
-      className="w-64 px-3 shrink-0 border-r border-default flex flex-col fixed top-0 left-0 h-screen"
+      className="fixed left-0 top-0 flex h-screen w-64 shrink-0 flex-col border-r border-default bg-surface px-3"
     >
-      {/* Brand + dark toggle */}
-      <div className="flex items-center justify-between h-14 px-3">
-        <span className="text text-2xl text-primary font-semibold underline underline-offset-6 tracking-tight">
-          @codohue
-        </span>
+      <div className="flex h-14 items-center px-3">
+        <div className="min-w-0">
+          <span className="block text-base font-semibold leading-tight text-primary">
+            Codohue
+          </span>
+          <span className="block text-[11px] font-medium uppercase tracking-[0.06em] text-muted">
+            Admin
+          </span>
+        </div>
       </div>
 
-      {/* Namespace selector */}
-      <div className="pt-4 pb-3 shrink-0">
+      <div className="shrink-0 border-y border-default py-4">
+        <p className="m-0 mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+          Namespace
+        </p>
         <NamespacePicker />
       </div>
 
-      {/* Nav */}
-      <div className="flex flex-col flex-1 py-4 overflow-y-auto">
-        <div className="space-y-2">
+      <div className="flex flex-1 flex-col overflow-y-auto py-4">
+        <p className="m-0 mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+          Navigation
+        </p>
+        <div className="space-y-1">
           {navRoutes.map(route => (
             <NavLink key={route.path} to={`/${route.path}`} icon={route.icon}>{route.label}</NavLink>
           ))}
           {namespace && (
-            <NavLink to={`/namespaces/${namespace}`} icon='settings'>Settings</NavLink>
+            <NavLink to={`/namespaces/${namespace}`} icon="settings">Settings</NavLink>
           )}
         </div>
       </div>
 
-      {/* Sign out */}
-      <div className="px-3 pb-4 pt-2 border-t border-default flex items-center justify-between">
-        <button
+      <div className="flex items-center justify-between gap-2 border-t border-default py-3">
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={handleLogout}
-          className="flex items-center h-9 px-3 text-sm font-medium text-secondary rounded cursor-pointer hover:bg-surface-raised hover:text-primary transition-colors duration-150"
+          className="flex-1 text-left"
         >
           Sign out
-        </button>
-        <button
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
           onClick={() => setDark(d => !d)}
-          className="w-8 h-8 flex items-center justify-center rounded-full text-muted hover:bg-surface-raised hover:text-secondary transition-colors duration-150"
           aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
         >
           {dark ? <Icon name="sun" size={14} /> : <Icon name="moon" size={14} />}
-        </button>
+        </Button>
       </div>
     </nav>
   )

@@ -2,8 +2,8 @@ import { useNavigate } from 'react-router-dom'
 import { useNamespacesOverview } from '../hooks/useNamespacesOverview'
 import ErrorBanner from '../components/ErrorBanner'
 import { SummaryBar, NamespaceCard } from './namespaces/components'
-import { Button, EmptyState, PageHeader } from '../components/ui'
-import { useActiveNamespace } from '../context/NamespaceContext'
+import { Button, EmptyState, LoadingState, Notice, PageHeader, PageShell } from '../components/ui'
+import { useActiveNamespace } from '../context/useActiveNamespace'
 
 export default function NamespacesPage() {
   const { data, error, isLoading } = useNamespacesOverview()
@@ -16,7 +16,7 @@ export default function NamespacesPage() {
   }
 
   return (
-    <div>
+    <PageShell>
       <PageHeader
         title="Namespaces"
         actions={(
@@ -27,13 +27,13 @@ export default function NamespacesPage() {
       />
 
       {!activeNs && (
-        <div className="flex items-center gap-3 px-4 py-3 mb-6 rounded-xl bg-accent-subtle border border-accent/20 text-sm text-accent font-medium">
+        <Notice tone="accent" role="status">
           Select a namespace below to start working.
-        </div>
+        </Notice>
       )}
 
       {error && <ErrorBanner message="Failed to load namespaces." />}
-      {isLoading && <p className="text-sm text-muted">Loading…</p>}
+      {isLoading && <LoadingState />}
 
       {data && data.namespaces.length === 0 && (
         <EmptyState>
@@ -44,7 +44,7 @@ export default function NamespacesPage() {
       {data && data.namespaces.length > 0 && (
         <>
           <SummaryBar namespaces={data.namespaces} />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
             {data.namespaces.map(h => (
               <NamespaceCard
                 key={h.config.namespace}
@@ -57,6 +57,6 @@ export default function NamespacesPage() {
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   )
 }

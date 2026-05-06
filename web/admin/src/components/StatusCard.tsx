@@ -1,37 +1,35 @@
+import { Badge } from './ui'
+
 interface Props {
   name: string
   status: string
 }
 
-const STATUS: Record<string, { dot: string; text: string; wrap: string }> = {
+const STATUS: Record<string, { tone: 'success' | 'warning' | 'danger'; frameClass: string }> = {
   ok: {
-    dot:  'bg-success',
-    text: 'text-success',
-    wrap: 'border border-success/30',
+    tone: 'success',
+    frameClass: 'border border-success/30',
   },
   degraded: {
-    dot:  'bg-warning',
-    text: 'text-warning',
-    wrap: 'border border-warning/30',
+    tone: 'warning',
+    frameClass: 'border border-warning/30',
   },
 }
 
 const ERROR_STATUS = {
-  dot:  'bg-danger',
-  text: 'text-danger',
-  wrap: 'bg-danger-bg border border-danger/25',
+  tone: 'danger' as const,
+  frameClass: 'bg-danger-bg border border-danger/25',
 }
 
 export default function StatusCard({ name, status }: Props) {
   const s = STATUS[status] ?? ERROR_STATUS
 
   return (
-    <div className={`flex items-center gap-3 px-5 py-4 min-w-44 rounded ${s.wrap}`}>
-      <span className={`w-2 h-2 rounded-full shrink-0 ${s.dot}`} aria-hidden="true" />
+    <div className={`flex min-w-44 items-center justify-between gap-4 rounded-lg bg-surface px-5 py-4 ${s.frameClass}`}>
       <div>
         <div className="text-sm font-medium text-primary">{name}</div>
-        <div className={`text-xs tabular-nums ${s.text}`}>{status}</div>
       </div>
+      <Badge tone={s.tone} dot>{status}</Badge>
     </div>
   )
 }
