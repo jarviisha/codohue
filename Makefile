@@ -60,7 +60,6 @@ build-cron:
 	go build -o $(CRON_BIN) ./cmd/cron
 
 build-admin:
-	cd web/admin && npm run build
 	go build -o $(ADMIN_BIN) ./cmd/admin
 
 # Run and development
