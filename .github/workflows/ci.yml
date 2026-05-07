@@ -8,7 +8,31 @@ on:
     tags: ['v*']
 
 jobs:
-  lint-test:
+  lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - .
+          - ./pkg/codohuetypes
+          - ./sdk/go
+          - ./sdk/go/redistream
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Lint Go module
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11.4
+          working-directory: ${{ matrix.module }}
+
+  test:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -24,11 +48,6 @@ jobs:
           --health-retries 5
         ports:
           - 5432:5432
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-
     steps:
       - uses: actions/checkout@v4
 
@@ -46,22 +65,16 @@ jobs:
         env:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
 
-      - name: Lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.11.4
-
       - name: Test
         run: make coverage-check-all
         env:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
-          REDIS_URL: redis://localhost:6379
           QDRANT_HOST: ""
           QDRANT_PORT: "6334"
           RECOMMENDER_API_KEY: ci-test-key
 
   e2e:
-    needs: lint-test
+    needs: [lint, test]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -103,6 +116,9 @@ jobs:
         run: migrate -path ./migrations -database "$DATABASE_URL" up
         env:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
+
+      - name: Wait for Qdrant gRPC
+        run: timeout 30 bash -c 'until </dev/tcp/localhost/6334; do sleep 1; done'
 
       - name: Build E2E binaries
         run: make build
