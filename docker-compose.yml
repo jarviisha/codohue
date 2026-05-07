@@ -2,7 +2,7 @@ services:
   migrate:
     build:
       context: .
-      target: migrate
+      dockerfile: docker/migrate.Dockerfile
     container_name: codohue-migrate
     restart: on-failure
     environment:

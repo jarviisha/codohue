@@ -38,7 +38,9 @@ MIN_CMD_CRON       ?= 45
 .PHONY: \
 	build build-api build-cron build-admin \
 	run run-cron run-admin dev dev-admin dev-all \
-	up up-all up-d up-infra up-app up-app-d down down-v down-app \
+	up up-all up-build up-d up-build-d \
+	up-infra up-infra-build up-infra-d up-infra-build-d \
+	up-app up-app-build up-app-d up-app-build-d down down-v down-app \
 	logs logs-api logs-cron logs-admin logs-app \
 	compose-check compose-check-app compose-check-prod \
 	lint fmt \
@@ -92,19 +94,31 @@ dev-all:
 up up-all:
 	$(COMPOSE) up
 
+up-build:
+	$(COMPOSE) up --build
+
 up-d:
 	$(COMPOSE) up -d
 
 up-build-d:
 	$(COMPOSE) up -d --build
 
-up-infra:
+up-infra up-infra-d:
 	$(COMPOSE) up -d postgres redis qdrant
 
+up-infra-build up-infra-build-d:
+	$(COMPOSE) up -d --build postgres redis qdrant
+
 up-app:
+	$(COMPOSE_APP) up
+
+up-app-build:
 	$(COMPOSE_APP) up --build
 
 up-app-d:
+	$(COMPOSE_APP) up -d
+
+up-app-build-d:
 	$(COMPOSE_APP) up -d --build
 
 down:
