@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Breadcrumbs from './Breadcrumbs'
+import ThemeToggle from './ThemeToggle'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { EmptyState } from './ui'
 
@@ -16,6 +17,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen bg-base">
       <Sidebar />
+      <ThemeToggle />
       <main className="min-h-screen bg-base md:ml-64">
         <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 md:px-8 md:py-8">
           {needsNs && !namespace ? (
