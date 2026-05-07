@@ -31,7 +31,7 @@ export default function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`${variantClasses[variant]} ${sizeClasses[size]} inline-flex items-center justify-center font-medium rounded cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus ${className}`}
+      className={`${variantClasses[variant]} ${sizeClasses[size]} inline-flex items-center justify-center font-medium rounded-lg cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus ${className}`}
       {...props}
     >
       {children}
