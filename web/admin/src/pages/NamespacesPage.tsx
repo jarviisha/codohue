@@ -23,7 +23,7 @@ export default function NamespacesPage() {
 
   function handleSelect(ns: string) {
     setNamespace(ns)
-    navigate('/health')
+    navigate('/overview')
   }
 
   function handleSeedDemo() {
@@ -135,7 +135,7 @@ export default function NamespacesPage() {
               {seedDemo.isPending ? 'Adding Demo...' : 'Add Demo Dataset'}
             </Button>
             {seedDemo.data && (
-              <Button type="button" variant="ghost" onClick={() => navigate('/health')}>
+              <Button type="button" variant="ghost" onClick={() => navigate('/overview')}>
                 Open Demo Namespace
               </Button>
             )}

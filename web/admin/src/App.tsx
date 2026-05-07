@@ -4,13 +4,26 @@ import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import { adminRoutes } from './routes'
 import { NamespaceProvider } from './context/NamespaceContext'
+import { useActiveNamespace } from './context/useActiveNamespace'
+import { useNamespaceList } from './hooks/useNamespaces'
+import { LoadingState } from './components/ui'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 10_000 } },
 })
 
 function DefaultRedirect() {
-  return <Navigate to="/health" replace />
+  const { namespace } = useActiveNamespace()
+  const { data, isLoading } = useNamespaceList()
+
+  if (isLoading) return <LoadingState />
+
+  const namespaces = data?.namespaces ?? []
+  const hasActiveNamespace = namespaces.some(ns => ns.namespace === namespace)
+
+  if (hasActiveNamespace) return <Navigate to="/overview" replace />
+
+  return <Navigate to="/namespaces" replace />
 }
 
 export default function App() {
