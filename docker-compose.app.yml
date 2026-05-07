@@ -14,9 +14,10 @@ services:
         required: false
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:$${API_PORT:-2001}/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
   cron:
     build:
