@@ -1,4 +1,4 @@
-const BASE = ''
+const BASE = import.meta.env.VITE_ADMIN_API_BASE_URL ?? ''
 
 export class ApiError extends Error {
   status: number

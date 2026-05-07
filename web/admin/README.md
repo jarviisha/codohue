@@ -10,13 +10,27 @@ Install dependencies from this directory:
 npm install
 ```
 
+Copy the frontend environment template when you need local overrides:
+
+```sh
+cp .env.example .env.local
+```
+
 Run the Vite dev server:
 
 ```sh
 npm run dev
 ```
 
-The dev server proxies `/api` requests to `http://localhost:2002` as configured in `vite.config.ts`.
+The dev server proxies `/api` requests to `VITE_ADMIN_PROXY_TARGET`, which defaults to `http://localhost:2002`.
+
+## Environment
+
+- `VITE_ADMIN_API_BASE_URL`: optional browser-visible API base URL. Leave empty for same-origin requests, which is the default when the Go admin binary serves the built SPA.
+- `VITE_ADMIN_DEV_PORT`: local Vite dev server port. Defaults to `5173`.
+- `VITE_ADMIN_PROXY_TARGET`: local Vite proxy target for `/api` requests. Defaults to `http://localhost:2002`.
+
+Do not put `RECOMMENDER_API_KEY` or namespace keys in frontend env files. The admin key is submitted through the login form and validated by the backend.
 
 ## Build And Checks
 
