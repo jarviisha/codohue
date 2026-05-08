@@ -53,14 +53,7 @@ tmp/
 temp/
 
 #AI Agents
-.agents/
-.claude/
-.mex/
-CLAUDE-*.md
-skills-lock.json
 ai-docs/
-.codex
-ai-*/
 
 
 ##
