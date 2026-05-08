@@ -111,6 +111,11 @@ func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(req.Candidates) == 0 {
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "candidates is required")
+		return
+	}
+
 	if len(req.Candidates) > maxCandidates {
 		httpapi.WriteError(w, http.StatusBadRequest, "too_many_candidates", "candidates exceeds limit of "+strconv.Itoa(maxCandidates))
 		return

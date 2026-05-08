@@ -38,7 +38,7 @@ func TestHandlerIngestSuccess(t *testing.T) {
 	h := &Handler{service: proc}
 	rec := httptest.NewRecorder()
 
-	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW","timestamp":"2026-04-21T00:00:00Z"}`, "ns"))
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
@@ -55,7 +55,7 @@ func TestHandlerIngestBodyNamespaceIgnored(t *testing.T) {
 	h := &Handler{service: proc}
 	rec := httptest.NewRecorder()
 
-	h.Ingest(rec, newIngestRequest(`{"namespace":"WRONG","subject_id":"u1","object_id":"o1","action":"VIEW","timestamp":"2026-04-21T00:00:00Z"}`, "ns"))
+	h.Ingest(rec, newIngestRequest(`{"namespace":"WRONG","subject_id":"u1","object_id":"o1","action":"VIEW","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 (body namespace ignored), got %d", rec.Code)
@@ -69,7 +69,7 @@ func TestHandlerIngestClientError(t *testing.T) {
 	h := &Handler{service: &fakeHTTPProcessor{err: fmt.Errorf("resolve weight: %w", ErrUnknownAction)}}
 	rec := httptest.NewRecorder()
 
-	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"UNKNOWN","timestamp":"2026-04-21T00:00:00Z"}`, "ns"))
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"UNKNOWN","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)

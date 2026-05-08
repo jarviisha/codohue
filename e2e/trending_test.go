@@ -10,7 +10,7 @@ import (
 
 func TestTrending_EmptyReturnsEmptyList(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS, nsKey, nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending", nsKey, nil)
 
 	var body struct {
 		Namespace   string    `json:"namespace"`
@@ -33,49 +33,49 @@ func TestTrending_EmptyReturnsEmptyList(t *testing.T) {
 
 func TestTrending_Unauthorized(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS, "wrong-key", nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending", "wrong-key", nil)
 	assertStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 }
 
 func TestTrending_NoToken(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS, "", nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending", "", nil)
 	assertStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 }
 
 func TestTrending_InvalidLimit(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS+"?limit=0", nsKey, nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending?limit=0", nsKey, nil)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
 }
 
 func TestTrending_NegativeLimit(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS+"?limit=-1", nsKey, nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending?limit=-1", nsKey, nil)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
 }
 
 func TestTrending_InvalidOffset(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS+"?offset=-1", nsKey, nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending?offset=-1", nsKey, nil)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
 }
 
 func TestTrending_PaginationParams(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS+"?limit=5&offset=0", nsKey, nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending?limit=5&offset=0", nsKey, nil)
 	assertStatus(t, resp, http.StatusOK)
 	resp.Body.Close()
 }
 
 func TestTrending_WindowHours(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/trending/"+testNS+"?window_hours=48", nsKey, nil)
+		baseURL+"/v1/namespaces/"+testNS+"/trending?window_hours=48", nsKey, nil)
 
 	var body struct {
 		WindowHours int `json:"window_hours"`

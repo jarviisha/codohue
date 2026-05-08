@@ -50,7 +50,7 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 	})
 
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=user_a&namespace="+namespace+"&limit=3",
+		baseURL+"/v1/namespaces/"+namespace+"/subjects/user_a/recommendations?limit=3",
 		apiKey, nil)
 
 	var body struct {
@@ -105,7 +105,7 @@ func TestRecommendComputed_ColdStartFallsBackToTrendingOrPopular(t *testing.T) {
 	})
 
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=cold_subject&namespace="+namespace+"&limit=3",
+		baseURL+"/v1/namespaces/"+namespace+"/subjects/cold_subject/recommendations?limit=3",
 		apiKey, nil)
 
 	var body struct {

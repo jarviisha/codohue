@@ -14,10 +14,9 @@ func TestRank_ColdStart(t *testing.T) {
 	// order with score 0 (rankFallback path).
 	body := map[string]any{
 		"subject_id": "rank_cold_user",
-		"namespace":  testNS,
 		"candidates": []string{"item_a", "item_b", "item_c"},
 	}
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", nsKey, body)
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+testNS+"/rankings", nsKey, body)
 
 	var result struct {
 		SubjectID string `json:"subject_id"`
@@ -48,54 +47,44 @@ func TestRank_ColdStart(t *testing.T) {
 func TestRank_EmptyCandidates(t *testing.T) {
 	body := map[string]any{
 		"subject_id": "rank_cold_user",
-		"namespace":  testNS,
 		"candidates": []string{},
 	}
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", nsKey, body)
-
-	var result struct {
-		Items []any `json:"items"`
-	}
-	decodeJSON(t, resp, &result)
-
-	if len(result.Items) != 0 {
-		t.Errorf("items count = %d, want 0 for empty candidates", len(result.Items))
-	}
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+testNS+"/rankings", nsKey, body)
+	assertStatus(t, resp, http.StatusBadRequest)
+	resp.Body.Close()
 }
 
 func TestRank_Unauthorized(t *testing.T) {
 	body := map[string]any{
 		"subject_id": "u1",
-		"namespace":  testNS,
 		"candidates": []string{"item_a"},
 	}
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", "bad-key", body)
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+testNS+"/rankings", "bad-key", body)
 	assertStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 }
 
 func TestRank_MissingSubjectID(t *testing.T) {
 	body := map[string]any{
-		"namespace":  testNS,
 		"candidates": []string{"item_a"},
 	}
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", nsKey, body)
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+testNS+"/rankings", nsKey, body)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
 }
 
-func TestRank_MissingNamespace(t *testing.T) {
+func TestRank_LegacyMissingNamespacePathIsGone(t *testing.T) {
 	body := map[string]any{
 		"subject_id": "u1",
 		"candidates": []string{"item_a"},
 	}
 	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", nsKey, body)
-	assertStatus(t, resp, http.StatusBadRequest)
+	assertStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }
 
 func TestRank_InvalidBody(t *testing.T) {
-	resp := doRawPost(t, baseURL+"/v1/rank", nsKey, "not-json-at-all")
+	resp := doRawPost(t, baseURL+"/v1/namespaces/"+testNS+"/rankings", nsKey, "not-json-at-all")
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
 }
@@ -107,10 +96,9 @@ func TestRank_TooManyCandidates(t *testing.T) {
 	}
 	body := map[string]any{
 		"subject_id": "u1",
-		"namespace":  testNS,
 		"candidates": candidates,
 	}
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", nsKey, body)
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+testNS+"/rankings", nsKey, body)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
 }

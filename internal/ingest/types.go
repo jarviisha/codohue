@@ -32,6 +32,18 @@ var DefaultActionWeights = map[Action]float64{
 // or the HTTP ingest endpoint.
 type EventPayload = codohuetypes.EventPayload
 
+// HTTPIngestRequest is the request body for POST /v1/namespaces/{ns}/events.
+// Namespace is intentionally absent because the path parameter is the single
+// source of truth for HTTP ingest.
+type HTTPIngestRequest struct {
+	SubjectID       string            `json:"subject_id"`
+	ObjectID        string            `json:"object_id"`
+	Action          Action            `json:"action"`
+	OccurredAt      time.Time         `json:"occurred_at"`
+	ObjectCreatedAt *time.Time        `json:"object_created_at,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+}
+
 // Event is the record stored in the database after validation and weight assignment.
 type Event struct {
 	ID              int64

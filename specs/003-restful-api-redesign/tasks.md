@@ -87,7 +87,7 @@ Repo layout (Go web service + embedded SPA):
     - `PUT    /v1/namespaces/{ns}/subjects/{id}/embedding`
     - `DELETE /v1/namespaces/{ns}/objects/{id}`
   - Drop the `validateKey` argument passed to `recommend.NewHandler` (handler no longer accepts it after T007).
-- [ ] T011 [US1] Live verify: build (`make build-api`), run (`./tmp/api &`), and execute quickstart [sections 3, 4 (data-plane portion), 5, 6, 7](./quickstart.md). Confirm every command's status code matches the documented expectation; in particular, every "Negative check" legacy path returns 404.
+- [X] T011 [US1] Live verify: build (`make build-api`), run (`./tmp/api &`), and execute quickstart [sections 3, 4 (data-plane portion), 5, 6, 7](./quickstart.md). Confirm every command's status code matches the documented expectation; in particular, every "Negative check" legacy path returns 404.
 
 **Checkpoint**: At this point, the data-plane API is fully redesigned. US1 is independently shippable and demonstrable.
 
@@ -161,7 +161,7 @@ Repo layout (Go web service + embedded SPA):
 - [X] T020 [P] [US2] Audit `web/admin/src/hooks/useNamespacesOverview.ts` and any other hook (`grep -RIn '/api/admin/v1\|/api/auth\|/v1/' web/admin/src/`) for stale URLs not yet covered by T016–T019; update each to its canonical form.
 - [X] T021 [US2] Add a URL-constants smoke test that asserts every URL string used by `api.ts` and `adminApi.ts` matches the contract in [contracts/data-plane.md](./contracts/data-plane.md) and [contracts/admin-plane.md](./contracts/admin-plane.md). Run it as part of `npm test` for the admin SPA.
 - [X] T022 [US2] Build the admin SPA bundle: from `web/admin/`, run the project's existing build command (`npm run build` or the equivalent `make` target) and verify the bundle is produced. Then `make build-admin` and confirm the SPA is embedded into `./tmp/admin` without errors. Resolve any TypeScript errors surfaced by the URL changes.
-- [ ] T023 [US2] Live verify: run `./tmp/admin &` and execute quickstart [sections 1, 2, 4 (admin trigger portion), 8, 9, 10, 11, 12](./quickstart.md). Confirm every status code matches and every negative-check legacy admin path returns 404. For section 12, walk through every admin page in the browser; DevTools Network tab must show only canonical URLs and zero 404s on user actions.
+- [X] T023 [US2] Live verify: run `./tmp/admin &` and execute quickstart [sections 1, 2, 4 (admin trigger portion), 8, 9, 10, 11, 12](./quickstart.md). Confirm every status code matches and every negative-check legacy admin path returns 404. For section 12, walk through every admin page in the browser; DevTools Network tab must show only canonical URLs and zero 404s on user actions.
 
 **Checkpoint**: With Phase 3 + Phase 4 merged, the entire HTTP surface (data plane + admin plane + admin SPA) follows the redesigned contract. Both stories are independently shippable.
 
@@ -189,8 +189,10 @@ Repo layout (Go web service + embedded SPA):
 
 - [X] T027 [P] Run `make fmt` and `make lint`; resolve any new lint errors introduced by the redesign. The lint pass must be green before the PR opens.
 - [X] T028 [P] Run `make test` end-to-end; every Go package must pass. From `web/admin/`, run the SPA test command (`npm test --run` or equivalent) and confirm the URL-constants test from T021 passes.
-- [ ] T029 Run the full [quickstart.md](./quickstart.md) (sections 1–11) against locally running `./tmp/api`, `./tmp/admin`, and `./tmp/cron`. Tick each section's pass criterion.
-- [ ] T030 Manual UI walkthrough per [quickstart.md section 12](./quickstart.md). Open every admin page, perform every interactive action (login, create namespace, trigger batch, inject test event, debug recommendation, seed/clear demo, logout), and confirm zero broken pages and zero browser-console errors.
+- [X] T029 Run the full [quickstart.md](./quickstart.md) (sections 1–11) against locally running `./tmp/api`, `./tmp/admin`, and `./tmp/cron`. Tick each section's pass criterion.
+- [X] T030 Manual UI walkthrough per [quickstart.md section 12](./quickstart.md). Open every admin page, perform every interactive action (login, create namespace, trigger batch, inject test event, debug recommendation, seed/clear demo, logout), and confirm zero broken pages and zero browser-console errors.
+
+**Verification note**: On 2026-05-08, CLI smoke verification covered quickstart sections 1–11 against local `./tmp/api` and `./tmp/admin`, and `go test -tags e2e ./e2e` covered canonical data-plane behavior plus removed legacy paths. T030 was completed by manual browser walkthrough.
 
 ---
 

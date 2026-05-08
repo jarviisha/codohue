@@ -221,6 +221,17 @@ func TestRank_InvalidBody(t *testing.T) {
 	}
 }
 
+func TestRank_EmptyCandidates(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, `{"subject_id":"u1","candidates":[]}`)
+	rec := httptest.NewRecorder()
+	h.Rank(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
 func TestRank_TooManyCandidates(t *testing.T) {
 	h := &Handler{service: &fakeSvc{}}
 	candidates := make([]string, maxCandidates+1)

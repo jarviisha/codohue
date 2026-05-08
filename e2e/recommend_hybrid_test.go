@@ -51,26 +51,26 @@ func TestRecommendHybrid_UsesSparseAndDenseArtifacts(t *testing.T) {
 		return true, nil
 	})
 
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/objects/"+namespace+"/item_3/embedding", apiKey, map[string]any{
+	resp := doRequest(t, http.MethodPut, baseURL+"/v1/namespaces/"+namespace+"/objects/item_3/embedding", apiKey, map[string]any{
 		"vector": []float32{0.95, 0.05, 0, 0},
 	})
 	assertStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 
-	resp = doRequest(t, http.MethodPost, baseURL+"/v1/objects/"+namespace+"/item_4/embedding", apiKey, map[string]any{
+	resp = doRequest(t, http.MethodPut, baseURL+"/v1/namespaces/"+namespace+"/objects/item_4/embedding", apiKey, map[string]any{
 		"vector": []float32{0.90, 0.10, 0, 0},
 	})
 	assertStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 
-	resp = doRequest(t, http.MethodPost, baseURL+"/v1/subjects/"+namespace+"/user_a/embedding", apiKey, map[string]any{
+	resp = doRequest(t, http.MethodPut, baseURL+"/v1/namespaces/"+namespace+"/subjects/user_a/embedding", apiKey, map[string]any{
 		"vector": []float32{1, 0, 0, 0},
 	})
 	assertStatus(t, resp, http.StatusNoContent)
 	resp.Body.Close()
 
 	resp = doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=user_a&namespace="+namespace+"&limit=3",
+		baseURL+"/v1/namespaces/"+namespace+"/subjects/user_a/recommendations?limit=3",
 		apiKey, nil)
 
 	var body struct {

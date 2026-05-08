@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -18,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jarviisha/codohue/internal/nsconfig"
 	qdrant "github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -68,9 +68,16 @@ func assertStatus(t testing.TB, resp *http.Response, want int) {
 // Use this when you need to send deliberately malformed JSON.
 func doRawPost(t testing.TB, url, token, rawBody string) *http.Response {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(rawBody))
+	return doRawRequest(t, http.MethodPost, url, token, rawBody)
+}
+
+// doRawRequest fires a request with a raw string body (Content-Type: application/json).
+// Use this when you need to send deliberately malformed JSON.
+func doRawRequest(t testing.TB, method, url, token, rawBody string) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(method, url, strings.NewReader(rawBody))
 	if err != nil {
-		t.Fatalf("new request POST %s: %v", url, err)
+		t.Fatalf("new request %s %s: %v", method, url, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
@@ -78,7 +85,7 @@ func doRawPost(t testing.TB, url, token, rawBody string) *http.Response {
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("do request POST %s: %v", url, err)
+		t.Fatalf("do request %s %s: %v", method, url, err)
 	}
 	return resp
 }
@@ -162,39 +169,21 @@ func createNamespaceRequest(namespace string, payload map[string]any) (string, t
 		return "", time.Time{}, fmt.Errorf("marshal payload: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPut,
-		baseURL+"/v1/config/namespaces/"+url.PathEscape(namespace),
-		bytes.NewReader(data))
+	var req nsconfig.UpsertRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return "", time.Time{}, fmt.Errorf("decode namespace config: %w", err)
+	}
+
+	svc := nsconfig.NewService(nsconfig.NewRepository(testDB))
+	resp, err := svc.Upsert(context.Background(), namespace, &req)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("new request: %w", err)
+		return "", time.Time{}, fmt.Errorf("upsert namespace config: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+adminKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("do request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", time.Time{}, fmt.Errorf("status %d: %s", resp.StatusCode, bytes.TrimSpace(body))
+	if resp.Namespace != namespace {
+		return "", time.Time{}, fmt.Errorf("namespace = %q, want %q", resp.Namespace, namespace)
 	}
 
-	var body struct {
-		Namespace string    `json:"namespace"`
-		UpdatedAt time.Time `json:"updated_at"`
-		APIKey    string    `json:"api_key"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return "", time.Time{}, fmt.Errorf("decode response: %w", err)
-	}
-	if body.Namespace != namespace {
-		return "", time.Time{}, fmt.Errorf("namespace = %q, want %q", body.Namespace, namespace)
-	}
-
-	return body.APIKey, body.UpdatedAt, nil
+	return resp.APIKey, resp.UpdatedAt, nil
 }
 
 func cleanupNamespace(t testing.TB, namespace string) {

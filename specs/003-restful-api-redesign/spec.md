@@ -2,7 +2,7 @@
 
 **Feature Branch**: `003-restful-api-redesign`
 **Created**: 2026-05-07
-**Status**: Draft
+**Status**: Complete
 **Input**: User description: "Redesign Codohue REST API before production launch. Drop legacy duplicate paths, eliminate RPC verbs, move namespace mutation off the data-plane to the admin plane only, adopt sub-resource style for recommendations, standardize on bare typed responses with consistent status codes, and update the admin web UI accordingly."
 
 ## User Scenarios & Testing *(mandatory)*

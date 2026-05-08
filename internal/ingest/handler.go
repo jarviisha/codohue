@@ -35,13 +35,21 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload EventPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	var req HTTPIngestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 
-	payload.Namespace = namespace
+	payload := EventPayload{
+		Namespace:       namespace,
+		SubjectID:       req.SubjectID,
+		ObjectID:        req.ObjectID,
+		Action:          req.Action,
+		Timestamp:       req.OccurredAt,
+		ObjectCreatedAt: req.ObjectCreatedAt,
+		Metadata:        req.Metadata,
+	}
 
 	if err := h.service.Process(r.Context(), &payload); err != nil {
 		if isClientPayloadError(err) {
