@@ -1,32 +1,31 @@
-package nsconfig
+package namespace
 
 import "time"
 
-// UpsertRequest is the payload from the Main Backend for creating or updating a namespace config.
-type UpsertRequest struct {
+// Config holds the configuration for a single namespace.
+type Config struct {
+	// Core fields.
+	Namespace     string             `json:"namespace"`
 	ActionWeights map[string]float64 `json:"action_weights"`
 	Lambda        float64            `json:"lambda"`
 	Gamma         float64            `json:"gamma"`
 	MaxResults    int                `json:"max_results"`
 	SeenItemsDays int                `json:"seen_items_days"`
 
-	// Dense hybrid
+	// Auth.
+	APIKeyHash string `json:"-"`
+
+	// Dense hybrid.
 	Alpha         float64 `json:"alpha"`
 	DenseStrategy string  `json:"dense_strategy"`
 	EmbeddingDim  int     `json:"embedding_dim"`
 	DenseDistance string  `json:"dense_distance"`
 
-	// Trending
+	// Trending.
 	TrendingWindow int     `json:"trending_window"`
 	TrendingTTL    int     `json:"trending_ttl"`
 	LambdaTrending float64 `json:"lambda_trending"`
-}
 
-// UpsertResponse is returned after a successful upsert.
-type UpsertResponse struct {
-	Namespace string    `json:"namespace"`
+	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	// APIKey is the plaintext API key returned only on initial namespace creation.
-	// It will not appear on subsequent updates.
-	APIKey string `json:"api_key,omitempty"`
 }

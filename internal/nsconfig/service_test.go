@@ -4,19 +4,21 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 // fakeRepo implements nsConfigRepository for testing.
 type fakeRepo struct {
-	upsertCfg           *NamespaceConfig
+	upsertCfg           *namespace.Config
 	upsertErr           error
 	setAPIKeyHashErr    error
 	setAPIKeyHashCalled bool
-	getCfg              *NamespaceConfig
+	getCfg              *namespace.Config
 	getErr              error
 }
 
-func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*NamespaceConfig, error) {
+func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*namespace.Config, error) {
 	return f.upsertCfg, f.upsertErr
 }
 
@@ -25,7 +27,7 @@ func (f *fakeRepo) SetAPIKeyHash(_ context.Context, _, _ string) error {
 	return f.setAPIKeyHashErr
 }
 
-func (f *fakeRepo) Get(_ context.Context, _ string) (*NamespaceConfig, error) {
+func (f *fakeRepo) Get(_ context.Context, _ string) (*namespace.Config, error) {
 	return f.getCfg, f.getErr
 }
 
@@ -39,7 +41,7 @@ func TestNewService(t *testing.T) {
 
 func TestServiceUpsert_NewNamespace_ReturnsAPIKey(t *testing.T) {
 	repo := &fakeRepo{
-		upsertCfg: &NamespaceConfig{Namespace: "ns", APIKeyHash: ""},
+		upsertCfg: &namespace.Config{Namespace: "ns", APIKeyHash: ""},
 	}
 	svc := &Service{repo: repo}
 
@@ -57,7 +59,7 @@ func TestServiceUpsert_NewNamespace_ReturnsAPIKey(t *testing.T) {
 
 func TestServiceUpsert_ExistingNamespace_NoAPIKey(t *testing.T) {
 	repo := &fakeRepo{
-		upsertCfg: &NamespaceConfig{Namespace: "ns", APIKeyHash: "$2a$10$existinghash"},
+		upsertCfg: &namespace.Config{Namespace: "ns", APIKeyHash: "$2a$10$existinghash"},
 	}
 	svc := &Service{repo: repo}
 
@@ -84,7 +86,7 @@ func TestServiceUpsert_RepoError(t *testing.T) {
 
 func TestServiceUpsert_SetAPIKeyHashError(t *testing.T) {
 	repo := &fakeRepo{
-		upsertCfg:        &NamespaceConfig{Namespace: "ns", APIKeyHash: ""},
+		upsertCfg:        &namespace.Config{Namespace: "ns", APIKeyHash: ""},
 		setAPIKeyHashErr: errors.New("db error"),
 	}
 	svc := &Service{repo: repo}
@@ -95,7 +97,7 @@ func TestServiceUpsert_SetAPIKeyHashError(t *testing.T) {
 }
 
 func TestServiceGet_ReturnsConfig(t *testing.T) {
-	want := &NamespaceConfig{Namespace: "ns", Lambda: 0.05, MaxResults: 20}
+	want := &namespace.Config{Namespace: "ns", Lambda: 0.05, MaxResults: 20}
 	svc := &Service{repo: &fakeRepo{getCfg: want}}
 
 	got, err := svc.Get(context.Background(), "ns")

@@ -27,7 +27,6 @@ Keep feature logic inside its domain package. The default package shape is `docs
 
 ## Architecture Rules
 - Domain packages may import `core`, `infra`, and `config`; they should not depend on each other directly.
-- Current exception: `internal/recommend` may use `internal/nsconfig` for namespace config lookup.
 - Every package must have a `docs.go` file containing the package doc comment and package declaration only.
 - Use PostgreSQL for durable events/config, Redis for streams/cache/trending, and Qdrant for vector collections such as `{ns}_subjects`, `{ns}_objects`, `{ns}_subjects_dense`, and `{ns}_objects_dense`.
 

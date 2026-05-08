@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 type rowScanner interface {
@@ -40,13 +42,13 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // Upsert creates or updates the configuration for a namespace.
 // api_key_hash is intentionally excluded from the ON CONFLICT UPDATE clause
 // so that an existing key is never overwritten by a config update.
-func (r *Repository) Upsert(ctx context.Context, namespace string, req *UpsertRequest) (*NamespaceConfig, error) {
+func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*namespace.Config, error) {
 	weightsJSON, err := json.Marshal(req.ActionWeights)
 	if err != nil {
 		return nil, fmt.Errorf("marshal action weights: %w", err)
 	}
 
-	var cfg NamespaceConfig
+	var cfg namespace.Config
 	var weightsRaw []byte
 
 	err = r.queryRowFn(ctx, `
@@ -77,7 +79,7 @@ func (r *Repository) Upsert(ctx context.Context, namespace string, req *UpsertRe
 			alpha, dense_strategy, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			created_at, updated_at`,
-		namespace, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
+		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
 		req.Alpha, req.DenseStrategy, req.EmbeddingDim, req.DenseDistance,
 		req.TrendingWindow, req.TrendingTTL, req.LambdaTrending,
 	).Scan(
@@ -115,8 +117,8 @@ func (r *Repository) SetAPIKeyHash(ctx context.Context, namespace, hash string) 
 }
 
 // Get returns the configuration for a namespace, or nil if it does not exist.
-func (r *Repository) Get(ctx context.Context, namespace string) (*NamespaceConfig, error) {
-	var cfg NamespaceConfig
+func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, error) {
+	var cfg namespace.Config
 	var weightsRaw []byte
 
 	err := r.queryRowFn(ctx, `
@@ -128,7 +130,7 @@ func (r *Repository) Get(ctx context.Context, namespace string) (*NamespaceConfi
 			created_at, updated_at
 		FROM namespace_configs
 		WHERE namespace = $1`,
-		namespace,
+		ns,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
 		&cfg.APIKeyHash,

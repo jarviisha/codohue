@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
-	"github.com/jarviisha/codohue/internal/nsconfig"
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
@@ -38,11 +38,11 @@ func (f *fakeRepo) GetPopularItems(_ context.Context, _ string, _ int) ([]string
 }
 
 type fakeNsConfig struct {
-	cfg *nsconfig.NamespaceConfig
+	cfg *namespace.Config
 	err error
 }
 
-func (f *fakeNsConfig) Get(_ context.Context, _ string) (*nsconfig.NamespaceConfig, error) {
+func (f *fakeNsConfig) Get(_ context.Context, _ string) (*namespace.Config, error) {
 	return f.cfg, f.err
 }
 
@@ -240,7 +240,7 @@ func TestDoRecommend_CF_SubjectIDError_FallsBackToPopular(t *testing.T) {
 
 func TestCollaborativeFiltering_SeenItemsError_StillQueriesAndReturnsCF(t *testing.T) {
 	repo := &fakeRepo{count: 10, seenItemsErr: errors.New("seen lookup failed")}
-	s := newTestService(repo, &fakeNsConfig{cfg: &nsconfig.NamespaceConfig{Gamma: 0}}, newFakeIDMapper())
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
 	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
@@ -269,7 +269,7 @@ func TestCollaborativeFiltering_UsesSeenItemsDaysFromConfig(t *testing.T) {
 	repo := &fakeRepo{count: 10, seenItems: []string{"seen-1"}}
 	idmap := newFakeIDMapper()
 	var gotDays int
-	s := newTestService(repo, &fakeNsConfig{cfg: &nsconfig.NamespaceConfig{SeenItemsDays: 14, Gamma: 0}}, idmap)
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{SeenItemsDays: 14, Gamma: 0}}, idmap)
 	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
@@ -314,7 +314,7 @@ func TestDoRecommend_ColdStart_PopularError_ReturnsError(t *testing.T) {
 
 func TestGetTrending_UsesParamWindow(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{TrendingWindow: 48},
+		cfg: &namespace.Config{TrendingWindow: 48},
 	}, newFakeIDMapper())
 
 	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 12) // param=12 overrides config=48
@@ -328,7 +328,7 @@ func TestGetTrending_UsesParamWindow(t *testing.T) {
 
 func TestGetTrending_UsesConfigWindow(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{TrendingWindow: 72},
+		cfg: &namespace.Config{TrendingWindow: 72},
 	}, newFakeIDMapper())
 
 	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 0) // param=0 → use config
@@ -416,7 +416,7 @@ func TestGetTrending_ConfigAndRedisErrorsStillReturnResponse(t *testing.T) {
 
 func TestStoreEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{EmbeddingDim: 64},
+		cfg: &namespace.Config{EmbeddingDim: 64},
 	}, newFakeIDMapper())
 
 	// Send a 128-dim vector when config expects 64.
@@ -437,14 +437,14 @@ func TestStoreEmbedding_NsConfigError_ReturnsError(t *testing.T) {
 
 	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2})
 	if err == nil {
-		t.Error("expected error from nsconfig.Get, got nil")
+		t.Error("expected error from namespace config lookup, got nil")
 	}
 }
 
 func TestStoreEmbedding_NoDimConfig_NoDimCheck(t *testing.T) {
 	// When config has EmbeddingDim=0, any dimension is accepted — no error before qdrant.
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{EmbeddingDim: 0},
+		cfg: &namespace.Config{EmbeddingDim: 0},
 	}, newFakeIDMapper())
 
 	// We expect an error from qdrant (nil client), NOT from dim validation.
@@ -456,7 +456,7 @@ func TestStoreEmbedding_NoDimConfig_NoDimCheck(t *testing.T) {
 
 func TestStoreSubjectEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{EmbeddingDim: 2},
+		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, newFakeIDMapper())
 
 	err := s.StoreSubjectEmbedding(context.Background(), "ns", "sub-1", []float32{0.1, 0.2, 0.3})
@@ -471,7 +471,7 @@ func TestStoreSubjectEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 func TestStoreEmbedding_Success(t *testing.T) {
 	idmap := newFakeIDMapper()
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{EmbeddingDim: 3, DenseDistance: "dot"},
+		cfg: &namespace.Config{EmbeddingDim: 3, DenseDistance: "dot"},
 	}, idmap)
 	s.ensureDenseCollectionsFn = func(_ context.Context, ns string, dim uint64, distance string) error {
 		if ns != "ns" || dim != 3 || distance != "dot" {
@@ -499,7 +499,7 @@ func TestStoreEmbedding_Success(t *testing.T) {
 func TestStoreSubjectEmbedding_Success(t *testing.T) {
 	idmap := newFakeIDMapper()
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{EmbeddingDim: 2},
+		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, idmap)
 	s.ensureDenseCollectionsFn = func(_ context.Context, ns string, dim uint64, distance string) error {
 		if ns != "ns" || dim != 2 || distance != "cosine" {
@@ -524,7 +524,7 @@ func TestStoreSubjectEmbedding_Success(t *testing.T) {
 
 func TestStoreEmbedding_EnsureDenseCollectionsError(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{EmbeddingDim: 2},
+		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, newFakeIDMapper())
 	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
 		return errors.New("ensure failed")
@@ -723,7 +723,7 @@ func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &nsconfig.NamespaceConfig{Alpha: 0.8, Gamma: 0}, &qdrant.SparseVector{}, []float32{1, 2}, nil)
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &namespace.Config{Alpha: 0.8, Gamma: 0}, &qdrant.SparseVector{}, []float32{1, 2}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -752,7 +752,7 @@ func TestHybridRecommend_AppliesFreshnessDecay(t *testing.T) {
 		return nil, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &nsconfig.NamespaceConfig{Alpha: 1, Gamma: 0.2}, &qdrant.SparseVector{}, []float32{1}, nil)
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 1, Gamma: 0.2}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -770,7 +770,7 @@ func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
 		return nil, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &nsconfig.NamespaceConfig{Alpha: 0.5}, &qdrant.SparseVector{}, []float32{1}, nil)
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 0.5}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -913,7 +913,7 @@ func TestSearchObjects_Success(t *testing.T) {
 }
 
 func TestRank_UsesSearchResults(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &nsconfig.NamespaceConfig{Gamma: 0}}, newFakeIDMapper())
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
 	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
@@ -970,7 +970,7 @@ func TestRank_FallsBackWhenAllCandidateIDsFail(t *testing.T) {
 
 func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
 	repo := &fakeRepo{count: 3}
-	s := newTestService(repo, &fakeNsConfig{cfg: &nsconfig.NamespaceConfig{Gamma: 0}}, newFakeIDMapper())
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
 	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
@@ -987,7 +987,7 @@ func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &nsconfig.NamespaceConfig{Gamma: 0})
+	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1001,7 +1001,7 @@ func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
 
 func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) {
 	repo := &fakeRepo{count: 3, popularErr: errors.New("popular failed")}
-	s := newTestService(repo, &fakeNsConfig{cfg: &nsconfig.NamespaceConfig{Gamma: 0}}, newFakeIDMapper())
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
 	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
@@ -1014,7 +1014,7 @@ func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) 
 		return nil, errors.New("redis failed")
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &nsconfig.NamespaceConfig{Gamma: 0})
+	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

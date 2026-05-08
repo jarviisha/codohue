@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jarviisha/codohue/internal/nsconfig"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 // fakeRepo implements eventInserter for testing.
@@ -24,11 +24,11 @@ func (f *fakeRepo) Insert(_ context.Context, e *Event) error {
 
 // fakeNsConfig implements nsConfigGetter for testing.
 type fakeNsConfig struct {
-	cfg *nsconfig.NamespaceConfig
+	cfg *namespace.Config
 	err error
 }
 
-func (f *fakeNsConfig) Get(_ context.Context, _ string) (*nsconfig.NamespaceConfig, error) {
+func (f *fakeNsConfig) Get(_ context.Context, _ string) (*namespace.Config, error) {
 	return f.cfg, f.err
 }
 
@@ -38,7 +38,7 @@ func newTestService(repo eventInserter, ns nsConfigGetter) *Service {
 
 func TestNewService(t *testing.T) {
 	repo := &Repository{}
-	nsSvc := &nsconfig.Service{}
+	nsSvc := &fakeNsConfig{}
 	svc := NewService(repo, nsSvc)
 	if svc == nil || svc.repo != repo || svc.nsConfigSvc != nsSvc {
 		t.Fatal("expected NewService to wire dependencies")
@@ -88,7 +88,7 @@ func TestServiceProcess_DefaultWeight(t *testing.T) {
 func TestServiceProcess_CustomNamespaceWeight(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := newTestService(repo, &fakeNsConfig{
-		cfg: &nsconfig.NamespaceConfig{
+		cfg: &namespace.Config{
 			ActionWeights: map[string]float64{"LIKE": 99.0},
 		},
 	})

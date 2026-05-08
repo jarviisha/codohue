@@ -14,8 +14,6 @@ import (
 
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
-
-	"github.com/jarviisha/codohue/internal/compute"
 )
 
 // adminRepo is the repository interface used by Service.
@@ -32,10 +30,14 @@ type adminRepo interface {
 }
 
 // nsConfigUpserter is the abstract collaborator that creates or updates a namespace
-// configuration. The wiring layer (cmd/admin) provides an adapter around nsconfig.Service
-// so the admin domain does not import nsconfig directly (constitution III).
+// configuration. The wiring layer provides an adapter around the concrete
+// namespace config service so the admin domain does not import it directly.
 type nsConfigUpserter interface {
 	Upsert(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error)
+}
+
+type batchRunner interface {
+	RunNamespace(ctx context.Context, namespace, triggerSource string)
 }
 
 // Service implements admin business logic.
@@ -46,13 +48,13 @@ type Service struct {
 	redisClient  *goredis.Client
 	qdrantClient *qdrant.Client
 	httpClient   *http.Client
-	job          *compute.Job
+	job          batchRunner
 	nsConfigSvc  nsConfigUpserter
 	runningBatch sync.Map // keyed by namespace name; prevents concurrent batch triggers
 }
 
 // NewService creates a new Service.
-func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job *compute.Job, nsConfigSvc nsConfigUpserter) *Service {
+func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job batchRunner, nsConfigSvc nsConfigUpserter) *Service {
 	return &Service{
 		repo:         repo,
 		apiURL:       apiURL,

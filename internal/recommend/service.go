@@ -13,10 +13,10 @@ import (
 	grpcstatus "google.golang.org/grpc/status"
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
-	"github.com/jarviisha/codohue/internal/nsconfig"
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -39,7 +39,7 @@ type recommendRepo interface {
 }
 
 type recommendNsConfig interface {
-	Get(ctx context.Context, namespace string) (*nsconfig.NamespaceConfig, error)
+	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
 type recommendIDMapper interface {
@@ -74,7 +74,7 @@ type Service struct {
 // NewService creates a new Service with all required dependencies.
 func NewService(
 	repo *Repository,
-	nsConfigSvc *nsconfig.Service,
+	nsConfigSvc recommendNsConfig,
 	idmapSvc *idmap.Service,
 	qdrantClient *qdrant.Client,
 	redisClient *goredis.Client,
@@ -251,7 +251,7 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	return resp, nil
 }
 
-func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int, cfg *nsconfig.NamespaceConfig) (*Response, error) {
+func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int, cfg *namespace.Config) (*Response, error) {
 	count, err := s.repo.CountInteractions(ctx, req.Namespace, req.SubjectID)
 	if err != nil {
 		slog.Error("count interactions failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
@@ -266,7 +266,7 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 	return s.collaborativeFiltering(ctx, req, maxResults, cfg)
 }
 
-func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limit int, cfg *nsconfig.NamespaceConfig) (*Response, error) {
+func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
 	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, req.Namespace)
 	if err != nil {
 		slog.Error("get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
@@ -339,7 +339,7 @@ func (s *Service) hybridRecommend(
 	ctx context.Context,
 	req *Request,
 	limit int,
-	cfg *nsconfig.NamespaceConfig,
+	cfg *namespace.Config,
 	subjectSparseVec *qdrant.SparseVector,
 	subjectDenseVec []float32,
 	seenFilter *qdrant.Filter,
@@ -557,7 +557,7 @@ func buildCreatedAtLookup(sets ...[]*qdrant.ScoredPoint) map[string]time.Time {
 	return m
 }
 
-func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *nsconfig.NamespaceConfig) (*Response, error) {
+func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
 	// Over-fetch from both sources to cover offset before blending.
 	overLimit := req.Offset + limit
 	innerReq := &Request{
@@ -662,7 +662,7 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, win
 
 // fallbackTrending serves trending items from Redis as the cold-start response.
 // When the trending cache is empty or unavailable, falls back to DB popular items.
-func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *nsconfig.NamespaceConfig) (*Response, error) {
+func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
 	entries, err := s.getTrendingFn(ctx, req.Namespace, req.Offset, limit)
 	if err == nil && len(entries) > 0 {
 		items := make([]RecommendedItem, len(entries))

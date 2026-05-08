@@ -10,10 +10,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
-	"github.com/jarviisha/codohue/internal/nsconfig"
 )
 
 type recomputer interface {
@@ -21,7 +21,7 @@ type recomputer interface {
 }
 
 type jobNsConfigReader interface {
-	Get(ctx context.Context, namespace string) (*nsconfig.NamespaceConfig, error)
+	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
 type jobComputeRepo interface {
@@ -71,7 +71,7 @@ type Job struct {
 
 // NewJob creates a new Job with the given run interval in minutes.
 // redisClient may be nil; Phase 3 (trending) is skipped when it is.
-func NewJob(service *Service, nsConfigSvc *nsconfig.Service, repo *Repository, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, redisClient *goredis.Client, intervalMinutes int) *Job {
+func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, redisClient *goredis.Client, intervalMinutes int) *Job {
 	return &Job{
 		service:     service,
 		nsConfigSvc: nsConfigSvc,
@@ -247,7 +247,7 @@ func (j *Job) RunNamespace(ctx context.Context, ns, triggerSource string) {
 
 // runPhase1 recomputes CF sparse vectors for a namespace.
 // Returns the number of subjects and objects upserted to Qdrant.
-func (j *Job) runPhase1(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig, capture *LogCapture) (subjects, objects int, err error) {
+func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (subjects, objects int, err error) {
 	start := time.Now()
 
 	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
@@ -291,7 +291,7 @@ const item2vecLargeEventThreshold = 500_000
 // For corpora beyond ~500K events, consider: (a) increasing BATCH_INTERVAL_MINUTES so
 // fewer retrains happen per hour, (b) switching dense_strategy to "svd" (cheaper full
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
-func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig, capture *LogCapture) (items, subjectCount int, err error) {
+func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items, subjectCount int, err error) {
 	start := time.Now()
 
 	embeddingDim := 64
@@ -369,7 +369,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *nsconfig.Names
 
 // runPhase3Trending computes trending scores for a namespace and caches them in Redis.
 // Returns the number of trending items computed.
-func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *nsconfig.NamespaceConfig, capture *LogCapture) (items int, err error) {
+func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items int, err error) {
 	start := time.Now()
 
 	windowHours := 24

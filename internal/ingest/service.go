@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jarviisha/codohue/internal/nsconfig"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 var (
@@ -20,7 +20,7 @@ type eventInserter interface {
 }
 
 type nsConfigGetter interface {
-	Get(ctx context.Context, namespace string) (*nsconfig.NamespaceConfig, error)
+	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
 // Service processes and persists behavioral events received from Redis Streams.
@@ -30,7 +30,7 @@ type Service struct {
 }
 
 // NewService creates a new Service with the given repository and namespace config service.
-func NewService(repo *Repository, nsConfigSvc *nsconfig.Service) *Service {
+func NewService(repo *Repository, nsConfigSvc nsConfigGetter) *Service {
 	return &Service{repo: repo, nsConfigSvc: nsConfigSvc}
 }
 

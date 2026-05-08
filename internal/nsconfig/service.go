@@ -6,15 +6,16 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const bcryptCost = 10
 
 type nsConfigRepository interface {
-	Upsert(ctx context.Context, namespace string, req *UpsertRequest) (*NamespaceConfig, error)
+	Upsert(ctx context.Context, namespace string, req *UpsertRequest) (*namespace.Config, error)
 	SetAPIKeyHash(ctx context.Context, namespace, hash string) error
-	Get(ctx context.Context, namespace string) (*NamespaceConfig, error)
+	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
 // Service provides business logic for managing namespace configuration.
@@ -58,7 +59,7 @@ func (s *Service) Upsert(ctx context.Context, namespace string, req *UpsertReque
 }
 
 // Get returns the configuration for a namespace, or nil if it does not exist.
-func (s *Service) Get(ctx context.Context, namespace string) (*NamespaceConfig, error) {
+func (s *Service) Get(ctx context.Context, namespace string) (*namespace.Config, error) {
 	cfg, err := s.repo.Get(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("get namespace config: %w", err)
