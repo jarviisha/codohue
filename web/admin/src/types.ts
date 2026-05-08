@@ -17,7 +17,8 @@ export interface NamespaceConfig {
 }
 
 export interface NamespaceListResponse {
-  namespaces: NamespaceConfig[]
+  items: NamespaceConfig[]
+  total: number
 }
 
 export interface UpsertNamespacePayload {
@@ -51,7 +52,8 @@ export interface NamespaceHealth {
 }
 
 export interface NamespacesOverviewResponse {
-  namespaces: NamespaceHealth[]
+  items: NamespaceHealth[]
+  total: number
 }
 
 export interface LogEntry {
@@ -98,7 +100,7 @@ export interface BatchRunStats {
 }
 
 export interface BatchRunsResponse {
-  runs: BatchRunLog[]
+  items: BatchRunLog[]
   total: number
   offset: number
   stats: BatchRunStats
@@ -115,7 +117,7 @@ export interface EventSummary {
 }
 
 export interface EventsListResponse {
-  events: EventSummary[]
+  items: EventSummary[]
   total: number
   limit: number
   offset: number
@@ -146,15 +148,16 @@ export interface HealthData {
   status: string
 }
 
-export interface QdrantCollectionStat {
+export interface QdrantCollection {
   exists: boolean
   points_count: number
-  indexed_vectors_count: number
 }
 
-export interface QdrantStatsResponse {
-  namespace: string
-  collections: Record<string, QdrantCollectionStat>
+export interface QdrantInspectResponse {
+  subjects: QdrantCollection
+  objects: QdrantCollection
+  subjects_dense: QdrantCollection
+  objects_dense: QdrantCollection
 }
 
 export interface RecommendDebugRequest {
@@ -170,7 +173,15 @@ export interface RecommendDebugItem {
   rank: number
 }
 
-export interface RecommendDebugResponse {
+export interface RecommendDebug {
+  sparse_nnz: number
+  dense_score: number
+  alpha: number
+  seen_items_count: number
+  interaction_count: number
+}
+
+export interface RecommendResponse {
   subject_id: string
   namespace: string
   items: RecommendDebugItem[]
@@ -179,6 +190,7 @@ export interface RecommendDebugResponse {
   offset: number
   total: number
   generated_at: string
+  debug?: RecommendDebug
 }
 
 export interface SubjectProfileRequest {
@@ -212,10 +224,9 @@ export interface TrendingAdminResponse {
   generated_at: string
 }
 
-export interface TriggerBatchResponse {
-  batch_run_id: number
+export interface BatchRunCreateResponse {
+  id: number
   namespace: string
+  status: string
   started_at: string
-  duration_ms: number
-  success: boolean
 }

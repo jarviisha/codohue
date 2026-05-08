@@ -2,7 +2,7 @@ package recommend
 
 import "github.com/jarviisha/codohue/pkg/codohuetypes"
 
-// Request holds the query parameters for GET /v1/recommendations.
+// Request holds the query parameters for subject recommendation reads.
 type Request struct {
 	SubjectID string
 	Namespace string

@@ -26,7 +26,7 @@ export default function EventsPage() {
   const total = data?.total ?? 0
   const pageEnd = Math.min(offset + PAGE_SIZE, total)
 
-  const nsConfig = nsData?.namespaces.find(n => n.namespace === namespace)
+  const nsConfig = nsData?.items.find(n => n.namespace === namespace)
   const actions = nsConfig?.action_weights && Object.keys(nsConfig.action_weights).length > 0
     ? Object.keys(nsConfig.action_weights)
     : DEFAULT_ACTIONS
@@ -72,18 +72,18 @@ export default function EventsPage() {
           {isLoading && !data && <LoadingState />}
 
           {data && total > 0 && (
-            <SummaryStrip events={data.events} total={total} subjectFilter={appliedSubject} />
+            <SummaryStrip events={data.items} total={total} subjectFilter={appliedSubject} />
           )}
 
-          {data && data.events.length === 0 && (
+          {data && data.items.length === 0 && (
             <EmptyState>
               No events found. Use the inject form above or send events via the main API.
             </EmptyState>
           )}
 
-          {data && data.events.length > 0 && (
+          {data && data.items.length > 0 && (
             <EventsTable
-              events={data.events}
+              events={data.items}
               offset={offset}
               pageSize={PAGE_SIZE}
               pageEnd={pageEnd}

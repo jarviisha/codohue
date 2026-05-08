@@ -104,11 +104,11 @@ The cron binary runs three phases per namespace on each tick:
 - **Time decay**: Events older than 90 days excluded. Freshness multiplier `e^(-λ × days_since)` applied during vector build; γ-based object freshness applied at rerank time.
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
-- **Two-tier auth**: Global `RECOMMENDER_API_KEY` for admin routes (namespace config upsert); per-namespace bcrypt-hashed keys for data routes (stored in `namespace_configs.api_key_hash`). Falls back to global key when a namespace has no key provisioned.
+- **Two-tier auth**: Global `RECOMMENDER_API_KEY` is used by the admin server (`cmd/admin`) for session creation and is **not** accepted by the data plane for mutations — namespace configuration lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate data-plane requests, with fallback to the global key when a namespace has no key provisioned.
 
 ### REST API — `cmd/api` (port 2001)
 
-**Infra / ops (no auth)**
+**Infra / ops (no auth, unversioned)**
 
 | Method  | Path       | Description                              |
 | ------- | ---------- | ---------------------------------------- |
@@ -116,46 +116,45 @@ The cron binary runs three phases per namespace on each tick:
 | `GET`   | `/healthz` | Health check for postgres, redis, qdrant |
 | `GET`   | `/metrics` | Prometheus metrics                       |
 
-**Admin — global `RECOMMENDER_API_KEY`**
+**Client-facing — per-namespace Bearer token (falls back to `RECOMMENDER_API_KEY`)**
 
-| Method  | Path                                | Description                                                        |
-| ------- | ----------------------------------- | ------------------------------------------------------------------ |
-| `PUT`   | `/v1/config/namespaces/{namespace}` | Upsert namespace config; returns plaintext API key on first create |
+Every business capability is reachable from exactly one canonical path. Legacy duplicate paths have been removed and return 404.
 
-**Client-facing — namespace key (Bearer token)**
+| Method   | Path                                                                    | Description                                                            |
+| -------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `POST`   | `/v1/namespaces/{ns}/events`                                            | Ingest a behavioral event (202 Accepted; namespace in body is ignored) |
+| `GET`    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`                     | CF recommendations for a subject (`?limit=&offset=`)                   |
+| `POST`   | `/v1/namespaces/{ns}/rankings`                                          | Score and rank up to 500 candidate items for a subject (200, computed) |
+| `GET`    | `/v1/namespaces/{ns}/trending`                                          | Trending items from Redis ZSET (`?limit=&offset=&window_hours=`)       |
+| `PUT`    | `/v1/namespaces/{ns}/objects/{id}/embedding`                            | Store/replace BYOE dense vector for an object (idempotent, 204)        |
+| `PUT`    | `/v1/namespaces/{ns}/subjects/{id}/embedding`                           | Store/replace BYOE dense vector for a subject (idempotent, 204)        |
+| `DELETE` | `/v1/namespaces/{ns}/objects/{id}`                                      | Remove an object from all Qdrant collections (idempotent, 204)         |
 
-Each capability is available under two URL styles: a legacy query-param style and a canonical path-param style. Both are active and equivalent.
-
-| Method   | Path (legacy)                         | Path (canonical)                                    | Description                                                              |
-| -------- | ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------ |
-| `POST`   | —                                     | `/v1/namespaces/{ns}/events`                        | Ingest a behavioral event (click, like, comment, share, skip, …)         |
-| `GET`    | `/v1/recommendations?namespace=&subject_id=` | `/v1/namespaces/{ns}/recommendations?subject_id=` | CF recommendations for a subject (`?limit=&offset=`)              |
-| `POST`   | `/v1/rank`                            | `/v1/namespaces/{ns}/rank`                          | Score and rank up to 500 candidate items for a subject                   |
-| `GET`    | `/v1/trending/{ns}`                   | `/v1/namespaces/{ns}/trending`                      | Trending items from Redis ZSET (`?limit=&offset=&window_hours=`)         |
-| `POST`   | `/v1/objects/{ns}/{id}/embedding`     | `/v1/namespaces/{ns}/objects/{id}/embedding`        | Store BYOE dense vector for an object                                    |
-| `POST`   | `/v1/subjects/{ns}/{id}/embedding`    | `/v1/namespaces/{ns}/subjects/{id}/embedding`       | Store BYOE dense vector for a subject                                    |
-| `DELETE` | `/v1/objects/{ns}/{id}`               | `/v1/namespaces/{ns}/objects/{id}`                  | Remove an object from all Qdrant collections (idempotent, returns 204)   |
-
-> **Ingest transport options:** Events can be sent via the HTTP endpoint above **or** published directly to Redis Streams — the `ingest` worker consumes both paths and writes to the same `events` table.
+> **Ingest transport options:** Events can be sent via the HTTP endpoint above **or** published directly to Redis Streams — the `ingest` worker consumes both paths and writes to the same `events` table. The Redis Streams transport carries `namespace` inside the payload because it has no URL path.
 
 ### REST API — `cmd/admin` (port 2002, session-cookie auth via `codohue_admin_session`)
 
-| Method   | Path                                   | Auth          | Description                                               |
-| -------- | -------------------------------------- | ------------- | --------------------------------------------------------- |
-| `POST`   | `/api/auth/login`                      | none (public) | Validate `RECOMMENDER_API_KEY`; set session cookie        |
-| `DELETE` | `/api/auth/logout`                     | none (public) | Clear session cookie                                      |
-| `GET`    | `/api/admin/v1/health`                 | session       | Proxy `GET /healthz` from `cmd/api`                       |
-| `GET`    | `/api/admin/v1/namespaces`             | session       | List all namespace configs from PostgreSQL                |
-| `GET`    | `/api/admin/v1/namespaces/{ns}`        | session       | Get single namespace config                               |
-| `PUT`    | `/api/admin/v1/namespaces/{ns}`        | session       | Create/update namespace (proxy to `cmd/api`)              |
-| `GET`    | `/api/admin/v1/batch-runs`             | session       | Recent batch run history (`?namespace=&limit=`)           |
-| `GET`    | `/api/admin/v1/trending/{ns}`          | session       | Trending items + Redis TTL (`?limit=&offset=&window_hours=`) |
-| `POST`   | `/api/admin/v1/recommend/debug`        | session       | Debug recommendations for a subject                       |
-| `GET`    | `/api/admin/v1/subjects/{ns}/{id}/profile` | session   | Subject profile: interaction count, seen items, sparse vector NNZ |
-| `GET`    | `/api/admin/v1/namespaces/{ns}/qdrant-stats` | session | Points count for `{ns}_subjects/objects/subjects_dense/objects_dense` |
-| `POST`   | `/api/admin/v1/namespaces/{ns}/batch-runs/trigger` | session | Run batch phases for namespace immediately (synchronous) |
-| `GET`    | `/api/admin/v1/namespaces/{ns}/events`     | session       | Paginated recent events (`?limit=&offset=&subject_id=`)           |
-| `POST`   | `/api/admin/v1/namespaces/{ns}/events`     | session       | Inject a test event (proxied to `cmd/api`)                        |
+Authentication models sessions as a resource. Login = create session; logout = delete current session.
+
+| Method   | Path                                                                | Auth          | Description                                                             |
+| -------- | ------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------- |
+| `POST`   | `/api/v1/auth/sessions`                                             | none (public) | Validate `RECOMMENDER_API_KEY`; set session cookie (201 + `expires_at`) |
+| `DELETE` | `/api/v1/auth/sessions/current`                                     | session       | Clear session cookie (204)                                              |
+| `GET`    | `/api/admin/v1/health`                                              | session       | Proxy `GET /healthz` from `cmd/api`                                     |
+| `GET`    | `/api/admin/v1/namespaces`                                          | session       | List all namespace configs from PostgreSQL (`?include=overview`)        |
+| `GET`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Get single namespace config                                             |
+| `PUT`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Create/update namespace; calls `nsconfig.Service` directly (200 / 201)  |
+| `GET`    | `/api/admin/v1/batch-runs`                                          | session       | Recent batch run history (`?namespace=&status=&limit=&offset=`)         |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/batch-runs`                          | session       | Batch run history scoped to one namespace                               |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/batch-runs`                          | session       | Create a new batch run (202 Accepted + `Location` header)               |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/qdrant`                              | session       | Points count for `{ns}_subjects/objects/subjects_dense/objects_dense`   |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/trending`                            | session       | Trending items + Redis TTL (`?limit=&offset=&window_hours=`)            |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/events`                              | session       | Paginated recent events (`?limit=&offset=&subject_id=`)                 |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/events`                              | session       | Inject a test event (proxied to `cmd/api`, 202)                         |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/subjects/{id}/profile`               | session       | Subject profile: interaction count, seen items, sparse vector NNZ       |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations`       | session       | Recommendations for a subject (`?limit=&offset=&debug=`)                |
+| `POST`   | `/api/admin/v1/demo-data`                                           | session       | Seed the bundled demo dataset (202)                                     |
+| `DELETE` | `/api/admin/v1/demo-data`                                           | session       | Clear the bundled demo dataset (204)                                    |
 
 ### Database Schema
 
@@ -204,5 +203,5 @@ Every file that contains business logic (`service.go`, `repository.go`, `job.go`
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/002-admin-pipeline-controls/plan.md
+at specs/003-restful-api-redesign/plan.md
 <!-- SPECKIT END -->

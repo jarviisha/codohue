@@ -1,5 +1,7 @@
 import { api } from './api'
 import type {
+  RecommendResponse,
+  BatchRunCreateResponse,
   BatchRunsResponse,
   DemoDatasetResponse,
   EventsListResponse,
@@ -9,13 +11,11 @@ import type {
   NamespaceConfig,
   NamespaceListResponse,
   NamespacesOverviewResponse,
-  QdrantStatsResponse,
+  QdrantInspectResponse,
   RecommendDebugRequest,
-  RecommendDebugResponse,
   SubjectProfileRequest,
   SubjectProfileResponse,
   TrendingAdminResponse,
-  TriggerBatchResponse,
   UpsertNamespacePayload,
   UpsertNamespaceResponse,
 } from '../types'
@@ -46,14 +46,14 @@ export const adminApi = {
     api.put<UpsertNamespaceResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}`, payload),
 
   getNamespacesOverview: () =>
-    api.get<NamespacesOverviewResponse>('/api/admin/v1/namespaces/overview'),
+    api.get<NamespacesOverviewResponse>('/api/admin/v1/namespaces?include=overview'),
 
-  seedDemoDataset: () => api.post<DemoDatasetResponse>('/api/admin/v1/demo', {}),
+  seedDemoDataset: () => api.post<DemoDatasetResponse>('/api/admin/v1/demo-data', {}),
 
-  clearDemoDataset: () => api.delete<DemoDatasetResponse>('/api/admin/v1/demo'),
+  clearDemoDataset: () => api.delete<DemoDatasetResponse>('/api/admin/v1/demo-data'),
 
-  getQdrantStats: (namespace: string) =>
-    api.get<QdrantStatsResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/qdrant-stats`),
+  getQdrant: (namespace: string) =>
+    api.get<QdrantInspectResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/qdrant`),
 
   listBatchRuns: (namespace?: string, limit = 20, offset = 0, status = '') => {
     const p = new URLSearchParams({ limit: String(limit), offset: String(offset) })
@@ -63,7 +63,7 @@ export const adminApi = {
   },
 
   triggerBatchRun: (namespace: string) =>
-    api.post<TriggerBatchResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/batch-runs/trigger`, {}),
+    api.post<BatchRunCreateResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/batch-runs`, {}),
 
   listEvents: ({ namespace, limit, offset, subjectID }: EventsListParams) => {
     const params = new URLSearchParams({
@@ -78,16 +78,27 @@ export const adminApi = {
   injectEvent: (namespace: string, event: InjectEventRequest) =>
     api.post<MutationOkResponse>(`/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/events`, event),
 
-  debugRecommendations: (request: RecommendDebugRequest) =>
-    api.post<RecommendDebugResponse>('/api/admin/v1/recommend/debug', request),
+  debugRecommendations: (request: RecommendDebugRequest) => {
+    const params = new URLSearchParams({ debug: 'true' })
+    if (request.limit) params.set('limit', String(request.limit))
+    if (request.offset) params.set('offset', String(request.offset))
+    return api.get<RecommendResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(request.namespace)}` +
+        `/subjects/${encodeURIComponent(request.subject_id)}/recommendations?${params}`,
+    )
+  },
 
   getSubjectProfile: ({ namespace, subject_id }: SubjectProfileRequest) =>
-    api.get<SubjectProfileResponse>(`/api/admin/v1/subjects/${encodeURIComponent(namespace)}/${encodeURIComponent(subject_id)}/profile`),
+    api.get<SubjectProfileResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/subjects/${encodeURIComponent(subject_id)}/profile`,
+    ),
 
   getTrending: ({ namespace, limit, offset, windowHours }: TrendingParams) => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
     if (windowHours > 0) params.set('window_hours', String(windowHours))
 
-    return api.get<TrendingAdminResponse>(`/api/admin/v1/trending/${encodeURIComponent(namespace)}?${params}`)
+    return api.get<TrendingAdminResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/trending?${params}`,
+    )
   },
 }

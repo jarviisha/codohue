@@ -24,10 +24,11 @@ type Response struct {
 	GeneratedAt time.Time         `json:"generated_at"`
 }
 
-// RankRequest is the payload for the rank endpoint.
+// RankRequest is the payload for the rank endpoint. The namespace is supplied
+// via the URL path (/v1/namespaces/{ns}/rankings) and is no longer carried in
+// the body.
 type RankRequest struct {
 	SubjectID  string   `json:"subject_id"`
-	Namespace  string   `json:"namespace"`
 	Candidates []string `json:"candidates"`
 }
 

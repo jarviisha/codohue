@@ -42,7 +42,6 @@ func (n *Namespace) Recommend(ctx context.Context, subjectID string, opts ...Lis
 	o := buildListOptions(opts)
 
 	q := url.Values{}
-	q.Set("subject_id", subjectID)
 	if o.limit > 0 {
 		q.Set("limit", strconv.Itoa(o.limit))
 	}
@@ -50,7 +49,8 @@ func (n *Namespace) Recommend(ctx context.Context, subjectID string, opts ...Lis
 		q.Set("offset", strconv.Itoa(o.offset))
 	}
 
-	path := "/v1/namespaces/" + url.PathEscape(n.namespace) + "/recommendations"
+	path := "/v1/namespaces/" + url.PathEscape(n.namespace) +
+		"/subjects/" + url.PathEscape(subjectID) + "/recommendations"
 	var out codohuetypes.Response
 	if err := n.client.do(ctx, http.MethodGet, path, n.apiKey, q, nil, &out); err != nil {
 		return nil, err

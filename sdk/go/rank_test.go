@@ -17,7 +17,7 @@ func TestNamespaceRank(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s", r.Method)
 		}
-		if r.URL.Path != "/v1/namespaces/feed/rank" {
+		if r.URL.Path != "/v1/namespaces/feed/rankings" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		if got := r.Header.Get("Content-Type"); got != "application/json" {
@@ -28,9 +28,7 @@ func TestNamespaceRank(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		if body.Namespace != "feed" {
-			t.Errorf("namespace not populated: %q", body.Namespace)
-		}
+		// Namespace is in the path, not in the body.
 		if body.SubjectID != "user-1" {
 			t.Errorf("subject_id = %q", body.SubjectID)
 		}

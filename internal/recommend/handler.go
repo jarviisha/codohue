@@ -14,56 +14,47 @@ import (
 )
 
 // maxCandidates is the hard upper bound on the number of candidates accepted by
-// POST /v1/rank. Requests exceeding this limit receive a 400 Bad Request.
-// This prevents unbounded Qdrant filter sizes and per-candidate ID lookups.
+// POST /v1/namespaces/{ns}/rankings. Requests exceeding this limit receive a
+// 400 Bad Request. This prevents unbounded Qdrant filter sizes and per-candidate
+// ID lookups.
 const maxCandidates = 500
-
-// KeyValidatorFn validates a Bearer token against a namespace's API key.
-// Returns true when the request is authorized.
-type KeyValidatorFn func(ctx context.Context, token, namespace string) bool
 
 type recommendSvc interface {
 	Recommend(ctx context.Context, req *Request) (*Response, error)
 	GetTrending(ctx context.Context, ns string, limit, offset, windowHours int) (*TrendingResponse, error)
-	Rank(ctx context.Context, req *RankRequest) (*RankResponse, error)
+	Rank(ctx context.Context, req *RankRequest, namespace string) (*RankResponse, error)
 	StoreObjectEmbedding(ctx context.Context, namespace, objectID string, vector []float32) error
 	StoreSubjectEmbedding(ctx context.Context, namespace, subjectID string, vector []float32) error
 	DeleteObject(ctx context.Context, namespace, objectID string) error
 }
 
 // Handler handles HTTP requests for recommendations.
+//
+// Authentication is enforced by middleware on the parent route group;
+// handlers in this package do not perform in-handler auth checks.
 type Handler struct {
-	service     recommendSvc
-	validateKey KeyValidatorFn
+	service recommendSvc
 }
 
 // NewHandler creates a new Handler with the given recommendation service.
-// validateKey is used to authorize POST /v1/rank requests by namespace.
-func NewHandler(service *Service, validateKey KeyValidatorFn) *Handler {
-	return &Handler{service: service, validateKey: validateKey}
+func NewHandler(service *Service) *Handler {
+	return &Handler{service: service}
 }
 
-// Get handles GET /v1/recommendations — returns recommended items for a subject.
-func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+// GetSubjectRecommendations handles GET /v1/namespaces/{ns}/subjects/{id}/recommendations.
+// It returns collaborative-filtering recommendations for a subject as a typed
+// response { items, total, source, generated_at }.
+func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Request) {
+	namespace := chi.URLParam(r, "ns")
+	subjectID := chi.URLParam(r, "id")
 
-	subjectID := q.Get("subject_id")
-	namespace := q.Get("namespace")
-	h.get(w, r, namespace, subjectID)
-}
-
-// GetByNamespace handles GET /v1/namespaces/{ns}/recommendations.
-func (h *Handler) GetByNamespace(w http.ResponseWriter, r *http.Request) {
-	h.get(w, r, chi.URLParam(r, "ns"), r.URL.Query().Get("subject_id"))
-}
-
-func (h *Handler) get(w http.ResponseWriter, r *http.Request, namespace, subjectID string) {
-	if subjectID == "" || namespace == "" {
-		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "subject_id and namespace are required")
+	if namespace == "" || subjectID == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "namespace and subject id are required")
 		return
 	}
 
 	q := r.URL.Query()
+
 	limit := 20
 	if l := q.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
@@ -96,39 +87,27 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request, namespace, subject
 	}
 
 	if err := writeJSON(w, resp); err != nil {
-		log.Printf("[recommend] encode response: %v", err)
+		log.Printf("[recommend] get: encode response: %v", err)
 	}
 }
 
-// Rank handles POST /v1/rank — scores and ranks a list of candidate items for a subject.
-// Auth is validated here (after body parse) because the namespace lives in the request body.
+// Rank handles POST /v1/namespaces/{ns}/rankings — scores and ranks a list of
+// candidate items for a subject.
 func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
-	h.rank(w, r, "")
-}
+	namespace := chi.URLParam(r, "ns")
+	if namespace == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "namespace is required")
+		return
+	}
 
-// RankByNamespace handles POST /v1/namespaces/{ns}/rank.
-func (h *Handler) RankByNamespace(w http.ResponseWriter, r *http.Request) {
-	h.rank(w, r, chi.URLParam(r, "ns"))
-}
-
-func (h *Handler) rank(w http.ResponseWriter, r *http.Request, pathNamespace string) {
 	var req RankRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 
-	if pathNamespace != "" {
-		if req.Namespace == "" {
-			req.Namespace = pathNamespace
-		} else if req.Namespace != pathNamespace {
-			httpapi.WriteError(w, http.StatusBadRequest, "namespace_mismatch", "namespace in path and body must match")
-			return
-		}
-	}
-
-	if req.SubjectID == "" || req.Namespace == "" {
-		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "subject_id and namespace are required")
+	if req.SubjectID == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "subject_id is required")
 		return
 	}
 
@@ -137,15 +116,7 @@ func (h *Handler) rank(w http.ResponseWriter, r *http.Request, pathNamespace str
 		return
 	}
 
-	if h.validateKey != nil {
-		token := extractBearerToken(r)
-		if !h.validateKey(r.Context(), token, req.Namespace) {
-			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
-			return
-		}
-	}
-
-	resp, err := h.service.Rank(r.Context(), &req)
+	resp, err := h.service.Rank(r.Context(), &req, namespace)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
@@ -156,7 +127,8 @@ func (h *Handler) rank(w http.ResponseWriter, r *http.Request, pathNamespace str
 	}
 }
 
-// GetTrending handles GET /v1/trending/{ns} — returns trending items from the Redis ZSET.
+// GetTrending handles GET /v1/namespaces/{ns}/trending — returns trending items
+// from the Redis ZSET.
 func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	if ns == "" {
@@ -207,12 +179,14 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// StoreObjectEmbedding handles POST /v1/objects/{ns}/{id}/embedding — BYOE for items.
+// StoreObjectEmbedding handles PUT /v1/namespaces/{ns}/objects/{id}/embedding —
+// idempotent BYOE storage for items.
 func (h *Handler) StoreObjectEmbedding(w http.ResponseWriter, r *http.Request) {
 	h.storeEmbedding(w, r, "object")
 }
 
-// StoreSubjectEmbedding handles POST /v1/subjects/{ns}/{id}/embedding — BYOE for users.
+// StoreSubjectEmbedding handles PUT /v1/namespaces/{ns}/subjects/{id}/embedding —
+// idempotent BYOE storage for users.
 func (h *Handler) StoreSubjectEmbedding(w http.ResponseWriter, r *http.Request) {
 	h.storeEmbedding(w, r, "subject")
 }
@@ -224,13 +198,6 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	if ns == "" || id == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "ns and id are required")
 		return
-	}
-
-	if h.validateKey != nil {
-		if !h.validateKey(r.Context(), extractBearerToken(r), ns) {
-			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
-			return
-		}
 	}
 
 	var req EmbeddingRequest
@@ -247,7 +214,6 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	}
 
 	if storeErr != nil {
-		// Distinguish dimension mismatch (400) from infra errors (500).
 		if isDimMismatch(storeErr) {
 			httpapi.WriteError(w, http.StatusBadRequest, "embedding_dimension_mismatch", storeErr.Error())
 			return
@@ -260,9 +226,8 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// DeleteObject handles DELETE /v1/objects/{ns}/{id} — removes an object from Qdrant.
-// Returns 204 on success. The operation is idempotent: deleting a non-existent object
-// also returns 204.
+// DeleteObject handles DELETE /v1/namespaces/{ns}/objects/{id} — removes an
+// object from Qdrant. Idempotent: deleting a non-existent object also returns 204.
 func (h *Handler) DeleteObject(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	id := chi.URLParam(r, "id")
@@ -270,13 +235,6 @@ func (h *Handler) DeleteObject(w http.ResponseWriter, r *http.Request) {
 	if ns == "" || id == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "ns and id are required")
 		return
-	}
-
-	if h.validateKey != nil {
-		if !h.validateKey(r.Context(), extractBearerToken(r), ns) {
-			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
-			return
-		}
 	}
 
 	if err := h.service.DeleteObject(r.Context(), ns, id); err != nil {
@@ -301,12 +259,4 @@ func writeJSON(w http.ResponseWriter, v any) error {
 		return fmt.Errorf("encode json response: %w", err)
 	}
 	return nil
-}
-
-func extractBearerToken(r *http.Request) string {
-	v := r.Header.Get("Authorization")
-	if len(v) > 7 && v[:7] == "Bearer " {
-		return v[7:]
-	}
-	return ""
 }

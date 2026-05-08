@@ -16,7 +16,7 @@ func TestStoreObjectEmbedding(t *testing.T) {
 	t.Parallel()
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
+		if r.Method != http.MethodPut {
 			t.Errorf("method = %s", r.Method)
 		}
 		if r.URL.Path != "/v1/namespaces/feed/objects/item-42/embedding" {

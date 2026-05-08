@@ -1,11 +1,9 @@
 package admin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,17 +18,17 @@ type adminSvc interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
 	GetNamespacesOverview(ctx context.Context) (*NamespacesOverviewResponse, error)
-	UpsertNamespace(ctx context.Context, namespace string, body io.Reader) (*NamespaceUpsertResponse, int, error)
+	UpsertNamespace(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error)
 	GetBatchRuns(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
-	DebugRecommend(ctx context.Context, req *RecommendDebugRequest) (*RecommendDebugResponse, int, error)
+	GetSubjectRecommendations(ctx context.Context, namespace, subjectID string, limit, offset int, debug bool) (*RecommendResponse, int, error)
 	GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error)
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
-	GetQdrantStats(ctx context.Context, namespace string) (*QdrantStatsResponse, error)
-	TriggerBatch(ctx context.Context, ns string) (*TriggerBatchResponse, error)
+	GetQdrant(ctx context.Context, namespace string) (*QdrantInspectResponse, error)
+	CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreateResponse, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
 	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
-	SeedDemoDataset(ctx context.Context) (*DemoDatasetResponse, error)
-	ClearDemoDataset(ctx context.Context) (*DemoDatasetResponse, error)
+	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
+	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 }
 
 // Handler handles HTTP requests for the admin API.
@@ -44,9 +42,11 @@ func NewHandler(svc adminSvc, apiKey string) *Handler {
 	return &Handler{svc: svc, apiKey: apiKey}
 }
 
-// Login handles POST /api/auth/login.
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	var req LoginRequest
+// CreateSession handles POST /api/v1/auth/sessions — validates the admin API
+// key and issues a session cookie. Returns 201 Created with body
+// CreateSessionResponse on success, 401 on bad credentials.
+func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
+	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
@@ -62,27 +62,29 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiresAt := time.Now().Add(8 * time.Hour)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
-		Path:     "/",
+		Path:     "/api",
 		HttpOnly: true,
 		MaxAge:   int((8 * time.Hour).Seconds()),
 		SameSite: http.SameSiteLaxMode,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusCreated, &CreateSessionResponse{ExpiresAt: expiresAt.UTC()})
 }
 
-// Logout handles DELETE /api/auth/logout.
-func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
+// DeleteCurrentSession handles DELETE /api/v1/auth/sessions/current — clears
+// the session cookie and returns 204 No Content.
+func (h *Handler) DeleteCurrentSession(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
-		Path:     "/",
+		Path:     "/api",
 		HttpOnly: true,
 		MaxAge:   -1,
 	})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GetHealth handles GET /api/admin/v1/health.
@@ -104,6 +106,11 @@ func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 
 // ListNamespaces handles GET /api/admin/v1/namespaces.
 func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("include") == "overview" {
+		h.GetNamespacesOverview(w, r)
+		return
+	}
+
 	namespaces, err := h.svc.ListNamespaces(r.Context())
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not list namespaces")
@@ -112,7 +119,7 @@ func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
 	if namespaces == nil {
 		namespaces = []NamespaceConfig{}
 	}
-	httpapi.WriteJSON(w, http.StatusOK, NamespacesListResponse{Namespaces: namespaces})
+	httpapi.WriteJSON(w, http.StatusOK, NamespacesListResponse{Items: namespaces, Total: len(namespaces)})
 }
 
 // GetNamespace handles GET /api/admin/v1/namespaces/{ns}.
@@ -134,27 +141,21 @@ func (h *Handler) GetNamespace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "could not read body")
-		return
-	}
-
 	var req NamespaceUpsertRequest
-	if err := json.Unmarshal(body, &req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
 
-	result, statusCode, err := h.svc.UpsertNamespace(r.Context(), ns, bytes.NewReader(body))
+	result, statusCode, err := h.svc.UpsertNamespace(r.Context(), ns, &req)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusBadGateway, "proxy_error", "could not reach api")
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not upsert namespace")
 		return
 	}
 	httpapi.WriteJSON(w, statusCode, result)
 }
 
-// GetNamespacesOverview handles GET /api/admin/v1/namespaces/overview.
+// GetNamespacesOverview handles GET /api/admin/v1/namespaces?include=overview.
 func (h *Handler) GetNamespacesOverview(w http.ResponseWriter, r *http.Request) {
 	overview, err := h.svc.GetNamespacesOverview(r.Context())
 	if err != nil {
@@ -194,26 +195,42 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 	if runs == nil {
 		runs = []BatchRunLog{}
 	}
-	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Runs: runs, Total: total, Offset: offset, Stats: stats})
+	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Items: runs, Total: total, Offset: offset, Stats: stats})
 }
 
-// DebugRecommend handles POST /api/admin/v1/recommend/debug.
-func (h *Handler) DebugRecommend(w http.ResponseWriter, r *http.Request) {
-	var req RecommendDebugRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
-		return
-	}
-	if req.Namespace == "" || req.SubjectID == "" {
-		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace and subject_id are required")
+// GetSubjectRecommendations handles
+// GET /api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations.
+// Optional query params: limit, offset, debug. The debug flag enriches the
+// response with operator diagnostics.
+func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	id := chi.URLParam(r, "id")
+	if ns == "" || id == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace and subject id are required")
 		return
 	}
 
-	result, statusCode, err := h.svc.DebugRecommend(r.Context(), &req)
+	q := r.URL.Query()
+	limit := 10
+	if lStr := q.Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	offset := 0
+	if oStr := q.Get("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	debug := q.Get("debug") == "true"
+
+	result, statusCode, err := h.svc.GetSubjectRecommendations(r.Context(), ns, id, limit, offset, debug)
 	if err != nil {
 		switch statusCode {
 		case http.StatusNotFound:
-			httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
+			httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace or subject not found")
 		case http.StatusUnauthorized:
 			httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid api key for namespace")
 		case 0:
@@ -226,10 +243,10 @@ func (h *Handler) DebugRecommend(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
-// GetQdrantStats handles GET /api/admin/v1/namespaces/{ns}/qdrant-stats.
-func (h *Handler) GetQdrantStats(w http.ResponseWriter, r *http.Request) {
+// GetQdrant handles GET /api/admin/v1/namespaces/{ns}/qdrant.
+func (h *Handler) GetQdrant(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
-	stats, err := h.svc.GetQdrantStats(r.Context(), ns)
+	stats, err := h.svc.GetQdrant(r.Context(), ns)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get qdrant stats")
 		return
@@ -237,7 +254,7 @@ func (h *Handler) GetQdrantStats(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, stats)
 }
 
-// GetSubjectProfile handles GET /api/admin/v1/subjects/{ns}/{id}/profile.
+// GetSubjectProfile handles GET /api/admin/v1/namespaces/{ns}/subjects/{id}/profile.
 func (h *Handler) GetSubjectProfile(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	id := chi.URLParam(r, "id")
@@ -250,7 +267,7 @@ func (h *Handler) GetSubjectProfile(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, profile)
 }
 
-// GetTrending handles GET /api/admin/v1/trending/{ns}.
+// GetTrending handles GET /api/admin/v1/namespaces/{ns}/trending.
 func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	q := r.URL.Query()
@@ -282,11 +299,12 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
-// TriggerBatch handles POST /api/admin/v1/namespaces/{ns}/batch-runs/trigger.
-func (h *Handler) TriggerBatch(w http.ResponseWriter, r *http.Request) {
+// CreateBatchRun handles POST /api/admin/v1/namespaces/{ns}/batch-runs.
+// Returns 202 Accepted with a Location header pointing to the created run.
+func (h *Handler) CreateBatchRun(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 
-	result, err := h.svc.TriggerBatch(r.Context(), ns)
+	result, err := h.svc.CreateBatchRun(r.Context(), ns)
 	if err != nil {
 		if errors.Is(err, errBatchRunning) {
 			httpapi.WriteError(w, http.StatusConflict, "conflict", err.Error())
@@ -303,7 +321,11 @@ func (h *Handler) TriggerBatch(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, result)
+	if result.ID > 0 {
+		w.Header().Set("Location",
+			"/api/admin/v1/namespaces/"+ns+"/batch-runs/"+strconv.FormatInt(result.ID, 10))
+	}
+	httpapi.WriteJSON(w, http.StatusAccepted, result)
 }
 
 // GetRecentEvents handles GET /api/admin/v1/namespaces/{ns}/events.
@@ -366,22 +388,24 @@ func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
-// SeedDemoDataset handles POST /api/admin/v1/demo.
-func (h *Handler) SeedDemoDataset(w http.ResponseWriter, r *http.Request) {
-	result, err := h.svc.SeedDemoDataset(r.Context())
+// CreateDemoData handles POST /api/admin/v1/demo-data — seeds the bundled
+// demo namespace and sample events. Returns 202 Accepted with the creation
+// summary in the body.
+func (h *Handler) CreateDemoData(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.CreateDemoData(r.Context())
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not seed demo dataset")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusCreated, result)
+	httpapi.WriteJSON(w, http.StatusAccepted, result)
 }
 
-// ClearDemoDataset handles DELETE /api/admin/v1/demo.
-func (h *Handler) ClearDemoDataset(w http.ResponseWriter, r *http.Request) {
-	result, err := h.svc.ClearDemoDataset(r.Context())
-	if err != nil {
+// DeleteDemoData handles DELETE /api/admin/v1/demo-data — clears the demo
+// dataset across postgres, redis, and qdrant. Returns 204 No Content.
+func (h *Handler) DeleteDemoData(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.svc.DeleteDemoData(r.Context()); err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not clear demo dataset")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, result)
+	w.WriteHeader(http.StatusNoContent)
 }

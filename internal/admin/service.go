@@ -31,6 +31,13 @@ type adminRepo interface {
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
 }
 
+// nsConfigUpserter is the abstract collaborator that creates or updates a namespace
+// configuration. The wiring layer (cmd/admin) provides an adapter around nsconfig.Service
+// so the admin domain does not import nsconfig directly (constitution III).
+type nsConfigUpserter interface {
+	Upsert(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error)
+}
+
 // Service implements admin business logic.
 type Service struct {
 	repo         adminRepo
@@ -40,11 +47,12 @@ type Service struct {
 	qdrantClient *qdrant.Client
 	httpClient   *http.Client
 	job          *compute.Job
+	nsConfigSvc  nsConfigUpserter
 	runningBatch sync.Map // keyed by namespace name; prevents concurrent batch triggers
 }
 
 // NewService creates a new Service.
-func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job *compute.Job) *Service {
+func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job *compute.Job, nsConfigSvc nsConfigUpserter) *Service {
 	return &Service{
 		repo:         repo,
 		apiURL:       apiURL,
@@ -53,6 +61,7 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 		qdrantClient: qdrantClient,
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 		job:          job,
+		nsConfigSvc:  nsConfigSvc,
 	}
 }
 
@@ -86,27 +95,19 @@ func (s *Service) GetNamespace(ctx context.Context, namespace string) (*Namespac
 	return s.repo.GetNamespace(ctx, namespace)
 }
 
-// UpsertNamespace proxies a create/update request to cmd/api.
-func (s *Service) UpsertNamespace(ctx context.Context, namespace string, body io.Reader) (*NamespaceUpsertResponse, int, error) {
-	url := s.apiURL + "/v1/config/namespaces/" + namespace
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, body)
+// UpsertNamespace creates or updates the namespace config by calling the injected
+// nsConfigUpserter directly. Returns 201 on first-time create (when a plaintext API
+// key is generated) and 200 on subsequent updates.
+func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error) {
+	resp, err := s.nsConfigSvc.Upsert(ctx, namespace, req)
 	if err != nil {
-		return nil, 0, fmt.Errorf("build upsert request: %w", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("upsert namespace: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-
-	resp, err := s.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("upsert proxy: %w", err)
+	status := http.StatusOK
+	if resp != nil && resp.APIKey != nil {
+		status = http.StatusCreated
 	}
-	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
-
-	var result NamespaceUpsertResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, resp.StatusCode, fmt.Errorf("decode upsert response: %w", err)
-	}
-	return &result, resp.StatusCode, nil
+	return resp, status, nil
 }
 
 // GetBatchRuns returns paginated batch run logs, filtered total, and aggregate stats.
@@ -156,18 +157,18 @@ func (s *Service) GetNamespacesOverview(ctx context.Context) (*NamespacesOvervie
 		out = append(out, h)
 	}
 
-	return &NamespacesOverviewResponse{Namespaces: out}, nil
+	return &NamespacesOverviewResponse{Items: out, Total: len(out)}, nil
 }
 
-// DebugRecommend proxies a recommendation request to cmd/api and returns debug info.
-func (s *Service) DebugRecommend(ctx context.Context, req *RecommendDebugRequest) (*RecommendDebugResponse, int, error) {
-	limit := req.Limit
+// GetSubjectRecommendations proxies a sub-resource recommendation request to
+// cmd/api and returns the typed admin recommendation response.
+func (s *Service) GetSubjectRecommendations(ctx context.Context, namespace, subjectID string, limit, offset int, debug bool) (*RecommendResponse, int, error) {
 	if limit <= 0 {
 		limit = 10
 	}
 
-	url := fmt.Sprintf("%s/v1/recommendations?namespace=%s&subject_id=%s&limit=%d&offset=%d",
-		s.apiURL, req.Namespace, req.SubjectID, limit, req.Offset)
+	url := fmt.Sprintf("%s/v1/namespaces/%s/subjects/%s/recommendations?limit=%d&offset=%d",
+		s.apiURL, namespace, subjectID, limit, offset)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
@@ -209,7 +210,7 @@ func (s *Service) DebugRecommend(ctx context.Context, req *RecommendDebugRequest
 		items[i] = RecommendDebugItem{ObjectID: it.ObjectID, Score: it.Score, Rank: it.Rank}
 	}
 
-	return &RecommendDebugResponse{
+	result := &RecommendResponse{
 		SubjectID:   raw.SubjectID,
 		Namespace:   raw.Namespace,
 		Items:       items,
@@ -218,35 +219,59 @@ func (s *Service) DebugRecommend(ctx context.Context, req *RecommendDebugRequest
 		Offset:      raw.Offset,
 		Total:       raw.Total,
 		GeneratedAt: raw.GeneratedAt,
-	}, http.StatusOK, nil
+	}
+	if debug {
+		result.Debug = s.recommendDebug(ctx, namespace, subjectID)
+	}
+
+	return result, http.StatusOK, nil
 }
 
-// GetQdrantStats returns point counts for the four Qdrant collections of a namespace.
-func (s *Service) GetQdrantStats(ctx context.Context, namespace string) (*QdrantStatsResponse, error) {
-	names := []string{
-		namespace + "_subjects",
-		namespace + "_objects",
-		namespace + "_subjects_dense",
-		namespace + "_objects_dense",
-	}
+// GetQdrant returns point counts for the four Qdrant collections of a namespace.
+func (s *Service) GetQdrant(ctx context.Context, namespace string) (*QdrantInspectResponse, error) {
+	return &QdrantInspectResponse{
+		Subjects:      s.qdrantCollection(ctx, namespace+"_subjects"),
+		Objects:       s.qdrantCollection(ctx, namespace+"_objects"),
+		SubjectsDense: s.qdrantCollection(ctx, namespace+"_subjects_dense"),
+		ObjectsDense:  s.qdrantCollection(ctx, namespace+"_objects_dense"),
+	}, nil
+}
 
-	cols := make(map[string]QdrantCollectionStat, len(names))
-	for _, col := range names {
-		stat := QdrantCollectionStat{}
-		if s.qdrantClient != nil {
-			exists, err := s.qdrantClient.CollectionExists(ctx, col)
-			if err == nil && exists {
-				stat.Exists = true
-				if info, err := s.qdrantClient.GetCollectionInfo(ctx, col); err == nil {
-					stat.PointsCount = info.GetPointsCount()
-					stat.IndexedVectorsCount = info.GetIndexedVectorsCount()
-				}
-			}
-		}
-		cols[col] = stat
+func (s *Service) qdrantCollection(ctx context.Context, name string) QdrantCollection {
+	stat := QdrantCollection{}
+	if s.qdrantClient == nil {
+		return stat
 	}
+	exists, err := s.qdrantClient.CollectionExists(ctx, name)
+	if err != nil || !exists {
+		return stat
+	}
+	stat.Exists = true
+	if info, err := s.qdrantClient.GetCollectionInfo(ctx, name); err == nil {
+		stat.PointsCount = info.GetPointsCount()
+	}
+	return stat
+}
 
-	return &QdrantStatsResponse{Namespace: namespace, Collections: cols}, nil
+func (s *Service) recommendDebug(ctx context.Context, namespace, subjectID string) *RecommendDebug {
+	debug := &RecommendDebug{SparseNNZ: -1}
+
+	ns, err := s.repo.GetNamespace(ctx, namespace)
+	if err != nil || ns == nil {
+		return debug
+	}
+	debug.Alpha = ns.Alpha
+
+	stats, err := s.repo.GetSubjectStats(ctx, namespace, subjectID, ns.SeenItemsDays)
+	if err != nil || stats == nil {
+		return debug
+	}
+	debug.InteractionCount = stats.InteractionCount
+	debug.SeenItemsCount = len(stats.SeenItems)
+	if stats.NumericID != nil {
+		debug.SparseNNZ = s.sparseNNZ(ctx, namespace, *stats.NumericID)
+	}
+	return debug
 }
 
 // GetSubjectProfile returns interaction count, seen items, and sparse vector NNZ for a subject.
@@ -266,18 +291,8 @@ func (s *Service) GetSubjectProfile(ctx context.Context, namespace, subjectID st
 	}
 
 	nnz := -1
-	if stats.NumericID != nil && s.qdrantClient != nil {
-		results, err := s.qdrantClient.Get(ctx, &qdrant.GetPoints{
-			CollectionName: namespace + "_subjects",
-			Ids:            []*qdrant.PointId{qdrant.NewIDNum(*stats.NumericID)},
-			WithVectors:    qdrant.NewWithVectorsInclude("sparse_interactions"),
-		})
-		if err == nil && len(results) > 0 {
-			sv := results[0].GetVectors().GetVectors().GetVectors()["sparse_interactions"].GetSparse()
-			if sv != nil {
-				nnz = len(sv.GetIndices())
-			}
-		}
+	if stats.NumericID != nil {
+		nnz = s.sparseNNZ(ctx, namespace, *stats.NumericID)
 	}
 
 	seenItems := stats.SeenItems
@@ -295,6 +310,25 @@ func (s *Service) GetSubjectProfile(ctx context.Context, namespace, subjectID st
 	}, nil
 }
 
+func (s *Service) sparseNNZ(ctx context.Context, namespace string, numericID uint64) int {
+	if s.qdrantClient == nil {
+		return -1
+	}
+	results, err := s.qdrantClient.Get(ctx, &qdrant.GetPoints{
+		CollectionName: namespace + "_subjects",
+		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
+		WithVectors:    qdrant.NewWithVectorsInclude("sparse_interactions"),
+	})
+	if err != nil || len(results) == 0 {
+		return -1
+	}
+	sv := results[0].GetVectors().GetVectors().GetVectors()["sparse_interactions"].GetSparse()
+	if sv == nil {
+		return -1
+	}
+	return len(sv.GetIndices())
+}
+
 // GetTrending proxies the trending request to cmd/api, then fetches the Redis TTL.
 func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error) {
 	params := fmt.Sprintf("?limit=%d&offset=%d", limit, offset)
@@ -302,7 +336,7 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 		params += "&window_hours=" + strconv.Itoa(windowHours)
 	}
 
-	url := s.apiURL + "/v1/trending/" + namespace + params
+	url := s.apiURL + "/v1/namespaces/" + namespace + "/trending" + params
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("build trending request: %w", err)
@@ -367,10 +401,13 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 // errBatchRunning is returned when a concurrent batch trigger is attempted for the same namespace.
 var errBatchRunning = errors.New("batch already in progress")
 
-// TriggerBatch runs all batch phases for a namespace synchronously.
+// CreateBatchRun runs all batch phases for a namespace synchronously and
+// returns the resulting BatchRun resource. The HTTP layer translates this to
+// 202 Accepted + Location header.
+//
 // Returns 409-style errBatchRunning if a batch is already in progress for that namespace.
 // Returns 404-style nil,nil from GetNamespace when namespace does not exist.
-func (s *Service) TriggerBatch(ctx context.Context, ns string) (*TriggerBatchResponse, error) {
+func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreateResponse, error) {
 	nsConfig, err := s.repo.GetNamespace(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("get namespace: %w", err)
@@ -392,25 +429,27 @@ func (s *Service) TriggerBatch(ctx context.Context, ns string) (*TriggerBatchRes
 
 	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", 1, 0)
 	if err != nil || len(logs) == 0 {
-		return &TriggerBatchResponse{
-			Namespace:  ns,
-			StartedAt:  start.UTC().Format(time.RFC3339),
-			DurationMs: int(time.Since(start).Milliseconds()),
-			Success:    true,
+		return &BatchRunCreateResponse{
+			Namespace: ns,
+			Status:    "queued",
+			StartedAt: start.UTC(),
 		}, nil
 	}
 
 	log := logs[0]
-	durMs := 0
-	if log.DurationMs != nil {
-		durMs = *log.DurationMs
+	status := "running"
+	if log.CompletedAt != nil {
+		if log.Success {
+			status = "succeeded"
+		} else {
+			status = "failed"
+		}
 	}
-	return &TriggerBatchResponse{
-		BatchRunID: log.ID,
-		Namespace:  ns,
-		StartedAt:  log.StartedAt.UTC().Format(time.RFC3339),
-		DurationMs: durMs,
-		Success:    log.Success,
+	return &BatchRunCreateResponse{
+		ID:        log.ID,
+		Namespace: ns,
+		Status:    status,
+		StartedAt: log.StartedAt.UTC(),
 	}, nil
 }
 
@@ -428,7 +467,7 @@ func (s *Service) GetRecentEvents(ctx context.Context, ns string, limit, offset 
 		return nil, fmt.Errorf("get recent events: %w", err)
 	}
 	return &EventsListResponse{
-		Events: events,
+		Items:  events,
 		Total:  total,
 		Limit:  limit,
 		Offset: offset,
@@ -468,19 +507,12 @@ func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventReq
 	return nil
 }
 
-// SeedDemoDataset creates the bundled demo namespace and loads deterministic sample events.
-func (s *Service) SeedDemoDataset(ctx context.Context) (*DemoDatasetResponse, error) {
-	var body bytes.Buffer
-	if err := json.NewEncoder(&body).Encode(demoNamespaceConfig); err != nil {
-		return nil, fmt.Errorf("encode demo namespace config: %w", err)
-	}
-
-	upsert, statusCode, err := s.UpsertNamespace(ctx, demoNamespace, &body)
+// CreateDemoData creates the bundled demo namespace and loads deterministic sample events.
+func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error) {
+	demoReq := demoNamespaceConfig
+	upsert, _, err := s.UpsertNamespace(ctx, demoNamespace, &demoReq)
 	if err != nil {
 		return nil, fmt.Errorf("create demo namespace: %w", err)
-	}
-	if statusCode < http.StatusOK || statusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("create demo namespace returned %d", statusCode)
 	}
 
 	created, err := s.repo.SeedDemoEvents(ctx, demoNamespace, demoDataset, time.Now().UTC())
@@ -498,8 +530,8 @@ func (s *Service) SeedDemoDataset(ctx context.Context) (*DemoDatasetResponse, er
 	return resp, nil
 }
 
-// ClearDemoDataset removes the bundled demo namespace and its generated data.
-func (s *Service) ClearDemoDataset(ctx context.Context) (*DemoDatasetResponse, error) {
+// DeleteDemoData removes the bundled demo namespace and its generated data.
+func (s *Service) DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error) {
 	deleted, err := s.repo.ClearNamespaceData(ctx, demoNamespace)
 	if err != nil {
 		return nil, fmt.Errorf("clear demo postgres data: %w", err)

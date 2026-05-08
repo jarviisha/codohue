@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -31,16 +30,16 @@ type fakeSvc struct {
 	upsertErr       error
 	batchRuns       []BatchRunLog
 	batchRunsErr    error
-	debugResp       *RecommendDebugResponse
+	debugResp       *RecommendResponse
 	debugStatus     int
 	debugErr        error
 	trendingResp    *TrendingAdminResponse
 	trendingErr     error
 	profileResp     *SubjectProfileResponse
 	profileErr      error
-	qdrantStatsResp *QdrantStatsResponse
+	qdrantStatsResp *QdrantInspectResponse
 	qdrantStatsErr  error
-	triggerResp     *TriggerBatchResponse
+	triggerResp     *BatchRunCreateResponse
 	triggerErr      error
 	eventsResp      *EventsListResponse
 	eventsErr       error
@@ -65,7 +64,7 @@ func (f *fakeSvc) GetNamespacesOverview(_ context.Context) (*NamespacesOverviewR
 	return f.nsOverviewResp, f.nsOverviewErr
 }
 
-func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ io.Reader) (*NamespaceUpsertResponse, int, error) {
+func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error) {
 	return f.upsertResp, f.upsertStatus, f.upsertErr
 }
 
@@ -73,7 +72,7 @@ func (f *fakeSvc) GetBatchRuns(_ context.Context, _, _ string, _, _ int) ([]Batc
 	return f.batchRuns, len(f.batchRuns), BatchRunStats{Total: len(f.batchRuns)}, f.batchRunsErr
 }
 
-func (f *fakeSvc) DebugRecommend(_ context.Context, _ *RecommendDebugRequest) (*RecommendDebugResponse, int, error) {
+func (f *fakeSvc) GetSubjectRecommendations(_ context.Context, _, _ string, _, _ int, _ bool) (*RecommendResponse, int, error) {
 	return f.debugResp, f.debugStatus, f.debugErr
 }
 
@@ -85,11 +84,11 @@ func (f *fakeSvc) GetSubjectProfile(_ context.Context, _, _ string) (*SubjectPro
 	return f.profileResp, f.profileErr
 }
 
-func (f *fakeSvc) GetQdrantStats(_ context.Context, _ string) (*QdrantStatsResponse, error) {
+func (f *fakeSvc) GetQdrant(_ context.Context, _ string) (*QdrantInspectResponse, error) {
 	return f.qdrantStatsResp, f.qdrantStatsErr
 }
 
-func (f *fakeSvc) TriggerBatch(_ context.Context, _ string) (*TriggerBatchResponse, error) {
+func (f *fakeSvc) CreateBatchRun(_ context.Context, _ string) (*BatchRunCreateResponse, error) {
 	return f.triggerResp, f.triggerErr
 }
 
@@ -101,11 +100,11 @@ func (f *fakeSvc) InjectEvent(_ context.Context, _ string, _ InjectEventRequest)
 	return f.injectErr
 }
 
-func (f *fakeSvc) SeedDemoDataset(_ context.Context) (*DemoDatasetResponse, error) {
+func (f *fakeSvc) CreateDemoData(_ context.Context) (*DemoDatasetResponse, error) {
 	return f.demoResp, f.demoErr
 }
 
-func (f *fakeSvc) ClearDemoDataset(_ context.Context) (*DemoDatasetResponse, error) {
+func (f *fakeSvc) DeleteDemoData(_ context.Context) (*DemoDatasetResponse, error) {
 	return f.demoResp, f.demoErr
 }
 
@@ -152,15 +151,15 @@ func assertJSON(t *testing.T, rec *httptest.ResponseRecorder, v any) {
 
 // ─── auth tests ───────────────────────────────────────────────────────────────
 
-func TestLoginSuccess(t *testing.T) {
+func TestCreateSession_Success(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/auth/login",
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions",
 		bytes.NewBufferString(`{"api_key":"test-secret"}`))
-	h.Login(rec, r)
+	h.CreateSession(rec, r)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 	cookies := rec.Result().Cookies()
 	if len(cookies) == 0 {
@@ -178,25 +177,25 @@ func TestLoginSuccess(t *testing.T) {
 	}
 }
 
-func TestLoginWrongKey(t *testing.T) {
+func TestCreateSession_WrongKey(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/auth/login",
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions",
 		bytes.NewBufferString(`{"api_key":"wrong"}`))
-	h.Login(rec, r)
+	h.CreateSession(rec, r)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", rec.Code)
 	}
 }
 
-func TestLogout(t *testing.T) {
+func TestDeleteCurrentSession(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/auth/logout", http.NoBody)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/auth/sessions/current", http.NoBody)
 	r.AddCookie(sessionCookie(t))
-	h.Logout(rec, r)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
+	h.DeleteCurrentSession(rec, r)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
 	}
 }
 
@@ -289,8 +288,8 @@ func TestListNamespaces_Handler(t *testing.T) {
 	}
 	var resp NamespacesListResponse
 	assertJSON(t, rec, &resp)
-	if len(resp.Namespaces) != 2 {
-		t.Errorf("expected 2 namespaces, got %d", len(resp.Namespaces))
+	if len(resp.Items) != 2 || resp.Total != 2 {
+		t.Errorf("expected 2 namespaces, got len=%d total=%d", len(resp.Items), resp.Total)
 	}
 }
 
@@ -360,8 +359,8 @@ func TestGetBatchRuns_All(t *testing.T) {
 	}
 	var resp BatchRunsResponse
 	assertJSON(t, rec, &resp)
-	if len(resp.Runs) != 1 {
-		t.Errorf("expected 1 run, got %d", len(resp.Runs))
+	if len(resp.Items) != 1 {
+		t.Errorf("expected 1 run, got %d", len(resp.Items))
 	}
 }
 
@@ -395,7 +394,7 @@ func TestGetBatchRuns_LimitCapped(t *testing.T) {
 func TestDebugRecommend_OK(t *testing.T) {
 	now := time.Now()
 	h := newTestHandler(&fakeSvc{
-		debugResp: &RecommendDebugResponse{
+		debugResp: &RecommendResponse{
 			SubjectID:   "user-1",
 			Namespace:   "ns1",
 			Items:       []RecommendDebugItem{{ObjectID: "post_1", Score: 0.9, Rank: 1}},
@@ -407,34 +406,36 @@ func TestDebugRecommend_OK(t *testing.T) {
 		debugStatus: http.StatusOK,
 	})
 	rec := httptest.NewRecorder()
-	body := `{"namespace":"ns1","subject_id":"user-1","limit":10}`
-	r := newChiRequest(http.MethodPost, "/api/admin/v1/recommend/debug", nil, body)
-	h.DebugRecommend(rec, r)
+	r := newChiRequest(http.MethodGet,
+		"/api/admin/v1/namespaces/ns1/subjects/user-1/recommendations?limit=10",
+		map[string]string{"ns": "ns1", "id": "user-1"}, "")
+	h.GetSubjectRecommendations(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
 }
 
-func TestDebugRecommend_MissingFields(t *testing.T) {
+func TestGetSubjectRecommendations_MissingPathParams(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
 	rec := httptest.NewRecorder()
-	body := `{"namespace":"ns1"}` // missing subject_id
-	r := newChiRequest(http.MethodPost, "/api/admin/v1/recommend/debug", nil, body)
-	h.DebugRecommend(rec, r)
+	r := newChiRequest(http.MethodGet,
+		"/api/admin/v1/namespaces//subjects//recommendations", nil, "")
+	h.GetSubjectRecommendations(rec, r)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
 
-func TestDebugRecommend_NamespaceNotFound(t *testing.T) {
+func TestGetSubjectRecommendations_NamespaceNotFound(t *testing.T) {
 	h := newTestHandler(&fakeSvc{
 		debugStatus: http.StatusNotFound,
 		debugErr:    fmt.Errorf("namespace not found"),
 	})
 	rec := httptest.NewRecorder()
-	body := `{"namespace":"unknown","subject_id":"user-1"}`
-	r := newChiRequest(http.MethodPost, "/api/admin/v1/recommend/debug", nil, body)
-	h.DebugRecommend(rec, r)
+	r := newChiRequest(http.MethodGet,
+		"/api/admin/v1/namespaces/unknown/subjects/user-1/recommendations",
+		map[string]string{"ns": "unknown", "id": "user-1"}, "")
+	h.GetSubjectRecommendations(rec, r)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
@@ -471,27 +472,24 @@ func TestGetSubjectProfile_OK(t *testing.T) {
 
 func TestGetQdrantStats_OK(t *testing.T) {
 	h := newTestHandler(&fakeSvc{
-		qdrantStatsResp: &QdrantStatsResponse{
-			Namespace: "ns1",
-			Collections: map[string]QdrantCollectionStat{
-				"ns1_subjects":       {Exists: true, PointsCount: 500, IndexedVectorsCount: 500},
-				"ns1_objects":        {Exists: true, PointsCount: 2000, IndexedVectorsCount: 2000},
-				"ns1_subjects_dense": {Exists: false},
-				"ns1_objects_dense":  {Exists: false},
-			},
+		qdrantStatsResp: &QdrantInspectResponse{
+			Subjects:      QdrantCollection{Exists: true, PointsCount: 500},
+			Objects:       QdrantCollection{Exists: true, PointsCount: 2000},
+			SubjectsDense: QdrantCollection{Exists: false},
+			ObjectsDense:  QdrantCollection{Exists: false},
 		},
 	})
 	rec := httptest.NewRecorder()
-	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/qdrant-stats",
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/qdrant",
 		map[string]string{"ns": "ns1"}, "")
-	h.GetQdrantStats(rec, r)
+	h.GetQdrant(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
 	}
-	var resp QdrantStatsResponse
+	var resp QdrantInspectResponse
 	assertJSON(t, rec, &resp)
-	if s := resp.Collections["ns1_subjects"]; !s.Exists || s.PointsCount != 500 {
-		t.Errorf("unexpected ns1_subjects stat: %+v", s)
+	if !resp.Subjects.Exists || resp.Subjects.PointsCount != 500 {
+		t.Errorf("unexpected subjects stat: %+v", resp.Subjects)
 	}
 }
 
@@ -541,19 +539,22 @@ func TestGetTrending_EmptyCache(t *testing.T) {
 
 // ─── TriggerBatch handler tests ───────────────────────────────────────────────
 
-func TestTriggerBatch_OK(t *testing.T) {
-	svc := &fakeSvc{triggerResp: &TriggerBatchResponse{BatchRunID: 7, Namespace: "ns1", Success: true, DurationMs: 500}}
+func TestCreateBatchRun_OK(t *testing.T) {
+	svc := &fakeSvc{triggerResp: &BatchRunCreateResponse{ID: 7, Namespace: "ns1", Status: "succeeded", StartedAt: time.Now()}}
 	h := newTestHandler(svc)
 	rec := httptest.NewRecorder()
-	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs/trigger", map[string]string{"ns": "ns1"}, "")
-	h.TriggerBatch(rec, r)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs", map[string]string{"ns": "ns1"}, "")
+	h.CreateBatchRun(rec, r)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var resp TriggerBatchResponse
+	if loc := rec.Header().Get("Location"); loc != "/api/admin/v1/namespaces/ns1/batch-runs/7" {
+		t.Errorf("unexpected Location header: %q", loc)
+	}
+	var resp BatchRunCreateResponse
 	assertJSON(t, rec, &resp)
-	if resp.BatchRunID != 7 {
-		t.Errorf("expected batch_run_id=7, got %d", resp.BatchRunID)
+	if resp.ID != 7 {
+		t.Errorf("expected id=7, got %d", resp.ID)
 	}
 }
 
@@ -562,7 +563,7 @@ func TestTriggerBatch_NotFound(t *testing.T) {
 	h := newTestHandler(svc)
 	rec := httptest.NewRecorder()
 	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/missing/batch-runs/trigger", map[string]string{"ns": "missing"}, "")
-	h.TriggerBatch(rec, r)
+	h.CreateBatchRun(rec, r)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
@@ -573,7 +574,7 @@ func TestTriggerBatch_Conflict(t *testing.T) {
 	h := newTestHandler(svc)
 	rec := httptest.NewRecorder()
 	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs/trigger", map[string]string{"ns": "ns1"}, "")
-	h.TriggerBatch(rec, r)
+	h.CreateBatchRun(rec, r)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", rec.Code)
 	}
@@ -584,7 +585,7 @@ func TestTriggerBatch_InternalError(t *testing.T) {
 	h := newTestHandler(svc)
 	rec := httptest.NewRecorder()
 	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/batch-runs/trigger", map[string]string{"ns": "ns1"}, "")
-	h.TriggerBatch(rec, r)
+	h.CreateBatchRun(rec, r)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
 	}
@@ -594,8 +595,8 @@ func TestTriggerBatch_InternalError(t *testing.T) {
 
 func TestGetRecentEvents_OK(t *testing.T) {
 	svc := &fakeSvc{eventsResp: &EventsListResponse{
-		Events: []EventSummary{{ID: 1, Namespace: "ns1", SubjectID: "user-1", ObjectID: "item-1", Action: "VIEW", Weight: 1.0, OccurredAt: "2026-05-03T10:00:00Z"}},
-		Total:  1, Limit: 50, Offset: 0,
+		Items: []EventSummary{{ID: 1, Namespace: "ns1", SubjectID: "user-1", ObjectID: "item-1", Action: "VIEW", Weight: 1.0, OccurredAt: "2026-05-03T10:00:00Z"}},
+		Total: 1, Limit: 50, Offset: 0,
 	}}
 	h := newTestHandler(svc)
 	rec := httptest.NewRecorder()
@@ -606,8 +607,8 @@ func TestGetRecentEvents_OK(t *testing.T) {
 	}
 	var resp EventsListResponse
 	assertJSON(t, rec, &resp)
-	if len(resp.Events) != 1 {
-		t.Errorf("expected 1 event, got %d", len(resp.Events))
+	if len(resp.Items) != 1 {
+		t.Errorf("expected 1 event, got %d", len(resp.Items))
 	}
 }
 
@@ -714,15 +715,15 @@ func TestInjectEvent_UpstreamError(t *testing.T) {
 
 // ─── Demo dataset handler tests ───────────────────────────────────────────────
 
-func TestSeedDemoDataset_OK(t *testing.T) {
+func TestCreateDemoData_OK(t *testing.T) {
 	h := newTestHandler(&fakeSvc{demoResp: &DemoDatasetResponse{Namespace: "demo", EventsCreated: 25}})
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/admin/v1/demo", http.NoBody)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/admin/v1/demo-data", http.NoBody)
 
-	h.SeedDemoDataset(rec, r)
+	h.CreateDemoData(rec, r)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
 	}
 	var resp DemoDatasetResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -733,21 +734,14 @@ func TestSeedDemoDataset_OK(t *testing.T) {
 	}
 }
 
-func TestClearDemoDataset_OK(t *testing.T) {
+func TestDeleteDemoData_OK(t *testing.T) {
 	h := newTestHandler(&fakeSvc{demoResp: &DemoDatasetResponse{Namespace: "demo", EventsDeleted: 25}})
 	rec := httptest.NewRecorder()
-	r := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/admin/v1/demo", http.NoBody)
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/admin/v1/demo-data", http.NoBody)
 
-	h.ClearDemoDataset(rec, r)
+	h.DeleteDemoData(rec, r)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var resp DemoDatasetResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Namespace != "demo" || resp.EventsDeleted != 25 {
-		t.Fatalf("unexpected response: %+v", resp)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
