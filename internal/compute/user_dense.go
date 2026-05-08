@@ -11,7 +11,7 @@ package compute
 // because it queries Qdrant with vectors computed in the same batch.
 //
 // To reduce staleness: decrease BATCH_INTERVAL_MINUTES, or switch to BYOE and push
-// updated subject embeddings via POST /v1/subjects/{ns}/{id}/embedding immediately
+// updated subject embeddings via the canonical subject embedding endpoint immediately
 // after each interaction is recorded.
 func UserDenseVectors(events []*RawEvent, itemVecs map[string][]float32) map[string][]float32 {
 	if len(itemVecs) == 0 {

@@ -12,7 +12,7 @@ func TestRecommend_ColdStart(t *testing.T) {
 	// A brand-new subject with no interaction history. The service falls back
 	// to trending → popular. Either way the HTTP response must be 200.
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=cold_user&namespace="+testNS,
+		baseURL+"/v1/namespaces/"+testNS+"/subjects/cold_user/recommendations",
 		nsKey, nil)
 
 	var body struct {
@@ -45,7 +45,7 @@ func TestRecommend_ColdStart(t *testing.T) {
 
 func TestRecommend_Unauthorized(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=u1&namespace="+testNS,
+		baseURL+"/v1/namespaces/"+testNS+"/subjects/u1/recommendations",
 		"bad-key", nil)
 	assertStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
@@ -53,33 +53,31 @@ func TestRecommend_Unauthorized(t *testing.T) {
 
 func TestRecommend_NoToken(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=u1&namespace="+testNS,
+		baseURL+"/v1/namespaces/"+testNS+"/subjects/u1/recommendations",
 		"", nil)
 	assertStatus(t, resp, http.StatusUnauthorized)
 	resp.Body.Close()
 }
 
-func TestRecommend_MissingSubjectID(t *testing.T) {
+func TestRecommend_LegacyMissingSubjectPathIsGone(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?namespace="+testNS,
+		baseURL+"/v1/namespaces/"+testNS+"/recommendations",
 		nsKey, nil)
-	assertStatus(t, resp, http.StatusBadRequest)
+	assertStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }
 
-func TestRecommend_MissingNamespace(t *testing.T) {
+func TestRecommend_LegacyMissingNamespacePathIsGone(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
 		baseURL+"/v1/recommendations?subject_id=u1",
 		nsKey, nil)
-	// Namespace is missing → auth middleware skips validation and passes through →
-	// handler returns 400 "subject_id and namespace are required".
-	assertStatus(t, resp, http.StatusBadRequest)
+	assertStatus(t, resp, http.StatusNotFound)
 	resp.Body.Close()
 }
 
 func TestRecommend_InvalidLimit(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=u1&namespace="+testNS+"&limit=abc",
+		baseURL+"/v1/namespaces/"+testNS+"/subjects/u1/recommendations?limit=abc",
 		nsKey, nil)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
@@ -87,7 +85,7 @@ func TestRecommend_InvalidLimit(t *testing.T) {
 
 func TestRecommend_ZeroLimit(t *testing.T) {
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=u1&namespace="+testNS+"&limit=0",
+		baseURL+"/v1/namespaces/"+testNS+"/subjects/u1/recommendations?limit=0",
 		nsKey, nil)
 	assertStatus(t, resp, http.StatusBadRequest)
 	resp.Body.Close()
@@ -96,7 +94,7 @@ func TestRecommend_ZeroLimit(t *testing.T) {
 func TestRecommend_LimitCapped(t *testing.T) {
 	// Namespace config sets max_results=20; result items must not exceed that.
 	resp := doRequest(t, http.MethodGet,
-		baseURL+"/v1/recommendations?subject_id=cold_user&namespace="+testNS+"&limit=5",
+		baseURL+"/v1/namespaces/"+testNS+"/subjects/cold_user/recommendations?limit=5",
 		nsKey, nil)
 
 	var body struct {

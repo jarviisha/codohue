@@ -99,10 +99,10 @@ func run() error {
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
 
-	// nsconfig
+	// nsconfig — read-only on the data plane (used for keyHashFn lookups).
+	// Namespace mutation lives only on the admin plane (cmd/admin).
 	nsConfigRepo := nsconfig.NewRepository(db)
 	nsConfigSvc := nsconfig.NewService(nsConfigRepo)
-	nsConfigHandler := nsconfig.NewHandler(nsConfigSvc)
 
 	// ingest
 	ingestRepo := ingest.NewRepository(db)
@@ -129,10 +129,7 @@ func run() error {
 		}
 		return cfg.APIKeyHash, nil
 	}
-	validateKey := func(ctx context.Context, token, namespace string) bool {
-		return auth.ValidateNamespaceKey(ctx, token, cfg.RecommenderAPIKey, keyHashFn, namespace)
-	}
-	recommendHandler := recommend.NewHandler(recommendSvc, validateKey)
+	recommendHandler := recommend.NewHandler(recommendSvc)
 
 	// HTTP Router
 	r := chi.NewRouter()
@@ -143,42 +140,19 @@ func run() error {
 	r.Get("/healthz", healthzHandler(db, redisClient, qdrantClient))
 	r.Handle("/metrics", promhttp.Handler())
 
-	// Admin-only routes: protected by the global RECOMMENDER_API_KEY.
-	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAdmin(cfg.RecommenderAPIKey))
-		r.Put("/v1/config/namespaces/{namespace}", nsConfigHandler.Upsert)
-	})
-
-	// Namespace-scoped routes: protected by per-namespace API keys.
-	// Falls back to global key when a namespace has not been provisioned with its own key.
-	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireNamespace(cfg.RecommenderAPIKey, keyHashFn, func(r *http.Request) string {
-			return r.URL.Query().Get("namespace")
-		}))
-		r.Get("/v1/recommendations", recommendHandler.Get)
-	})
-
-	// POST /v1/rank: namespace is inside the request body, so auth is handled in the handler
-	// after the body is parsed.
-	r.Group(func(r chi.Router) {
-		r.Post("/v1/rank", recommendHandler.Rank)
-	})
-
-	// BYOE + trending endpoints: namespace is a URL path param {ns}.
+	// All client-facing routes live under /v1/namespaces/{ns}/* and authenticate
+	// via per-namespace bcrypt-hashed keys (with fallback to the global
+	// RECOMMENDER_API_KEY when no namespace key is provisioned).
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireNamespace(cfg.RecommenderAPIKey, keyHashFn, func(r *http.Request) string {
 			return chi.URLParam(r, "ns")
 		}))
-		r.Get("/v1/trending/{ns}", recommendHandler.GetTrending)
-		r.Post("/v1/objects/{ns}/{id}/embedding", recommendHandler.StoreObjectEmbedding)
-		r.Post("/v1/subjects/{ns}/{id}/embedding", recommendHandler.StoreSubjectEmbedding)
-		r.Delete("/v1/objects/{ns}/{id}", recommendHandler.DeleteObject)
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
-		r.Get("/v1/namespaces/{ns}/recommendations", recommendHandler.GetByNamespace)
-		r.Post("/v1/namespaces/{ns}/rank", recommendHandler.RankByNamespace)
+		r.Get("/v1/namespaces/{ns}/subjects/{id}/recommendations", recommendHandler.GetSubjectRecommendations)
+		r.Post("/v1/namespaces/{ns}/rankings", recommendHandler.Rank)
 		r.Get("/v1/namespaces/{ns}/trending", recommendHandler.GetTrending)
-		r.Post("/v1/namespaces/{ns}/objects/{id}/embedding", recommendHandler.StoreObjectEmbedding)
-		r.Post("/v1/namespaces/{ns}/subjects/{id}/embedding", recommendHandler.StoreSubjectEmbedding)
+		r.Put("/v1/namespaces/{ns}/objects/{id}/embedding", recommendHandler.StoreObjectEmbedding)
+		r.Put("/v1/namespaces/{ns}/subjects/{id}/embedding", recommendHandler.StoreSubjectEmbedding)
 		r.Delete("/v1/namespaces/{ns}/objects/{id}", recommendHandler.DeleteObject)
 	})
 

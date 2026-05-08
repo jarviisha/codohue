@@ -42,5 +42,5 @@ func (n *Namespace) storeEmbedding(ctx context.Context, entity, id string, vecto
 	body := codohuetypes.EmbeddingRequest{Vector: vector}
 	path := fmt.Sprintf("/v1/namespaces/%s/%s/%s/embedding",
 		url.PathEscape(n.namespace), entity, url.PathEscape(id))
-	return n.client.do(ctx, http.MethodPost, path, n.apiKey, nil, body, nil)
+	return n.client.do(ctx, http.MethodPut, path, n.apiKey, nil, body, nil)
 }

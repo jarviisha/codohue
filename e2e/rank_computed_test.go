@@ -49,9 +49,8 @@ func TestRankComputed_WarmSubjectRanksConnectedCandidateFirst(t *testing.T) {
 		return true, nil
 	})
 
-	resp := doRequest(t, http.MethodPost, baseURL+"/v1/rank", apiKey, map[string]any{
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+namespace+"/rankings", apiKey, map[string]any{
 		"subject_id": "user_a",
-		"namespace":  namespace,
 		"candidates": []string{"item_4", "item_3"},
 	})
 

@@ -18,7 +18,7 @@ function DefaultRedirect() {
 
   if (isLoading) return <LoadingState />
 
-  const namespaces = data?.namespaces ?? []
+  const namespaces = data?.items ?? []
   const hasActiveNamespace = namespaces.some(ns => ns.namespace === namespace)
 
   if (hasActiveNamespace) return <Navigate to="/overview" replace />

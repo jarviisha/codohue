@@ -36,7 +36,7 @@ function BatchRunsContent({ namespace }: { namespace: string | null }) {
   )
   const runNow = useTriggerBatch(namespace ?? '')
 
-  const runs = data?.runs ?? []
+  const runs = data?.items ?? []
   const total = data?.total ?? 0
   const totalPages = Math.ceil(total / BATCH_PAGE_SIZE)
   const hasRunning = (data?.stats.running ?? 0) > 0

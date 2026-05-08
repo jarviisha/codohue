@@ -13,10 +13,9 @@ import (
 func (n *Namespace) Rank(ctx context.Context, subjectID string, candidates []string) (*codohuetypes.RankResponse, error) {
 	body := codohuetypes.RankRequest{
 		SubjectID:  subjectID,
-		Namespace:  n.namespace,
 		Candidates: candidates,
 	}
-	path := "/v1/namespaces/" + url.PathEscape(n.namespace) + "/rank"
+	path := "/v1/namespaces/" + url.PathEscape(n.namespace) + "/rankings"
 
 	var out codohuetypes.RankResponse
 	if err := n.client.do(ctx, http.MethodPost, path, n.apiKey, nil, body, &out); err != nil {

@@ -25,6 +25,7 @@ type fakeSvc struct {
 	trendingErr   error
 	rankResp      *RankResponse
 	rankErr       error
+	rankNamespace string
 	storeErr      error
 	deleteErr     error
 }
@@ -37,7 +38,8 @@ func (f *fakeSvc) GetTrending(_ context.Context, _ string, _, _, _ int) (*Trendi
 	return f.trendingResp, f.trendingErr
 }
 
-func (f *fakeSvc) Rank(_ context.Context, _ *RankRequest) (*RankResponse, error) {
+func (f *fakeSvc) Rank(_ context.Context, _ *RankRequest, namespace string) (*RankResponse, error) {
+	f.rankNamespace = namespace
 	return f.rankResp, f.rankErr
 }
 
@@ -81,64 +83,64 @@ func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) httpapi.E
 	return resp
 }
 
-// ─── GET /v1/recommendations ─────────────────────────────────────────────────
-
-func TestHandlerGetMissingParams(t *testing.T) {
-	h := &Handler{}
-
-	for _, url := range []string{
-		"/v1/recommendations?namespace=test",
-		"/v1/recommendations?subject_id=u1",
-		"/v1/recommendations",
-	} {
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, url, http.NoBody)
-		rec := httptest.NewRecorder()
-		h.Get(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("url %s: expected 400, got %d", url, rec.Code)
-		}
-	}
-}
-
-func TestHandlerGetMissingParams_JSONError(t *testing.T) {
-	h := &Handler{}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/recommendations", http.NoBody)
-	rec := httptest.NewRecorder()
-
-	h.Get(rec, req)
-
-	if got := decodeErrorResponse(t, rec); got.Error.Code != "missing_required_fields" {
-		t.Fatalf("unexpected error code: %+v", got)
-	}
-}
+// ─── GET /v1/namespaces/{ns}/subjects/{id}/recommendations ──────────────────
 
 func TestNewHandler(t *testing.T) {
 	svc := &Service{}
-	validate := func(_ context.Context, _, _ string) bool { return true }
-	h := NewHandler(svc, validate)
+	h := NewHandler(svc)
 	if h == nil || h.service != svc {
 		t.Fatal("expected handler to be initialized with provided service")
 	}
 }
 
-func TestHandlerGetInvalidLimit(t *testing.T) {
+func TestGetSubjectRecommendations_MissingParams(t *testing.T) {
 	h := &Handler{}
 
-	for _, url := range []string{
-		"/v1/recommendations?subject_id=u1&namespace=ns&limit=abc",
-		"/v1/recommendations?subject_id=u1&namespace=ns&limit=0",
-		"/v1/recommendations?subject_id=u1&namespace=ns&limit=-1",
+	for _, params := range []map[string]string{
+		{"ns": "ns"}, // missing id
+		{"id": "u1"}, // missing ns
+		{},           // missing both
 	} {
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, url, http.NoBody)
+		req := newChiRequest(http.MethodGet,
+			"/v1/namespaces/ns/subjects/u1/recommendations", params, "")
 		rec := httptest.NewRecorder()
-		h.Get(rec, req)
+		h.GetSubjectRecommendations(rec, req)
 		if rec.Code != http.StatusBadRequest {
-			t.Errorf("url %s: expected 400, got %d", url, rec.Code)
+			t.Errorf("params %v: expected 400, got %d", params, rec.Code)
+		}
+		if got := decodeErrorResponse(t, rec); got.Error.Code != "missing_required_fields" {
+			t.Errorf("params %v: unexpected error code %+v", params, got)
 		}
 	}
 }
 
-func TestHandlerGetSuccess(t *testing.T) {
+func TestGetSubjectRecommendations_InvalidLimit(t *testing.T) {
+	h := &Handler{}
+	for _, q := range []string{"limit=abc", "limit=0", "limit=-1"} {
+		req := newChiRequest(http.MethodGet,
+			"/v1/namespaces/ns/subjects/u1/recommendations?"+q,
+			map[string]string{"ns": "ns", "id": "u1"}, "")
+		rec := httptest.NewRecorder()
+		h.GetSubjectRecommendations(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("q=%q: expected 400, got %d", q, rec.Code)
+		}
+	}
+}
+
+func TestGetSubjectRecommendations_InvalidOffset(t *testing.T) {
+	h := &Handler{}
+	req := newChiRequest(http.MethodGet,
+		"/v1/namespaces/ns/subjects/u1/recommendations?offset=-1",
+		map[string]string{"ns": "ns", "id": "u1"}, "")
+	rec := httptest.NewRecorder()
+	h.GetSubjectRecommendations(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestGetSubjectRecommendations_Success(t *testing.T) {
 	h := &Handler{service: &fakeSvc{
 		recommendResp: &Response{
 			SubjectID: "u1", Namespace: "ns",
@@ -154,10 +156,11 @@ func TestHandlerGetSuccess(t *testing.T) {
 		},
 	}}
 
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
-		"/v1/recommendations?subject_id=u1&namespace=ns", http.NoBody)
+	req := newChiRequest(http.MethodGet,
+		"/v1/namespaces/ns/subjects/u1/recommendations",
+		map[string]string{"ns": "ns", "id": "u1"}, "")
 	rec := httptest.NewRecorder()
-	h.Get(rec, req)
+	h.GetSubjectRecommendations(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
@@ -171,39 +174,24 @@ func TestHandlerGetSuccess(t *testing.T) {
 	}
 }
 
-func TestHandlerGetServiceError(t *testing.T) {
+func TestGetSubjectRecommendations_ServiceError(t *testing.T) {
 	h := &Handler{service: &fakeSvc{recommendErr: errors.New("db error")}}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
-		"/v1/recommendations?subject_id=u1&namespace=ns", http.NoBody)
+	req := newChiRequest(http.MethodGet,
+		"/v1/namespaces/ns/subjects/u1/recommendations",
+		map[string]string{"ns": "ns", "id": "u1"}, "")
 	rec := httptest.NewRecorder()
-	h.Get(rec, req)
+	h.GetSubjectRecommendations(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", rec.Code)
 	}
 }
 
-// ─── POST /v1/rank ───────────────────────────────────────────────────────────
+// ─── POST /v1/namespaces/{ns}/rankings ─────────────────────────────────────
 
-func TestHandlerRankMissingFields(t *testing.T) {
+func TestRank_MissingNamespacePath(t *testing.T) {
 	h := &Handler{}
-
-	for _, body := range []string{
-		`{"namespace":"ns","candidates":["p1"]}`,
-		`{"subject_id":"u1","candidates":["p1"]}`,
-		`{"candidates":["p1"]}`,
-	} {
-		req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/rank", strings.NewReader(body))
-		rec := httptest.NewRecorder()
-		h.Rank(rec, req)
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("body %s: expected 400, got %d", body, rec.Code)
-		}
-	}
-}
-
-func TestHandlerRankInvalidBody(t *testing.T) {
-	h := &Handler{}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/rank", strings.NewReader("not json"))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
+		"/v1/namespaces//rankings", strings.NewReader(`{"subject_id":"u1","candidates":["p1"]}`))
 	rec := httptest.NewRecorder()
 	h.Rank(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -211,17 +199,55 @@ func TestHandlerRankInvalidBody(t *testing.T) {
 	}
 }
 
-func TestHandlerRankMaxCandidates(t *testing.T) {
+func TestRank_MissingSubjectID(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, `{"candidates":["p1"]}`)
+	rec := httptest.NewRecorder()
+	h.Rank(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestRank_InvalidBody(t *testing.T) {
 	h := &Handler{}
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, "not json")
+	rec := httptest.NewRecorder()
+	h.Rank(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestRank_EmptyCandidates(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, `{"subject_id":"u1","candidates":[]}`)
+	rec := httptest.NewRecorder()
+	h.Rank(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestRank_TooManyCandidates(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
 	candidates := make([]string, maxCandidates+1)
 	for i := range candidates {
 		candidates[i] = fmt.Sprintf("item_%d", i)
 	}
-	body, err := json.Marshal(RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: candidates})
+	body, err := json.Marshal(RankRequest{SubjectID: "u1", Candidates: candidates})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/rank", bytes.NewReader(body))
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, "")
+	req.Body = http.NoBody // override; we'll set below via bytes.NewReader
+	req = newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, "")
+	req.Body = httpReader(body)
 	rec := httptest.NewRecorder()
 	h.Rank(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -229,46 +255,31 @@ func TestHandlerRankMaxCandidates(t *testing.T) {
 	}
 }
 
-func TestHandlerRankUnauthorized(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{},
-		validateKey: func(_ context.Context, _, _ string) bool { return false },
-	}
-	body, err := json.Marshal(RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: []string{"p1"}})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/rank", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer wrong")
-	rec := httptest.NewRecorder()
-	h.Rank(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", rec.Code)
-	}
-}
-
-func TestHandlerRankSuccess(t *testing.T) {
-	h := &Handler{
-		service: &fakeSvc{
-			rankResp: &RankResponse{
-				SubjectID: "u1", Namespace: "ns",
-				Items:  []RankedItem{{ObjectID: "p1", Score: 0.9}},
-				Source: SourceHybridRank, GeneratedAt: time.Now(),
-			},
+func TestRank_Success(t *testing.T) {
+	fake := &fakeSvc{
+		rankResp: &RankResponse{
+			SubjectID: "u1", Namespace: "ns",
+			Items:  []RankedItem{{ObjectID: "p1", Score: 0.9, Rank: 1}},
+			Source: SourceHybridRank, GeneratedAt: time.Now(),
 		},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
 	}
-	body, err := json.Marshal(RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: []string{"p1", "p2"}})
+	h := &Handler{service: fake}
+
+	body, err := json.Marshal(RankRequest{SubjectID: "u1", Candidates: []string{"p1", "p2"}})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/rank", bytes.NewReader(body))
-	req.Header.Set("Authorization", "Bearer valid-token")
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, "")
+	req.Body = httpReader(body)
 	rec := httptest.NewRecorder()
 	h.Rank(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", rec.Code)
+	}
+	if fake.rankNamespace != "ns" {
+		t.Errorf("service did not receive path namespace, got %q", fake.rankNamespace)
 	}
 	var resp RankResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
@@ -279,57 +290,40 @@ func TestHandlerRankSuccess(t *testing.T) {
 	}
 }
 
-func TestHandlerRankByNamespaceSuccess(t *testing.T) {
-	h := &Handler{
-		service: &fakeSvc{
-			rankResp: &RankResponse{
-				SubjectID: "u1", Namespace: "ns",
-				Items:  []RankedItem{{ObjectID: "p1", Score: 0.9}},
-				Source: SourceHybridRank, GeneratedAt: time.Now(),
-			},
+// Body field "namespace" is silently ignored — path is the single source of truth.
+func TestRank_BodyNamespaceIgnored(t *testing.T) {
+	fake := &fakeSvc{
+		rankResp: &RankResponse{
+			SubjectID: "u1", Namespace: "ns-from-path",
+			Items:  []RankedItem{{ObjectID: "p1", Score: 0.5, Rank: 1}},
+			Source: SourceHybridRank, GeneratedAt: time.Now(),
 		},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
 	}
-	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rank", map[string]string{"ns": "ns"}, `{"subject_id":"u1","candidates":["p1"]}`)
-	req.Header.Set("Authorization", "Bearer valid-token")
-	rec := httptest.NewRecorder()
+	h := &Handler{service: fake}
 
-	h.RankByNamespace(rec, req)
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns-from-path/rankings",
+		map[string]string{"ns": "ns-from-path"},
+		`{"namespace":"WRONG-WILL-BE-IGNORED","subject_id":"u1","candidates":["p1"]}`)
+	rec := httptest.NewRecorder()
+	h.Rank(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", rec.Code)
+		t.Errorf("expected 200, got %d", rec.Code)
 	}
-	var resp RankResponse
-	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if resp.Namespace != "ns" {
-		t.Fatalf("namespace: got %q", resp.Namespace)
+	if fake.rankNamespace != "ns-from-path" {
+		t.Errorf("service must receive path namespace, got %q", fake.rankNamespace)
 	}
 }
 
-func TestHandlerRankByNamespaceMismatch(t *testing.T) {
-	h := &Handler{}
-	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns-a/rank", map[string]string{"ns": "ns-a"}, `{"namespace":"ns-b","subject_id":"u1","candidates":["p1"]}`)
-	rec := httptest.NewRecorder()
-
-	h.RankByNamespace(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
-	}
-	if got := decodeErrorResponse(t, rec); got.Error.Code != "namespace_mismatch" {
-		t.Fatalf("unexpected error code: %+v", got)
-	}
-}
-
-func TestHandlerRankServiceError(t *testing.T) {
+func TestRank_ServiceError(t *testing.T) {
 	h := &Handler{service: &fakeSvc{rankErr: errors.New("qdrant error")}}
-	body, err := json.Marshal(RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: []string{"p1"}})
+	body, err := json.Marshal(RankRequest{SubjectID: "u1", Candidates: []string{"p1"}})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/v1/rank", bytes.NewReader(body))
+	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
+		map[string]string{"ns": "ns"}, "")
+	req.Body = httpReader(body)
 	rec := httptest.NewRecorder()
 	h.Rank(rec, req)
 	if rec.Code != http.StatusInternalServerError {
@@ -337,11 +331,12 @@ func TestHandlerRankServiceError(t *testing.T) {
 	}
 }
 
-// ─── GET /v1/trending/{ns} ───────────────────────────────────────────────────
+// ─── GET /v1/namespaces/{ns}/trending ──────────────────────────────────────
 
-func TestGetTrendingMissingNs(t *testing.T) {
+func TestGetTrending_MissingNs(t *testing.T) {
 	h := &Handler{}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/trending/", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
+		"/v1/namespaces//trending", http.NoBody)
 	rec := httptest.NewRecorder()
 	h.GetTrending(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -349,9 +344,10 @@ func TestGetTrendingMissingNs(t *testing.T) {
 	}
 }
 
-func TestGetTrendingInvalidLimit(t *testing.T) {
+func TestGetTrending_InvalidLimit(t *testing.T) {
 	h := &Handler{}
-	req := newChiRequest(http.MethodGet, "/v1/trending/ns?limit=0", map[string]string{"ns": "ns"}, "")
+	req := newChiRequest(http.MethodGet, "/v1/namespaces/ns/trending?limit=0",
+		map[string]string{"ns": "ns"}, "")
 	rec := httptest.NewRecorder()
 	h.GetTrending(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -359,9 +355,10 @@ func TestGetTrendingInvalidLimit(t *testing.T) {
 	}
 }
 
-func TestGetTrendingInvalidOffset(t *testing.T) {
+func TestGetTrending_InvalidOffset(t *testing.T) {
 	h := &Handler{}
-	req := newChiRequest(http.MethodGet, "/v1/trending/ns?offset=-1", map[string]string{"ns": "ns"}, "")
+	req := newChiRequest(http.MethodGet, "/v1/namespaces/ns/trending?offset=-1",
+		map[string]string{"ns": "ns"}, "")
 	rec := httptest.NewRecorder()
 	h.GetTrending(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -369,7 +366,7 @@ func TestGetTrendingInvalidOffset(t *testing.T) {
 	}
 }
 
-func TestGetTrendingSuccess(t *testing.T) {
+func TestGetTrending_Success(t *testing.T) {
 	h := &Handler{service: &fakeSvc{
 		trendingResp: &TrendingResponse{
 			Namespace:   "ns",
@@ -378,7 +375,8 @@ func TestGetTrendingSuccess(t *testing.T) {
 			GeneratedAt: time.Now(),
 		},
 	}}
-	req := newChiRequest(http.MethodGet, "/v1/trending/ns", map[string]string{"ns": "ns"}, "")
+	req := newChiRequest(http.MethodGet, "/v1/namespaces/ns/trending",
+		map[string]string{"ns": "ns"}, "")
 	rec := httptest.NewRecorder()
 	h.GetTrending(rec, req)
 
@@ -394,12 +392,12 @@ func TestGetTrendingSuccess(t *testing.T) {
 	}
 }
 
-// ─── POST /v1/{objects|subjects}/{ns}/{id}/embedding ─────────────────────────
+// ─── PUT /v1/namespaces/{ns}/{objects|subjects}/{id}/embedding ───────────
 
-func TestStoreEmbeddingMissingVector(t *testing.T) {
+func TestStoreEmbedding_MissingVector(t *testing.T) {
 	h := &Handler{}
 	for _, body := range []string{"", "not-json", `{"vector":[]}`} {
-		req := newChiRequest(http.MethodPost, "/v1/objects/ns/obj1/embedding",
+		req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 			map[string]string{"ns": "ns", "id": "obj1"}, body)
 		rec := httptest.NewRecorder()
 		h.StoreObjectEmbedding(rec, req)
@@ -409,25 +407,10 @@ func TestStoreEmbeddingMissingVector(t *testing.T) {
 	}
 }
 
-func TestStoreEmbeddingUnauthorized(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{},
-		validateKey: func(_ context.Context, _, _ string) bool { return false },
-	}
-	req := newChiRequest(http.MethodPost, "/v1/objects/ns/obj1/embedding",
-		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
-	req.Header.Set("Authorization", "Bearer wrong")
-	rec := httptest.NewRecorder()
-	h.StoreObjectEmbedding(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", rec.Code)
-	}
-}
-
-func TestStoreEmbeddingMissingURLParams(t *testing.T) {
+func TestStoreEmbedding_MissingURLParams(t *testing.T) {
 	h := &Handler{}
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
-		"/v1/objects//embedding", strings.NewReader(`{"vector":[0.1]}`))
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut,
+		"/v1/namespaces/ns/objects//embedding", strings.NewReader(`{"vector":[0.1]}`))
 	rec := httptest.NewRecorder()
 	h.StoreObjectEmbedding(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -435,12 +418,11 @@ func TestStoreEmbeddingMissingURLParams(t *testing.T) {
 	}
 }
 
-func TestStoreEmbeddingDimMismatch_Returns400(t *testing.T) {
+func TestStoreEmbedding_DimMismatch_Returns400(t *testing.T) {
 	h := &Handler{
-		service:     &fakeSvc{storeErr: fmt.Errorf("embedding dimension mismatch: got 128, want 64")},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
+		service: &fakeSvc{storeErr: fmt.Errorf("embedding dimension mismatch: got 128, want 64")},
 	}
-	req := newChiRequest(http.MethodPost, "/v1/objects/ns/obj1/embedding",
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
 	rec := httptest.NewRecorder()
 	h.StoreObjectEmbedding(rec, req)
@@ -449,12 +431,9 @@ func TestStoreEmbeddingDimMismatch_Returns400(t *testing.T) {
 	}
 }
 
-func TestStoreEmbeddingServiceError_Returns500(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{storeErr: errors.New("qdrant error")},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
-	}
-	req := newChiRequest(http.MethodPost, "/v1/objects/ns/obj1/embedding",
+func TestStoreEmbedding_ServiceError_Returns500(t *testing.T) {
+	h := &Handler{service: &fakeSvc{storeErr: errors.New("qdrant error")}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
 	rec := httptest.NewRecorder()
 	h.StoreObjectEmbedding(rec, req)
@@ -463,12 +442,9 @@ func TestStoreEmbeddingServiceError_Returns500(t *testing.T) {
 	}
 }
 
-func TestStoreEmbeddingSuccess(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{storeErr: nil},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
-	}
-	req := newChiRequest(http.MethodPost, "/v1/objects/ns/obj1/embedding",
+func TestStoreObjectEmbeddingHandler_Success(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2,0.3]}`)
 	rec := httptest.NewRecorder()
 	h.StoreObjectEmbedding(rec, req)
@@ -477,12 +453,9 @@ func TestStoreEmbeddingSuccess(t *testing.T) {
 	}
 }
 
-func TestStoreSubjectEmbeddingSuccess(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{storeErr: nil},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
-	}
-	req := newChiRequest(http.MethodPost, "/v1/subjects/ns/sub1/embedding",
+func TestStoreSubjectEmbeddingHandler_Success(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/subjects/sub1/embedding",
 		map[string]string{"ns": "ns", "id": "sub1"}, `{"vector":[0.1,0.2,0.3]}`)
 	rec := httptest.NewRecorder()
 	h.StoreSubjectEmbedding(rec, req)
@@ -491,12 +464,9 @@ func TestStoreSubjectEmbeddingSuccess(t *testing.T) {
 	}
 }
 
-func TestStoreSubjectEmbeddingServiceError(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{storeErr: errors.New("qdrant error")},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
-	}
-	req := newChiRequest(http.MethodPost, "/v1/subjects/ns/sub1/embedding",
+func TestStoreSubjectEmbeddingHandler_ServiceError(t *testing.T) {
+	h := &Handler{service: &fakeSvc{storeErr: errors.New("qdrant error")}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/subjects/sub1/embedding",
 		map[string]string{"ns": "ns", "id": "sub1"}, `{"vector":[0.1,0.2]}`)
 	rec := httptest.NewRecorder()
 	h.StoreSubjectEmbedding(rec, req)
@@ -505,12 +475,12 @@ func TestStoreSubjectEmbeddingServiceError(t *testing.T) {
 	}
 }
 
-// ─── DELETE /v1/objects/{ns}/{id} ────────────────────────────────────────────
+// ─── DELETE /v1/namespaces/{ns}/objects/{id} ──────────────────────────────
 
-func TestDeleteObjectMissingParams(t *testing.T) {
+func TestDeleteObject_MissingParams(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete,
-		"/v1/objects//obj1", http.NoBody)
+		"/v1/namespaces/ns/objects/", http.NoBody)
 	rec := httptest.NewRecorder()
 	h.DeleteObject(rec, req)
 	if rec.Code != http.StatusBadRequest {
@@ -518,27 +488,9 @@ func TestDeleteObjectMissingParams(t *testing.T) {
 	}
 }
 
-func TestDeleteObjectUnauthorized(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{},
-		validateKey: func(_ context.Context, _, _ string) bool { return false },
-	}
-	req := newChiRequest(http.MethodDelete, "/v1/objects/ns/post_1",
-		map[string]string{"ns": "ns", "id": "post_1"}, "")
-	req.Header.Set("Authorization", "Bearer wrong")
-	rec := httptest.NewRecorder()
-	h.DeleteObject(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401, got %d", rec.Code)
-	}
-}
-
-func TestDeleteObjectSuccess(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{deleteErr: nil},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
-	}
-	req := newChiRequest(http.MethodDelete, "/v1/objects/ns/post_1",
+func TestDeleteObject_Success(t *testing.T) {
+	h := &Handler{service: &fakeSvc{}}
+	req := newChiRequest(http.MethodDelete, "/v1/namespaces/ns/objects/post_1",
 		map[string]string{"ns": "ns", "id": "post_1"}, "")
 	rec := httptest.NewRecorder()
 	h.DeleteObject(rec, req)
@@ -547,12 +499,9 @@ func TestDeleteObjectSuccess(t *testing.T) {
 	}
 }
 
-func TestDeleteObjectServiceError(t *testing.T) {
-	h := &Handler{
-		service:     &fakeSvc{deleteErr: errors.New("qdrant error")},
-		validateKey: func(_ context.Context, _, _ string) bool { return true },
-	}
-	req := newChiRequest(http.MethodDelete, "/v1/objects/ns/post_1",
+func TestDeleteObject_ServiceError(t *testing.T) {
+	h := &Handler{service: &fakeSvc{deleteErr: errors.New("qdrant error")}}
+	req := newChiRequest(http.MethodDelete, "/v1/namespaces/ns/objects/post_1",
 		map[string]string{"ns": "ns", "id": "post_1"}, "")
 	rec := httptest.NewRecorder()
 	h.DeleteObject(rec, req)
@@ -578,3 +527,19 @@ func TestIsDimMismatch(t *testing.T) {
 		}
 	}
 }
+
+// httpReader wraps bytes.NewReader so the test can override req.Body with a
+// readable + closeable reader after the request has been constructed via the
+// newChiRequest helper.
+func httpReader(b []byte) interface {
+	Read(p []byte) (int, error)
+	Close() error
+} {
+	return readCloser{Reader: bytes.NewReader(b)}
+}
+
+type readCloser struct {
+	*bytes.Reader
+}
+
+func (readCloser) Close() error { return nil }

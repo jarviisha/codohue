@@ -554,11 +554,10 @@ func TestRankFallback(t *testing.T) {
 	svc := &Service{}
 	req := &RankRequest{
 		SubjectID:  "user_a",
-		Namespace:  "ns_feed",
 		Candidates: []string{"post_1", "post_2", "post_3"},
 	}
 
-	resp := svc.rankFallback(req)
+	resp := svc.rankFallback(req, "ns_feed")
 
 	if resp.Source != SourceHybridRank {
 		t.Errorf("source = %q, want %q", resp.Source, SourceHybridRank)
@@ -582,7 +581,7 @@ func TestRankFallback(t *testing.T) {
 func TestRankFallbackIsolation(t *testing.T) {
 	svc := &Service{}
 	req := &RankRequest{Candidates: []string{"post_x", "post_y"}}
-	resp := svc.rankFallback(req)
+	resp := svc.rankFallback(req, "ns")
 	resp.Items[0] = RankedItem{ObjectID: "mutated"}
 	if req.Candidates[0] == "mutated" {
 		t.Error("rankFallback shares backing array with Candidates")
@@ -931,7 +930,7 @@ func TestRank_UsesSearchResults(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: []string{"obj-1", "obj-2"}})
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1", "obj-2"}}, "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -942,7 +941,7 @@ func TestRank_UsesSearchResults(t *testing.T) {
 
 func TestRank_FallsBackWhenSubjectVectorMissing(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: []string{"obj-1", "obj-2"}})
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1", "obj-2"}}, "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -960,7 +959,7 @@ func TestRank_FallsBackWhenAllCandidateIDsFail(t *testing.T) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
 
-	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Namespace: "ns", Candidates: []string{"obj-1", "obj-2"}})
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1", "obj-2"}}, "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

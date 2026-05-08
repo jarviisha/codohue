@@ -45,7 +45,7 @@ export default function NamespacePicker() {
     }
   }, [open])
 
-  const activeEntry = data?.namespaces.find(n => n.config.namespace === namespace)
+  const activeEntry = data?.items.find(n => n.config.namespace === namespace)
   const activeStatus = activeEntry?.status
 
   function handleSelect(ns: string) {
@@ -102,13 +102,13 @@ export default function NamespacePicker() {
             <p className="m-0 px-3 py-2.5 text-xs text-muted">Loading...</p>
           )}
 
-          {!isLoading && (!data || data.namespaces.length === 0) && (
+          {!isLoading && (!data || data.items.length === 0) && (
             <p className="m-0 px-3 py-2.5 text-xs text-muted">No namespaces yet.</p>
           )}
 
-          {data && data.namespaces.length > 0 && (
+          {data && data.items.length > 0 && (
             <ul className="m-0 max-h-60 list-none overflow-y-auto p-1">
-              {data.namespaces.map(({ config, status }) => {
+              {data.items.map(({ config, status }) => {
                 const isActive = config.namespace === namespace
                 return (
                   <li key={config.namespace} className="m-0 p-0">

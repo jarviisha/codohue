@@ -10,7 +10,7 @@ export function useBatchRuns(namespace?: string, page = 0, status = '') {
     queryKey: queryKeys.batchRuns.list(namespace, offset, status),
     queryFn: () => adminApi.listBatchRuns(namespace, BATCH_PAGE_SIZE, offset, status),
     refetchInterval: (query) => {
-      const runs = query.state.data?.runs ?? []
+      const runs = query.state.data?.items ?? []
       return runs.some(r => !r.completed_at) ? 5_000 : 30_000
     },
   })

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
@@ -75,35 +77,58 @@ func run() error {
 	job := compute.NewJob(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, 5)
 
 	repo := admin.NewRepository(db)
-	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient, job)
+	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
+	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient, job, nsAdapter)
 	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			httpapi.WriteError(w, http.StatusNotFound, "not_found", "not found")
+			return
+		}
+		httpapi.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+	})
 
-	// Auth routes (public)
-	r.Post("/api/auth/login", h.Login)
-	r.Delete("/api/auth/logout", h.Logout)
+	// Auth (sessions as a resource)
+	r.Post("/api/v1/auth/sessions", h.CreateSession)
 
 	// Protected admin API routes
 	r.Group(func(r chi.Router) {
 		r.Use(admin.RequireSession(cfg.RecommenderAPIKey))
+		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
+
 		r.Get("/api/admin/v1/health", h.GetHealth)
+
+		// Namespaces
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
-		r.Get("/api/admin/v1/namespaces/overview", h.GetNamespacesOverview)
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
+
+		// Batch runs
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
-		r.Post("/api/admin/v1/recommend/debug", h.DebugRecommend)
-		r.Post("/api/admin/v1/demo", h.SeedDemoDataset)
-		r.Delete("/api/admin/v1/demo", h.ClearDemoDataset)
-		r.Get("/api/admin/v1/trending/{ns}", h.GetTrending)
-		r.Get("/api/admin/v1/subjects/{ns}/{id}/profile", h.GetSubjectProfile)
-		r.Get("/api/admin/v1/namespaces/{ns}/qdrant-stats", h.GetQdrantStats)
-		r.Post("/api/admin/v1/namespaces/{ns}/batch-runs/trigger", h.TriggerBatch)
+		r.Get("/api/admin/v1/namespaces/{ns}/batch-runs", h.GetBatchRuns)
+		r.Post("/api/admin/v1/namespaces/{ns}/batch-runs", h.CreateBatchRun)
+
+		// Qdrant inspection
+		r.Get("/api/admin/v1/namespaces/{ns}/qdrant", h.GetQdrant)
+
+		// Subjects
+		r.Get("/api/admin/v1/namespaces/{ns}/subjects/{id}/profile", h.GetSubjectProfile)
+		r.Get("/api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations", h.GetSubjectRecommendations)
+
+		// Trending
+		r.Get("/api/admin/v1/namespaces/{ns}/trending", h.GetTrending)
+
+		// Events
 		r.Get("/api/admin/v1/namespaces/{ns}/events", h.GetRecentEvents)
 		r.Post("/api/admin/v1/namespaces/{ns}/events", h.InjectEvent)
+
+		// Demo data
+		r.Post("/api/admin/v1/demo-data", h.CreateDemoData)
+		r.Delete("/api/admin/v1/demo-data", h.DeleteDemoData)
 	})
 
 	// Static file serving — React SPA embedded in the binary

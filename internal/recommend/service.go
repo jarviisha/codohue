@@ -907,11 +907,11 @@ func blendItems(popular, cf []string, popularRatio float64, limit int) []string 
 // Rank scores a list of candidate items for a subject using sparse CF vectors
 // and returns them in descending score order. If the subject has no interaction
 // history, candidates are returned in their original order.
-func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, error) {
+func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) (*RankResponse, error) {
 	if len(req.Candidates) == 0 {
 		return &RankResponse{
 			SubjectID:   req.SubjectID,
-			Namespace:   req.Namespace,
+			Namespace:   namespace,
 			Items:       []RankedItem{},
 			Source:      SourceHybridRank,
 			Total:       0,
@@ -919,26 +919,26 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 		}, nil
 	}
 
-	cfg, err := s.nsConfigSvc.Get(ctx, req.Namespace)
+	cfg, err := s.nsConfigSvc.Get(ctx, namespace)
 	if err != nil {
-		slog.Error("rank: get ns config failed", "namespace", req.Namespace, "error", err)
+		slog.Error("rank: get ns config failed", "namespace", namespace, "error", err)
 	}
 
-	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, req.Namespace)
+	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, namespace)
 	if err != nil {
-		slog.Error("rank: get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		return s.rankFallback(req), nil
+		slog.Error("rank: get subject numeric id failed", "namespace", namespace, "subject_id", req.SubjectID, "error", err)
+		return s.rankFallback(req, namespace), nil
 	}
 
-	subjectVec, err := s.fetchSubjectVecFn(ctx, req.Namespace, subjectNumID)
+	subjectVec, err := s.fetchSubjectVecFn(ctx, namespace, subjectNumID)
 	if err != nil || subjectVec == nil {
-		slog.Info("rank: no subject vector, returning original order", "namespace", req.Namespace, "subject_id", req.SubjectID)
-		return s.rankFallback(req), nil
+		slog.Info("rank: no subject vector, returning original order", "namespace", namespace, "subject_id", req.SubjectID)
+		return s.rankFallback(req, namespace), nil
 	}
 
 	ids := make([]*qdrant.PointId, 0, len(req.Candidates))
 	for _, candidateID := range req.Candidates {
-		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, candidateID, req.Namespace)
+		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, candidateID, namespace)
 		if err != nil {
 			slog.Error("rank: get object numeric id failed", "object_id", candidateID, "error", err)
 			continue
@@ -947,7 +947,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 	}
 
 	if len(ids) == 0 {
-		return s.rankFallback(req), nil
+		return s.rankFallback(req, namespace), nil
 	}
 
 	filter := &qdrant.Filter{
@@ -956,10 +956,10 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 		},
 	}
 
-	results, err := s.searchObjectsFn(ctx, req.Namespace, subjectVec, filter, uint64(len(ids)))
+	results, err := s.searchObjectsFn(ctx, namespace, subjectVec, filter, uint64(len(ids)))
 	if err != nil {
-		slog.Error("rank: search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		return s.rankFallback(req), nil
+		slog.Error("rank: search objects failed", "namespace", namespace, "subject_id", req.SubjectID, "error", err)
+		return s.rankFallback(req, namespace), nil
 	}
 
 	gamma := defaultGamma
@@ -973,10 +973,10 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 		ranked[i] = RankedItem{ObjectID: s.objectID, Score: s.finalScore, Rank: i + 1}
 	}
 
-	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybridRank).Inc()
+	metrics.RecommendRequests.WithLabelValues(namespace, SourceHybridRank).Inc()
 	return &RankResponse{
 		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
+		Namespace:   namespace,
 		Items:       ranked,
 		Source:      SourceHybridRank,
 		Total:       len(ranked),
@@ -986,14 +986,14 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest) (*RankResponse, er
 
 // rankFallback returns candidates in their original order when CF scoring is unavailable.
 // Score is set to 0 to signal to callers that no relevance information is available.
-func (s *Service) rankFallback(req *RankRequest) *RankResponse {
+func (s *Service) rankFallback(req *RankRequest, namespace string) *RankResponse {
 	items := make([]RankedItem, len(req.Candidates))
 	for i, c := range req.Candidates {
 		items[i] = RankedItem{ObjectID: c, Score: 0, Rank: i + 1}
 	}
 	return &RankResponse{
 		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
+		Namespace:   namespace,
 		Items:       items,
 		Source:      SourceHybridRank,
 		Total:       len(items),

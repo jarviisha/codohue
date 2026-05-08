@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 type fakeHTTPProcessor struct {
@@ -40,7 +38,7 @@ func TestHandlerIngestSuccess(t *testing.T) {
 	h := &Handler{service: proc}
 	rec := httptest.NewRecorder()
 
-	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW","timestamp":"2026-04-21T00:00:00Z"}`, "ns"))
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d", rec.Code)
@@ -50,21 +48,20 @@ func TestHandlerIngestSuccess(t *testing.T) {
 	}
 }
 
-func TestHandlerIngestNamespaceMismatch(t *testing.T) {
-	h := &Handler{service: &fakeHTTPProcessor{}}
+// The path namespace is the single source of truth — any namespace value in the
+// body is silently ignored.
+func TestHandlerIngestBodyNamespaceIgnored(t *testing.T) {
+	proc := &fakeHTTPProcessor{}
+	h := &Handler{service: proc}
 	rec := httptest.NewRecorder()
 
-	h.Ingest(rec, newIngestRequest(`{"namespace":"other","subject_id":"u1","object_id":"o1","action":"VIEW","timestamp":"2026-04-21T00:00:00Z"}`, "ns"))
+	h.Ingest(rec, newIngestRequest(`{"namespace":"WRONG","subject_id":"u1","object_id":"o1","action":"VIEW","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rec.Code)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202 (body namespace ignored), got %d", rec.Code)
 	}
-	var got httpapi.ErrorResponse
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatalf("decode error response: %v", err)
-	}
-	if got.Error.Code != "namespace_mismatch" {
-		t.Fatalf("unexpected error code: %+v", got)
+	if proc.lastPayload == nil || proc.lastPayload.Namespace != "ns" {
+		t.Fatalf("path namespace must override body, got %+v", proc.lastPayload)
 	}
 }
 
@@ -72,7 +69,7 @@ func TestHandlerIngestClientError(t *testing.T) {
 	h := &Handler{service: &fakeHTTPProcessor{err: fmt.Errorf("resolve weight: %w", ErrUnknownAction)}}
 	rec := httptest.NewRecorder()
 
-	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"UNKNOWN","timestamp":"2026-04-21T00:00:00Z"}`, "ns"))
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"UNKNOWN","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)

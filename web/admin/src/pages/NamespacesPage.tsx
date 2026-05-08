@@ -18,8 +18,8 @@ export default function NamespacesPage() {
   const seedDemo = useSeedDemoDataset()
   const clearDemo = useClearDemoDataset()
   const navigate = useNavigate()
-  const demoExists = data?.namespaces.some(h => h.config.namespace === 'demo') ?? false
-  const hasNamespaces = (data?.namespaces.length ?? 0) > 0
+  const demoExists = data?.items.some(h => h.config.namespace === 'demo') ?? false
+  const hasNamespaces = (data?.items.length ?? 0) > 0
 
   function handleSelect(ns: string) {
     setNamespace(ns)
@@ -113,7 +113,7 @@ export default function NamespacesPage() {
       {error && <ErrorBanner message="Failed to load namespaces." />}
       {isLoading && <LoadingState />}
 
-      {data && data.namespaces.length === 0 && (
+      {data && data.items.length === 0 && (
         <Panel bodyClassName="flex flex-col gap-5">
           <div className="max-w-2xl">
             <h2 className="m-0 text-lg font-semibold text-primary">No namespaces yet</h2>
@@ -168,11 +168,11 @@ export default function NamespacesPage() {
         </Panel>
       )}
 
-      {data && data.namespaces.length > 0 && (
+      {data && data.items.length > 0 && (
         <>
-          <SummaryBar namespaces={data.namespaces} />
+          <SummaryBar namespaces={data.items} />
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {data.namespaces.map(h => (
+            {data.items.map(h => (
               <NamespaceCard
                 key={h.config.namespace}
                 health={h}

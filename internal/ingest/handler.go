@@ -26,6 +26,8 @@ func NewHandler(service *Service) *Handler {
 }
 
 // Ingest handles POST /v1/namespaces/{ns}/events and persists a single event.
+// The namespace is taken exclusively from the URL path; any namespace value in
+// the request body is silently ignored (the path is the single source of truth).
 func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	namespace := chi.URLParam(r, "ns")
 	if namespace == "" {
@@ -33,17 +35,20 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload EventPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	var req HTTPIngestRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
 
-	if payload.Namespace == "" {
-		payload.Namespace = namespace
-	} else if payload.Namespace != namespace {
-		httpapi.WriteError(w, http.StatusBadRequest, "namespace_mismatch", "namespace in path and body must match")
-		return
+	payload := EventPayload{
+		Namespace:       namespace,
+		SubjectID:       req.SubjectID,
+		ObjectID:        req.ObjectID,
+		Action:          req.Action,
+		Timestamp:       req.OccurredAt,
+		ObjectCreatedAt: req.ObjectCreatedAt,
+		Metadata:        req.Metadata,
 	}
 
 	if err := h.service.Process(r.Context(), &payload); err != nil {

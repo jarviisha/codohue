@@ -252,11 +252,20 @@ migrate -path migrations -database "$DATABASE_URL" up
 
 ## Namespace Setup
 
-Before calling namespace-scoped endpoints, create a namespace configuration with the admin API key from `RECOMMENDER_API_KEY`.
+Before calling namespace-scoped endpoints, create a namespace configuration through the admin server with the admin API key from `RECOMMENDER_API_KEY`.
+
+Create an admin session:
 
 ```bash
-curl -X PUT http://localhost:2001/v1/config/namespaces/demo \
-  -H "Authorization: Bearer dev-secret-key" \
+curl -c cookies.txt -X POST http://localhost:2002/api/v1/auth/sessions \
+  -H "Content-Type: application/json" \
+  -d '{"api_key":"dev-secret-key"}'
+```
+
+Then upsert the namespace:
+
+```bash
+curl -b cookies.txt -X PUT http://localhost:2002/api/admin/v1/namespaces/demo \
   -H "Content-Type: application/json" \
   -d '{
     "action_weights": {"VIEW": 1, "LIKE": 5, "SHARE": 10},
@@ -305,7 +314,7 @@ For client integrations that do not want direct Redis access, Codohue also expos
 POST /v1/namespaces/{ns}/events
 ```
 
-with the same JSON payload shape.
+with `occurred_at` instead of the Redis payload's `timestamp`, and without `namespace`; the namespace is supplied by the URL path.
 
 Default built-in actions in the ingest layer:
 
@@ -325,32 +334,39 @@ Health and diagnostics:
 - `GET /healthz`
 - `GET /metrics`
 
-Admin route:
+Admin routes:
 
-- `PUT /v1/config/namespaces/{namespace}`
+- `POST /api/v1/auth/sessions`
+- `DELETE /api/v1/auth/sessions/current`
+- `GET /api/admin/v1/health`
+- `GET /api/admin/v1/namespaces`
+- `GET /api/admin/v1/namespaces/{ns}`
+- `PUT /api/admin/v1/namespaces/{ns}`
+- `GET /api/admin/v1/batch-runs`
+- `GET /api/admin/v1/namespaces/{ns}/batch-runs`
+- `POST /api/admin/v1/namespaces/{ns}/batch-runs`
+- `GET /api/admin/v1/namespaces/{ns}/qdrant`
+- `GET /api/admin/v1/namespaces/{ns}/trending`
+- `GET /api/admin/v1/namespaces/{ns}/events`
+- `POST /api/admin/v1/namespaces/{ns}/events`
+- `GET /api/admin/v1/namespaces/{ns}/subjects/{id}/profile`
+- `GET /api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations`
+- `POST /api/admin/v1/demo-data`
+- `DELETE /api/admin/v1/demo-data`
 
 Namespace routes:
 
-- `GET /v1/recommendations?subject_id=...&namespace=...`
-- `POST /v1/rank`
-- `GET /v1/trending/{ns}`
-- `POST /v1/objects/{ns}/{id}/embedding`
-- `POST /v1/subjects/{ns}/{id}/embedding`
-- `DELETE /v1/objects/{ns}/{id}`
-
-Canonical namespace-path routes for new clients:
-
 - `POST /v1/namespaces/{ns}/events`
-- `GET /v1/namespaces/{ns}/recommendations?subject_id=...`
-- `POST /v1/namespaces/{ns}/rank`
+- `GET /v1/namespaces/{ns}/subjects/{id}/recommendations`
+- `POST /v1/namespaces/{ns}/rankings`
 - `GET /v1/namespaces/{ns}/trending`
-- `POST /v1/namespaces/{ns}/objects/{id}/embedding`
-- `POST /v1/namespaces/{ns}/subjects/{id}/embedding`
+- `PUT /v1/namespaces/{ns}/objects/{id}/embedding`
+- `PUT /v1/namespaces/{ns}/subjects/{id}/embedding`
 - `DELETE /v1/namespaces/{ns}/objects/{id}`
 
 Authentication model:
 
-- `PUT /v1/config/namespaces/{namespace}` uses the global admin key from `RECOMMENDER_API_KEY`
+- admin routes use a session cookie created with `RECOMMENDER_API_KEY`
 - namespace routes use the per-namespace API key returned when the namespace is created
 - `GET /ping` and `GET /healthz` are public
 

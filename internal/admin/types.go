@@ -67,9 +67,14 @@ type TrendingAdminEntry struct {
 	CacheTTLSec int     `json:"cache_ttl_sec"` // -1 = no expiry, -2 = key missing
 }
 
-// LoginRequest is the payload for POST /api/auth/login.
-type LoginRequest struct {
+// CreateSessionRequest is the payload for POST /api/v1/auth/sessions.
+type CreateSessionRequest struct {
 	APIKey string `json:"api_key"`
+}
+
+// CreateSessionResponse is the body of a successful session creation.
+type CreateSessionResponse struct {
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // NamespaceUpsertRequest is the payload for PUT /api/admin/v1/namespaces/{ns}.
@@ -95,12 +100,13 @@ type NamespaceUpsertResponse struct {
 	APIKey    *string   `json:"api_key,omitempty"` // non-nil only on first create
 }
 
-// RecommendDebugRequest is the payload for POST /api/admin/v1/recommend/debug.
-type RecommendDebugRequest struct {
-	Namespace string `json:"namespace"`
-	SubjectID string `json:"subject_id"`
-	Limit     int    `json:"limit"`
-	Offset    int    `json:"offset"`
+// RecommendDebug contains additional operator-only recommendation diagnostics.
+type RecommendDebug struct {
+	SparseNNZ        int     `json:"sparse_nnz"`
+	DenseScore       float64 `json:"dense_score"`
+	Alpha            float64 `json:"alpha"`
+	SeenItemsCount   int     `json:"seen_items_count"`
+	InteractionCount int     `json:"interaction_count"`
 }
 
 // RecommendDebugItem is a single item in the recommendation debug response.
@@ -110,8 +116,9 @@ type RecommendDebugItem struct {
 	Rank     int     `json:"rank"`
 }
 
-// RecommendDebugResponse is the response for POST /api/admin/v1/recommend/debug.
-type RecommendDebugResponse struct {
+// RecommendResponse is the body returned by the admin recommendations
+// sub-resource endpoint. The Debug block is populated only when debug=true.
+type RecommendResponse struct {
 	SubjectID   string               `json:"subject_id"`
 	Namespace   string               `json:"namespace"`
 	Items       []RecommendDebugItem `json:"items"`
@@ -120,6 +127,7 @@ type RecommendDebugResponse struct {
 	Offset      int                  `json:"offset"`
 	Total       int                  `json:"total"`
 	GeneratedAt time.Time            `json:"generated_at"`
+	Debug       *RecommendDebug      `json:"debug,omitempty"`
 }
 
 // BatchRunStats holds aggregate counts across all statuses for a namespace.
@@ -132,13 +140,13 @@ type BatchRunStats struct {
 
 // BatchRunsResponse is the response for GET /api/admin/v1/batch-runs.
 type BatchRunsResponse struct {
-	Runs   []BatchRunLog `json:"runs"`
+	Items  []BatchRunLog `json:"items"`
 	Total  int           `json:"total"`
 	Offset int           `json:"offset"`
 	Stats  BatchRunStats `json:"stats"`
 }
 
-// TrendingAdminResponse is the response for GET /api/admin/v1/trending/{ns}.
+// TrendingAdminResponse is the response for GET /api/admin/v1/namespaces/{ns}/trending.
 type TrendingAdminResponse struct {
 	Namespace   string               `json:"namespace"`
 	Items       []TrendingAdminEntry `json:"items"`
@@ -152,7 +160,8 @@ type TrendingAdminResponse struct {
 
 // NamespacesListResponse is the response for GET /api/admin/v1/namespaces.
 type NamespacesListResponse struct {
-	Namespaces []NamespaceConfig `json:"namespaces"`
+	Items []NamespaceConfig `json:"items"`
+	Total int               `json:"total"`
 }
 
 // NamespaceStatus is the computed health state for a namespace.
@@ -180,9 +189,10 @@ type NamespaceHealth struct {
 	LastRun         *BatchRunLog    `json:"last_run"`
 }
 
-// NamespacesOverviewResponse is the response for GET /api/admin/v1/namespaces/overview.
+// NamespacesOverviewResponse is the response for GET /api/admin/v1/namespaces?include=overview.
 type NamespacesOverviewResponse struct {
-	Namespaces []NamespaceHealth `json:"namespaces"`
+	Items []NamespaceHealth `json:"items"`
+	Total int               `json:"total"`
 }
 
 // HealthResponse is the response for GET /api/admin/v1/health.
@@ -193,26 +203,26 @@ type HealthResponse struct {
 	Status   string `json:"status"`
 }
 
-// QdrantCollectionStat holds point counts for one Qdrant collection.
-type QdrantCollectionStat struct {
-	Exists              bool   `json:"exists"`
-	PointsCount         uint64 `json:"points_count"`
-	IndexedVectorsCount uint64 `json:"indexed_vectors_count"`
+// QdrantCollection holds point counts for one Qdrant collection.
+type QdrantCollection struct {
+	Exists      bool   `json:"exists"`
+	PointsCount uint64 `json:"points_count"`
 }
 
-// QdrantStatsResponse is the response for GET /api/admin/v1/namespaces/{ns}/qdrant-stats.
-type QdrantStatsResponse struct {
-	Namespace   string                          `json:"namespace"`
-	Collections map[string]QdrantCollectionStat `json:"collections"`
+// QdrantInspectResponse is the response for GET /api/admin/v1/namespaces/{ns}/qdrant.
+type QdrantInspectResponse struct {
+	Subjects      QdrantCollection `json:"subjects"`
+	Objects       QdrantCollection `json:"objects"`
+	SubjectsDense QdrantCollection `json:"subjects_dense"`
+	ObjectsDense  QdrantCollection `json:"objects_dense"`
 }
 
-// TriggerBatchResponse is returned when an on-demand batch run completes.
-type TriggerBatchResponse struct {
-	BatchRunID int64  `json:"batch_run_id"`
-	Namespace  string `json:"namespace"`
-	StartedAt  string `json:"started_at"`
-	DurationMs int    `json:"duration_ms"`
-	Success    bool   `json:"success"`
+// BatchRunCreateResponse is returned when an on-demand batch run is accepted.
+type BatchRunCreateResponse struct {
+	ID        int64     `json:"id"`
+	Namespace string    `json:"namespace"`
+	Status    string    `json:"status"`
+	StartedAt time.Time `json:"started_at"`
 }
 
 // EventSummary is a single event row for the admin events list.
@@ -228,7 +238,7 @@ type EventSummary struct {
 
 // EventsListResponse wraps a page of events with pagination metadata.
 type EventsListResponse struct {
-	Events []EventSummary `json:"events"`
+	Items  []EventSummary `json:"items"`
 	Total  int            `json:"total"`
 	Limit  int            `json:"limit"`
 	Offset int            `json:"offset"`
@@ -257,7 +267,7 @@ type SubjectStats struct {
 	NumericID        *uint64 // nil if the subject has no Qdrant point yet
 }
 
-// SubjectProfileResponse is the response for GET /api/admin/v1/subjects/{ns}/{id}/profile.
+// SubjectProfileResponse is the response for GET /api/admin/v1/namespaces/{ns}/subjects/{id}/profile.
 type SubjectProfileResponse struct {
 	SubjectID        string   `json:"subject_id"`
 	Namespace        string   `json:"namespace"`

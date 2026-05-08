@@ -67,7 +67,7 @@ func TestCronRecompute_BuildsSparseDenseAndTrendingArtifacts(t *testing.T) {
 		return true, nil
 	})
 
-	resp := doRequest(t, http.MethodGet, baseURL+"/v1/trending/"+namespace, apiKey, nil)
+	resp := doRequest(t, http.MethodGet, baseURL+"/v1/namespaces/"+namespace+"/trending", apiKey, nil)
 	var body struct {
 		Namespace string `json:"namespace"`
 		Items     []struct {

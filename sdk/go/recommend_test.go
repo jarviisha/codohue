@@ -32,11 +32,8 @@ func TestNamespaceRecommend(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Errorf("method = %s", r.Method)
 		}
-		if r.URL.Path != "/v1/namespaces/feed/recommendations" {
+		if r.URL.Path != "/v1/namespaces/feed/subjects/user-1/recommendations" {
 			t.Errorf("path = %s", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("subject_id"); got != "user-1" {
-			t.Errorf("subject_id = %q", got)
 		}
 		if got := r.URL.Query().Get("limit"); got != "5" {
 			t.Errorf("limit = %q", got)

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
@@ -82,10 +81,32 @@ func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int,
 	return f.clearDeleted, f.clearErr
 }
 
+// ─── fake nsconfig upserter ──────────────────────────────────────────────────
+
+type fakeNSConfig struct {
+	gotNamespace string
+	gotReq       *NamespaceUpsertRequest
+	resp         *NamespaceUpsertResponse
+	err          error
+}
+
+func (f *fakeNSConfig) Upsert(_ context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error) {
+	f.gotNamespace = namespace
+	f.gotReq = req
+	if f.resp != nil {
+		return f.resp, f.err
+	}
+	return &NamespaceUpsertResponse{Namespace: namespace, UpdatedAt: time.Now()}, f.err
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func newTestService(repo adminRepo, apiURL, apiKey string) *Service {
-	return NewService(repo, apiURL, apiKey, nil, nil, nil)
+	return NewService(repo, apiURL, apiKey, nil, nil, nil, &fakeNSConfig{})
+}
+
+func newTestServiceWithNS(repo adminRepo, apiURL, apiKey string, ns nsConfigUpserter) *Service {
+	return NewService(repo, apiURL, apiKey, nil, nil, nil, ns)
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
@@ -150,26 +171,66 @@ func TestGetHealth_Service_Degraded(t *testing.T) {
 	}
 }
 
-func TestUpsertNamespace_Proxy(t *testing.T) {
-	apiKey := "test-key-proxy"
-	var receivedAuth string
-	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedAuth = r.Header.Get("Authorization")
-		json.NewEncoder(w).Encode(NamespaceUpsertResponse{ //nolint:errcheck // test helper; encoding errors are not meaningful here
+func TestUpsertNamespace_DelegatesToNSConfig(t *testing.T) {
+	lambda := 0.05
+	apiKey := "plaintext-once"
+	fakeNS := &fakeNSConfig{
+		resp: &NamespaceUpsertResponse{
 			Namespace: "new_ns",
 			UpdatedAt: time.Now(),
-		})
-	}))
-	defer fake.Close()
+			APIKey:    &apiKey,
+		},
+	}
+	svc := newTestServiceWithNS(&fakeRepo{}, "", "", fakeNS)
 
-	svc := newTestService(&fakeRepo{}, fake.URL, apiKey)
-	body := strings.NewReader(`{"lambda":0.05}`)
-	_, _, err := svc.UpsertNamespace(context.Background(), "new_ns", body)
+	req := &NamespaceUpsertRequest{Lambda: &lambda}
+	resp, status, err := svc.UpsertNamespace(context.Background(), "new_ns", req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if receivedAuth != "Bearer "+apiKey {
-		t.Errorf("expected Authorization header %q, got %q", "Bearer "+apiKey, receivedAuth)
+	if fakeNS.gotNamespace != "new_ns" {
+		t.Errorf("expected nsconfig to receive namespace %q, got %q", "new_ns", fakeNS.gotNamespace)
+	}
+	if fakeNS.gotReq == nil || fakeNS.gotReq.Lambda == nil || *fakeNS.gotReq.Lambda != lambda {
+		t.Errorf("nsconfig did not receive the same upsert request payload")
+	}
+	if status != http.StatusCreated {
+		t.Errorf("expected 201 (first-time create with api_key), got %d", status)
+	}
+	if resp == nil || resp.APIKey == nil || *resp.APIKey != apiKey {
+		t.Errorf("expected APIKey %q to be propagated, got %+v", apiKey, resp)
+	}
+}
+
+func TestUpsertNamespace_UpdateReturns200(t *testing.T) {
+	fakeNS := &fakeNSConfig{
+		resp: &NamespaceUpsertResponse{
+			Namespace: "existing_ns",
+			UpdatedAt: time.Now(),
+			// APIKey nil → existing namespace, no plaintext key returned
+		},
+	}
+	svc := newTestServiceWithNS(&fakeRepo{}, "", "", fakeNS)
+
+	_, status, err := svc.UpsertNamespace(context.Background(), "existing_ns", &NamespaceUpsertRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("expected 200 (update), got %d", status)
+	}
+}
+
+func TestUpsertNamespace_PropagatesError(t *testing.T) {
+	fakeNS := &fakeNSConfig{err: errors.New("db down")}
+	svc := newTestServiceWithNS(&fakeRepo{}, "", "", fakeNS)
+
+	_, status, err := svc.UpsertNamespace(context.Background(), "any", &NamespaceUpsertRequest{})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if status != http.StatusInternalServerError {
+		t.Errorf("expected 500 on upstream error, got %d", status)
 	}
 }
 
@@ -189,11 +250,7 @@ func TestDebugRecommend_Proxy(t *testing.T) {
 	defer fake.Close()
 
 	svc := newTestService(&fakeRepo{}, fake.URL, "test-key")
-	resp, _, err := svc.DebugRecommend(context.Background(), &RecommendDebugRequest{
-		Namespace: "ns1",
-		SubjectID: "user-1",
-		Limit:     10,
-	})
+	resp, _, err := svc.GetSubjectRecommendations(context.Background(), "ns1", "user-1", 10, 0, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -205,17 +262,14 @@ func TestDebugRecommend_Proxy(t *testing.T) {
 	}
 }
 
-func TestDebugRecommend_404Passthrough(t *testing.T) {
+func TestGetSubjectRecommendations_404Passthrough(t *testing.T) {
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":{"code":"not_found","message":"namespace not found"}}`, http.StatusNotFound)
 	}))
 	defer fake.Close()
 
 	svc := newTestService(&fakeRepo{}, fake.URL, "test-key")
-	_, statusCode, err := svc.DebugRecommend(context.Background(), &RecommendDebugRequest{
-		Namespace: "unknown",
-		SubjectID: "user-1",
-	})
+	_, statusCode, err := svc.GetSubjectRecommendations(context.Background(), "unknown", "user-1", 0, 0, false)
 	if err == nil {
 		t.Fatal("expected error for 404 response")
 	}
@@ -288,7 +342,7 @@ func TestGetTrending_WithTTL(t *testing.T) {
 func TestTriggerBatch_NamespaceNotFound(t *testing.T) {
 	repo := &fakeRepo{namespace: nil}
 	svc := newTestService(repo, "", "")
-	resp, err := svc.TriggerBatch(context.Background(), "missing")
+	resp, err := svc.CreateBatchRun(context.Background(), "missing")
 	if err != nil {
 		t.Fatalf("expected nil error for missing ns, got %v", err)
 	}
@@ -305,7 +359,7 @@ func TestTriggerBatch_ConcurrentLock(t *testing.T) {
 	svc.runningBatch.Store("ns1", true)
 	defer svc.runningBatch.Delete("ns1")
 
-	_, err := svc.TriggerBatch(context.Background(), "ns1")
+	_, err := svc.CreateBatchRun(context.Background(), "ns1")
 	if err == nil {
 		t.Fatal("expected errBatchRunning, got nil")
 	}

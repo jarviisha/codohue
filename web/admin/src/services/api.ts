@@ -54,9 +54,9 @@ export const api = {
 }
 
 export async function login(apiKey: string): Promise<void> {
-  await request('POST', '/api/auth/login', { api_key: apiKey }, { redirectOnUnauthorized: false })
+  await request('POST', '/api/v1/auth/sessions', { api_key: apiKey }, { redirectOnUnauthorized: false })
 }
 
 export async function logout(): Promise<void> {
-  await request('DELETE', '/api/auth/logout')
+  await request('DELETE', '/api/v1/auth/sessions/current')
 }

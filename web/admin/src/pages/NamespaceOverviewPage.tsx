@@ -1,6 +1,6 @@
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { useNamespacesOverview } from '../hooks/useNamespacesOverview'
-import { useQdrantStats } from '../hooks/useQdrantStats'
+import { useQdrant } from '../hooks/useQdrant'
 import { useBatchRuns } from '../hooks/useBatchRuns'
 import { Badge, KeyValueList, KeyValueRow, LoadingState, MetricTile, PageHeader, PageShell, Panel, Table, Thead, Th, Tbody, Tr, Td } from '../components/ui'
 import StatusBadge from './namespaces/StatusBadge'
@@ -17,17 +17,17 @@ function RunStatusCell({ run }: { run: BatchRunLog }) {
 export default function NamespaceOverviewPage() {
   const { namespace } = useActiveNamespace()
   const { data: overview } = useNamespacesOverview()
-  const { data: qdrantData } = useQdrantStats(namespace ?? '')
+  const { data: qdrantData } = useQdrant(namespace ?? '')
   const { data: runsData } = useBatchRuns(namespace || undefined)
 
   if (!namespace) return null
 
-  const nsHealth = overview?.namespaces.find(n => n.config.namespace === namespace)
+  const nsHealth = overview?.items.find(n => n.config.namespace === namespace)
   const config = nsHealth?.config
   const lastRun = nsHealth?.last_run
-  const recentRuns = runsData?.runs.slice(0, 5) ?? []
+  const recentRuns = runsData?.items.slice(0, 5) ?? []
 
-  const coll = (key: string) => qdrantData?.collections[`${namespace}_${key}`]
+  const coll = (key: 'subjects' | 'objects' | 'subjects_dense' | 'objects_dense') => qdrantData?.[key]
   const subjects      = coll('subjects')
   const objects       = coll('objects')
   const subjectsDense = coll('subjects_dense')

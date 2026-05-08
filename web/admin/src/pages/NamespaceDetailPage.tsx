@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useNamespace, useUpsertNamespace } from '../hooks/useNamespaces'
-import { useQdrantStats } from '../hooks/useQdrantStats'
+import { useQdrant } from '../hooks/useQdrant'
 import ErrorBanner from '../components/ErrorBanner'
 import { LoadingState, PageHeader, PageShell } from '../components/ui'
 import {
@@ -20,7 +20,7 @@ export default function NamespaceDetailPage() {
   const navigate = useNavigate()
 
   const { data: existing, error: loadErr, isLoading } = useNamespace(ns ?? '')
-  const { data: qdrantStats } = useQdrantStats(isNew ? '' : (ns ?? ''))
+  const { data: qdrantStats } = useQdrant(isNew ? '' : (ns ?? ''))
   const upsert = useUpsertNamespace()
 
   const [newKey, setNewKey] = useState<string | null>(null)
@@ -63,7 +63,7 @@ export default function NamespaceDetailPage() {
       {saveError && <ErrorBanner message={saveError} onDismiss={() => setSaveError('')} />}
 
       {!isNew && qdrantStats && (
-        <QdrantStatsPanel ns={ns!} stats={qdrantStats.collections} />
+        <QdrantStatsPanel stats={qdrantStats} />
       )}
 
       {!newKey && isLoading && !initialForm && (
