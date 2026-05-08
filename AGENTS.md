@@ -110,3 +110,8 @@ Avoid mixing older styles such as `scope: summary` with Conventional Commits in 
 - call out migration or config changes explicitly,
 - include sample requests or responses for API changes,
 - note required rollout steps if Redis, Qdrant, or cron behavior changes.
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
