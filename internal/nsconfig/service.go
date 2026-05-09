@@ -32,8 +32,8 @@ func NewService(repo *Repository) *Service {
 // On first creation, a namespace-scoped API key is generated and returned as
 // plaintext in UpsertResponse.APIKey. The plaintext key is shown once only —
 // subsequent updates will not return the key.
-func (s *Service) Upsert(ctx context.Context, namespace string, req *UpsertRequest) (*UpsertResponse, error) {
-	cfg, err := s.repo.Upsert(ctx, namespace, req)
+func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*UpsertResponse, error) {
+	cfg, err := s.repo.Upsert(ctx, ns, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert namespace config: %w", err)
 	}
@@ -49,7 +49,7 @@ func (s *Service) Upsert(ctx context.Context, namespace string, req *UpsertReque
 		if err != nil {
 			return nil, fmt.Errorf("generate api key: %w", err)
 		}
-		if err := s.repo.SetAPIKeyHash(ctx, namespace, hash); err != nil {
+		if err := s.repo.SetAPIKeyHash(ctx, ns, hash); err != nil {
 			return nil, fmt.Errorf("store api key hash: %w", err)
 		}
 		resp.APIKey = plaintext
@@ -59,8 +59,8 @@ func (s *Service) Upsert(ctx context.Context, namespace string, req *UpsertReque
 }
 
 // Get returns the configuration for a namespace, or nil if it does not exist.
-func (s *Service) Get(ctx context.Context, namespace string) (*namespace.Config, error) {
-	cfg, err := s.repo.Get(ctx, namespace)
+func (s *Service) Get(ctx context.Context, ns string) (*namespace.Config, error) {
+	cfg, err := s.repo.Get(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("get namespace config: %w", err)
 	}

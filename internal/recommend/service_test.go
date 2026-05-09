@@ -541,11 +541,11 @@ type fakeRepoWithSeenDays struct {
 	onSeen func(days int)
 }
 
-func (f *fakeRepoWithSeenDays) GetSeenItems(ctx context.Context, namespace, subjectID string, days int) ([]string, error) {
+func (f *fakeRepoWithSeenDays) GetSeenItems(ctx context.Context, ns, subjectID string, days int) ([]string, error) {
 	if f.onSeen != nil {
 		f.onSeen(days)
 	}
-	return f.fakeRepo.GetSeenItems(ctx, namespace, subjectID, days)
+	return f.fakeRepo.GetSeenItems(ctx, ns, subjectID, days)
 }
 
 // ─── rankFallback ────────────────────────────────────────────────────────────

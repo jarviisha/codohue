@@ -133,17 +133,17 @@ func NewService(
 }
 
 // StoreObjectEmbedding stores a BYOE dense vector for an object in {ns}_objects_dense.
-func (s *Service) StoreObjectEmbedding(ctx context.Context, namespace, objectID string, vector []float32) error {
-	return s.storeEmbedding(ctx, namespace, objectID, "object", vector)
+func (s *Service) StoreObjectEmbedding(ctx context.Context, ns, objectID string, vector []float32) error {
+	return s.storeEmbedding(ctx, ns, objectID, "object", vector)
 }
 
 // StoreSubjectEmbedding stores a BYOE dense vector for a subject in {ns}_subjects_dense.
-func (s *Service) StoreSubjectEmbedding(ctx context.Context, namespace, subjectID string, vector []float32) error {
-	return s.storeEmbedding(ctx, namespace, subjectID, "subject", vector)
+func (s *Service) StoreSubjectEmbedding(ctx context.Context, ns, subjectID string, vector []float32) error {
+	return s.storeEmbedding(ctx, ns, subjectID, "subject", vector)
 }
 
-func (s *Service) storeEmbedding(ctx context.Context, namespace, entityID, entityType string, vector []float32) error {
-	cfg, err := s.nsConfigSvc.Get(ctx, namespace)
+func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType string, vector []float32) error {
+	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("get ns config: %w", err)
 	}
@@ -165,20 +165,20 @@ func (s *Service) storeEmbedding(ctx context.Context, namespace, entityID, entit
 			distance = cfg.DenseDistance
 		}
 	}
-	if err := s.ensureDenseCollectionsFn(ctx, namespace, dim, distance); err != nil {
+	if err := s.ensureDenseCollectionsFn(ctx, ns, dim, distance); err != nil {
 		return fmt.Errorf("ensure dense collections: %w", err)
 	}
 
 	// Resolve collection name.
-	collection := namespace + "_" + entityType + "s_dense"
+	collection := ns + "_" + entityType + "s_dense"
 	idKey := entityType + "_id"
 
 	// Get or create numeric ID.
 	var numID uint64
 	if entityType == "object" {
-		numID, err = s.idmapSvc.GetOrCreateObjectID(ctx, entityID, namespace)
+		numID, err = s.idmapSvc.GetOrCreateObjectID(ctx, entityID, ns)
 	} else {
-		numID, err = s.idmapSvc.GetOrCreateSubjectID(ctx, entityID, namespace)
+		numID, err = s.idmapSvc.GetOrCreateSubjectID(ctx, entityID, ns)
 	}
 	if err != nil {
 		return fmt.Errorf("get numeric id: %w", err)
@@ -454,9 +454,9 @@ func (s *Service) hybridRecommend(
 }
 
 // fetchSubjectDenseVector retrieves the dense embedding for a subject from {ns}_subjects_dense.
-func (s *Service) fetchSubjectDenseVector(ctx context.Context, namespace string, numericID uint64) ([]float32, error) {
+func (s *Service) fetchSubjectDenseVector(ctx context.Context, ns string, numericID uint64) ([]float32, error) {
 	results, err := s.qdrantGetFn(ctx, &qdrant.GetPoints{
-		CollectionName: namespace + "_subjects_dense",
+		CollectionName: ns + "_subjects_dense",
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude(denseVectorName),
 	})
@@ -474,8 +474,8 @@ func (s *Service) fetchSubjectDenseVector(ctx context.Context, namespace string,
 }
 
 // searchObjectsDense queries {ns}_objects_dense using a dense vector.
-func (s *Service) searchObjectsDense(ctx context.Context, namespace string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
-	collection := namespace + "_objects_dense"
+func (s *Service) searchObjectsDense(ctx context.Context, ns string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
+	collection := ns + "_objects_dense"
 	start := time.Now()
 	results, err := s.qdrantQueryFn(ctx, &qdrant.QueryPoints{
 		CollectionName: collection,
@@ -485,7 +485,7 @@ func (s *Service) searchObjectsDense(ctx context.Context, namespace string, quer
 		Limit:          qdrant.PtrOf(topK),
 		WithPayload:    qdrant.NewWithPayload(true),
 	})
-	metrics.QdrantQueryDuration.WithLabelValues(namespace, collection).Observe(time.Since(start).Seconds())
+	metrics.QdrantQueryDuration.WithLabelValues(ns, collection).Observe(time.Since(start).Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("query dense objects from qdrant: %w", err)
 	}
@@ -726,9 +726,9 @@ func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int) 
 	}, nil
 }
 
-func (s *Service) fetchSubjectVector(ctx context.Context, namespace string, numericID uint64) (*qdrant.SparseVector, error) {
+func (s *Service) fetchSubjectVector(ctx context.Context, ns string, numericID uint64) (*qdrant.SparseVector, error) {
 	results, err := s.qdrantGetFn(ctx, &qdrant.GetPoints{
-		CollectionName: namespace + "_subjects",
+		CollectionName: ns + "_subjects",
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude(sparseVectorName),
 	})
@@ -746,9 +746,9 @@ func (s *Service) fetchSubjectVector(ctx context.Context, namespace string, nume
 	return vecOutput.GetSparse(), nil
 }
 
-func (s *Service) searchObjects(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
-	collection := namespace + "_objects"
-	timer := metrics.QdrantQueryDuration.WithLabelValues(namespace, collection)
+func (s *Service) searchObjects(ctx context.Context, ns string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
+	collection := ns + "_objects"
+	timer := metrics.QdrantQueryDuration.WithLabelValues(ns, collection)
 	start := time.Now()
 	results, err := s.qdrantSearchFn(ctx, &qdrant.SearchPoints{
 		CollectionName: collection,
@@ -766,13 +766,13 @@ func (s *Service) searchObjects(ctx context.Context, namespace string, queryVec 
 	return results, nil
 }
 
-func (s *Service) buildSeenItemsFilter(ctx context.Context, namespace string, seenStringIDs []string) *qdrant.Filter {
+func (s *Service) buildSeenItemsFilter(ctx context.Context, ns string, seenStringIDs []string) *qdrant.Filter {
 	if len(seenStringIDs) == 0 {
 		return nil
 	}
 	ids := make([]*qdrant.PointId, 0, len(seenStringIDs))
 	for _, sid := range seenStringIDs {
-		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, sid, namespace)
+		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, sid, ns)
 		if err != nil {
 			continue
 		}
@@ -907,11 +907,11 @@ func blendItems(popular, cf []string, popularRatio float64, limit int) []string 
 // Rank scores a list of candidate items for a subject using sparse CF vectors
 // and returns them in descending score order. If the subject has no interaction
 // history, candidates are returned in their original order.
-func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) (*RankResponse, error) {
+func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankResponse, error) {
 	if len(req.Candidates) == 0 {
 		return &RankResponse{
 			SubjectID:   req.SubjectID,
-			Namespace:   namespace,
+			Namespace:   ns,
 			Items:       []RankedItem{},
 			Source:      SourceHybridRank,
 			Total:       0,
@@ -919,26 +919,26 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) 
 		}, nil
 	}
 
-	cfg, err := s.nsConfigSvc.Get(ctx, namespace)
+	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
-		slog.Error("rank: get ns config failed", "namespace", namespace, "error", err)
+		slog.Error("rank: get ns config failed", "namespace", ns, "error", err)
 	}
 
-	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, namespace)
+	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, ns)
 	if err != nil {
-		slog.Error("rank: get subject numeric id failed", "namespace", namespace, "subject_id", req.SubjectID, "error", err)
-		return s.rankFallback(req, namespace), nil
+		slog.Error("rank: get subject numeric id failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+		return s.rankFallback(req, ns), nil
 	}
 
-	subjectVec, err := s.fetchSubjectVecFn(ctx, namespace, subjectNumID)
+	subjectVec, err := s.fetchSubjectVecFn(ctx, ns, subjectNumID)
 	if err != nil || subjectVec == nil {
-		slog.Info("rank: no subject vector, returning original order", "namespace", namespace, "subject_id", req.SubjectID)
-		return s.rankFallback(req, namespace), nil
+		slog.Info("rank: no subject vector, returning original order", "namespace", ns, "subject_id", req.SubjectID)
+		return s.rankFallback(req, ns), nil
 	}
 
 	ids := make([]*qdrant.PointId, 0, len(req.Candidates))
 	for _, candidateID := range req.Candidates {
-		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, candidateID, namespace)
+		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, candidateID, ns)
 		if err != nil {
 			slog.Error("rank: get object numeric id failed", "object_id", candidateID, "error", err)
 			continue
@@ -947,7 +947,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) 
 	}
 
 	if len(ids) == 0 {
-		return s.rankFallback(req, namespace), nil
+		return s.rankFallback(req, ns), nil
 	}
 
 	filter := &qdrant.Filter{
@@ -956,10 +956,10 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) 
 		},
 	}
 
-	results, err := s.searchObjectsFn(ctx, namespace, subjectVec, filter, uint64(len(ids)))
+	results, err := s.searchObjectsFn(ctx, ns, subjectVec, filter, uint64(len(ids)))
 	if err != nil {
-		slog.Error("rank: search objects failed", "namespace", namespace, "subject_id", req.SubjectID, "error", err)
-		return s.rankFallback(req, namespace), nil
+		slog.Error("rank: search objects failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+		return s.rankFallback(req, ns), nil
 	}
 
 	gamma := defaultGamma
@@ -973,10 +973,10 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) 
 		ranked[i] = RankedItem{ObjectID: s.objectID, Score: s.finalScore, Rank: i + 1}
 	}
 
-	metrics.RecommendRequests.WithLabelValues(namespace, SourceHybridRank).Inc()
+	metrics.RecommendRequests.WithLabelValues(ns, SourceHybridRank).Inc()
 	return &RankResponse{
 		SubjectID:   req.SubjectID,
-		Namespace:   namespace,
+		Namespace:   ns,
 		Items:       ranked,
 		Source:      SourceHybridRank,
 		Total:       len(ranked),
@@ -986,14 +986,14 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, namespace string) 
 
 // rankFallback returns candidates in their original order when CF scoring is unavailable.
 // Score is set to 0 to signal to callers that no relevance information is available.
-func (s *Service) rankFallback(req *RankRequest, namespace string) *RankResponse {
+func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 	items := make([]RankedItem, len(req.Candidates))
 	for i, c := range req.Candidates {
 		items[i] = RankedItem{ObjectID: c, Score: 0, Rank: i + 1}
 	}
 	return &RankResponse{
 		SubjectID:   req.SubjectID,
-		Namespace:   namespace,
+		Namespace:   ns,
 		Items:       items,
 		Source:      SourceHybridRank,
 		Total:       len(items),
@@ -1009,22 +1009,22 @@ func (s *Service) rankFallback(req *RankRequest, namespace string) *RankResponse
 // Caveat: recommendation results cached in Redis may still include this object for up to
 // recCacheTTL (5 minutes) after deletion, since the cache is keyed by subject rather than
 // by individual objects.
-func (s *Service) DeleteObject(ctx context.Context, namespace, objectID string) error {
-	numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
+func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
+	numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, ns)
 	if err != nil {
 		return fmt.Errorf("get numeric id: %w", err)
 	}
 
 	pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}
 
-	if err := s.deleteFromCollectionFn(ctx, namespace+"_objects", pointIDs); err != nil {
+	if err := s.deleteFromCollectionFn(ctx, ns+"_objects", pointIDs); err != nil {
 		return err
 	}
 
 	// Dense collection is optional — it may not exist when dense_strategy is "disabled"
 	// or no embeddings have been pushed yet. Treat cleanup errors as best-effort.
-	if err := s.deleteFromCollectionFn(ctx, namespace+"_objects_dense", pointIDs); err != nil {
-		slog.Debug("delete object: dense collection cleanup skipped", "namespace", namespace, "object_id", objectID, "error", err)
+	if err := s.deleteFromCollectionFn(ctx, ns+"_objects_dense", pointIDs); err != nil {
+		slog.Debug("delete object: dense collection cleanup skipped", "namespace", ns, "object_id", objectID, "error", err)
 	}
 
 	return nil
@@ -1052,6 +1052,6 @@ func (s *Service) deleteFromCollection(ctx context.Context, collection string, i
 	return nil
 }
 
-func recCacheKey(namespace, subjectID string, limit, offset int) string {
-	return fmt.Sprintf("rec:%s:%s:limit=%d:offset=%d", namespace, subjectID, limit, offset)
+func recCacheKey(ns, subjectID string, limit, offset int) string {
+	return fmt.Sprintf("rec:%s:%s:limit=%d:offset=%d", ns, subjectID, limit, offset)
 }

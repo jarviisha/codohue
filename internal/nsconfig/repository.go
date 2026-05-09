@@ -103,12 +103,12 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 // SetAPIKeyHash stores the bcrypt hash for the namespace. It is a no-op if the
 // namespace already has a hash (first-write-wins, matching the INSERT-then-check
 // pattern in Service.Upsert).
-func (r *Repository) SetAPIKeyHash(ctx context.Context, namespace, hash string) error {
+func (r *Repository) SetAPIKeyHash(ctx context.Context, ns, hash string) error {
 	err := r.execFn(ctx, `
 		UPDATE namespace_configs
 		SET api_key_hash = $2
 		WHERE namespace = $1 AND api_key_hash IS NULL`,
-		namespace, hash,
+		ns, hash,
 	)
 	if err != nil {
 		return fmt.Errorf("set api key hash: %w", err)

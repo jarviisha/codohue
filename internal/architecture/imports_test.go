@@ -13,7 +13,7 @@ import (
 const modulePath = "github.com/jarviisha/codohue"
 
 func TestInternalPackagesDoNotImportPeerDomains(t *testing.T) {
-	root := filepath.Join("..")
+	root := ".."
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

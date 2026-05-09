@@ -491,9 +491,9 @@ type fakeWindowRepo struct {
 	onWindow func(int)
 }
 
-func (f *fakeWindowRepo) GetNamespaceEventsInWindow(ctx context.Context, namespace string, window int) ([]*RawEvent, error) {
+func (f *fakeWindowRepo) GetNamespaceEventsInWindow(ctx context.Context, ns string, window int) ([]*RawEvent, error) {
 	if f.onWindow != nil {
 		f.onWindow(window)
 	}
-	return f.fakeJobRepo.GetNamespaceEventsInWindow(ctx, namespace, window)
+	return f.fakeJobRepo.GetNamespaceEventsInWindow(ctx, ns, window)
 }

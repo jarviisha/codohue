@@ -61,8 +61,8 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) error {
 	return nil
 }
 
-func (s *Service) resolveWeight(ctx context.Context, namespace string, action Action) (float64, error) {
-	cfg, err := s.nsConfigSvc.Get(ctx, namespace)
+func (s *Service) resolveWeight(ctx context.Context, ns string, action Action) (float64, error) {
+	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err == nil && cfg != nil {
 		if w, ok := cfg.ActionWeights[string(action)]; ok {
 			return w, nil
