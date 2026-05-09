@@ -135,22 +135,14 @@ check_feature_branch() {
         return 0
     fi
 
-    local branch
-    branch=$(spec_kit_effective_branch_name "$raw")
-
-    # Accept sequential prefix (3+ digits) but exclude malformed timestamps
-    # Malformed: 7-or-8 digit date + 6-digit time with no trailing slug (e.g. "2026031-143022" or "20260319-143022")
-    local is_sequential=false
-    if [[ "$branch" =~ ^[0-9]{3,}- ]] && [[ ! "$branch" =~ ^[0-9]{7}-[0-9]{6}- ]] && [[ ! "$branch" =~ ^[0-9]{7,8}-[0-9]{6}$ ]]; then
-        is_sequential=true
-    fi
-    if [[ "$is_sequential" != "true" ]] && [[ ! "$branch" =~ ^[0-9]{8}-[0-9]{6}- ]]; then
-        echo "ERROR: Not on a feature branch. Current branch: $raw" >&2
-        echo "Feature branches should be named like: 001-feature-name, 1234-feature-name, or 20260319-143022-feature-name" >&2
-        return 1
+    local conventional_pattern='^(feat|fix|refactor|test|docs|ci|chore)/(api|cron|ingest|compute|recommend|nsconfig|auth|idmap|qdrant|redis|postgres|metrics|e2e|docs|ci)-[a-z0-9][a-z0-9-]*$'
+    if [[ "$raw" =~ $conventional_pattern ]]; then
+        return 0
     fi
 
-    return 0
+    echo "ERROR: Not on a feature branch. Current branch: $raw" >&2
+    echo "Feature branches should be named like: feat/api-feature-name or fix/recommend-bug-name" >&2
+    return 1
 }
 
 # Find feature directory by numeric prefix instead of exact branch match
@@ -168,8 +160,8 @@ find_feature_dir_by_prefix() {
     elif [[ "$branch_name" =~ ^([0-9]{3,})- ]]; then
         prefix="${BASH_REMATCH[1]}"
     else
-        # If branch doesn't have a recognized prefix, fall back to exact match
-        echo "$specs_dir/$branch_name"
+        # If branch doesn't have a recognized prefix, fall back to a filesystem-safe branch match.
+        echo "$specs_dir/${branch_name//\//-}"
         return
     fi
 
@@ -595,4 +587,3 @@ except Exception:
     printf '%s' "$content"
     return 0
 }
-

@@ -1,5 +1,5 @@
 ---
-description: "Create a feature branch with sequential or timestamp numbering"
+description: "Create a feature branch using the repository Conventional Branch naming rule"
 ---
 
 # Create Feature Branch
@@ -26,13 +26,20 @@ If the user explicitly provided `GIT_BRANCH_NAME` (e.g., via environment variabl
 - Verify Git is available by running `git rev-parse --is-inside-work-tree 2>/dev/null`
 - If Git is not available, warn the user and skip branch creation
 
-## Branch Numbering Mode
+## Branch Naming
 
-Determine the branch numbering strategy by checking configuration in this order:
+Branches must follow the repository rule from `AGENTS.md`:
 
-1. Check `.specify/extensions/git/git-config.yml` for `branch_numbering` value
-2. Check `.specify/init-options.json` for `branch_numbering` value (backward compatibility)
-3. Default to `sequential` if neither exists
+```text
+type/scope-summary
+```
+
+Use the same Conventional Commit types and scopes as `AGENTS.md`, for example:
+
+- `feat/api-namespace-routes`
+- `fix/recommend-json-errors`
+- `test/e2e-client-routes`
+- `docs/readme-namespace-api`
 
 ## Execution
 
@@ -44,12 +51,12 @@ Generate a concise short name (2-4 words) for the branch:
 Run the appropriate script based on your platform:
 
 - **Bash**: `.specify/extensions/git/scripts/bash/create-new-feature.sh --json --short-name "<short-name>" "<feature description>"`
-- **Bash (timestamp)**: `.specify/extensions/git/scripts/bash/create-new-feature.sh --json --timestamp --short-name "<short-name>" "<feature description>"`
+- **Bash (timestamp flag ignored for naming)**: `.specify/extensions/git/scripts/bash/create-new-feature.sh --json --timestamp --short-name "<short-name>" "<feature description>"`
 - **PowerShell**: `.specify/extensions/git/scripts/powershell/create-new-feature.ps1 -Json -ShortName "<short-name>" "<feature description>"`
 - **PowerShell (timestamp)**: `.specify/extensions/git/scripts/powershell/create-new-feature.ps1 -Json -Timestamp -ShortName "<short-name>" "<feature description>"`
 
 **IMPORTANT**:
-- Do NOT pass `--number` — the script determines the correct next number automatically
+- Do NOT pass `--number` — new branches do not use numeric prefixes
 - Always include the JSON flag (`--json` for Bash, `-Json` for PowerShell) so the output can be parsed reliably
 - You must only ever run this script once per feature
 - The JSON output will contain `BRANCH_NAME` and `FEATURE_NUM`
@@ -63,5 +70,5 @@ If Git is not installed or the current directory is not a Git repository:
 ## Output
 
 The script outputs JSON with:
-- `BRANCH_NAME`: The branch name (e.g., `003-user-auth` or `20260319-143022-user-auth`)
-- `FEATURE_NUM`: The numeric or timestamp prefix used
+- `BRANCH_NAME`: The branch name (e.g., `feat/api-user-auth` or `fix/recommend-timeout`)
+- `FEATURE_NUM`: The generated short-name slug used by downstream reporting

@@ -22,24 +22,32 @@ Get the current branch name:
 git rev-parse --abbrev-ref HEAD
 ```
 
-The branch name must match one of these patterns:
+The branch name must match this repository pattern from `AGENTS.md`:
 
-1. **Sequential**: `^[0-9]{3,}-` (e.g., `001-feature-name`, `042-fix-bug`, `1000-big-feature`)
-2. **Timestamp**: `^[0-9]{8}-[0-9]{6}-` (e.g., `20260319-143022-feature-name`)
+```text
+type/scope-summary
+```
+
+Examples:
+
+- `feat/api-namespace-routes`
+- `fix/recommend-json-errors`
+- `test/e2e-client-routes`
+- `docs/readme-namespace-api`
 
 ## Execution
 
-If on a feature branch (matches either pattern):
+If on a feature branch:
 - Output: `✓ On feature branch: <branch-name>`
 - Check if the corresponding spec directory exists under `specs/`:
-  - For sequential branches, look for `specs/<prefix>-*` where prefix matches the numeric portion
-  - For timestamp branches, look for `specs/<prefix>-*` where prefix matches the `YYYYMMDD-HHMMSS` portion
+  - Prefer `.specify/feature.json` when present
+  - Otherwise look for a filesystem-safe branch directory such as `specs/feat-api-namespace-routes`
 - If spec directory exists: `✓ Spec directory found: <path>`
 - If spec directory missing: `⚠ No spec directory found for prefix <prefix>`
 
 If NOT on a feature branch:
 - Output: `✗ Not on a feature branch. Current branch: <branch-name>`
-- Output: `Feature branches should be named like: 001-feature-name or 20260319-143022-feature-name`
+- Output: `Feature branches should be named like: feat/api-feature-name or fix/recommend-bug-name`
 
 ## Graceful Degradation
 

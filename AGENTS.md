@@ -105,6 +105,17 @@ Examples:
 
 Avoid mixing older styles such as `scope: summary` with Conventional Commits in new history. In pull requests:
 
+Use matching Conventional Branch names for feature work:
+
+- Format: `type/scope-summary`
+- Use the same recommended types and scopes as commits.
+- Keep the summary lowercase, hyphen-separated, and concise.
+- Examples: `feat/api-namespace-routes`, `fix/recommend-json-errors`, `test/e2e-client-routes`, `docs/readme-namespace-api`.
+
+Avoid older Spec Kit numeric branch names such as `001-feature-name` for new branches.
+
+In pull requests:
+
 - describe the behavior change and affected modules,
 - call out migration or config changes explicitly,
 - include sample requests or responses for API changes,

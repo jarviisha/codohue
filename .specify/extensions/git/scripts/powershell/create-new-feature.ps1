@@ -26,8 +26,8 @@ if ($Help) {
     Write-Host "  -DryRun             Compute branch name without creating the branch"
     Write-Host "  -AllowExistingBranch  Switch to branch if it already exists instead of failing"
     Write-Host "  -ShortName <name>   Provide a custom short name (2-4 words) for the branch"
-    Write-Host "  -Number N           Specify branch number manually (overrides auto-detection)"
-    Write-Host "  -Timestamp          Use timestamp prefix (YYYYMMDD-HHMMSS) instead of sequential numbering"
+    Write-Host "  -Number N           Ignored; retained for Spec Kit compatibility"
+    Write-Host "  -Timestamp          Ignored; retained for Spec Kit compatibility"
     Write-Host "  -Help               Show this help message"
     Write-Host ""
     Write-Host "Environment variables:"
@@ -146,6 +146,51 @@ function Get-NextBranchNumber {
 function ConvertTo-CleanBranchName {
     param([string]$Name)
     return $Name.ToLower() -replace '[^a-z0-9]', '-' -replace '-{2,}', '-' -replace '^-', '' -replace '-$', ''
+}
+
+function Get-BranchType {
+    param([string]$Text)
+    $value = $Text.ToLower()
+    if ($value -match '\b(fix|bug|bugfix|regression|error|failure|broken)\b') { return 'fix' }
+    if ($value -match '\b(test|tests|testing|coverage|e2e)\b') { return 'test' }
+    if ($value -match '\b(doc|docs|readme|documentation)\b') { return 'docs' }
+    if ($value -match '\b(ci|workflow|pipeline|github action|automation)\b') { return 'ci' }
+    if ($value -match '\b(refactor|restructure|decouple|cleanup)\b') { return 'refactor' }
+    if ($value -match '\b(chore|maintenance|dependency|deps|tooling)\b') { return 'chore' }
+    return 'feat'
+}
+
+function Get-BranchScope {
+    param([string]$Text)
+    $value = ($Text.ToLower() -replace '[^a-z0-9]', ' ')
+    $scopes = @('api', 'cron', 'ingest', 'compute', 'recommend', 'nsconfig', 'auth', 'idmap', 'qdrant', 'redis', 'postgres', 'metrics', 'e2e', 'docs', 'ci')
+    foreach ($scope in $scopes) {
+        if ($value -match "(^|\s)$scope(\s|$)") { return $scope }
+    }
+    if ($value -match 'namespace|config') { return 'nsconfig' }
+    if ($value -match 'recommendation|rank|hybrid|popular|trending|embedding') { return 'recommend' }
+    if ($value -match 'event|stream|payload|worker') { return 'ingest' }
+    if ($value -match 'vector|batch|cron|dense|sparse|recompute') { return 'compute' }
+    if ($value -match 'database|migration|postgres|sql') { return 'postgres' }
+    if ($value -match 'metric|prometheus|observability') { return 'metrics' }
+    return 'api'
+}
+
+function Get-ConventionalBranchName {
+    param(
+        [string]$Description,
+        [string]$Suffix
+    )
+    $branchType = Get-BranchType -Text "$Description $Suffix"
+    $branchScope = Get-BranchScope -Text "$Description $Suffix"
+    $summary = $Suffix
+    if ($summary.StartsWith("$branchType-")) {
+        $summary = $summary.Substring($branchType.Length + 1)
+    }
+    if ($summary.StartsWith("$branchScope-")) {
+        return "$branchType/$summary"
+    }
+    return "$branchType/$branchScope-$summary"
 }
 
 # ---------------------------------------------------------------------------
@@ -282,42 +327,21 @@ if ($env:GIT_BRANCH_NAME) {
         $branchSuffix = Get-BranchName -Description $featureDesc
     }
 
-    if ($Timestamp -and $Number -ne 0) {
-        Write-Warning "[specify] Warning: -Number is ignored when -Timestamp is used"
-        $Number = 0
-    }
-
-    if ($Timestamp) {
-        $featureNum = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $branchName = "$featureNum-$branchSuffix"
-    } else {
-        if ($Number -eq 0) {
-            if ($DryRun -and $hasGit) {
-                $Number = Get-NextBranchNumber -SpecsDir $specsDir -SkipFetch
-            } elseif ($DryRun) {
-                $Number = (Get-HighestNumberFromSpecs -SpecsDir $specsDir) + 1
-            } elseif ($hasGit) {
-                $Number = Get-NextBranchNumber -SpecsDir $specsDir
-            } else {
-                $Number = (Get-HighestNumberFromSpecs -SpecsDir $specsDir) + 1
-            }
-        }
-
-        $featureNum = ('{0:000}' -f $Number)
-        $branchName = "$featureNum-$branchSuffix"
-    }
+    $featureNum = $branchSuffix
+    $branchName = Get-ConventionalBranchName -Description $featureDesc -Suffix $branchSuffix
 }
 
 $maxBranchLength = 244
 if ($branchName.Length -gt $maxBranchLength) {
-    $prefixLength = $featureNum.Length + 1
+    $prefixLength = $branchName.Length - $branchSuffix.Length
     $maxSuffixLength = $maxBranchLength - $prefixLength
 
     $truncatedSuffix = $branchSuffix.Substring(0, [Math]::Min($branchSuffix.Length, $maxSuffixLength))
     $truncatedSuffix = $truncatedSuffix -replace '-$', ''
 
     $originalBranchName = $branchName
-    $branchName = "$featureNum-$truncatedSuffix"
+    $featureNum = $truncatedSuffix
+    $branchName = Get-ConventionalBranchName -Description $featureDesc -Suffix $truncatedSuffix
 
     Write-Warning "[specify] Branch name exceeded GitHub's 244-byte limit"
     Write-Warning "[specify] Original: $originalBranchName ($($originalBranchName.Length) bytes)"

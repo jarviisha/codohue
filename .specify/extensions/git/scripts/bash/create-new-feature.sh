@@ -67,8 +67,8 @@ while [ $i -le $# ]; do
             echo "  --dry-run           Compute branch name without creating the branch"
             echo "  --allow-existing-branch  Switch to branch if it already exists instead of failing"
             echo "  --short-name <name> Provide a custom short name (2-4 words) for the branch"
-            echo "  --number N          Specify branch number manually (overrides auto-detection)"
-            echo "  --timestamp         Use timestamp prefix (YYYYMMDD-HHMMSS) instead of sequential numbering"
+            echo "  --number N          Ignored; retained for Spec Kit compatibility"
+            echo "  --timestamp         Ignored; retained for Spec Kit compatibility"
             echo "  --help, -h          Show this help message"
             echo ""
             echo "Environment variables:"
@@ -76,8 +76,8 @@ while [ $i -le $# ]; do
             echo ""
             echo "Examples:"
             echo "  $0 'Add user authentication system' --short-name 'user-auth'"
-            echo "  $0 'Implement OAuth2 integration for API' --number 5"
-            echo "  $0 --timestamp --short-name 'user-auth' 'Add user authentication'"
+            echo "  $0 'Implement OAuth2 integration for API'"
+            echo "  $0 --short-name 'recommend-json-errors' 'Fix recommend JSON errors'"
             echo "  GIT_BRANCH_NAME=my-branch $0 'feature description'"
             exit 0
             ;;
@@ -190,6 +190,76 @@ check_existing_branches() {
 clean_branch_name() {
     local name="$1"
     echo "$name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+infer_branch_type() {
+    local text
+    text=$(echo "$1" | tr '[:upper:]' '[:lower:]')
+
+    if echo "$text" | grep -Eq '\b(fix|bug|bugfix|regression|error|failure|broken)\b'; then
+        echo "fix"
+    elif echo "$text" | grep -Eq '\b(test|tests|testing|coverage|e2e)\b'; then
+        echo "test"
+    elif echo "$text" | grep -Eq '\b(doc|docs|readme|documentation)\b'; then
+        echo "docs"
+    elif echo "$text" | grep -Eq '\b(ci|workflow|pipeline|github action|automation)\b'; then
+        echo "ci"
+    elif echo "$text" | grep -Eq '\b(refactor|restructure|decouple|cleanup)\b'; then
+        echo "refactor"
+    elif echo "$text" | grep -Eq '\b(chore|maintenance|dependency|deps|tooling)\b'; then
+        echo "chore"
+    else
+        echo "feat"
+    fi
+}
+
+infer_branch_scope() {
+    local text
+    text=$(echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/ /g')
+
+    local scopes="api cron ingest compute recommend nsconfig auth idmap qdrant redis postgres metrics e2e docs ci"
+    for scope in $scopes; do
+        if echo "$text" | grep -Eq "(^|[[:space:]])${scope}([[:space:]]|$)"; then
+            echo "$scope"
+            return
+        fi
+    done
+
+    if echo "$text" | grep -Eq 'namespace|config'; then
+        echo "nsconfig"
+    elif echo "$text" | grep -Eq 'recommendation|rank|hybrid|popular|trending|embedding'; then
+        echo "recommend"
+    elif echo "$text" | grep -Eq 'event|stream|payload|worker'; then
+        echo "ingest"
+    elif echo "$text" | grep -Eq 'vector|batch|cron|dense|sparse|recompute'; then
+        echo "compute"
+    elif echo "$text" | grep -Eq 'database|migration|postgres|sql'; then
+        echo "postgres"
+    elif echo "$text" | grep -Eq 'metric|prometheus|observability'; then
+        echo "metrics"
+    else
+        echo "api"
+    fi
+}
+
+conventional_branch_name() {
+    local description="$1"
+    local suffix="$2"
+    local branch_type
+    local branch_scope
+    local summary
+
+    branch_type=$(infer_branch_type "$description $suffix")
+    branch_scope=$(infer_branch_scope "$description $suffix")
+    summary="$suffix"
+    if [[ "$summary" == "$branch_type-"* ]]; then
+        summary="${summary#${branch_type}-}"
+    fi
+    if [[ "$summary" == "$branch_scope-"* ]]; then
+        echo "${branch_type}/${summary}"
+        return
+    fi
+    echo "${branch_type}/${branch_scope}-${summary}"
 }
 
 # ---------------------------------------------------------------------------
@@ -331,28 +401,9 @@ else
         BRANCH_NUMBER=""
     fi
 
-    # Determine branch prefix
-    if [ "$USE_TIMESTAMP" = true ]; then
-        FEATURE_NUM=$(date +%Y%m%d-%H%M%S)
-        BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
-    else
-        if [ -z "$BRANCH_NUMBER" ]; then
-            if [ "$DRY_RUN" = true ] && [ "$HAS_GIT" = true ]; then
-                BRANCH_NUMBER=$(check_existing_branches "$SPECS_DIR" true)
-            elif [ "$DRY_RUN" = true ]; then
-                HIGHEST=$(get_highest_from_specs "$SPECS_DIR")
-                BRANCH_NUMBER=$((HIGHEST + 1))
-            elif [ "$HAS_GIT" = true ]; then
-                BRANCH_NUMBER=$(check_existing_branches "$SPECS_DIR")
-            else
-                HIGHEST=$(get_highest_from_specs "$SPECS_DIR")
-                BRANCH_NUMBER=$((HIGHEST + 1))
-            fi
-        fi
-
-        FEATURE_NUM=$(printf "%03d" "$((10#$BRANCH_NUMBER))")
-        BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
-    fi
+    # Branches follow AGENTS.md Conventional Branch naming: type/scope-summary.
+    FEATURE_NUM="$BRANCH_SUFFIX"
+    BRANCH_NAME=$(conventional_branch_name "$FEATURE_DESCRIPTION" "$BRANCH_SUFFIX")
 fi
 
 # GitHub enforces a 244-byte limit on branch names
@@ -363,14 +414,15 @@ if [ -n "${GIT_BRANCH_NAME:-}" ] && [ "$BRANCH_BYTE_LEN" -gt $MAX_BRANCH_LENGTH 
     >&2 echo "Error: GIT_BRANCH_NAME must be 244 bytes or fewer in UTF-8. Provided value is ${BRANCH_BYTE_LEN} bytes."
     exit 1
 elif [ "$BRANCH_BYTE_LEN" -gt $MAX_BRANCH_LENGTH ]; then
-    PREFIX_LENGTH=$(( ${#FEATURE_NUM} + 1 ))
+    PREFIX_LENGTH=$(( ${#BRANCH_NAME} - ${#BRANCH_SUFFIX} ))
     MAX_SUFFIX_LENGTH=$((MAX_BRANCH_LENGTH - PREFIX_LENGTH))
 
     TRUNCATED_SUFFIX=$(echo "$BRANCH_SUFFIX" | cut -c1-$MAX_SUFFIX_LENGTH)
     TRUNCATED_SUFFIX=$(echo "$TRUNCATED_SUFFIX" | sed 's/-$//')
 
     ORIGINAL_BRANCH_NAME="$BRANCH_NAME"
-    BRANCH_NAME="${FEATURE_NUM}-${TRUNCATED_SUFFIX}"
+    FEATURE_NUM="$TRUNCATED_SUFFIX"
+    BRANCH_NAME=$(conventional_branch_name "$FEATURE_DESCRIPTION" "$TRUNCATED_SUFFIX")
 
     >&2 echo "[specify] Warning: Branch name exceeded GitHub's 244-byte limit"
     >&2 echo "[specify] Original: $ORIGINAL_BRANCH_NAME (${#ORIGINAL_BRANCH_NAME} bytes)"
