@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 )
 
@@ -174,6 +176,14 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if attempt > maxAttempts {
 		_ = s.repo.MarkDeadLetter(ctx, item.ID,
 			fmt.Sprintf("attempt %d exceeds max %d", attempt, maxAttempts))
+		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "max_attempts")
+		slog.WarnContext(ctx, "catalog item dead-lettered (max attempts exceeded)",
+			slog.String("namespace", item.Namespace),
+			slog.String("object_id", item.ObjectID),
+			slog.Int64("catalog_item_id", item.ID),
+			slog.Int("attempt", attempt),
+			slog.Int("max_attempts", maxAttempts),
+		)
 		return OutcomeDeadLetter, nil
 	}
 
@@ -182,34 +192,40 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 		// Misconfiguration (unknown strategy or factory rejected params) —
 		// terminal until operator fixes config; dead-letter immediately.
 		_ = s.repo.MarkDeadLetter(ctx, item.ID, fmt.Sprintf("strategy resolve: %v", err))
+		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "strategy_resolve")
 		return OutcomeDeadLetter, nil
 	}
 
+	embedStart := s.clock()
 	vec, err := strategy.Embed(ctx, item.Content)
 	if err != nil {
-		return s.handleEmbedError(ctx, item, err)
+		return s.handleEmbedError(ctx, item, strategy, err)
 	}
 
 	if len(vec) != cfg.EmbeddingDim {
 		_ = s.repo.MarkDeadLetter(ctx, item.ID,
 			fmt.Sprintf("dim mismatch: produced=%d expected=%d", len(vec), cfg.EmbeddingDim))
+		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "dim_mismatch")
 		return OutcomeDeadLetter, nil
 	}
 
 	if err := s.ensureNamespaceCollections(ctx, item.Namespace, cfg); err != nil {
 		_ = s.repo.MarkFailed(ctx, item.ID, fmt.Sprintf("ensure dense collections: %v", err))
+		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "ensure_collections")
 		return OutcomeFailed, fmt.Errorf("ensure dense collections: %w", err)
 	}
 
 	pointID, err := s.idmap.GetOrCreateObjectID(ctx, item.ObjectID, item.Namespace)
 	if err != nil {
 		_ = s.repo.MarkFailed(ctx, item.ID, fmt.Sprintf("idmap: %v", err))
+		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "idmap")
 		return OutcomeFailed, fmt.Errorf("idmap: %w", err)
 	}
 
 	embeddedAt := s.clock().UTC()
 	if err := s.upsertVector(ctx, item.Namespace, item.ObjectID, pointID, vec, strategy, embeddedAt); err != nil {
 		_ = s.repo.MarkFailed(ctx, item.ID, fmt.Sprintf("qdrant: %v", err))
+		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "qdrant")
 		return OutcomeFailed, fmt.Errorf("qdrant upsert: %w", err)
 	}
 
@@ -217,26 +233,86 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 		// Postgres write failed AFTER Qdrant succeeded. The vector is in
 		// Qdrant but the row says 'in_flight'. Surface as transient — next
 		// retry will re-upsert (idempotent on point id) and re-mark.
+		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "mark_embedded")
 		return OutcomeFailed, fmt.Errorf("mark embedded: %w", err)
 	}
 
+	elapsed := s.clock().Sub(embedStart)
+	s.recordSuccess(item.Namespace, strategy.ID(), strategy.Version(), elapsed)
+	slog.DebugContext(ctx, "catalog item embedded",
+		slog.String("namespace", item.Namespace),
+		slog.String("object_id", item.ObjectID),
+		slog.Int64("catalog_item_id", item.ID),
+		slog.String("strategy_id", strategy.ID()),
+		slog.String("strategy_version", strategy.Version()),
+		slog.Duration("elapsed", elapsed),
+	)
 	return OutcomeEmbedded, nil
 }
 
+// recordSuccess emits the four "happy path" metrics: items_embedded,
+// embed_duration, work_volume (V1 unit="items"). Centralised so future
+// strategies can extend the unit dimension without changing every
+// success path.
+func (s *Service) recordSuccess(ns, strategyID, strategyVersion string, elapsed time.Duration) {
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	metrics.CatalogItemsEmbeddedTotal.WithLabelValues(ns, strategyID, strategyVersion).Inc()
+	metrics.CatalogEmbedDuration.WithLabelValues(ns, strategyID, strategyVersion).Observe(elapsed.Seconds())
+	metrics.CatalogStrategyWorkVolumeTotal.WithLabelValues(ns, strategyID, strategyVersion, "items").Inc()
+}
+
+// recordFailure emits the embed-failure counter with a reason label.
+func (s *Service) recordFailure(ns, strategyID, strategyVersion, reason string) {
+	metrics.CatalogEmbedFailuresTotal.WithLabelValues(ns, strategyID, strategyVersion, reason).Inc()
+}
+
+// logDeadLetter emits a structured warn-level log for terminal failures so
+// operators see them in stdout/stderr without having to query Postgres.
+// Transient failures (ErrTransient, context cancel, unknown) are NOT logged
+// here — they are noisy by nature; the metric counter alone surfaces them.
+func (s *Service) logDeadLetter(ctx context.Context, item *PendingItem, strategyID, strategyVersion, reason string, err error) {
+	slog.WarnContext(ctx, "catalog item dead-lettered",
+		slog.String("namespace", item.Namespace),
+		slog.String("object_id", item.ObjectID),
+		slog.Int64("catalog_item_id", item.ID),
+		slog.String("strategy_id", strategyID),
+		slog.String("strategy_version", strategyVersion),
+		slog.String("reason", reason),
+		slog.String("error", err.Error()),
+	)
+}
+
 // handleEmbedError maps Strategy.Embed errors to ProcessOutcome per the
-// contract in contracts/strategy-interface.md.
-func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, err error) (ProcessOutcome, error) {
+// contract in contracts/strategy-interface.md and emits the
+// catalog_embed_failures_total counter with the matching reason label.
+func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strategy embedstrategy.Strategy, err error) (ProcessOutcome, error) {
+	sid, sver := strategy.ID(), strategy.Version()
 	switch {
-	case errors.Is(err, embedstrategy.ErrZeroNorm),
-		errors.Is(err, embedstrategy.ErrInputTooLarge),
-		errors.Is(err, embedstrategy.ErrDimensionMismatch):
+	case errors.Is(err, embedstrategy.ErrZeroNorm):
 		_ = s.repo.MarkDeadLetter(ctx, item.ID, err.Error())
+		s.recordFailure(item.Namespace, sid, sver, "zero_norm")
+		s.logDeadLetter(ctx, item, sid, sver, "zero_norm", err)
+		return OutcomeDeadLetter, nil
+
+	case errors.Is(err, embedstrategy.ErrInputTooLarge):
+		_ = s.repo.MarkDeadLetter(ctx, item.ID, err.Error())
+		s.recordFailure(item.Namespace, sid, sver, "input_too_large")
+		s.logDeadLetter(ctx, item, sid, sver, "input_too_large", err)
+		return OutcomeDeadLetter, nil
+
+	case errors.Is(err, embedstrategy.ErrDimensionMismatch):
+		_ = s.repo.MarkDeadLetter(ctx, item.ID, err.Error())
+		s.recordFailure(item.Namespace, sid, sver, "dim_mismatch")
+		s.logDeadLetter(ctx, item, sid, sver, "dim_mismatch", err)
 		return OutcomeDeadLetter, nil
 
 	case errors.Is(err, embedstrategy.ErrTransient),
 		errors.Is(err, context.Canceled),
 		errors.Is(err, context.DeadlineExceeded):
 		_ = s.repo.MarkFailed(ctx, item.ID, err.Error())
+		s.recordFailure(item.Namespace, sid, sver, "transient")
 		return OutcomeFailed, err
 
 	default:
@@ -244,6 +320,7 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, err e
 		// item gets retried; persistent unknown errors will eventually
 		// hit max_attempts and dead-letter via the attempt cap above.
 		_ = s.repo.MarkFailed(ctx, item.ID, err.Error())
+		s.recordFailure(item.Namespace, sid, sver, "unknown")
 		return OutcomeFailed, err
 	}
 }

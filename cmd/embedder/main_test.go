@@ -101,6 +101,7 @@ func withEmbedderTestHooks(t *testing.T) {
 	origPool := newPoolFn
 	origRedis := newRedisFn
 	origQdrant := newQdrantFn
+	origRegister := registerMetricsFn
 	origNotify := signalNotifyFn
 	origClosePool := closePoolFn
 	origCloseRedis := closeRedisFn
@@ -110,6 +111,7 @@ func withEmbedderTestHooks(t *testing.T) {
 		newPoolFn = origPool
 		newRedisFn = origRedis
 		newQdrantFn = origQdrant
+		registerMetricsFn = origRegister
 		signalNotifyFn = origNotify
 		closePoolFn = origClosePool
 		closeRedisFn = origCloseRedis
@@ -117,4 +119,5 @@ func withEmbedderTestHooks(t *testing.T) {
 	})
 	closePoolFn = func(_ *pgxpool.Pool) {}
 	closeRedisFn = func(_ *goredis.Client) error { return nil }
+	registerMetricsFn = func() {} // tests don't exercise metric registration
 }

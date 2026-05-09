@@ -110,6 +110,17 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*C
 			)
 			return res.Item, fmt.Errorf("publish to embed stream: %w", err)
 		}
+		slog.DebugContext(ctx, "catalog item accepted and queued",
+			slog.String("namespace", ns),
+			slog.String("object_id", req.ObjectID),
+			slog.Int64("catalog_item_id", res.Item.ID),
+		)
+	} else {
+		slog.DebugContext(ctx, "catalog item idempotent re-ingest (no publish)",
+			slog.String("namespace", ns),
+			slog.String("object_id", req.ObjectID),
+			slog.Int64("catalog_item_id", res.Item.ID),
+		)
 	}
 
 	return res.Item, nil

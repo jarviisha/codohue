@@ -21,6 +21,12 @@ const (
 	baseURL  = "http://localhost:" + testPort
 	apiBin   = "../tmp/api"
 	cronBin  = "../tmp/cron"
+	// embedderBin is the path to the cmd/embedder binary; tests that
+	// exercise the catalog auto-embedding feature start it on demand
+	// via runEmbedderInBackground.
+	embedderBin        = "../tmp/embedder"
+	embedderHealthPort = "12003"
+	embedderHealthURL  = "http://localhost:" + embedderHealthPort
 	// testNS is a fixed namespace name used across all tests. It is created
 	// in TestMain and deleted both before (to clear stale data) and after tests.
 	testNS = "e2e_suite"
@@ -133,8 +139,13 @@ func waitReady(url string, timeout time.Duration) error {
 func cleanupNamespaceData(namespace string) {
 	ctx := context.Background()
 	_, _ = testDB.Exec(ctx, "DELETE FROM events WHERE namespace = $1", namespace)
+	_, _ = testDB.Exec(ctx, "DELETE FROM catalog_items WHERE namespace = $1", namespace)
 	_, _ = testDB.Exec(ctx, "DELETE FROM id_mappings WHERE namespace = $1", namespace)
 	_, _ = testDB.Exec(ctx, "DELETE FROM namespace_configs WHERE namespace = $1", namespace)
+
+	// Delete the per-namespace catalog embed stream so the next test run
+	// starts with a clean queue + consumer-group offset.
+	testRedis.Del(ctx, "catalog:embed:"+namespace) //nolint:errcheck
 
 	// Delete recommendation cache (rec:<ns>:*) and trending cache for the namespace.
 	// Without this, stale cached responses from previous runs bleed into new runs.

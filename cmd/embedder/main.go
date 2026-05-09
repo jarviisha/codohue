@@ -22,6 +22,7 @@ import (
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/embedder"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -31,14 +32,15 @@ import (
 // Indirection points so cmd/embedder/main_test.go can stub out the heavy
 // infra dependencies — same pattern as cmd/cron/main.go and cmd/api/main.go.
 var (
-	loadConfigFn   = config.LoadEmbedder
-	newPoolFn      = infrapg.NewPool
-	newRedisFn     = infraredis.NewClient
-	newQdrantFn    = infraqdrant.NewClient
-	signalNotifyFn = signal.Notify
-	closePoolFn    = func(db *pgxpool.Pool) { db.Close() }
-	closeRedisFn   = func(client *goredis.Client) error { return client.Close() }
-	hostnameFn     = os.Hostname
+	loadConfigFn      = config.LoadEmbedder
+	newPoolFn         = infrapg.NewPool
+	newRedisFn        = infraredis.NewClient
+	newQdrantFn       = infraqdrant.NewClient
+	registerMetricsFn = metrics.Register
+	signalNotifyFn    = signal.Notify
+	closePoolFn       = func(db *pgxpool.Pool) { db.Close() }
+	closeRedisFn      = func(client *goredis.Client) error { return client.Close() }
+	hostnameFn        = os.Hostname
 )
 
 func main() {
@@ -54,6 +56,8 @@ func run() error {
 	}
 
 	initLogger(cfg.LogFormat)
+
+	registerMetricsFn()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

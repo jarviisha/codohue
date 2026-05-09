@@ -156,6 +156,7 @@ Every business capability is reachable from exactly one canonical path. Legacy d
 | Method   | Path                                                                    | Description                                                            |
 | -------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `POST`   | `/v1/namespaces/{ns}/events`                                            | Ingest a behavioral event (202 Accepted; namespace in body is ignored) |
+| `POST`   | `/v1/namespaces/{ns}/catalog`                                           | Ingest raw content for catalog auto-embedding (202; only when `catalog_enabled`; embedder consumer asynchronously upserts the dense vector) |
 | `GET`    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`                     | CF recommendations for a subject (`?limit=&offset=`)                   |
 | `POST`   | `/v1/namespaces/{ns}/rankings`                                          | Score and rank up to 500 candidate items for a subject (200, computed) |
 | `GET`    | `/v1/namespaces/{ns}/trending`                                          | Trending items from Redis ZSET (`?limit=&offset=&window_hours=`)       |
