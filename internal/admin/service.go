@@ -36,21 +36,49 @@ type nsConfigUpserter interface {
 	Upsert(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error)
 }
 
+// nsCatalogConfigurator owns the catalog-specific config update path. Wired
+// by an adapter in cmd/admin so this domain need not import nsconfig or
+// embedstrategy directly.
+type nsCatalogConfigurator interface {
+	// GetNamespace returns the current admin view of a namespace, including
+	// its catalog config; nil when the namespace does not exist.
+	GetCatalog(ctx context.Context, namespace string) (*NamespaceCatalogConfig, error)
+
+	// UpdateCatalog applies the request and returns the resulting state.
+	// The implementation is expected to translate dim-mismatch into
+	// *CatalogDimensionMismatch and unknown-namespace into a nil result.
+	UpdateCatalog(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
+
+	// AvailableStrategies returns every registered strategy variant whose
+	// Dim matches the namespace's embedding_dim. Empty slice when no
+	// matching variant is registered.
+	AvailableStrategies(namespaceEmbeddingDim int) []CatalogStrategyDescriptor
+}
+
+// catalogBacklogReader reports the operational catalog counts for a
+// namespace by querying both Postgres (catalog_items state buckets) and
+// Redis (XLEN of catalog:embed:{ns}). Wired by an adapter in cmd/admin.
+type catalogBacklogReader interface {
+	Read(ctx context.Context, namespace string) (CatalogBacklog, error)
+}
+
 type batchRunner interface {
 	RunNamespace(ctx context.Context, namespace, triggerSource string)
 }
 
 // Service implements admin business logic.
 type Service struct {
-	repo         adminRepo
-	apiURL       string
-	apiKey       string
-	redisClient  *goredis.Client
-	qdrantClient *qdrant.Client
-	httpClient   *http.Client
-	job          batchRunner
-	nsConfigSvc  nsConfigUpserter
-	runningBatch sync.Map // keyed by namespace name; prevents concurrent batch triggers
+	repo            adminRepo
+	apiURL          string
+	apiKey          string
+	redisClient     *goredis.Client
+	qdrantClient    *qdrant.Client
+	httpClient      *http.Client
+	job             batchRunner
+	nsConfigSvc     nsConfigUpserter
+	catalogConfig   nsCatalogConfigurator
+	catalogBacklog  catalogBacklogReader
+	runningBatch    sync.Map // keyed by namespace name; prevents concurrent batch triggers
 }
 
 // NewService creates a new Service.
@@ -65,6 +93,22 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 		job:          job,
 		nsConfigSvc:  nsConfigSvc,
 	}
+}
+
+// SetCatalogConfigurator wires the catalog config adapter. Optional —
+// when nil, the catalog admin endpoints return 503 Service Unavailable
+// to signal that the catalog feature is not enabled in this deployment.
+// (Plain method rather than constructor parameter so existing callers
+// of NewService stay source-compatible.)
+func (s *Service) SetCatalogConfigurator(c nsCatalogConfigurator) {
+	s.catalogConfig = c
+}
+
+// SetCatalogBacklogReader wires the optional Postgres+Redis backlog reader
+// for the catalog admin endpoint. When nil, GetCatalog returns zero
+// backlog counts (admin UI degrades gracefully).
+func (s *Service) SetCatalogBacklogReader(r catalogBacklogReader) {
+	s.catalogBacklog = r
 }
 
 // GetHealth proxies GET <apiURL>/healthz and returns the parsed response.
@@ -110,6 +154,60 @@ func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *Na
 		status = http.StatusCreated
 	}
 	return resp, status, nil
+}
+
+// ErrCatalogConfiguratorUnavailable signals that the catalog config adapter
+// has not been wired (catalog feature disabled at this deployment). The
+// handler maps this to 503 Service Unavailable so the admin UI can hide
+// catalog controls gracefully rather than crash.
+var ErrCatalogConfiguratorUnavailable = errors.New("admin: catalog configurator not wired")
+
+// GetCatalogConfig returns the catalog config + available strategies +
+// backlog snapshot for a namespace. Returns nil when the namespace does
+// not exist; ErrCatalogConfiguratorUnavailable when the adapter is missing.
+func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error) {
+	if s.catalogConfig == nil {
+		return nil, ErrCatalogConfiguratorUnavailable
+	}
+	cfg, err := s.catalogConfig.GetCatalog(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get catalog config: %w", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+
+	resp := &NamespaceCatalogResponse{
+		Catalog:             *cfg,
+		AvailableStrategies: s.catalogConfig.AvailableStrategies(cfg.EmbeddingDim),
+	}
+	if s.catalogBacklog != nil {
+		// Backlog read failures are non-fatal; surface zero counts so the
+		// admin UI still renders. The error is logged at DEBUG via the
+		// caller's choice, not from inside the service.
+		if backlog, err := s.catalogBacklog.Read(ctx, namespace); err == nil {
+			resp.Backlog = backlog
+		}
+	}
+	return resp, nil
+}
+
+// UpdateCatalogConfig applies the catalog auto-embedding config change
+// for a namespace. Returns:
+//   - the updated config on success
+//   - nil result + nil error when the namespace does not exist
+//   - *CatalogDimensionMismatch when the chosen strategy's dim != embedding_dim
+//   - ErrCatalogConfiguratorUnavailable when the adapter is missing
+//   - any other error (DB, registry) wrapped
+func (s *Service) UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error) {
+	if s.catalogConfig == nil {
+		return nil, ErrCatalogConfiguratorUnavailable
+	}
+	cfg, err := s.catalogConfig.UpdateCatalog(ctx, namespace, req)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // GetBatchRuns returns paginated batch run logs, filtered total, and aggregate stats.

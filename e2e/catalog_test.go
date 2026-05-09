@@ -383,3 +383,159 @@ func TestCatalogE2E_OversizedContent_413(t *testing.T) {
 		// nothing to do.
 	}
 }
+
+// US2 acceptance #1 + multi-tenant isolation: two namespaces with their
+// own active strategies must produce vectors at the right dim in the
+// right collection. We use the V1 hashing strategy at two different
+// dims (128 and 256) since V1 ships only one strategy id but supports
+// multiple dim variants via RegisterVariants.
+func TestCatalogE2E_MultiTenant_StrategyIsolation(t *testing.T) {
+	nsA, keyA := createIsolatedNamespace(t, "catalog_iso_a", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  128,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	enableCatalogForNamespace(t, nsA, 128)
+
+	nsB, keyB := createIsolatedNamespace(t, "catalog_iso_b", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  256,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	enableCatalogForNamespace(t, nsB, 256)
+
+	runEmbedderInBackground(t)
+
+	// Ingest one item into each namespace.
+	for _, x := range []struct {
+		ns, key, content string
+	}{
+		{nsA, keyA, "alpha namespace text"},
+		{nsB, keyB, "beta namespace text"},
+	} {
+		resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+x.ns+"/catalog", x.key, map[string]any{
+			"object_id": "iso_obj_1",
+			"content":   x.content,
+		})
+		assertStatus(t, resp, http.StatusAccepted)
+		resp.Body.Close()
+	}
+
+	waitForCatalogState(t, nsA, "iso_obj_1", "embedded", 10*time.Second)
+	waitForCatalogState(t, nsB, "iso_obj_1", "embedded", 10*time.Second)
+
+	// Each namespace's vector must land at the configured dim and ONLY in
+	// that namespace's collection.
+	for _, want := range []struct {
+		ns  string
+		dim int
+	}{
+		{nsA, 128},
+		{nsB, 256},
+	} {
+		pointID := numericIDFor(t, "iso_obj_1", want.ns, "object")
+		client := newQdrantTestClient(t)
+		points, err := client.Get(context.Background(), &qdrant.GetPoints{
+			CollectionName: want.ns + "_objects_dense",
+			Ids:            []*qdrant.PointId{qdrant.NewIDNum(pointID)},
+			WithVectors:    qdrant.NewWithVectorsEnable(true),
+		})
+		if err != nil {
+			t.Fatalf("ns=%s qdrant get: %v", want.ns, err)
+		}
+		if len(points) != 1 {
+			t.Fatalf("ns=%s expected 1 point, got %d", want.ns, len(points))
+		}
+		dense := points[0].GetVectors().GetVectors().GetVectors()["dense_interactions"]
+		if dense == nil {
+			t.Fatalf("ns=%s missing dense vector", want.ns)
+		}
+		if got := len(dense.GetData()); got != want.dim {
+			t.Errorf("ns=%s vec dim: got %d, want %d", want.ns, got, want.dim)
+		}
+	}
+}
+
+// FR-018 / R8: BYOE writes for OBJECT dense vectors return 409 Conflict
+// when the namespace has catalog auto-embedding enabled. Subject BYOE
+// writes remain accepted (per Assumption "Subject embeddings continue
+// through cron mean-pool"); this test asserts both.
+func TestCatalogE2E_BYOEObjectWrite_Returns409_WhenCatalogEnabled(t *testing.T) {
+	namespace, apiKey := createIsolatedNamespace(t, "catalog_byoe_409", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  128,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	enableCatalogForNamespace(t, namespace, 128)
+
+	// Build a 128-dim vector for the BYOE write attempt.
+	vec := make([]float32, 128)
+	for i := range vec {
+		vec[i] = 0.01
+	}
+
+	// Object BYOE write → 409.
+	objURL := baseURL + "/v1/namespaces/" + namespace + "/objects/byoe_obj_1/embedding"
+	resp := doRequest(t, http.MethodPut, objURL, apiKey, map[string]any{"vector": vec})
+	code, _ := decodeErrorJSON(t, resp, http.StatusConflict)
+	if code != "catalog_active" {
+		t.Errorf("expected error code 'catalog_active', got %q", code)
+	}
+
+	// Subject BYOE write → 204 (NOT guarded). The spec assumption keeps
+	// subject vectors flowing through the cron mean-pool path even under
+	// catalog mode.
+	subjURL := baseURL + "/v1/namespaces/" + namespace + "/subjects/byoe_subj_1/embedding"
+	resp = doRequest(t, http.MethodPut, subjURL, apiKey, map[string]any{"vector": vec})
+	assertStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+}
+
+// FR-018: when catalog is DISABLED, BYOE object writes work as before
+// (the 409 guard is gated on catalog_enabled=true, not on catalog
+// being in the codebase).
+func TestCatalogE2E_BYOEObjectWrite_StillWorksWhenCatalogDisabled(t *testing.T) {
+	namespace, apiKey := createIsolatedNamespace(t, "catalog_byoe_ok", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  128,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	// Deliberately NOT enabling catalog — the namespace is in pure BYOE mode.
+
+	vec := make([]float32, 128)
+	for i := range vec {
+		vec[i] = 0.01
+	}
+
+	objURL := baseURL + "/v1/namespaces/" + namespace + "/objects/byoe_legacy_1/embedding"
+	resp := doRequest(t, http.MethodPut, objURL, apiKey, map[string]any{"vector": vec})
+	assertStatus(t, resp, http.StatusNoContent)
+	resp.Body.Close()
+}
+
+// US2 admin-plane endpoints (GET/PUT /api/admin/v1/namespaces/{ns}/catalog)
+// are exercised at the unit-test level in internal/admin/handler_test.go;
+// the e2e suite intentionally does not spawn cmd/admin (it would require
+// the embedded SPA + session cookie machinery), so the admin endpoints
+// are not covered here. The cmd/api side of US2 — the BYOE 409 guard —
+// IS covered above by the BYOE tests.

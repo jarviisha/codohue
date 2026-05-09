@@ -3,6 +3,7 @@ package recommend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -219,6 +220,11 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	}
 
 	if storeErr != nil {
+		if errors.Is(storeErr, ErrCatalogActive) {
+			httpapi.WriteError(w, http.StatusConflict, "catalog_active",
+				"namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted")
+			return
+		}
 		if isDimMismatch(storeErr) {
 			httpapi.WriteError(w, http.StatusBadRequest, "embedding_dimension_mismatch", storeErr.Error())
 			return

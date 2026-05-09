@@ -160,8 +160,8 @@ Every business capability is reachable from exactly one canonical path. Legacy d
 | `GET`    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`                     | CF recommendations for a subject (`?limit=&offset=`)                   |
 | `POST`   | `/v1/namespaces/{ns}/rankings`                                          | Score and rank up to 500 candidate items for a subject (200, computed) |
 | `GET`    | `/v1/namespaces/{ns}/trending`                                          | Trending items from Redis ZSET (`?limit=&offset=&window_hours=`)       |
-| `PUT`    | `/v1/namespaces/{ns}/objects/{id}/embedding`                            | Store/replace BYOE dense vector for an object (idempotent, 204)        |
-| `PUT`    | `/v1/namespaces/{ns}/subjects/{id}/embedding`                           | Store/replace BYOE dense vector for a subject (idempotent, 204)        |
+| `PUT`    | `/v1/namespaces/{ns}/objects/{id}/embedding`                            | Store/replace BYOE dense vector for an object (idempotent, 204). Returns **409 Conflict** when the namespace has `catalog_enabled=true` (catalog auto-embedding is the source of truth in that mode). |
+| `PUT`    | `/v1/namespaces/{ns}/subjects/{id}/embedding`                           | Store/replace BYOE dense vector for a subject (idempotent, 204). NOT guarded by catalog mode — subject vectors continue through `cmd/cron` mean-pooling regardless. |
 | `DELETE` | `/v1/namespaces/{ns}/objects/{id}`                                      | Remove an object from all Qdrant collections (idempotent, 204)         |
 
 > **Ingest transport options:** Events can be sent via the HTTP endpoint above **or** published directly to Redis Streams — the `ingest` worker consumes both paths and writes to the same `events` table. The Redis Streams transport carries `namespace` inside the payload because it has no URL path.
@@ -178,6 +178,8 @@ Authentication models sessions as a resource. Login = create session; logout = d
 | `GET`    | `/api/admin/v1/namespaces`                                          | session       | List all namespace configs from PostgreSQL (`?include=overview`)        |
 | `GET`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Get single namespace config                                             |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Create/update namespace; calls `nsconfig.Service` directly (200 / 201)  |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Get catalog auto-embedding config + available strategies + backlog snapshot |
+| `PUT`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Enable / update / disable catalog auto-embedding for a namespace (400 on dim mismatch with both dims in body; 503 when feature unwired) |
 | `GET`    | `/api/admin/v1/batch-runs`                                          | session       | Recent batch run history (`?namespace=&status=&limit=&offset=`)         |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/batch-runs`                          | session       | Batch run history scoped to one namespace                               |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/batch-runs`                          | session       | Create a new batch run (202 Accepted + `Location` header)               |

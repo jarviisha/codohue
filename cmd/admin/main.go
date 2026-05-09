@@ -19,8 +19,13 @@ import (
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	// Side-effect import: internal/embedder.init() registers the V1 hashing
+	// strategy with embedstrategy.DefaultRegistry, which the catalog admin
+	// endpoints expose to operators via available_strategies.
+	_ "github.com/jarviisha/codohue/internal/embedder"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -79,6 +84,13 @@ func run() error {
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
 	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient, job, nsAdapter)
+
+	// Catalog auto-embedding admin endpoints (US2). The adapter bridges
+	// admin.Service → nsconfig.Service + embedstrategy.DefaultRegistry
+	// without forcing internal/admin to import either directly.
+	catalogAdapter := newCatalogConfigAdapter(nsConfigSvc, embedstrategy.DefaultRegistry())
+	svc.SetCatalogConfigurator(catalogAdapter)
+
 	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
 
 	r := chi.NewRouter()
@@ -106,6 +118,10 @@ func run() error {
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
+
+		// Catalog auto-embedding (feature 004) — per-namespace config.
+		r.Get("/api/admin/v1/namespaces/{ns}/catalog", h.GetCatalogConfig)
+		r.Put("/api/admin/v1/namespaces/{ns}/catalog", h.UpdateCatalogConfig)
 
 		// Batch runs
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)

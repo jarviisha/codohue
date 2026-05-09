@@ -122,14 +122,14 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Admin endpoints
 
-- [ ] T037 [P] [US2] Add `internal/admin/catalog_handler.go` and `internal/admin/catalog_handler_test.go` exposing `GET /api/admin/v1/namespaces/{ns}/catalog` per [contracts/rest-api.md](./contracts/rest-api.md): joins nsconfig + Redis `XLEN`/`XPENDING` + Postgres state counts + last `batch_run_logs` row + `embedstrategy.Registry.List()` filtered to namespace `embedding_dim`
-- [ ] T038 [P] [US2] Add `PUT /api/admin/v1/namespaces/{ns}/catalog` handler/test in the same files (or `catalog_put_handler.go` if file gets large): validates strategy via `nsconfig.Service` (T014), persists, returns 200/400 with the dim-mismatch body shape from [contracts/rest-api.md](./contracts/rest-api.md)
-- [ ] T039 [US2] Wire the two admin routes into `cmd/admin/main.go` and update `cmd/admin/main_test.go` to assert registration
+- [X] T037 [P] [US2] Add `internal/admin/catalog_handler.go` and `internal/admin/catalog_handler_test.go` exposing `GET /api/admin/v1/namespaces/{ns}/catalog` per [contracts/rest-api.md](./contracts/rest-api.md): joins nsconfig + Redis `XLEN`/`XPENDING` + Postgres state counts + last `batch_run_logs` row + `embedstrategy.Registry.List()` filtered to namespace `embedding_dim`
+- [X] T038 [P] [US2] Add `PUT /api/admin/v1/namespaces/{ns}/catalog` handler/test in the same files (or `catalog_put_handler.go` if file gets large): validates strategy via `nsconfig.Service` (T014), persists, returns 200/400 with the dim-mismatch body shape from [contracts/rest-api.md](./contracts/rest-api.md)
+- [X] T039 [US2] Wire the two admin routes into `cmd/admin/main.go` and update `cmd/admin/main_test.go` to assert registration
 
 ### BYOE source-of-truth precedence guard (FR-018)
 
-- [ ] T040 [US2] Update `internal/recommend/handler.go` PUT object embedding handler — add a one-line `nsconfig.GetByNamespace(ns).CatalogEnabled` lookup before the existing dim validation; on `true`, return 409 with body `{"error":"namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted"}` per [research.md R8](./research.md#r8-source-of-truth-conflict-policy-fr-018-assumption-source-of-truth-precedence)
-- [ ] T041 [US2] Add 409-path test cases in `internal/recommend/handler_test.go`: catalog enabled → 409, catalog disabled → existing 204 success path
+- [X] T040 [US2] Update `internal/recommend/handler.go` PUT object embedding handler — add a one-line `nsconfig.GetByNamespace(ns).CatalogEnabled` lookup before the existing dim validation; on `true`, return 409 with body `{"error":"namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted"}` per [research.md R8](./research.md#r8-source-of-truth-conflict-policy-fr-018-assumption-source-of-truth-precedence)
+- [X] T041 [US2] Add 409-path test cases in `internal/recommend/handler_test.go`: catalog enabled → 409, catalog disabled → existing 204 success path
 
 ### Frontend (web/admin)
 
@@ -138,8 +138,8 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Integration
 
-- [ ] T044 [US2] Add e2e coverage in `e2e/catalog_test.go` for two-namespace isolation (US2 acceptance #1) and the BYOE 409 (FR-018 + R8): create ns_a with strategy v1@dim128, ns_b with strategy v1@dim256 (assuming T019 registers the dim variant), ingest into both, assert vectors land in the right collection at the right dim; PUT BYOE to ns_a returns 409
-- [ ] T045 [P] [US2] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add `GET` and `PUT /api/admin/v1/namespaces/{ns}/catalog` admin-plane rows; document the BYOE 409 behaviour change in the existing PUT object embedding row's description
+- [X] T044 [US2] Add e2e coverage in `e2e/catalog_test.go` for two-namespace isolation (US2 acceptance #1) and the BYOE 409 (FR-018 + R8): create ns_a with strategy v1@dim128, ns_b with strategy v1@dim256 (assuming T019 registers the dim variant), ingest into both, assert vectors land in the right collection at the right dim; PUT BYOE to ns_a returns 409
+- [X] T045 [P] [US2] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add `GET` and `PUT /api/admin/v1/namespaces/{ns}/catalog` admin-plane rows; document the BYOE 409 behaviour change in the existing PUT object embedding row's description
 
 **Checkpoint**: US2 fully functional. Multi-tenant deployments can route different namespaces to different strategies. SC-005 + SC-009 (forward-compat) testable. Admin UI is fully operable.
 
