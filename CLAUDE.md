@@ -9,26 +9,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-make build          # build both binaries (./tmp/api and ./tmp/cron)
+make build          # build all three binaries (./tmp/api, ./tmp/cron, ./tmp/admin)
 make build-api      # build API only
 make build-cron     # build cron job only
+make build-admin    # build admin server only
 
 make up             # start full stack (docker compose up, foreground)
 make up-d           # start full stack (docker compose up, detached)
 make up-infra       # start only postgres + redis + qdrant
+make up-app         # start only api + cron + admin (uses docker-compose.app.yml)
 make down           # stop stack
 make logs           # tail api container logs
+make logs-cron      # tail cron container logs
+make logs-admin     # tail admin container logs
 
 make dev            # live-reload API using air
+make dev-admin      # run web/admin frontend (Vite dev server)
+make dev-all        # run api (air) + admin server + web/admin frontend together
 make run            # run API directly (requires infra already up)
 make run-cron       # run cron job once (requires infra already up)
+make run-admin      # run admin server directly (requires infra already up)
 
-make test           # run all tests
-make test-pkg PKG=./internal/ingest/...   # test a specific package
-make test-verbose   # test with verbose output
+make test                                  # run all tests across go.work modules
+make test-pkg PKG=./internal/ingest/...    # test a specific package
+make test-verbose                          # test with verbose output
+make test-race                             # run tests with -race detector
 
-make lint           # run golangci-lint
-make fmt            # auto-format imports
+make test-e2e         # build binaries and run e2e suite (./e2e/..., -tags=e2e)
+make test-e2e-api     # e2e subset that exercises only cmd/api
+make test-e2e-heavy   # e2e subset for ingest + cron + recompute flows
+
+make coverage             # generate ./tmp/coverage/unit.out and print total
+make coverage-html        # open HTML coverage report
+make coverage-check-all   # enforce per-package and total coverage minimums (used by CI)
+
+make lint           # run golangci-lint over every go.work module
+make fmt            # auto-format imports across every go.work module
 
 make migrate-up     # run all pending migrations
 make migrate-down   # roll back 1 migration
@@ -38,14 +54,26 @@ make migrate-create NAME=add_indexes  # create new migration files
 make clean          # delete ./tmp/
 ```
 
-Live reload in development uses `air` (configured in `.air.toml`), auto-rebuilds `cmd/api` on Go file changes.
+Live reload in development uses `air` (configured in `.air.toml`), auto-rebuilds `cmd/api` on Go file changes. The admin frontend lives at [web/admin/](web/admin/) (Vite + React 19 + Tailwind v4) and is embedded into the `cmd/admin` binary at build time.
 
 ## Architecture
 
-### Two Binaries
+### Three Binaries
 
 - **`cmd/api`** — HTTP API server (port **2001**) + Redis Streams ingest worker goroutine
-- **`cmd/cron`** — Batch job daemon that recomputes sparse vectors on a configurable interval (default: 5 min)
+- **`cmd/cron`** — Batch job daemon that recomputes sparse and dense vectors plus trending data on a configurable interval (default: 5 min)
+- **`cmd/admin`** — Admin server (port **2002**) that serves the embedded `web/admin` SPA, the session-cookie auth API, and the `/api/admin/v1/*` operational dashboard endpoints
+
+### Go Workspace
+
+The repo is a Go workspace ([go.work](go.work)) with four modules; lint/test/coverage targets iterate over every module:
+
+| Module                   | Purpose                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `.`                      | Server application — all three binaries, all `internal/` domains, e2e suite          |
+| `./pkg/codohuetypes`     | Shared wire types so SDK consumers do not pull in pgx/qdrant/prometheus dependencies |
+| `./sdk/go`               | Public Go SDK for clients embedding Codohue                                          |
+| `./sdk/go/redistream`    | Redis Streams transport helper for the SDK                                           |
 
 ### Data Flow
 
@@ -67,16 +95,21 @@ Main Backend → Redis Streams ────────────────�
 
 Each feature domain lives in `internal/<domain>/` with a consistent `handler.go`, `service.go`, `repository.go`, `types.go` structure:
 
-| Domain       | Responsibility                                                                                        |
-| ------------ | ----------------------------------------------------------------------------------------------------- |
-| `ingest`     | HTTP and Redis Streams event ingestion — validates events, stores to `events` table                   |
-| `compute`    | Batch recomputes sparse vectors with time decay, upserts to Qdrant                                    |
-| `recommend`  | Serves CF recommendations, hybrid dense/sparse, trending, rank, BYOE embeddings, object deletion      |
-| `nsconfig`   | CRUD for per-namespace configuration (action weights, decay params, dense hybrid config)              |
-| `core/idmap` | Maps string IDs → numeric Qdrant point IDs via `id_mappings` table                                    |
-| `auth`       | Bearer token validation — global admin key and per-namespace bcrypt-hashed keys                       |
+| Domain            | Responsibility                                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------------------- |
+| `ingest`          | HTTP and Redis Streams event ingestion — validates events, stores to `events` table                |
+| `compute`         | Batch recomputes sparse + dense vectors with time decay, upserts to Qdrant; logs to `batch_run_logs` |
+| `recommend`       | Serves CF recommendations, hybrid dense/sparse, trending, rank, BYOE embeddings, object deletion   |
+| `nsconfig`        | CRUD for per-namespace configuration (action weights, decay params, dense hybrid config)           |
+| `admin`           | Handlers, services, and repositories for the `cmd/admin` operational dashboard                     |
+| `auth`            | Bearer token validation — global admin key and per-namespace bcrypt-hashed keys                    |
+| `config`          | Loads and validates application configuration from environment variables                           |
+| `core/namespace`  | Shared namespace configuration contracts (`namespace.Config`) consumed by every domain             |
+| `core/idmap`      | Maps string IDs → numeric Qdrant point IDs via `id_mappings` table                                 |
+| `core/httpapi`    | Shared JSON HTTP response helpers and middleware                                                   |
+| `architecture`    | Repository architecture tests — enforces the import rule below                                     |
 
-**Import rule:** domains import `core/`, `infra/`, and `config/` — never each other. Exception: `recommend` imports `nsconfig` for config lookups.
+**Import rule** (enforced by [internal/architecture/imports_test.go](internal/architecture/imports_test.go)): packages under `internal/` may only import `internal/config`, `internal/core/...`, and `internal/infra/...`. Peer-domain imports are forbidden. Cross-domain coordination happens through `cmd/api` and `cmd/admin` wiring (e.g. [cmd/admin/nsconfig_adapter.go](cmd/admin/nsconfig_adapter.go)).
 
 ### Infrastructure Clients (`internal/infra/`)
 
@@ -164,7 +197,16 @@ Migrations live in `migrations/` as `NNN_name.up.sql` / `NNN_name.down.sql` pair
 - `events` — raw behavioral events; indexed on `(namespace, subject_id)` and `occurred_at`
 - `id_mappings` — string ID → BIGSERIAL numeric ID, scoped by `(namespace, entity_type)`
 
-Key columns added by later migrations: `gamma` (002), `seen_items_days` (003), `object_created_at` on events (004), `api_key_hash`/`alpha`/`dense_strategy`/`embedding_dim`/`trending_*` on namespace_configs (005).
+Key columns added by later migrations:
+
+- **002** — `gamma` on namespace_configs (γ-based object freshness rerank)
+- **003** — `seen_items_days` on namespace_configs (recency window for the seen-items filter)
+- **004** — `object_created_at` on events
+- **005** — `api_key_hash`, `alpha`, `dense_strategy`, `embedding_dim`, `trending_*` on namespace_configs
+- **006** — `batch_run_logs` table (per-run history written by `cmd/cron` and surfaced by the admin API)
+- **007** — phase breakdown columns on `batch_run_logs` (`phase{1,2,3}_ok` / `_duration_ms` / `_subjects` / `_objects` / `_error`)
+- **008** — `trigger_source` on `batch_run_logs` (e.g. `cron`, `admin`)
+- **009** — `log_lines` JSONB on `batch_run_logs` (captured slog output for run inspection)
 
 ## Environment Variables
 
@@ -178,6 +220,9 @@ QDRANT_PORT=6334
 RECOMMENDER_API_KEY=dev-secret-key
 BATCH_INTERVAL_MINUTES=5
 LOG_FORMAT=text   # "text" (default) | "json"
+API_PORT=2001     # cmd/api listen port
+ADMIN_PORT=2002   # cmd/admin listen port
+API_URL=http://localhost:2001  # used by cmd/admin to proxy /healthz and inject test events
 ```
 
 ## Conventions
