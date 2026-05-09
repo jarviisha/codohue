@@ -23,6 +23,7 @@ type nsConfigRepository interface {
 	SetAPIKeyHash(ctx context.Context, namespace, hash string) error
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 	UpsertCatalogConfig(ctx context.Context, namespace string, req *UpdateCatalogRequest) (*namespace.Config, error)
+	ListCatalogEnabled(ctx context.Context) ([]*namespace.Config, error)
 }
 
 // Service provides business logic for managing namespace configuration.
@@ -83,6 +84,16 @@ func (s *Service) Get(ctx context.Context, ns string) (*namespace.Config, error)
 		return nil, fmt.Errorf("get namespace config: %w", err)
 	}
 	return cfg, nil
+}
+
+// ListCatalogEnabled returns every namespace that currently has catalog
+// auto-embedding enabled. Used by the embedder binary's namespace poller.
+func (s *Service) ListCatalogEnabled(ctx context.Context) ([]*namespace.Config, error) {
+	cfgs, err := s.repo.ListCatalogEnabled(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog-enabled namespaces: %w", err)
+	}
+	return cfgs, nil
 }
 
 // UpdateCatalogConfig persists the catalog auto-embedding configuration for a

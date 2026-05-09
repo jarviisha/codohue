@@ -20,6 +20,8 @@ type fakeRepo struct {
 	upsertCatalogCfg         *namespace.Config
 	upsertCatalogErr         error
 	upsertCatalogCalledWith  *UpdateCatalogRequest
+	listCfgs                 []*namespace.Config
+	listErr                  error
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*namespace.Config, error) {
@@ -38,6 +40,10 @@ func (f *fakeRepo) Get(_ context.Context, _ string) (*namespace.Config, error) {
 func (f *fakeRepo) UpsertCatalogConfig(_ context.Context, _ string, req *UpdateCatalogRequest) (*namespace.Config, error) {
 	f.upsertCatalogCalledWith = req
 	return f.upsertCatalogCfg, f.upsertCatalogErr
+}
+
+func (f *fakeRepo) ListCatalogEnabled(_ context.Context) ([]*namespace.Config, error) {
+	return f.listCfgs, f.listErr
 }
 
 // stubStrategyT mirrors the embedstrategy test stub but lives in this package
@@ -318,5 +324,45 @@ func TestServiceUpdateCatalogConfig_RepoUpsertReturnsNil(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNamespaceNotFound) {
 		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
+	}
+}
+
+// --- ListCatalogEnabled ----------------------------------------------------
+
+func TestServiceListCatalogEnabled_PassThrough(t *testing.T) {
+	want := []*namespace.Config{
+		{Namespace: "a", CatalogEnabled: true},
+		{Namespace: "b", CatalogEnabled: true},
+	}
+	repo := &fakeRepo{listCfgs: want}
+	svc, _ := newServiceWithRegistry(repo)
+
+	got, err := svc.ListCatalogEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 || got[0].Namespace != "a" || got[1].Namespace != "b" {
+		t.Errorf("unexpected list: %+v", got)
+	}
+}
+
+func TestServiceListCatalogEnabled_RepoError(t *testing.T) {
+	repo := &fakeRepo{listErr: errors.New("db down")}
+	svc, _ := newServiceWithRegistry(repo)
+	if _, err := svc.ListCatalogEnabled(context.Background()); err == nil {
+		t.Fatal("expected error from repo.ListCatalogEnabled, got nil")
+	}
+}
+
+func TestServiceListCatalogEnabled_EmptyResult(t *testing.T) {
+	repo := &fakeRepo{listCfgs: nil}
+	svc, _ := newServiceWithRegistry(repo)
+
+	got, err := svc.ListCatalogEnabled(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil/empty when no enabled namespaces, got %+v", got)
 	}
 }

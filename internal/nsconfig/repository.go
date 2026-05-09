@@ -172,6 +172,67 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 	return &cfg, nil
 }
 
+// ListCatalogEnabled returns the configuration of every namespace that
+// currently has catalog auto-embedding enabled. Used by the embedder
+// binary to discover which per-namespace Redis Streams to consume.
+//
+// Returns an empty slice (not nil error) when no namespaces are enabled.
+// The result order is namespace ASC for stable test output.
+func (r *Repository) ListCatalogEnabled(ctx context.Context) ([]*namespace.Config, error) {
+	if r.db == nil {
+		// Allow unit tests that exercise other methods to leave db nil; this
+		// method is only called from the embedder where db is always set.
+		return nil, fmt.Errorf("nsconfig: db is nil")
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			COALESCE(api_key_hash, ''),
+			alpha, dense_strategy, embedding_dim, dense_distance,
+			trending_window, trending_ttl, lambda_trending,
+			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
+			created_at, updated_at
+		FROM namespace_configs
+		WHERE catalog_enabled = TRUE
+		ORDER BY namespace ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog-enabled namespaces: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]*namespace.Config, 0, 4)
+	for rows.Next() {
+		var cfg namespace.Config
+		var weightsRaw []byte
+		var paramsRaw []byte
+		err := rows.Scan(
+			&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
+			&cfg.APIKeyHash,
+			&cfg.Alpha, &cfg.DenseStrategy, &cfg.EmbeddingDim, &cfg.DenseDistance,
+			&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
+			&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+			&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
+			&cfg.CreatedAt, &cfg.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan namespace config row: %w", err)
+		}
+		if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
+			return nil, fmt.Errorf("unmarshal action weights: %w", err)
+		}
+		if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+			return nil, err
+		}
+		out = append(out, &cfg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate namespace configs: %w", err)
+	}
+	return out, nil
+}
+
 // UpsertCatalogConfig writes the catalog-specific columns for an existing
 // namespace. The namespace must already exist (call Upsert first); this
 // method does not create rows. Caller is responsible for any cross-field
