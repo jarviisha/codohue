@@ -11,8 +11,9 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api  ./cmd/api
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/cron ./cmd/cron
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/api      ./cmd/api
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/cron     ./cmd/cron
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/embedder ./cmd/embedder
 
 # Stage 2: API runtime
 FROM alpine:3.21 AS api
@@ -31,6 +32,16 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /out/cron /cron
 
 ENTRYPOINT ["/cron"]
+
+# Stage 3b: Embedder runtime
+FROM alpine:3.21 AS embedder
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /out/embedder /embedder
+
+EXPOSE 2003
+
+ENTRYPOINT ["/embedder"]
 
 # Stage 4: Frontend builder — React SPA bundle (admin only)
 FROM node:20-alpine AS frontend

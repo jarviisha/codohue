@@ -33,6 +33,20 @@ services:
       - path: .env.app
         required: false
 
+  embedder:
+    build:
+      context: .
+      target: embedder
+    container_name: codohue-embedder
+    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:127.0.0.1"
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.app
+        required: false
+
   admin:
     build:
       context: .

@@ -42,6 +42,10 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // Upsert creates or updates the configuration for a namespace.
 // api_key_hash is intentionally excluded from the ON CONFLICT UPDATE clause
 // so that an existing key is never overwritten by a config update.
+//
+// Catalog auto-embedding columns (catalog_*) are also excluded from the
+// UPDATE clause: they are owned by the separate UpsertCatalogConfig path.
+// On INSERT they fall back to the column defaults declared in migration 011.
 func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*namespace.Config, error) {
 	weightsJSON, err := json.Marshal(req.ActionWeights)
 	if err != nil {
@@ -50,6 +54,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 
 	var cfg namespace.Config
 	var weightsRaw []byte
+	var paramsRaw []byte
 
 	err = r.queryRowFn(ctx, `
 		INSERT INTO namespace_configs (
@@ -78,6 +83,8 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 			COALESCE(api_key_hash, ''),
 			alpha, dense_strategy, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
+			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
 		req.Alpha, req.DenseStrategy, req.EmbeddingDim, req.DenseDistance,
@@ -87,6 +94,8 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		&cfg.APIKeyHash,
 		&cfg.Alpha, &cfg.DenseStrategy, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
+		&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
 		&cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err != nil {
@@ -95,6 +104,9 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 
 	if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
 		return nil, fmt.Errorf("unmarshal action weights: %w", err)
+	}
+	if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+		return nil, err
 	}
 
 	return &cfg, nil
@@ -120,6 +132,7 @@ func (r *Repository) SetAPIKeyHash(ctx context.Context, ns, hash string) error {
 func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, error) {
 	var cfg namespace.Config
 	var weightsRaw []byte
+	var paramsRaw []byte
 
 	err := r.queryRowFn(ctx, `
 		SELECT
@@ -127,6 +140,8 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 			COALESCE(api_key_hash, ''),
 			alpha, dense_strategy, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
+			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at
 		FROM namespace_configs
 		WHERE namespace = $1`,
@@ -136,6 +151,8 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 		&cfg.APIKeyHash,
 		&cfg.Alpha, &cfg.DenseStrategy, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
+		&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
 		&cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
@@ -148,6 +165,115 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 	if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
 		return nil, fmt.Errorf("unmarshal action weights: %w", err)
 	}
+	if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+		return nil, err
+	}
 
 	return &cfg, nil
+}
+
+// UpsertCatalogConfig writes the catalog-specific columns for an existing
+// namespace. The namespace must already exist (call Upsert first); this
+// method does not create rows. Caller is responsible for any cross-field
+// validation (e.g. dimension match) — the repository only persists.
+func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *UpdateCatalogRequest) (*namespace.Config, error) {
+	paramsJSON, err := marshalCatalogParams(req.Params)
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		strategyID, strategyVer any
+	)
+	if req.Enabled {
+		strategyID = req.StrategyID
+		strategyVer = req.StrategyVersion
+	} else {
+		// Persist as NULL when disabled so a future enable starts from a
+		// clean slot rather than an inherited identifier.
+		strategyID = nil
+		strategyVer = nil
+	}
+
+	maxAttempts := req.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
+	maxBytes := req.MaxContentBytes
+	if maxBytes <= 0 {
+		maxBytes = 32768
+	}
+
+	var cfg namespace.Config
+	var weightsRaw []byte
+	var paramsRaw []byte
+
+	err = r.queryRowFn(ctx, `
+		UPDATE namespace_configs
+		SET catalog_enabled            = $2,
+		    catalog_strategy_id        = $3,
+		    catalog_strategy_version   = $4,
+		    catalog_strategy_params    = $5,
+		    catalog_max_attempts       = $6,
+		    catalog_max_content_bytes  = $7,
+		    updated_at                 = NOW()
+		WHERE namespace = $1
+		RETURNING
+			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			COALESCE(api_key_hash, ''),
+			alpha, dense_strategy, embedding_dim, dense_distance,
+			trending_window, trending_ttl, lambda_trending,
+			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
+			created_at, updated_at`,
+		ns, req.Enabled, strategyID, strategyVer, paramsJSON, maxAttempts, maxBytes,
+	).Scan(
+		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
+		&cfg.APIKeyHash,
+		&cfg.Alpha, &cfg.DenseStrategy, &cfg.EmbeddingDim, &cfg.DenseDistance,
+		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
+		&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
+		&cfg.CreatedAt, &cfg.UpdatedAt,
+	)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("update catalog config: %w", err)
+	}
+
+	if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
+		return nil, fmt.Errorf("unmarshal action weights: %w", err)
+	}
+	if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+func marshalCatalogParams(p map[string]any) ([]byte, error) {
+	if p == nil {
+		return []byte("{}"), nil
+	}
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil, fmt.Errorf("marshal catalog strategy params: %w", err)
+	}
+	return b, nil
+}
+
+func unmarshalCatalogParams(raw []byte, dest *map[string]any) error {
+	if len(raw) == 0 {
+		*dest = nil
+		return nil
+	}
+	if err := json.Unmarshal(raw, dest); err != nil {
+		return fmt.Errorf("unmarshal catalog strategy params: %w", err)
+	}
+	if len(*dest) == 0 {
+		*dest = nil
+	}
+	return nil
 }

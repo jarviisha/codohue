@@ -248,5 +248,5 @@ Every file that contains business logic (`service.go`, `repository.go`, `job.go`
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/003-restful-api-redesign/plan.md
+at specs/004-catalog-embedder/plan.md
 <!-- SPECKIT END -->

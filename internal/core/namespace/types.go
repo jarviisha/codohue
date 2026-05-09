@@ -26,6 +26,19 @@ type Config struct {
 	TrendingTTL    int     `json:"trending_ttl"`
 	LambdaTrending float64 `json:"lambda_trending"`
 
+	// Catalog auto-embedding (feature 004-catalog-embedder).
+	// CatalogEnabled toggles whether this namespace accepts catalog ingest and
+	// rejects BYOE writes for object dense vectors.
+	CatalogEnabled bool `json:"catalog_enabled"`
+	// CatalogStrategyID and CatalogStrategyVersion identify the active embedding
+	// strategy registered in internal/core/embedstrategy. Both are empty when
+	// CatalogEnabled is false.
+	CatalogStrategyID      string         `json:"catalog_strategy_id,omitempty"`
+	CatalogStrategyVersion string         `json:"catalog_strategy_version,omitempty"`
+	CatalogStrategyParams  map[string]any `json:"catalog_strategy_params,omitempty"`
+	CatalogMaxAttempts     int            `json:"catalog_max_attempts"`
+	CatalogMaxContentBytes int            `json:"catalog_max_content_bytes"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
