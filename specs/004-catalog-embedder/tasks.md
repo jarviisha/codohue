@@ -77,10 +77,10 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Tokenizer + V1 hashing strategy
 
-- [ ] T017 [P] [US1] Create `internal/embedder/tokenizer.go` and `internal/embedder/tokenizer_test.go` per [research.md R2](./research.md#r2-tokenizer-implementation): NFC normalisation, lowercase, whitespace split via `unicode.IsSpace`, punctuation strip, URL prefix drop, character n-grams n∈[3,5]; tests include Vietnamese sample (`"Hôm nay trời đẹp quá"`), URL drop, hashtag preservation, empty-after-trim
-- [ ] T018 [P] [US1] Create `internal/embedder/hashing.go` and `internal/embedder/hashing_test.go` per [research.md R1](./research.md#r1-embedding-algorithm--concrete-shape-of-the-v1-deterministic-strategy): feature hashing with sign trick, L2 normalisation, deterministic output for identical input across runs, dim-correctness, zero-norm path returning `ErrZeroNorm` from `embedstrategy`
-- [ ] T019 [US1] Create `internal/embedder/strategy.go` and `internal/embedder/strategy_test.go` — `init()` calls `embedstrategy.DefaultRegistry().Register("internal-hashing-ngrams", "v1", factory)` where factory reads `Params["dim"]`; tests verify registration is visible from `embedstrategy.DefaultRegistry().Build("internal-hashing-ngrams","v1",Params{"dim":128})` (depends on T009, T018)
-- [ ] T020 [P] [US1] Create `internal/embedder/docs.go` with the canonical `// Package embedder ...` doc comment
+- [X] T017 [P] [US1] Create `internal/embedder/tokenizer.go` and `internal/embedder/tokenizer_test.go` per [research.md R2](./research.md#r2-tokenizer-implementation): NFC normalisation, lowercase, whitespace split via `unicode.IsSpace`, punctuation strip, URL prefix drop, character n-grams n∈[3,5]; tests include Vietnamese sample (`"Hôm nay trời đẹp quá"`), URL drop, hashtag preservation, empty-after-trim
+- [X] T018 [P] [US1] Create `internal/embedder/hashing.go` and `internal/embedder/hashing_test.go` per [research.md R1](./research.md#r1-embedding-algorithm--concrete-shape-of-the-v1-deterministic-strategy): feature hashing with sign trick, L2 normalisation, deterministic output for identical input across runs, dim-correctness, zero-norm path returning `ErrZeroNorm` from `embedstrategy`
+- [X] T019 [US1] Create `internal/embedder/strategy.go` and `internal/embedder/strategy_test.go` — `init()` calls `embedstrategy.DefaultRegistry().Register("internal-hashing-ngrams", "v1", factory)` where factory reads `Params["dim"]`; tests verify registration is visible from `embedstrategy.DefaultRegistry().Build("internal-hashing-ngrams","v1",Params{"dim":128})` (depends on T009, T018)
+- [X] T020 [P] [US1] Create `internal/embedder/docs.go` with the canonical `// Package embedder ...` doc comment
 
 ### Catalog domain (data-plane HTTP ingest)
 
