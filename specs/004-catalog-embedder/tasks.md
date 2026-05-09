@@ -84,12 +84,12 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Catalog domain (data-plane HTTP ingest)
 
-- [ ] T021 [P] [US1] Create `internal/catalog/docs.go` with the canonical `// Package catalog ...` doc comment
-- [ ] T022 [P] [US1] Create `internal/catalog/types.go`: `IngestRequest{ObjectID, Content string; Metadata map[string]any}`, `CatalogItem` struct mirroring [data-model.md §1](./data-model.md#1-new-table-catalog_items-migration-010), and a `ContentHash(content string) []byte` helper (sha256 over `content` only, per FR-002 and Q4)
-- [ ] T023 [US1] Create `internal/catalog/repository.go` and `internal/catalog/repository_test.go`: UPSERT by `(namespace, object_id)` with idempotency on identical `content_hash`; state transition helpers (`MarkInFlight`, `MarkEmbedded`, `MarkFailed`, `MarkDeadLetter`); tests use a real Postgres test DB (existing pattern in repo)
-- [ ] T024 [US1] Create `internal/catalog/service.go` and `internal/catalog/service_test.go`: validation (empty content, oversized vs `nsconfig.CatalogMaxContentBytes`), hash compute, persist via repository, `XADD catalog:embed:{ns}` per [contracts/redis-stream.md](./contracts/redis-stream.md); tests cover idempotency no-op, oversized rejection (413 path returned to handler as typed error), namespace-not-enabled rejection, transient Redis failure ⇒ row remains `pending` for the recovery sweep
-- [ ] T025 [US1] Create `internal/catalog/handler.go` and `internal/catalog/handler_test.go`: `POST /v1/namespaces/{ns}/catalog` with the existing per-namespace bearer auth middleware; status code mapping per [contracts/rest-api.md](./contracts/rest-api.md) (202/400/401/404/413/422)
-- [ ] T026 [US1] Wire `internal/catalog.Handler.Routes()` into `cmd/api/main.go` and update `cmd/api/main_test.go` to assert the new route is registered (mirrors how the existing ingest handler is wired)
+- [X] T021 [P] [US1] Create `internal/catalog/docs.go` with the canonical `// Package catalog ...` doc comment
+- [X] T022 [P] [US1] Create `internal/catalog/types.go`: `IngestRequest{ObjectID, Content string; Metadata map[string]any}`, `CatalogItem` struct mirroring [data-model.md §1](./data-model.md#1-new-table-catalog_items-migration-010), and a `ContentHash(content string) []byte` helper (sha256 over `content` only, per FR-002 and Q4)
+- [X] T023 [US1] Create `internal/catalog/repository.go` and `internal/catalog/repository_test.go`: UPSERT by `(namespace, object_id)` with idempotency on identical `content_hash`; state transition helpers (`MarkInFlight`, `MarkEmbedded`, `MarkFailed`, `MarkDeadLetter`); tests use a real Postgres test DB (existing pattern in repo)
+- [X] T024 [US1] Create `internal/catalog/service.go` and `internal/catalog/service_test.go`: validation (empty content, oversized vs `nsconfig.CatalogMaxContentBytes`), hash compute, persist via repository, `XADD catalog:embed:{ns}` per [contracts/redis-stream.md](./contracts/redis-stream.md); tests cover idempotency no-op, oversized rejection (413 path returned to handler as typed error), namespace-not-enabled rejection, transient Redis failure ⇒ row remains `pending` for the recovery sweep
+- [X] T025 [US1] Create `internal/catalog/handler.go` and `internal/catalog/handler_test.go`: `POST /v1/namespaces/{ns}/catalog` with the existing per-namespace bearer auth middleware; status code mapping per [contracts/rest-api.md](./contracts/rest-api.md) (202/400/401/404/413/422)
+- [X] T026 [US1] Wire `internal/catalog.Handler.Routes()` into `cmd/api/main.go` and update `cmd/api/main_test.go` to assert the new route is registered (mirrors how the existing ingest handler is wired)
 
 ### Embedder domain (worker)
 
