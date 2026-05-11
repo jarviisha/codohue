@@ -157,3 +157,100 @@ func TestRepositorySetAPIKeyHash_IsNoOpIfAlreadySet(t *testing.T) {
 		t.Errorf("APIKeyHash: got %q, want %q", cfg.APIKeyHash, "first-hash")
 	}
 }
+
+// TestRepositoryListCatalogEnabled covers the embedder-facing discovery
+// query: only namespaces with catalog_enabled=true must appear, ordered by
+// namespace ASC, and the catalog_strategy_params JSONB must round-trip.
+func TestRepositoryListCatalogEnabled(t *testing.T) {
+	db := openTestDB(t)
+	ctx := context.Background()
+
+	const (
+		nsEnabledA  = "nsconfig_list_catalog_a"
+		nsEnabledB  = "nsconfig_list_catalog_b"
+		nsDisabled  = "nsconfig_list_catalog_disabled"
+	)
+	for _, n := range []string{nsEnabledA, nsEnabledB, nsDisabled} {
+		cleanupNS(t, db, n)
+	}
+
+	repo := NewRepository(db)
+	for _, n := range []string{nsEnabledA, nsEnabledB, nsDisabled} {
+		if _, err := repo.Upsert(ctx, n, &UpsertRequest{EmbeddingDim: 128}); err != nil {
+			t.Fatalf("Upsert %q: %v", n, err)
+		}
+	}
+
+	// Enable two namespaces with distinct strategy params.
+	for _, p := range []struct {
+		ns      string
+		req     *UpdateCatalogRequest
+	}{
+		{nsEnabledA, &UpdateCatalogRequest{
+			Enabled: true, StrategyID: "internal-hashing-ngrams",
+			StrategyVersion: "v1", Params: map[string]any{"dim": float64(128)},
+			MaxAttempts: 5, MaxContentBytes: 32768,
+		}},
+		{nsEnabledB, &UpdateCatalogRequest{
+			Enabled: true, StrategyID: "internal-hashing-ngrams",
+			StrategyVersion: "v1", Params: map[string]any{"dim": float64(128)},
+			MaxAttempts: 7, MaxContentBytes: 65536,
+		}},
+	} {
+		if _, err := repo.UpsertCatalogConfig(ctx, p.ns, p.req); err != nil {
+			t.Fatalf("UpsertCatalogConfig %q: %v", p.ns, err)
+		}
+	}
+
+	got, err := repo.ListCatalogEnabled(ctx)
+	if err != nil {
+		t.Fatalf("ListCatalogEnabled: %v", err)
+	}
+
+	// We must see both enabled namespaces and not the disabled one. Filter the
+	// result down to the namespaces this test owns so unrelated rows do not
+	// flake the assertion.
+	owned := make(map[string]bool, 2)
+	for _, c := range got {
+		switch c.Namespace {
+		case nsEnabledA, nsEnabledB:
+			owned[c.Namespace] = true
+			if !c.CatalogEnabled {
+				t.Errorf("ns %q: CatalogEnabled=false in result", c.Namespace)
+			}
+			if c.CatalogStrategyID != "internal-hashing-ngrams" {
+				t.Errorf("ns %q: strategy_id=%q", c.Namespace, c.CatalogStrategyID)
+			}
+			if v := c.CatalogStrategyParams["dim"]; v != float64(128) {
+				t.Errorf("ns %q: params[dim]=%v want 128", c.Namespace, v)
+			}
+		case nsDisabled:
+			t.Errorf("disabled namespace %q must NOT appear in ListCatalogEnabled", c.Namespace)
+		}
+	}
+	if !owned[nsEnabledA] || !owned[nsEnabledB] {
+		t.Errorf("expected both enabled namespaces, owned=%v", owned)
+	}
+
+	// Order check: the two we own must be in ASC order relative to each
+	// other (a before b).
+	var posA, posB = -1, -1
+	for i, c := range got {
+		if c.Namespace == nsEnabledA {
+			posA = i
+		}
+		if c.Namespace == nsEnabledB {
+			posB = i
+		}
+	}
+	if posA == -1 || posB == -1 || posA >= posB {
+		t.Errorf("expected nsEnabledA (pos=%d) before nsEnabledB (pos=%d)", posA, posB)
+	}
+}
+
+func TestRepositoryListCatalogEnabled_NilDB(t *testing.T) {
+	repo := &Repository{}
+	if _, err := repo.ListCatalogEnabled(context.Background()); err == nil {
+		t.Fatal("expected error when db is nil")
+	}
+}
