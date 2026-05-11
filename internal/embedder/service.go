@@ -84,9 +84,9 @@ type Service struct {
 	registry strategyBuilder
 	idmap    idmapper
 
-	qdrantClient    *qdrant.Client
-	qdrantUpsertFn  func(ctx context.Context, points *qdrant.UpsertPoints) error
-	ensureCollFn    func(ctx context.Context, ns string, dim uint64, distance string) error
+	qdrantClient   *qdrant.Client
+	qdrantUpsertFn func(ctx context.Context, points *qdrant.UpsertPoints) error
+	ensureCollFn   func(ctx context.Context, ns string, dim uint64, distance string) error
 
 	clock func() time.Time
 
@@ -174,7 +174,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	}
 
 	if attempt > maxAttempts {
-		_ = s.repo.MarkDeadLetter(ctx, item.ID,
+		s.markDeadLetter(ctx, item.ID,
 			fmt.Sprintf("attempt %d exceeds max %d", attempt, maxAttempts))
 		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "max_attempts")
 		slog.WarnContext(ctx, "catalog item dead-lettered (max attempts exceeded)",
@@ -191,7 +191,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		// Misconfiguration (unknown strategy or factory rejected params) —
 		// terminal until operator fixes config; dead-letter immediately.
-		_ = s.repo.MarkDeadLetter(ctx, item.ID, fmt.Sprintf("strategy resolve: %v", err))
+		s.markDeadLetter(ctx, item.ID, fmt.Sprintf("strategy resolve: %v", err))
 		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "strategy_resolve")
 		return OutcomeDeadLetter, nil
 	}
@@ -203,28 +203,28 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	}
 
 	if len(vec) != cfg.EmbeddingDim {
-		_ = s.repo.MarkDeadLetter(ctx, item.ID,
+		s.markDeadLetter(ctx, item.ID,
 			fmt.Sprintf("dim mismatch: produced=%d expected=%d", len(vec), cfg.EmbeddingDim))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "dim_mismatch")
 		return OutcomeDeadLetter, nil
 	}
 
 	if err := s.ensureNamespaceCollections(ctx, item.Namespace, cfg); err != nil {
-		_ = s.repo.MarkFailed(ctx, item.ID, fmt.Sprintf("ensure dense collections: %v", err))
+		s.markFailed(ctx, item.ID, fmt.Sprintf("ensure dense collections: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "ensure_collections")
 		return OutcomeFailed, fmt.Errorf("ensure dense collections: %w", err)
 	}
 
 	pointID, err := s.idmap.GetOrCreateObjectID(ctx, item.ObjectID, item.Namespace)
 	if err != nil {
-		_ = s.repo.MarkFailed(ctx, item.ID, fmt.Sprintf("idmap: %v", err))
+		s.markFailed(ctx, item.ID, fmt.Sprintf("idmap: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "idmap")
 		return OutcomeFailed, fmt.Errorf("idmap: %w", err)
 	}
 
 	embeddedAt := s.clock().UTC()
 	if err := s.upsertVector(ctx, item.Namespace, item.ObjectID, pointID, vec, strategy, embeddedAt); err != nil {
-		_ = s.repo.MarkFailed(ctx, item.ID, fmt.Sprintf("qdrant: %v", err))
+		s.markFailed(ctx, item.ID, fmt.Sprintf("qdrant: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "qdrant")
 		return OutcomeFailed, fmt.Errorf("qdrant upsert: %w", err)
 	}
@@ -268,6 +268,31 @@ func (s *Service) recordFailure(ns, strategyID, strategyVersion, reason string) 
 	metrics.CatalogEmbedFailuresTotal.WithLabelValues(ns, strategyID, strategyVersion, reason).Inc()
 }
 
+// markDeadLetter is a thin wrapper that ignores the repo error after logging.
+// Failed bookkeeping must not block the outer flow — the row stays 'in_flight'
+// in that case and the embedder's recovery sweep will eventually re-process it.
+func (s *Service) markDeadLetter(ctx context.Context, itemID int64, reason string) {
+	if err := s.repo.MarkDeadLetter(ctx, itemID, reason); err != nil {
+		slog.WarnContext(ctx, "catalog mark dead_letter failed",
+			slog.Int64("catalog_item_id", itemID),
+			slog.String("reason", reason),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
+// markFailed is the transient-failure counterpart of markDeadLetter. The row
+// stays eligible for retry until attempt_count exceeds max_attempts.
+func (s *Service) markFailed(ctx context.Context, itemID int64, reason string) {
+	if err := s.repo.MarkFailed(ctx, itemID, reason); err != nil {
+		slog.WarnContext(ctx, "catalog mark failed (transient) failed",
+			slog.Int64("catalog_item_id", itemID),
+			slog.String("reason", reason),
+			slog.String("error", err.Error()),
+		)
+	}
+}
+
 // logDeadLetter emits a structured warn-level log for terminal failures so
 // operators see them in stdout/stderr without having to query Postgres.
 // Transient failures (ErrTransient, context cancel, unknown) are NOT logged
@@ -291,19 +316,19 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 	sid, sver := strategy.ID(), strategy.Version()
 	switch {
 	case errors.Is(err, embedstrategy.ErrZeroNorm):
-		_ = s.repo.MarkDeadLetter(ctx, item.ID, err.Error())
+		s.markDeadLetter(ctx, item.ID, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "zero_norm")
 		s.logDeadLetter(ctx, item, sid, sver, "zero_norm", err)
 		return OutcomeDeadLetter, nil
 
 	case errors.Is(err, embedstrategy.ErrInputTooLarge):
-		_ = s.repo.MarkDeadLetter(ctx, item.ID, err.Error())
+		s.markDeadLetter(ctx, item.ID, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "input_too_large")
 		s.logDeadLetter(ctx, item, sid, sver, "input_too_large", err)
 		return OutcomeDeadLetter, nil
 
 	case errors.Is(err, embedstrategy.ErrDimensionMismatch):
-		_ = s.repo.MarkDeadLetter(ctx, item.ID, err.Error())
+		s.markDeadLetter(ctx, item.ID, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "dim_mismatch")
 		s.logDeadLetter(ctx, item, sid, sver, "dim_mismatch", err)
 		return OutcomeDeadLetter, nil
@@ -311,7 +336,7 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 	case errors.Is(err, embedstrategy.ErrTransient),
 		errors.Is(err, context.Canceled),
 		errors.Is(err, context.DeadlineExceeded):
-		_ = s.repo.MarkFailed(ctx, item.ID, err.Error())
+		s.markFailed(ctx, item.ID, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "transient")
 		return OutcomeFailed, err
 
@@ -319,7 +344,7 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 		// Unknown errors are conservatively treated as transient so the
 		// item gets retried; persistent unknown errors will eventually
 		// hit max_attempts and dead-letter via the attempt cap above.
-		_ = s.repo.MarkFailed(ctx, item.ID, err.Error())
+		s.markFailed(ctx, item.ID, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "unknown")
 		return OutcomeFailed, err
 	}

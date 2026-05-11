@@ -180,8 +180,8 @@ func TestTokenize_NgramSlidingWindow(t *testing.T) {
 func TestTokenize_NFCNormalisation(t *testing.T) {
 	// "é" can be precomposed (one rune) or decomposed (two runes: e + ◌́).
 	// Both must produce the same feature stream after NFC normalisation.
-	precomposed := "café"            // U+00E9
-	decomposed := "café"       // e + combining acute accent
+	precomposed := "café" // U+00E9
+	decomposed := "café" // e + combining acute accent
 
 	gotA := toStrings(Tokenize(precomposed))
 	gotB := toStrings(Tokenize(decomposed))

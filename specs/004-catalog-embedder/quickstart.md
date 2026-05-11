@@ -126,9 +126,11 @@ Expected: the `socialdemo_objects_dense` count incremented by 1.
 Redis side:
 
 ```bash
-redis-cli XLEN catalog:embed:socialdemo          # should be 0 (consumed + ACK'd)
-redis-cli XPENDING catalog:embed:socialdemo embedder   # should report 0 pending
+redis-cli XLEN catalog:embed:socialdemo                # >= 1 (entries persist after ACK; trimmed on cleanup)
+redis-cli XPENDING catalog:embed:socialdemo embedder   # should report 0 pending — this is the "fully consumed" signal
 ```
+
+Redis Streams do **not** delete entries on `XACK` — they live in the stream until an explicit `XTRIM` / `XDEL`, or the cleanup section below. `XPENDING=0` is the correct "no in-flight or unacked work" indicator.
 
 ---
 

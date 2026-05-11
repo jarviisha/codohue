@@ -16,13 +16,13 @@ import (
 // --- fakes ----------------------------------------------------------------
 
 type fakeStreamClient struct {
-	mu        sync.Mutex
-	groupErr  error
-	readFn    func(ctx context.Context, a *redis.XReadGroupArgs) ([]redis.XStream, error)
-	autoFn    func(ctx context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)
-	ackErr    error
-	ackedIDs  []string
-	ackCalls  int
+	mu         sync.Mutex
+	groupErr   error
+	readFn     func(ctx context.Context, a *redis.XReadGroupArgs) ([]redis.XStream, error)
+	autoFn     func(ctx context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)
+	ackErr     error
+	ackedIDs   []string
+	ackCalls   int
 	groupCalls int
 }
 
@@ -92,10 +92,10 @@ func (f *fakeStreamClient) acked() []string {
 }
 
 type fakeProcessor struct {
-	out      ProcessOutcome
-	err      error
-	calls    int32
-	lastID   int64
+	out       ProcessOutcome
+	err       error
+	calls     int32
+	lastID    int64
 	processFn func(ctx context.Context, id int64) (ProcessOutcome, error)
 }
 
@@ -434,7 +434,7 @@ func TestWorker_ConsumeStream_DispatchesAndACKs(t *testing.T) {
 	cancel()
 	<-done
 
-	if !(gotIDs[0] == 42 && gotIDs[1] == 43) && !(gotIDs[0] == 43 && gotIDs[1] == 42) {
+	if (gotIDs[0] != 42 || gotIDs[1] != 43) && (gotIDs[0] != 43 || gotIDs[1] != 42) {
 		t.Errorf("expected processed ids to include 42 and 43, got %v", gotIDs)
 	}
 	if len(client.acked()) != 2 {

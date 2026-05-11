@@ -15,8 +15,8 @@ import (
 // --- fakes ----------------------------------------------------------------
 
 type fakeRepo struct {
-	loadItem    *PendingItem
-	loadErr     error
+	loadItem *PendingItem
+	loadErr  error
 
 	markInFlightAttempt int
 	markInFlightErr     error
@@ -133,6 +133,7 @@ func enabledCfg(dim int) *namespace.Config {
 	}
 }
 
+//nolint:gocritic // returning the rig as 6 values keeps test call sites concise; bundling into a struct adds no clarity.
 func newSvc(t *testing.T, opts ...func(*Service)) (*Service, *fakeRepo, *fakeNSCfg, *fakeRegistry, *fakeIDMapper, *[]upsertCall) {
 	t.Helper()
 	repo := &fakeRepo{

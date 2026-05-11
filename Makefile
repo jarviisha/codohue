@@ -35,6 +35,10 @@ MIN_INFRA_QDRANT   ?= 75
 MIN_INFRA_POSTGRES ?= 85
 MIN_CMD_API        ?= 40
 MIN_CMD_CRON       ?= 45
+# Feature 004 — catalog auto-embedding domains.
+MIN_CATALOG        ?= 85
+MIN_EMBEDDER       ?= 70
+MIN_EMBEDSTRATEGY  ?= 90
 
 .PHONY: \
 	build build-api build-cron build-admin build-embedder \
@@ -276,6 +280,9 @@ coverage-check-all: coverage-unit
 	$(MAKE) coverage-check-pkg PKG=./internal/infra/postgres/... MIN=$(MIN_INFRA_POSTGRES)
 	$(MAKE) coverage-check-pkg PKG=./cmd/api/... MIN=$(MIN_CMD_API)
 	$(MAKE) coverage-check-pkg PKG=./cmd/cron/... MIN=$(MIN_CMD_CRON)
+	$(MAKE) coverage-check-pkg PKG=./internal/catalog/... MIN=$(MIN_CATALOG)
+	$(MAKE) coverage-check-pkg PKG=./internal/embedder/... MIN=$(MIN_EMBEDDER)
+	$(MAKE) coverage-check-pkg PKG=./internal/core/embedstrategy/... MIN=$(MIN_EMBEDSTRATEGY)
 
 coverage-clean:
 	rm -rf $(COVERAGE_DIR)

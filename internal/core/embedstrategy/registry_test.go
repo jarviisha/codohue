@@ -14,10 +14,10 @@ type stubStrategy struct {
 	embedFn     func(ctx context.Context, content string) ([]float32, error)
 }
 
-func (s *stubStrategy) ID() string            { return s.id }
-func (s *stubStrategy) Version() string       { return s.version }
-func (s *stubStrategy) Dim() int              { return s.dim }
-func (s *stubStrategy) MaxInputBytes() int    { return s.maxIn }
+func (s *stubStrategy) ID() string         { return s.id }
+func (s *stubStrategy) Version() string    { return s.version }
+func (s *stubStrategy) Dim() int           { return s.dim }
+func (s *stubStrategy) MaxInputBytes() int { return s.maxIn }
 func (s *stubStrategy) Embed(ctx context.Context, content string) ([]float32, error) {
 	if s.embedFn != nil {
 		return s.embedFn(ctx, content)
@@ -211,7 +211,9 @@ func TestRegistry_Concurrent_RegisterAndBuild(t *testing.T) {
 }
 
 func TestDefaultRegistry_ReturnsProcessSingleton(t *testing.T) {
-	if DefaultRegistry() != DefaultRegistry() {
+	first := DefaultRegistry()
+	second := DefaultRegistry()
+	if first != second {
 		t.Fatal("DefaultRegistry returned different instances")
 	}
 }

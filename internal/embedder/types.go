@@ -15,6 +15,8 @@ import (
 // forbids cross-domain imports between internal/catalog and internal/embedder.
 type State string
 
+// Lifecycle states for catalog_items rows owned by the embedder. The values
+// match the SQL CHECK constraint defined in migration 010.
 const (
 	StatePending    State = "pending"
 	StateInFlight   State = "in_flight"
@@ -91,8 +93,10 @@ func stringField(m map[string]any, key string) string {
 	if !ok {
 		return ""
 	}
-	s, _ := v.(string)
-	return s
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }
 
 // Embedder service-level errors. The worker maps these to catalog_items

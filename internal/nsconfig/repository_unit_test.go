@@ -276,10 +276,7 @@ func TestRepositoryGet_PopulatesCatalogFields(t *testing.T) {
 				if err := setString(dest[15], "internal-hashing-ngrams"); err != nil {
 					return err
 				}
-				if err := setString(dest[16], "v1"); err != nil {
-					return err
-				}
-				return nil
+				return setString(dest[16], "v1")
 			}}
 		},
 	}

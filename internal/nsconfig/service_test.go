@@ -11,17 +11,17 @@ import (
 
 // fakeRepo implements nsConfigRepository for testing.
 type fakeRepo struct {
-	upsertCfg                *namespace.Config
-	upsertErr                error
-	setAPIKeyHashErr         error
-	setAPIKeyHashCalled      bool
-	getCfg                   *namespace.Config
-	getErr                   error
-	upsertCatalogCfg         *namespace.Config
-	upsertCatalogErr         error
-	upsertCatalogCalledWith  *UpdateCatalogRequest
-	listCfgs                 []*namespace.Config
-	listErr                  error
+	upsertCfg               *namespace.Config
+	upsertErr               error
+	setAPIKeyHashErr        error
+	setAPIKeyHashCalled     bool
+	getCfg                  *namespace.Config
+	getErr                  error
+	upsertCatalogCfg        *namespace.Config
+	upsertCatalogErr        error
+	upsertCatalogCalledWith *UpdateCatalogRequest
+	listCfgs                []*namespace.Config
+	listErr                 error
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*namespace.Config, error) {

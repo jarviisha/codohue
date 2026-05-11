@@ -29,6 +29,7 @@ var hashingNgramsValidDims = []int{64, 128, 256, 512}
 // Algorithm (per research.md R1):
 //
 //  1. Tokenize content into word + character-n-gram features.
+//
 //  2. For each feature:
 //     - hash := xxhash64(feature_bytes)
 //     - slot := hash mod dim
@@ -45,10 +46,20 @@ type hashingNgrams struct {
 	dim int
 }
 
-func (h *hashingNgrams) ID() string         { return hashingNgramsID }
-func (h *hashingNgrams) Version() string    { return hashingNgramsVersion }
-func (h *hashingNgrams) Dim() int           { return h.dim }
-func (h *hashingNgrams) MaxInputBytes() int { return 0 } // namespace-level cap applies
+// ID returns the registered strategy identifier ("internal-hashing-ngrams").
+func (h *hashingNgrams) ID() string { return hashingNgramsID }
+
+// Version returns the immutable strategy version. Bumping it requires a
+// namespace-wide re-embed because vectors produced under different versions
+// are not comparable.
+func (h *hashingNgrams) Version() string { return hashingNgramsVersion }
+
+// Dim returns the output vector size; one of {64, 128, 256, 512} for V1.
+func (h *hashingNgrams) Dim() int { return h.dim }
+
+// MaxInputBytes returns 0 to signal that this strategy has no internal cap;
+// the namespace-level catalog_max_content_bytes is the operative limit.
+func (h *hashingNgrams) MaxInputBytes() int { return 0 }
 
 // Embed produces an L2-normalised dense vector. Returns ErrZeroNorm when
 // the content has no surviving features (e.g. punctuation-only) or the
@@ -56,7 +67,7 @@ func (h *hashingNgrams) MaxInputBytes() int { return 0 } // namespace-level cap 
 // when balanced positive/negative collisions sum to zero).
 func (h *hashingNgrams) Embed(ctx context.Context, content string) ([]float32, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("hashing-ngrams embed: %w", err)
 	}
 
 	features := Tokenize(content)

@@ -3,19 +3,25 @@
 ## Project Overview
 Codohue is a hybrid recommendation service for behavioral personalization. It ingests events from Redis Streams, stores raw events in PostgreSQL, computes sparse and dense vectors, and serves recommendations through an HTTP API backed by Qdrant.
 
-There are two binaries:
+There are four binaries:
 
 - `cmd/api`: HTTP server on port `2001` and Redis Streams ingest worker.
 - `cmd/cron`: batch recompute job that rebuilds vectors on a schedule.
+- `cmd/admin`: admin server on port `2002` that serves the embedded `web/admin` SPA, the session-cookie auth API, and the `/api/admin/v1/*` operational dashboard endpoints.
+- `cmd/embedder`: catalog auto-embedding worker (port `2003` for `/healthz` + `/metrics`); consumes raw catalog content from `catalog:embed:{ns}` Redis streams, embeds it via the configured strategy, and upserts dense vectors into `{ns}_objects_dense`.
 
 ## Project Structure & Module Organization
 The repository follows a strict Go service layout:
 
-- `cmd/api`, `cmd/cron`: executable entrypoints.
+- `cmd/api`, `cmd/cron`, `cmd/admin`, `cmd/embedder`: executable entrypoints.
 - `internal/ingest`: consume events and persist them.
 - `internal/compute`: recompute CF sparse vectors, dense vectors, and trending data.
 - `internal/recommend`: recommendation, ranking, hybrid merge, trending fallback, BYOE embedding endpoints.
 - `internal/nsconfig`: per-namespace config CRUD.
+- `internal/admin`: handlers, services, and repositories for the `cmd/admin` operational dashboard.
+- `internal/catalog`: data-plane HTTP ingest path for raw catalog content.
+- `internal/embedder`: per-item embed pipeline, strategy registration, worker, re-embed completion watcher.
+- `internal/core/embedstrategy`: forward-compat seam for embedding strategies (registry + interface). Both `internal/catalog` and `internal/embedder` depend on it; they MUST NOT import each other.
 - `internal/core/idmap`: map string IDs to numeric Qdrant point IDs.
 - `internal/auth`: bearer-token authentication.
 - `internal/infra/{postgres,redis,qdrant,metrics}`: external clients and observability.
@@ -33,8 +39,8 @@ Keep feature logic inside its domain package. The default package shape is `docs
 ## Build, Test, and Development Commands
 Use the `Makefile` as the source of truth:
 
-- `make build`: build both binaries into `tmp/`.
-- `make build-api`, `make build-cron`: build a single binary.
+- `make build`: build all binaries into `tmp/`.
+- `make build-api`, `make build-cron`, `make build-admin`, `make build-embedder`: build a single binary.
 - `make run`: run the API directly.
 - `make run-cron`: execute one cron cycle manually.
 - `make dev`: run live reload with `air`.
@@ -90,9 +96,9 @@ Recommended commit types:
 
 Recommended scopes for this repo:
 
-- `api`, `cron`
-- `ingest`, `compute`, `recommend`, `nsconfig`, `auth`
-- `idmap`, `qdrant`, `redis`, `postgres`, `metrics`
+- `api`, `cron`, `admin`, `embedder`
+- `ingest`, `compute`, `recommend`, `nsconfig`, `auth`, `catalog`
+- `embedstrategy`, `idmap`, `qdrant`, `redis`, `postgres`, `metrics`
 - `e2e`, `docs`, `ci`
 
 Examples:

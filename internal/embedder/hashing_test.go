@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"math"
+	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 )
@@ -216,4 +219,66 @@ func TestHashingNgrams_EmbedSimilarContentIsCloser(t *testing.T) {
 		t.Errorf("expected similar English inputs to be closer than English vs Vietnamese; got %v vs %v",
 			cosine(a, aSimilar), cosine(a, bDifferent))
 	}
+}
+
+// BenchmarkHashingEmbed_1KiB measures end-to-end embed latency on a 1 KiB
+// input. The plan's Performance Goals require p95 ≤ 5 ms (T066). This
+// benchmark also asserts the budget so a regression in the tokenizer or
+// hashing path will surface as a failing benchmark rather than only a
+// slower number on the dashboard.
+func BenchmarkHashingEmbed_1KiB(b *testing.B) {
+	const targetBytes = 1024
+	// A representative input: short Vietnamese sentences interleaved with a
+	// hashtag. Repeated until just over 1 KiB.
+	sample := "Hôm nay trời đẹp quá, ai cũng muốn ra biển! #weekend "
+	var sb strings.Builder
+	for sb.Len() < targetBytes {
+		sb.WriteString(sample)
+	}
+	content := sb.String()[:targetBytes]
+
+	s, err := newHashingNgrams(embedstrategy.Params{"dim": 128})
+	if err != nil {
+		b.Fatalf("factory: %v", err)
+	}
+
+	// Warm-up to amortise first-run jitter (allocator, branch predictor).
+	for i := 0; i < 50; i++ {
+		if _, err := s.Embed(context.Background(), content); err != nil {
+			b.Fatalf("warm-up embed: %v", err)
+		}
+	}
+
+	const sampleCount = 1000
+	durations := make([]time.Duration, 0, sampleCount)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		start := time.Now()
+		if _, err := s.Embed(context.Background(), content); err != nil {
+			b.Fatalf("embed: %v", err)
+		}
+		if i < sampleCount {
+			durations = append(durations, time.Since(start))
+		}
+	}
+
+	if b.N < sampleCount {
+		// `go test -bench` may run with a small N when sampling for the
+		// final estimate. Skip the p95 guard in that case so the benchmark
+		// still reports a number; the guarded path triggers under
+		// `-benchtime=1000x` (or higher) which feeds enough iterations.
+		return
+	}
+
+	b.StopTimer()
+	sort.Slice(durations, func(i, j int) bool { return durations[i] < durations[j] })
+	p95 := durations[(len(durations)*95)/100]
+	const budget = 5 * time.Millisecond
+	if p95 > budget {
+		b.Fatalf("p95 latency over budget: got %s, want <= %s (n=%d)", p95, budget, len(durations))
+	}
+	b.ReportMetric(float64(p95)/float64(time.Millisecond), "p95-ms")
 }

@@ -31,10 +31,10 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 **Purpose**: Project scaffolding before any code lands.
 
-- [X] T001 Create new directories: `internal/catalog/`, `internal/embedder/`, `internal/core/embedstrategy/`, `cmd/embedder/`
-- [X] T002 [P] Add Makefile targets `build-embedder`, `dev-embedder`, `run-embedder`, `logs-embedder` mirroring the existing `build-cron` / `dev` / `run-cron` / `logs-cron` shapes in `Makefile`
-- [X] T003 [P] Add `embedder` service to `docker-compose.yml` and `docker-compose.app.yml` (image build + Redis/Postgres/Qdrant deps + `EMBEDDER_HEALTH_PORT=2003`)
-- [X] T004 [P] Add new env vars to `.env.example`: `CATALOG_MAX_CONTENT_BYTES=32768`, `EMBED_MAX_ATTEMPTS=5`, `EMBEDDER_HEALTH_PORT=2003`, `EMBEDDER_REPLICA_NAME=`, `EMBEDDER_NAMESPACE_POLL_INTERVAL=30s`
+- [x] T001 Create new directories: `internal/catalog/`, `internal/embedder/`, `internal/core/embedstrategy/`, `cmd/embedder/`
+- [x] T002 [P] Add Makefile targets `build-embedder`, `dev-embedder`, `run-embedder`, `logs-embedder` mirroring the existing `build-cron` / `dev` / `run-cron` / `logs-cron` shapes in `Makefile`
+- [x] T003 [P] Add `embedder` service to `docker-compose.yml` and `docker-compose.app.yml` (image build + Redis/Postgres/Qdrant deps + `EMBEDDER_HEALTH_PORT=2003`)
+- [x] T004 [P] Add new env vars to `.env.example`: `CATALOG_MAX_CONTENT_BYTES=32768`, `EMBED_MAX_ATTEMPTS=5`, `EMBEDDER_HEALTH_PORT=2003`, `EMBEDDER_REPLICA_NAME=`, `EMBEDDER_NAMESPACE_POLL_INTERVAL=30s`
 
 ---
 
@@ -46,24 +46,24 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Database migrations
 
-- [X] T005 [P] Write migration 010 at `migrations/010_catalog_items.up.sql` and `migrations/010_catalog_items.down.sql` per [data-model.md §1](./data-model.md#1-new-table-catalog_items-migration-010) (table + four indexes; down drops table)
-- [X] T006 [P] Write migration 011 at `migrations/011_namespace_configs_catalog.up.sql` and `migrations/011_namespace_configs_catalog.down.sql` per [data-model.md §2](./data-model.md#2-modified-table-namespace_configs-migration-011) (six new columns; down drops them)
+- [x] T005 [P] Write migration 010 at `migrations/010_catalog_items.up.sql` and `migrations/010_catalog_items.down.sql` per [data-model.md §1](./data-model.md#1-new-table-catalog_items-migration-010) (table + four indexes; down drops table)
+- [x] T006 [P] Write migration 011 at `migrations/011_namespace_configs_catalog.up.sql` and `migrations/011_namespace_configs_catalog.down.sql` per [data-model.md §2](./data-model.md#2-modified-table-namespace_configs-migration-011) (six new columns; down drops them)
 
 ### Strategy abstraction (forward-compat seam)
 
-- [X] T007 [P] Create `internal/core/embedstrategy/docs.go` with the canonical `// Package embedstrategy ...` doc comment per [contracts/strategy-interface.md](./contracts/strategy-interface.md)
-- [X] T008 [P] Create `internal/core/embedstrategy/types.go` with the `Strategy` interface, `Params`, `Factory`, `StrategyDescriptor`, and the five sentinel errors (`ErrUnknownStrategy`, `ErrDimensionMismatch`, `ErrZeroNorm`, `ErrInputTooLarge`, `ErrTransient`) per [contracts/strategy-interface.md](./contracts/strategy-interface.md)
-- [X] T009 Create `internal/core/embedstrategy/registry.go` with `Registry`, `DefaultRegistry()`, `Register`, `Build`, `Has`, `List` (depends on T008)
-- [X] T010 Create `internal/core/embedstrategy/registry_test.go` covering: register success, duplicate `(id, version)` panic, `Build` unknown returns `ErrUnknownStrategy`, `List` returns descriptor for every registered factory, concurrent-safe register/build under `-race`
+- [x] T007 [P] Create `internal/core/embedstrategy/docs.go` with the canonical `// Package embedstrategy ...` doc comment per [contracts/strategy-interface.md](./contracts/strategy-interface.md)
+- [x] T008 [P] Create `internal/core/embedstrategy/types.go` with the `Strategy` interface, `Params`, `Factory`, `StrategyDescriptor`, and the five sentinel errors (`ErrUnknownStrategy`, `ErrDimensionMismatch`, `ErrZeroNorm`, `ErrInputTooLarge`, `ErrTransient`) per [contracts/strategy-interface.md](./contracts/strategy-interface.md)
+- [x] T009 Create `internal/core/embedstrategy/registry.go` with `Registry`, `DefaultRegistry()`, `Register`, `Build`, `Has`, `List` (depends on T008)
+- [x] T010 Create `internal/core/embedstrategy/registry_test.go` covering: register success, duplicate `(id, version)` panic, `Build` unknown returns `ErrUnknownStrategy`, `List` returns descriptor for every registered factory, concurrent-safe register/build under `-race`
 
 ### Namespace config extensions
 
-- [X] T011 Extend `internal/nsconfig/types.go` with `CatalogEnabled bool`, `CatalogStrategyID string`, `CatalogStrategyVersion string`, `CatalogStrategyParams map[string]any`, `CatalogMaxAttempts int`, `CatalogMaxContentBytes int` per [data-model.md §2](./data-model.md#2-modified-table-namespace_configs-migration-011)
-- [X] T012 Update `internal/nsconfig/repository.go` to read/write the six new columns; defaults must mirror migration defaults
-- [X] T013 Update `internal/nsconfig/repository_test.go` for the new columns (round-trip read/write, default values, JSONB params encoding)
-- [X] T014 Extend `internal/nsconfig/service.go` to validate `(CatalogStrategyID, CatalogStrategyVersion)` against `embedstrategy.DefaultRegistry()` AND to assert `Strategy.Dim() == namespace.embedding_dim` on enable; returns a typed error carrying both numbers (US2 #2 acceptance)
-- [X] T015 Update `internal/nsconfig/service_test.go` for the validation paths: unknown strategy → `ErrUnknownStrategy`, dim mismatch → typed error with both dims, valid enable round-trip
-- [X] T016 [P] Extend `internal/config` to load `CATALOG_MAX_CONTENT_BYTES`, `EMBED_MAX_ATTEMPTS`, `EMBEDDER_HEALTH_PORT`, `EMBEDDER_REPLICA_NAME`, `EMBEDDER_NAMESPACE_POLL_INTERVAL` (extend `LoadCron` + introduce `LoadEmbedder`); add unit tests in the existing config test file
+- [x] T011 Extend `internal/nsconfig/types.go` with `CatalogEnabled bool`, `CatalogStrategyID string`, `CatalogStrategyVersion string`, `CatalogStrategyParams map[string]any`, `CatalogMaxAttempts int`, `CatalogMaxContentBytes int` per [data-model.md §2](./data-model.md#2-modified-table-namespace_configs-migration-011)
+- [x] T012 Update `internal/nsconfig/repository.go` to read/write the six new columns; defaults must mirror migration defaults
+- [x] T013 Update `internal/nsconfig/repository_test.go` for the new columns (round-trip read/write, default values, JSONB params encoding)
+- [x] T014 Extend `internal/nsconfig/service.go` to validate `(CatalogStrategyID, CatalogStrategyVersion)` against `embedstrategy.DefaultRegistry()` AND to assert `Strategy.Dim() == namespace.embedding_dim` on enable; returns a typed error carrying both numbers (US2 #2 acceptance)
+- [x] T015 Update `internal/nsconfig/service_test.go` for the validation paths: unknown strategy → `ErrUnknownStrategy`, dim mismatch → typed error with both dims, valid enable round-trip
+- [x] T016 [P] Extend `internal/config` to load `CATALOG_MAX_CONTENT_BYTES`, `EMBED_MAX_ATTEMPTS`, `EMBEDDER_HEALTH_PORT`, `EMBEDDER_REPLICA_NAME`, `EMBEDDER_NAMESPACE_POLL_INTERVAL` (extend `LoadCron` + introduce `LoadEmbedder`); add unit tests in the existing config test file
 
 **Checkpoint**: Foundation ready — migrations applied, strategy abstraction compiled, namespace config knows about catalog.
 
@@ -77,38 +77,38 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Tokenizer + V1 hashing strategy
 
-- [X] T017 [P] [US1] Create `internal/embedder/tokenizer.go` and `internal/embedder/tokenizer_test.go` per [research.md R2](./research.md#r2-tokenizer-implementation): NFC normalisation, lowercase, whitespace split via `unicode.IsSpace`, punctuation strip, URL prefix drop, character n-grams n∈[3,5]; tests include Vietnamese sample (`"Hôm nay trời đẹp quá"`), URL drop, hashtag preservation, empty-after-trim
-- [X] T018 [P] [US1] Create `internal/embedder/hashing.go` and `internal/embedder/hashing_test.go` per [research.md R1](./research.md#r1-embedding-algorithm--concrete-shape-of-the-v1-deterministic-strategy): feature hashing with sign trick, L2 normalisation, deterministic output for identical input across runs, dim-correctness, zero-norm path returning `ErrZeroNorm` from `embedstrategy`
-- [X] T019 [US1] Create `internal/embedder/strategy.go` and `internal/embedder/strategy_test.go` — `init()` calls `embedstrategy.DefaultRegistry().Register("internal-hashing-ngrams", "v1", factory)` where factory reads `Params["dim"]`; tests verify registration is visible from `embedstrategy.DefaultRegistry().Build("internal-hashing-ngrams","v1",Params{"dim":128})` (depends on T009, T018)
-- [X] T020 [P] [US1] Create `internal/embedder/docs.go` with the canonical `// Package embedder ...` doc comment
+- [x] T017 [P] [US1] Create `internal/embedder/tokenizer.go` and `internal/embedder/tokenizer_test.go` per [research.md R2](./research.md#r2-tokenizer-implementation): NFC normalisation, lowercase, whitespace split via `unicode.IsSpace`, punctuation strip, URL prefix drop, character n-grams n∈[3,5]; tests include Vietnamese sample (`"Hôm nay trời đẹp quá"`), URL drop, hashtag preservation, empty-after-trim
+- [x] T018 [P] [US1] Create `internal/embedder/hashing.go` and `internal/embedder/hashing_test.go` per [research.md R1](./research.md#r1-embedding-algorithm--concrete-shape-of-the-v1-deterministic-strategy): feature hashing with sign trick, L2 normalisation, deterministic output for identical input across runs, dim-correctness, zero-norm path returning `ErrZeroNorm` from `embedstrategy`
+- [x] T019 [US1] Create `internal/embedder/strategy.go` and `internal/embedder/strategy_test.go` — `init()` calls `embedstrategy.DefaultRegistry().Register("internal-hashing-ngrams", "v1", factory)` where factory reads `Params["dim"]`; tests verify registration is visible from `embedstrategy.DefaultRegistry().Build("internal-hashing-ngrams","v1",Params{"dim":128})` (depends on T009, T018)
+- [x] T020 [P] [US1] Create `internal/embedder/docs.go` with the canonical `// Package embedder ...` doc comment
 
 ### Catalog domain (data-plane HTTP ingest)
 
-- [X] T021 [P] [US1] Create `internal/catalog/docs.go` with the canonical `// Package catalog ...` doc comment
-- [X] T022 [P] [US1] Create `internal/catalog/types.go`: `IngestRequest{ObjectID, Content string; Metadata map[string]any}`, `CatalogItem` struct mirroring [data-model.md §1](./data-model.md#1-new-table-catalog_items-migration-010), and a `ContentHash(content string) []byte` helper (sha256 over `content` only, per FR-002 and Q4)
-- [X] T023 [US1] Create `internal/catalog/repository.go` and `internal/catalog/repository_test.go`: UPSERT by `(namespace, object_id)` with idempotency on identical `content_hash`; state transition helpers (`MarkInFlight`, `MarkEmbedded`, `MarkFailed`, `MarkDeadLetter`); tests use a real Postgres test DB (existing pattern in repo)
-- [X] T024 [US1] Create `internal/catalog/service.go` and `internal/catalog/service_test.go`: validation (empty content, oversized vs `nsconfig.CatalogMaxContentBytes`), hash compute, persist via repository, `XADD catalog:embed:{ns}` per [contracts/redis-stream.md](./contracts/redis-stream.md); tests cover idempotency no-op, oversized rejection (413 path returned to handler as typed error), namespace-not-enabled rejection, transient Redis failure ⇒ row remains `pending` for the recovery sweep
-- [X] T025 [US1] Create `internal/catalog/handler.go` and `internal/catalog/handler_test.go`: `POST /v1/namespaces/{ns}/catalog` with the existing per-namespace bearer auth middleware; status code mapping per [contracts/rest-api.md](./contracts/rest-api.md) (202/400/401/404/413/422)
-- [X] T026 [US1] Wire `internal/catalog.Handler.Routes()` into `cmd/api/main.go` and update `cmd/api/main_test.go` to assert the new route is registered (mirrors how the existing ingest handler is wired)
+- [x] T021 [P] [US1] Create `internal/catalog/docs.go` with the canonical `// Package catalog ...` doc comment
+- [x] T022 [P] [US1] Create `internal/catalog/types.go`: `IngestRequest{ObjectID, Content string; Metadata map[string]any}`, `CatalogItem` struct mirroring [data-model.md §1](./data-model.md#1-new-table-catalog_items-migration-010), and a `ContentHash(content string) []byte` helper (sha256 over `content` only, per FR-002 and Q4)
+- [x] T023 [US1] Create `internal/catalog/repository.go` and `internal/catalog/repository_test.go`: UPSERT by `(namespace, object_id)` with idempotency on identical `content_hash`; state transition helpers (`MarkInFlight`, `MarkEmbedded`, `MarkFailed`, `MarkDeadLetter`); tests use a real Postgres test DB (existing pattern in repo)
+- [x] T024 [US1] Create `internal/catalog/service.go` and `internal/catalog/service_test.go`: validation (empty content, oversized vs `nsconfig.CatalogMaxContentBytes`), hash compute, persist via repository, `XADD catalog:embed:{ns}` per [contracts/redis-stream.md](./contracts/redis-stream.md); tests cover idempotency no-op, oversized rejection (413 path returned to handler as typed error), namespace-not-enabled rejection, transient Redis failure ⇒ row remains `pending` for the recovery sweep
+- [x] T025 [US1] Create `internal/catalog/handler.go` and `internal/catalog/handler_test.go`: `POST /v1/namespaces/{ns}/catalog` with the existing per-namespace bearer auth middleware; status code mapping per [contracts/rest-api.md](./contracts/rest-api.md) (202/400/401/404/413/422)
+- [x] T026 [US1] Wire `internal/catalog.Handler.Routes()` into `cmd/api/main.go` and update `cmd/api/main_test.go` to assert the new route is registered (mirrors how the existing ingest handler is wired)
 
 ### Embedder domain (worker)
 
-- [X] T027 [P] [US1] Create `internal/embedder/types.go`: worker config struct (`Concurrency`, `MaxAttempts`, `MinIdleReclaim`), Redis stream entry decoding helpers
-- [X] T028 [US1] Create `internal/embedder/repository.go` and `internal/embedder/repository_test.go`: read pending `catalog_items` by id, write the four success/failure state transitions (mirrors the catalog repo but is independently testable so the cross-domain rule remains intact), recovery-sweep query `state='pending' AND id NOT IN (XPENDING ids)`
-- [X] T029 [US1] Create `internal/embedder/service.go` and `internal/embedder/service_test.go`: per-item orchestration — load row, build cached `Strategy` via `embedstrategy.Build` keyed on `(strategy_id, strategy_version, paramsHash)`, embed, validate dim against `nsconfig.embedding_dim` (defence in depth per FR-009), upsert Qdrant `{ns}_objects_dense` via existing `idmap` flow with `payload.{strategy_id, strategy_version, embedded_at}` per [data-model.md §4](./data-model.md#4-qdrant-point-payload-conventions), mark embedded; service_test mocks Qdrant and registry, exercises the FR-010 error→state mapping table from [contracts/strategy-interface.md](./contracts/strategy-interface.md)
-- [X] T030 [US1] Create `internal/embedder/worker.go` and `internal/embedder/worker_test.go`: per-namespace `XREADGROUP > BLOCK 5s COUNT 32` loop, `XAUTOCLAIM` reaper goroutine (60 s min-idle), recovery sweep goroutine, namespace-registry poller per [contracts/redis-stream.md](./contracts/redis-stream.md); worker_test uses `miniredis` (or equivalent) and a mocked service to assert the loop calls service for each entry, ACKs on success, leaves PEL untouched on transient failure, ACKs+dead-letter on hard failure
+- [x] T027 [P] [US1] Create `internal/embedder/types.go`: worker config struct (`Concurrency`, `MaxAttempts`, `MinIdleReclaim`), Redis stream entry decoding helpers
+- [x] T028 [US1] Create `internal/embedder/repository.go` and `internal/embedder/repository_test.go`: read pending `catalog_items` by id, write the four success/failure state transitions (mirrors the catalog repo but is independently testable so the cross-domain rule remains intact), recovery-sweep query `state='pending' AND id NOT IN (XPENDING ids)`
+- [x] T029 [US1] Create `internal/embedder/service.go` and `internal/embedder/service_test.go`: per-item orchestration — load row, build cached `Strategy` via `embedstrategy.Build` keyed on `(strategy_id, strategy_version, paramsHash)`, embed, validate dim against `nsconfig.embedding_dim` (defence in depth per FR-009), upsert Qdrant `{ns}_objects_dense` via existing `idmap` flow with `payload.{strategy_id, strategy_version, embedded_at}` per [data-model.md §4](./data-model.md#4-qdrant-point-payload-conventions), mark embedded; service_test mocks Qdrant and registry, exercises the FR-010 error→state mapping table from [contracts/strategy-interface.md](./contracts/strategy-interface.md)
+- [x] T030 [US1] Create `internal/embedder/worker.go` and `internal/embedder/worker_test.go`: per-namespace `XREADGROUP > BLOCK 5s COUNT 32` loop, `XAUTOCLAIM` reaper goroutine (60 s min-idle), recovery sweep goroutine, namespace-registry poller per [contracts/redis-stream.md](./contracts/redis-stream.md); worker_test uses `miniredis` (or equivalent) and a mocked service to assert the loop calls service for each entry, ACKs on success, leaves PEL untouched on transient failure, ACKs+dead-letter on hard failure
 
 ### Embedder binary
 
-- [X] T031 [US1] Create `cmd/embedder/main.go` and `cmd/embedder/main_test.go` mirroring the shape of `cmd/cron/main.go`: load `LoadEmbedder` config, init pgxpool + redis + qdrant clients via `internal/infra/...`, expose `/healthz` and `/metrics` on `EMBEDDER_HEALTH_PORT`, run worker, handle SIGINT/SIGTERM for graceful shutdown; `main_test.go` is a smoke test asserting `run()` returns cleanly when context is cancelled
+- [x] T031 [US1] Create `cmd/embedder/main.go` and `cmd/embedder/main_test.go` mirroring the shape of `cmd/cron/main.go`: load `LoadEmbedder` config, init pgxpool + redis + qdrant clients via `internal/infra/...`, expose `/healthz` and `/metrics` on `EMBEDDER_HEALTH_PORT`, run worker, handle SIGINT/SIGTERM for graceful shutdown; `main_test.go` is a smoke test asserting `run()` returns cleanly when context is cancelled
 
 ### Observability + e2e
 
-- [X] T032 [US1] Add per-namespace Prometheus metrics in `internal/embedder/service.go` registration: `catalog_pending_total{namespace}` (gauge), `catalog_inflight_total{namespace}` (gauge), `catalog_deadletter_total{namespace}` (gauge), `catalog_items_embedded_total{namespace,strategy_id,strategy_version}` (counter), `catalog_embed_duration_seconds{namespace,strategy_id,strategy_version}` (histogram), `catalog_embed_failures_total{namespace,strategy_id,strategy_version,reason}` (counter), `catalog_strategy_work_volume_total{namespace,strategy_id,strategy_version,unit}` (counter, V1 sets `unit="tokens_processed"`) per [research.md R10](./research.md#r10-observability-indicators-fr-014-fr-015-sc-007); add unit tests for metric registration / increment in `internal/embedder/service_test.go`
-- [X] T033 [US1] Add structured `slog` logging in `internal/catalog/service.go` and `internal/embedder/{service,worker}.go` matching the existing log format used by `internal/ingest` and `internal/compute`
-- [X] T034 [US1] Create `e2e/catalog_test.go` (`-tags=e2e`) covering US1 acceptance scenarios 1–4: enable catalog → ingest sample posts → wait for drain → assert Qdrant point count + payload tags → assert recommendations include catalog items
-- [X] T035 [US1] Update `Makefile` `test-e2e-heavy` target to include the new `e2e/catalog_test.go`
-- [X] T036 [P] [US1] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add `POST /v1/namespaces/{ns}/catalog` data-plane row per [contracts/rest-api.md](./contracts/rest-api.md)
+- [x] T032 [US1] Add per-namespace Prometheus metrics in `internal/embedder/service.go` registration: `catalog_pending_total{namespace}` (gauge), `catalog_inflight_total{namespace}` (gauge), `catalog_deadletter_total{namespace}` (gauge), `catalog_items_embedded_total{namespace,strategy_id,strategy_version}` (counter), `catalog_embed_duration_seconds{namespace,strategy_id,strategy_version}` (histogram), `catalog_embed_failures_total{namespace,strategy_id,strategy_version,reason}` (counter), `catalog_strategy_work_volume_total{namespace,strategy_id,strategy_version,unit}` (counter, V1 sets `unit="tokens_processed"`) per [research.md R10](./research.md#r10-observability-indicators-fr-014-fr-015-sc-007); add unit tests for metric registration / increment in `internal/embedder/service_test.go`
+- [x] T033 [US1] Add structured `slog` logging in `internal/catalog/service.go` and `internal/embedder/{service,worker}.go` matching the existing log format used by `internal/ingest` and `internal/compute`
+- [x] T034 [US1] Create `e2e/catalog_test.go` (`-tags=e2e`) covering US1 acceptance scenarios 1–4: enable catalog → ingest sample posts → wait for drain → assert Qdrant point count + payload tags → assert recommendations include catalog items
+- [x] T035 [US1] Update `Makefile` `test-e2e-heavy` target to include the new `e2e/catalog_test.go`
+- [x] T036 [P] [US1] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add `POST /v1/namespaces/{ns}/catalog` data-plane row per [contracts/rest-api.md](./contracts/rest-api.md)
 
 **Checkpoint**: US1 fully functional. A new client can ingest raw posts and the cycle ingest→embed→recommend works without operator intervention beyond the initial enable. SC-001, SC-002, SC-003, SC-005 all reachable; demo-able as MVP.
 
@@ -122,24 +122,24 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Admin endpoints
 
-- [X] T037 [P] [US2] Add `internal/admin/catalog_handler.go` and `internal/admin/catalog_handler_test.go` exposing `GET /api/admin/v1/namespaces/{ns}/catalog` per [contracts/rest-api.md](./contracts/rest-api.md): joins nsconfig + Redis `XLEN`/`XPENDING` + Postgres state counts + last `batch_run_logs` row + `embedstrategy.Registry.List()` filtered to namespace `embedding_dim`
-- [X] T038 [P] [US2] Add `PUT /api/admin/v1/namespaces/{ns}/catalog` handler/test in the same files (or `catalog_put_handler.go` if file gets large): validates strategy via `nsconfig.Service` (T014), persists, returns 200/400 with the dim-mismatch body shape from [contracts/rest-api.md](./contracts/rest-api.md)
-- [X] T039 [US2] Wire the two admin routes into `cmd/admin/main.go` and update `cmd/admin/main_test.go` to assert registration
+- [x] T037 [P] [US2] Add `internal/admin/catalog_handler.go` and `internal/admin/catalog_handler_test.go` exposing `GET /api/admin/v1/namespaces/{ns}/catalog` per [contracts/rest-api.md](./contracts/rest-api.md): joins nsconfig + Redis `XLEN`/`XPENDING` + Postgres state counts + last `batch_run_logs` row + `embedstrategy.Registry.List()` filtered to namespace `embedding_dim`
+- [x] T038 [P] [US2] Add `PUT /api/admin/v1/namespaces/{ns}/catalog` handler/test in the same files (or `catalog_put_handler.go` if file gets large): validates strategy via `nsconfig.Service` (T014), persists, returns 200/400 with the dim-mismatch body shape from [contracts/rest-api.md](./contracts/rest-api.md)
+- [x] T039 [US2] Wire the two admin routes into `cmd/admin/main.go` and update `cmd/admin/main_test.go` to assert registration
 
 ### BYOE source-of-truth precedence guard (FR-018)
 
-- [X] T040 [US2] Update `internal/recommend/handler.go` PUT object embedding handler — add a one-line `nsconfig.GetByNamespace(ns).CatalogEnabled` lookup before the existing dim validation; on `true`, return 409 with body `{"error":"namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted"}` per [research.md R8](./research.md#r8-source-of-truth-conflict-policy-fr-018-assumption-source-of-truth-precedence)
-- [X] T041 [US2] Add 409-path test cases in `internal/recommend/handler_test.go`: catalog enabled → 409, catalog disabled → existing 204 success path
+- [x] T040 [US2] Update `internal/recommend/handler.go` PUT object embedding handler — add a one-line `nsconfig.GetByNamespace(ns).CatalogEnabled` lookup before the existing dim validation; on `true`, return 409 with body `{"error":"namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted"}` per [research.md R8](./research.md#r8-source-of-truth-conflict-policy-fr-018-assumption-source-of-truth-precedence)
+- [x] T041 [US2] Add 409-path test cases in `internal/recommend/handler_test.go`: catalog enabled → 409, catalog disabled → existing 204 success path
 
 ### Frontend (web/admin)
 
-- [ ] T042 [P] [US2] Add `Catalog` config form to `web/admin/src/...` namespace detail page: enable toggle, strategy id/version selector populated from `available_strategies`, max-attempts/max-content-bytes inputs, dim-mismatch error display matching the API body
-- [ ] T043 [P] [US2] Add `Catalog` status panel to the namespace detail page rendering backlog counts, last-run summary, and active strategy identifier+version
+- [X] T042 [P] [US2] Add `Catalog` config form to `web/admin/src/...` namespace detail page: enable toggle, strategy id/version selector populated from `available_strategies`, max-attempts/max-content-bytes inputs, dim-mismatch error display matching the API body
+- [X] T043 [P] [US2] Add `Catalog` status panel to the namespace detail page rendering backlog counts, last-run summary, and active strategy identifier+version
 
 ### Integration
 
-- [X] T044 [US2] Add e2e coverage in `e2e/catalog_test.go` for two-namespace isolation (US2 acceptance #1) and the BYOE 409 (FR-018 + R8): create ns_a with strategy v1@dim128, ns_b with strategy v1@dim256 (assuming T019 registers the dim variant), ingest into both, assert vectors land in the right collection at the right dim; PUT BYOE to ns_a returns 409
-- [X] T045 [P] [US2] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add `GET` and `PUT /api/admin/v1/namespaces/{ns}/catalog` admin-plane rows; document the BYOE 409 behaviour change in the existing PUT object embedding row's description
+- [x] T044 [US2] Add e2e coverage in `e2e/catalog_test.go` for two-namespace isolation (US2 acceptance #1) and the BYOE 409 (FR-018 + R8): create ns_a with strategy v1@dim128, ns_b with strategy v1@dim256 (assuming T019 registers the dim variant), ingest into both, assert vectors land in the right collection at the right dim; PUT BYOE to ns_a returns 409
+- [x] T045 [P] [US2] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add `GET` and `PUT /api/admin/v1/namespaces/{ns}/catalog` admin-plane rows; document the BYOE 409 behaviour change in the existing PUT object embedding row's description
 
 **Checkpoint**: US2 fully functional. Multi-tenant deployments can route different namespaces to different strategies. SC-005 + SC-009 (forward-compat) testable. Admin UI is fully operable.
 
@@ -153,32 +153,32 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Re-embed orchestration
 
-- [ ] T046 [P] [US3] Add `POST /api/admin/v1/namespaces/{ns}/catalog/re-embed` handler+test in `internal/admin/catalog_reembed_handler.go` (and `_test.go`): inserts `batch_run_logs` row with `trigger_source='admin'`, returns 202 + `Location` header per [contracts/rest-api.md](./contracts/rest-api.md); 409 when an existing run is `running` per [research.md R6](./research.md#r6-re-embed-trigger-mechanism-operator-initiated-namespace-wide)
-- [ ] T047 [US3] Add re-embed orchestration service in `internal/admin/catalog_reembed_service.go` (+ `_test.go`): `SELECT id FROM catalog_items WHERE namespace=$1 AND (strategy_version <> $2 OR strategy_version IS NULL) AND state IN ('embedded','failed','dead_letter')`, sets `state='pending'`, `attempt_count=0`, then bulk-XADDs to `catalog:embed:{ns}` (transaction-scoped to keep enqueue idempotent on retry)
-- [ ] T048 [US3] Add re-embed completion watcher goroutine in `cmd/embedder/main.go` (or a new `internal/embedder/reembed_watcher.go` file with test): polls `SELECT count(*) FROM catalog_items WHERE namespace=$1 AND strategy_version <> $2 AND state IN ('pending','in_flight','failed')` every 5 s for any namespace with an open `batch_run_logs` row of phase `embed_reembed`; on zero, marks the row complete with timing metadata
+- [X] T046 [P] [US3] Add `POST /api/admin/v1/namespaces/{ns}/catalog/re-embed` handler+test in `internal/admin/catalog_reembed_handler.go` (and `_test.go`): inserts `batch_run_logs` row with `trigger_source='admin'`, returns 202 + `Location` header per [contracts/rest-api.md](./contracts/rest-api.md); 409 when an existing run is `running` per [research.md R6](./research.md#r6-re-embed-trigger-mechanism-operator-initiated-namespace-wide)
+- [X] T047 [US3] Add re-embed orchestration service in `internal/admin/catalog_reembed_service.go` (+ `_test.go`): `SELECT id FROM catalog_items WHERE namespace=$1 AND (strategy_version <> $2 OR strategy_version IS NULL) AND state IN ('embedded','failed','dead_letter')`, sets `state='pending'`, `attempt_count=0`, then bulk-XADDs to `catalog:embed:{ns}` (transaction-scoped to keep enqueue idempotent on retry)
+- [X] T048 [US3] Add re-embed completion watcher goroutine in `cmd/embedder/main.go` (or a new `internal/embedder/reembed_watcher.go` file with test): polls `SELECT count(*) FROM catalog_items WHERE namespace=$1 AND strategy_version <> $2 AND state IN ('pending','in_flight','failed')` every 5 s for any namespace with an open `batch_run_logs` row of phase `embed_reembed`; on zero, marks the row complete with timing metadata
 
 ### Item browser + redrive endpoints (FR-014, FR-016, SC-008)
 
-- [ ] T049 [P] [US3] `GET /api/admin/v1/namespaces/{ns}/catalog/items` handler+test (paginated browse, state filter, no `content` projection)
-- [ ] T050 [P] [US3] `GET /api/admin/v1/namespaces/{ns}/catalog/items/{id}` handler+test (full record including `content` and `metadata`)
-- [ ] T051 [P] [US3] `POST /api/admin/v1/namespaces/{ns}/catalog/items/{id}/redrive` handler+test (single redrive: state→pending, attempt_count=0, XADD)
-- [ ] T052 [P] [US3] `POST /api/admin/v1/namespaces/{ns}/catalog/items/redrive-deadletter` handler+test (bulk redrive of every dead-letter row in the namespace, satisfies SC-008)
-- [ ] T053 [P] [US3] `DELETE /api/admin/v1/namespaces/{ns}/catalog/items/{id}` handler+test (Postgres delete + Qdrant point removal via existing recommend object-deletion path; FR-017)
+- [X] T049 [P] [US3] `GET /api/admin/v1/namespaces/{ns}/catalog/items` handler+test (paginated browse, state filter, no `content` projection)
+- [X] T050 [P] [US3] `GET /api/admin/v1/namespaces/{ns}/catalog/items/{id}` handler+test (full record including `content` and `metadata`)
+- [X] T051 [P] [US3] `POST /api/admin/v1/namespaces/{ns}/catalog/items/{id}/redrive` handler+test (single redrive: state→pending, attempt_count=0, XADD)
+- [X] T052 [P] [US3] `POST /api/admin/v1/namespaces/{ns}/catalog/items/redrive-deadletter` handler+test (bulk redrive of every dead-letter row in the namespace, satisfies SC-008)
+- [X] T053 [P] [US3] `DELETE /api/admin/v1/namespaces/{ns}/catalog/items/{id}` handler+test (Postgres delete + Qdrant point removal via existing recommend object-deletion path; FR-017)
 
 ### Wiring
 
-- [ ] T054 [US3] Wire all five new admin routes into `cmd/admin/main.go` and assert registration in `cmd/admin/main_test.go`
+- [X] T054 [US3] Wire all five new admin routes into `cmd/admin/main.go` and assert registration in `cmd/admin/main_test.go`
 
 ### Frontend (web/admin)
 
-- [ ] T055 [P] [US3] Add re-embed trigger button to namespace detail page; show in-progress state from `last_run` polling
-- [ ] T056 [P] [US3] Add catalog items browser with state filter, pagination, and per-item drill-down to full record
-- [ ] T057 [P] [US3] Add bulk redrive button on the items browser when filter=`dead_letter`
+- [X] T055 [P] [US3] Add re-embed trigger button to namespace detail page; show in-progress state from `last_run` polling
+- [X] T056 [P] [US3] Add catalog items browser with state filter, pagination, and per-item drill-down to full record
+- [X] T057 [P] [US3] Add bulk redrive button on the items browser when filter=`dead_letter`
 
 ### Integration
 
-- [ ] T058 [US3] Add e2e coverage in `e2e/catalog_test.go` for the full US3 flow: register a `v2` test strategy in test setup, populate namespace at `v1`, bump to `v2`, trigger re-embed, ingest a new item mid-flight and assert it lands tagged `v2` directly (Q2 transition semantics), assert recommend serves OK throughout, assert final state is fully `v2`, assert pause/cancel preserves partial progress
-- [ ] T059 [P] [US3] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add the six new admin-plane rows from [contracts/rest-api.md](./contracts/rest-api.md)
+- [X] T058 [US3] Add e2e coverage in `e2e/catalog_test.go` for the full US3 flow: register a `v2` test strategy in test setup, populate namespace at `v1`, bump to `v2`, trigger re-embed, ingest a new item mid-flight and assert it lands tagged `v2` directly (Q2 transition semantics), assert recommend serves OK throughout, assert final state is fully `v2`, assert pause/cancel preserves partial progress
+- [X] T059 [P] [US3] Update [/CLAUDE.md](../../CLAUDE.md) REST API table — add the six new admin-plane rows from [contracts/rest-api.md](./contracts/rest-api.md)
 
 **Checkpoint**: US3 fully functional. SC-006, SC-007, SC-008 all testable. Operators can run the full lifecycle of a namespace including model upgrades and dead-letter recovery.
 
@@ -188,14 +188,14 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 **Purpose**: Cross-cutting work that touches multiple user stories or is best done after the surface stabilises.
 
-- [ ] T060 [P] Extend `internal/architecture/imports_test.go` to assert: `internal/catalog/` does NOT import `internal/embedder/`, and vice versa; both MAY import `internal/core/embedstrategy/` and `internal/infra/...`; admin MAY import `embedstrategy` (forward-compat seam)
-- [ ] T061 [P] Update [/AGENTS.md](../../AGENTS.md) to mention `cmd/embedder` and the new domains in the "Three Binaries" section (renaming to "Four Binaries" with the same prose pattern as the existing CLAUDE.md update)
-- [ ] T062 [P] Update [/CLAUDE.md](../../CLAUDE.md) "Three Binaries" section to "Four Binaries" with the embedder description and add `internal/catalog`, `internal/embedder`, `internal/core/embedstrategy` to the Domain Organization table
-- [ ] T063 [P] Update `Makefile` `coverage-check-all` target to enforce per-package coverage minima for `internal/catalog`, `internal/embedder`, `internal/core/embedstrategy`
-- [ ] T064 Run `make lint` and resolve any golangci-lint findings introduced by the new code
-- [ ] T065 Run `make test-race` to detect data races in `internal/embedder/worker` (most likely place given concurrent goroutines) and fix any findings
-- [ ] T066 Add a benchmark `BenchmarkHashingEmbed_1KiB` in `internal/embedder/hashing_test.go` that fails the test if p95 over 1000 iterations exceeds 5 ms (matches plan Performance Goals)
-- [ ] T067 Run `quickstart.md` end-to-end manually against a fresh `make up` stack to validate the operator workflow (ingest → embed → re-embed → dead-letter redrive → disable → cleanup)
+- [X] T060 [P] Extend `internal/architecture/imports_test.go` to assert: `internal/catalog/` does NOT import `internal/embedder/`, and vice versa; both MAY import `internal/core/embedstrategy/` and `internal/infra/...`; admin MAY import `embedstrategy` (forward-compat seam)
+- [X] T061 [P] Update [/AGENTS.md](../../AGENTS.md) to mention `cmd/embedder` and the new domains in the "Three Binaries" section (renaming to "Four Binaries" with the same prose pattern as the existing CLAUDE.md update)
+- [X] T062 [P] Update [/CLAUDE.md](../../CLAUDE.md) "Three Binaries" section to "Four Binaries" with the embedder description and add `internal/catalog`, `internal/embedder`, `internal/core/embedstrategy` to the Domain Organization table
+- [X] T063 [P] Update `Makefile` `coverage-check-all` target to enforce per-package coverage minima for `internal/catalog`, `internal/embedder`, `internal/core/embedstrategy`
+- [X] T064 Run `make lint` and resolve any golangci-lint findings introduced by the new code
+- [X] T065 Run `make test-race` to detect data races in `internal/embedder/worker` (most likely place given concurrent goroutines) and fix any findings
+- [X] T066 Add a benchmark `BenchmarkHashingEmbed_1KiB` in `internal/embedder/hashing_test.go` that fails the test if p95 over 1000 iterations exceeds 5 ms (matches plan Performance Goals)
+- [X] T067 Run `quickstart.md` end-to-end manually against a fresh `make up` stack to validate the operator workflow (ingest → embed → re-embed → dead-letter redrive → disable → cleanup)
 
 ---
 

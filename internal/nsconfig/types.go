@@ -51,7 +51,7 @@ type UpdateCatalogRequest struct {
 // equal the namespace's existing embedding_dim. It carries both numbers so
 // the admin handler can render them in the error body verbatim (US2 #2).
 type DimensionMismatchError struct {
-	StrategyDim          int
+	StrategyDim           int
 	NamespaceEmbeddingDim int
 }
 

@@ -105,7 +105,8 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
 		return nil, fmt.Errorf("unmarshal action weights: %w", err)
 	}
-	if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+	cfg.CatalogStrategyParams, err = unmarshalCatalogParams(paramsRaw)
+	if err != nil {
 		return nil, err
 	}
 
@@ -165,7 +166,8 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 	if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
 		return nil, fmt.Errorf("unmarshal action weights: %w", err)
 	}
-	if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+	cfg.CatalogStrategyParams, err = unmarshalCatalogParams(paramsRaw)
+	if err != nil {
 		return nil, err
 	}
 
@@ -222,7 +224,8 @@ func (r *Repository) ListCatalogEnabled(ctx context.Context) ([]*namespace.Confi
 		if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
 			return nil, fmt.Errorf("unmarshal action weights: %w", err)
 		}
-		if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+		cfg.CatalogStrategyParams, err = unmarshalCatalogParams(paramsRaw)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, &cfg)
@@ -307,7 +310,8 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 	if err := json.Unmarshal(weightsRaw, &cfg.ActionWeights); err != nil {
 		return nil, fmt.Errorf("unmarshal action weights: %w", err)
 	}
-	if err := unmarshalCatalogParams(paramsRaw, &cfg.CatalogStrategyParams); err != nil {
+	cfg.CatalogStrategyParams, err = unmarshalCatalogParams(paramsRaw)
+	if err != nil {
 		return nil, err
 	}
 
@@ -325,16 +329,16 @@ func marshalCatalogParams(p map[string]any) ([]byte, error) {
 	return b, nil
 }
 
-func unmarshalCatalogParams(raw []byte, dest *map[string]any) error {
+func unmarshalCatalogParams(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
-		*dest = nil
-		return nil
+		return nil, nil
 	}
-	if err := json.Unmarshal(raw, dest); err != nil {
-		return fmt.Errorf("unmarshal catalog strategy params: %w", err)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("unmarshal catalog strategy params: %w", err)
 	}
-	if len(*dest) == 0 {
-		*dest = nil
+	if len(m) == 0 {
+		return nil, nil
 	}
-	return nil
+	return m, nil
 }

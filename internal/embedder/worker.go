@@ -16,13 +16,13 @@ import (
 
 // Default worker tunables. Operators can override via cmd/embedder env vars.
 const (
-	defaultConsumerGroup     = "embedder"
-	defaultPollInterval      = 30 * time.Second
-	defaultReapInterval      = 60 * time.Second
-	defaultMinIdleReap       = 60 * time.Second
-	defaultReadBlockTime     = 5 * time.Second
-	defaultReadBatchSize     = 32
-	defaultReapBatchSize     = 100
+	defaultConsumerGroup = "embedder"
+	defaultPollInterval  = 30 * time.Second
+	defaultReapInterval  = 60 * time.Second
+	defaultMinIdleReap   = 60 * time.Second
+	defaultReadBlockTime = 5 * time.Second
+	defaultReadBatchSize = 32
+	defaultReapBatchSize = 100
 )
 
 // streamClient is the subset of *redis.Client methods the worker needs.
@@ -145,7 +145,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("worker run: %w", ctx.Err())
 		case <-ticker.C:
 			if err := w.refreshNamespaces(ctx); err != nil {
 				slog.WarnContext(ctx, "namespace refresh failed", slog.String("error", err.Error()))
@@ -303,7 +303,13 @@ func (w *Worker) handleMessage(ctx context.Context, ns, stream, group string, ms
 			slog.String("entry_id", msg.ID),
 			slog.String("error", err.Error()),
 		)
-		_ = w.redis.XAck(ctx, stream, group, msg.ID).Err()
+		if ackErr := w.redis.XAck(ctx, stream, group, msg.ID).Err(); ackErr != nil {
+			slog.WarnContext(ctx, "xack malformed entry failed",
+				slog.String("namespace", ns),
+				slog.String("entry_id", msg.ID),
+				slog.String("error", ackErr.Error()),
+			)
+		}
 		return
 	}
 
