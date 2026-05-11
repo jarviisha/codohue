@@ -30,12 +30,15 @@ type fakeRepo struct {
 	events               []EventSummary
 	eventsTotal          int
 	eventsErr            error
-	seededEvents         []demoEvent
-	seededNamespace      string
-	seedErr              error
-	clearNamespace       string
-	clearDeleted         int
-	clearErr             error
+	seededEvents           []demoEvent
+	seededNamespace        string
+	seedErr                error
+	seededCatalogItems     []demoCatalogItem
+	seededCatalogNamespace string
+	seedCatalogErr         error
+	clearNamespace         string
+	clearDeleted           int
+	clearErr               error
 
 	// US3 catalog operator endpoints
 	runningReembed    *BatchRunLog
@@ -119,6 +122,12 @@ func (f *fakeRepo) SeedDemoEvents(_ context.Context, namespace string, events []
 	f.seededNamespace = namespace
 	f.seededEvents = events
 	return len(events), f.seedErr
+}
+
+func (f *fakeRepo) SeedDemoCatalogItems(_ context.Context, namespace string, items []demoCatalogItem, _ time.Time) (int, error) {
+	f.seededCatalogNamespace = namespace
+	f.seededCatalogItems = items
+	return len(items), f.seedCatalogErr
 }
 
 func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {

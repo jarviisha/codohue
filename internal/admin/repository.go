@@ -395,6 +395,44 @@ func (r *Repository) SeedDemoEvents(ctx context.Context, namespace string, event
 	return len(events), nil
 }
 
+// SeedDemoCatalogItems replaces the catalog_items rows for the demo
+// namespace with the bundled fixture. Items are inserted in state='pending'
+// with the canonical sha256 content_hash so a downstream embedder run picks
+// them up the same way a normal data-plane ingest would.
+func (r *Repository) SeedDemoCatalogItems(ctx context.Context, namespace string, items []demoCatalogItem, _ time.Time) (int, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("begin seed catalog tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // commit path below owns successful completion
+
+	if _, err := tx.Exec(ctx, `DELETE FROM catalog_items WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete existing catalog items: %w", err)
+	}
+
+	for _, it := range items {
+		metaBytes, err := json.Marshal(it.Metadata)
+		if err != nil {
+			return 0, fmt.Errorf("marshal demo catalog metadata for %s: %w", it.ObjectID, err)
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO catalog_items (
+				namespace, object_id, content, content_hash, metadata,
+				state, attempt_count, created_at, updated_at
+			)
+			VALUES ($1, $2, $3, $4, $5, 'pending', 0, NOW(), NOW())`,
+			namespace, it.ObjectID, it.Content, demoContentHash(it.Content), metaBytes,
+		); err != nil {
+			return 0, fmt.Errorf("insert demo catalog item %s: %w", it.ObjectID, err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit seed catalog tx: %w", err)
+	}
+	return len(items), nil
+}
+
 // ClearNamespaceData removes all PostgreSQL-owned state for a namespace.
 func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (int, error) {
 	tx, err := r.db.Begin(ctx)
@@ -409,6 +447,9 @@ func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (
 	}
 	eventsDeleted := int(tag.RowsAffected())
 
+	if _, err := tx.Exec(ctx, `DELETE FROM catalog_items WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete catalog items: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM batch_run_logs WHERE namespace = $1`, namespace); err != nil {
 		return 0, fmt.Errorf("delete batch run logs: %w", err)
 	}

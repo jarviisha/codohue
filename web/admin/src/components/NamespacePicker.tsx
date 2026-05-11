@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useNamespacesOverview } from '../hooks/useNamespacesOverview'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { STATUS_META } from '../pages/namespaces/statusMeta'
@@ -28,6 +28,8 @@ export default function NamespacePicker() {
   const { data, isLoading } = useNamespacesOverview()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (!open) return
@@ -51,6 +53,16 @@ export default function NamespacePicker() {
   function handleSelect(ns: string) {
     setNamespace(ns)
     setOpen(false)
+
+    // Pages mounted under /namespaces/:ns/* read the namespace from the URL
+    // (useParams), not the context. Rewrite the :ns segment in place so they
+    // refetch with the new namespace. /namespaces/new is excluded because it
+    // is not a real namespace route.
+    const match = location.pathname.match(/^\/namespaces\/([^/]+)(\/.*)?$/)
+    if (match && match[1] !== 'new' && match[1] !== ns) {
+      const rest = match[2] ?? ''
+      navigate(`/namespaces/${encodeURIComponent(ns)}${rest}`, { replace: true })
+    }
   }
 
   return (

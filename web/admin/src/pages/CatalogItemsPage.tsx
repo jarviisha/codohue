@@ -142,17 +142,7 @@ export default function CatalogItemsPage() {
 
   return (
     <PageShell>
-      <PageHeader
-        title={`Catalog Items: ${namespace}`}
-        actions={
-          <Link
-            to={`/namespaces/${encodeURIComponent(namespace)}`}
-            className="text-sm font-medium text-accent hover:underline"
-          >
-            ← Back to settings
-          </Link>
-        }
-      />
+      <PageHeader title={`Catalog Items: ${namespace}`} />
 
       {actionError && (
         <Notice tone="danger" onDismiss={() => setActionError('')}>

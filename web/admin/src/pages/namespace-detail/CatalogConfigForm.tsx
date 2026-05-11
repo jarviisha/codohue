@@ -152,6 +152,18 @@ function CatalogConfigFormBody({
       }
       req.strategy_id = form.strategy_id
       req.strategy_version = form.strategy_version
+      // The chosen variant's dim is part of the descriptor identity. Backend
+      // factories that support multiple dims under the same (id, version) —
+      // e.g. internal-hashing-ngrams@v1 — require it as a Params entry. The
+      // available_strategies list is already filtered server-side to variants
+      // whose dim matches the namespace's embedding_dim, so the lookup yields
+      // a single descriptor.
+      const descriptor = (data.available_strategies ?? []).find(
+        d => d.id === form.strategy_id && d.version === form.strategy_version,
+      )
+      if (descriptor) {
+        req.params = { dim: descriptor.dim }
+      }
     }
 
     try {

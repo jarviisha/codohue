@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -26,6 +27,7 @@ type adminRepo interface {
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
 	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
+	SeedDemoCatalogItems(ctx context.Context, namespace string, items []demoCatalogItem, now time.Time) (int, error)
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
 
 	// Catalog re-embed orchestration (US3).
@@ -693,7 +695,8 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 		return nil, fmt.Errorf("create demo namespace: %w", err)
 	}
 
-	created, err := s.repo.SeedDemoEvents(ctx, demoNamespace, demoDataset, time.Now().UTC())
+	now := time.Now().UTC()
+	created, err := s.repo.SeedDemoEvents(ctx, demoNamespace, demoDataset, now)
 	if err != nil {
 		return nil, fmt.Errorf("seed demo events: %w", err)
 	}
@@ -705,6 +708,54 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 	if upsert != nil && upsert.APIKey != nil {
 		resp.APIKey = *upsert.APIKey
 	}
+
+	// Enable catalog auto-embedding and seed the bundled catalog content so
+	// the admin catalog browse page has data to render. The configurator may
+	// be unwired in trimmed deployments (e.g. some tests) — in that case the
+	// catalog seeding is skipped silently rather than failing demo setup.
+	if s.catalogConfig != nil {
+		enable := true
+		strategyID := demoCatalogStrategyID
+		strategyVersion := demoCatalogStrategyVersion
+		if _, err := s.catalogConfig.UpdateCatalog(ctx, demoNamespace, &NamespaceCatalogUpdateRequest{
+			Enabled:         enable,
+			StrategyID:      &strategyID,
+			StrategyVersion: &strategyVersion,
+			Params:          map[string]any{"dim": demoCatalogStrategyDim},
+		}); err != nil {
+			return nil, fmt.Errorf("enable demo catalog: %w", err)
+		}
+
+		catalogCreated, err := s.repo.SeedDemoCatalogItems(ctx, demoNamespace, demoCatalogDataset, now)
+		if err != nil {
+			return nil, fmt.Errorf("seed demo catalog items: %w", err)
+		}
+		resp.CatalogItemsCreated = catalogCreated
+
+		// Best-effort: publish each seeded row to the embed stream so a
+		// running cmd/embedder picks them up the same way a data-plane
+		// ingest would. Publish failures are non-fatal — rows remain in
+		// state='pending' and can be picked up later (e.g. via re-embed).
+		if s.streamPublisher != nil {
+			for _, it := range demoCatalogDataset {
+				args := &goredis.XAddArgs{
+					Stream: "catalog:embed:" + demoNamespace,
+					Values: map[string]any{
+						"namespace":        demoNamespace,
+						"object_id":        it.ObjectID,
+						"strategy_id":      strategyID,
+						"strategy_version": strategyVersion,
+						"enqueued_at":      now.Format(time.RFC3339Nano),
+					},
+				}
+				if err := s.streamPublisher.XAdd(ctx, args).Err(); err != nil {
+					slog.Warn("demo catalog xadd failed",
+						"object_id", it.ObjectID, "error", err)
+				}
+			}
+		}
+	}
+
 	return resp, nil
 }
 
@@ -731,7 +782,10 @@ func (s *Service) DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, err
 }
 
 func (s *Service) clearDemoRedis(ctx context.Context) error {
-	keys := []string{"trending:" + demoNamespace}
+	keys := []string{
+		"trending:" + demoNamespace,
+		"catalog:embed:" + demoNamespace,
+	}
 	iter := s.redisClient.Scan(ctx, 0, "rec:"+demoNamespace+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())

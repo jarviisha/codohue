@@ -138,6 +138,7 @@ export interface DemoDatasetResponse {
   namespace: string
   events_created?: number
   events_deleted?: number
+  catalog_items_created?: number
   api_key?: string
 }
 
