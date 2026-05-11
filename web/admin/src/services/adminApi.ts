@@ -3,6 +3,15 @@ import type {
   RecommendResponse,
   BatchRunCreateResponse,
   BatchRunsResponse,
+  CatalogBulkRedriveResponse,
+  CatalogItemDetail,
+  CatalogItemsListParams,
+  CatalogItemsListResponse,
+  CatalogReEmbedResponse,
+  CatalogRedriveResponse,
+  NamespaceCatalogConfig,
+  NamespaceCatalogResponse,
+  NamespaceCatalogUpdateRequest,
   DemoDatasetResponse,
   EventsListResponse,
   HealthData,
@@ -101,4 +110,56 @@ export const adminApi = {
       `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/trending?${params}`,
     )
   },
+
+  // ─── Catalog auto-embedding (US2 — config) ───────────────────────────────
+
+  getCatalogConfig: (namespace: string) =>
+    api.get<NamespaceCatalogResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog`,
+    ),
+
+  updateCatalogConfig: (namespace: string, body: NamespaceCatalogUpdateRequest) =>
+    api.put<NamespaceCatalogConfig>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog`,
+      body,
+    ),
+
+  // ─── Catalog auto-embedding (US3) ───────────────────────────────────────
+
+  triggerCatalogReEmbed: (namespace: string) =>
+    api.post<CatalogReEmbedResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog/re-embed`,
+      {},
+    ),
+
+  listCatalogItems: ({ namespace, state, limit = 50, offset = 0, objectID }: CatalogItemsListParams) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+    if (state && state !== 'all') params.set('state', state)
+    if (objectID) params.set('object_id', objectID)
+    return api.get<CatalogItemsListResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog/items?${params}`,
+    )
+  },
+
+  getCatalogItem: (namespace: string, id: number) =>
+    api.get<CatalogItemDetail>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog/items/${id}`,
+    ),
+
+  redriveCatalogItem: (namespace: string, id: number) =>
+    api.post<CatalogRedriveResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog/items/${id}/redrive`,
+      {},
+    ),
+
+  bulkRedriveDeadletter: (namespace: string) =>
+    api.post<CatalogBulkRedriveResponse>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog/items/redrive-deadletter`,
+      {},
+    ),
+
+  deleteCatalogItem: (namespace: string, id: number) =>
+    api.delete<void>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/catalog/items/${id}`,
+    ),
 }

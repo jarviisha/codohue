@@ -10,6 +10,9 @@ import {
   namespaceFormToPayload,
   type NamespaceFormState,
 } from './namespaceForm'
+import CatalogConfigForm from './namespace-detail/CatalogConfigForm'
+import CatalogOpsPanel from './namespace-detail/CatalogOpsPanel'
+import CatalogStatusPanel from './namespace-detail/CatalogStatusPanel'
 import CreatedApiKeyPanel from './namespace-detail/CreatedApiKeyPanel'
 import NamespaceForm from './namespace-detail/NamespaceForm'
 import QdrantStatsPanel from './namespace-detail/QdrantStatsPanel'
@@ -64,6 +67,14 @@ export default function NamespaceDetailPage() {
 
       {!isNew && qdrantStats && (
         <QdrantStatsPanel stats={qdrantStats} />
+      )}
+
+      {!isNew && ns && (
+        <>
+          <CatalogConfigForm namespace={ns} />
+          <CatalogStatusPanel namespace={ns} />
+          <CatalogOpsPanel namespace={ns} />
+        </>
       )}
 
       {!newKey && isLoading && !initialForm && (

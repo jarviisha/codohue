@@ -22,4 +22,12 @@ export const queryKeys = {
     list: (namespace: string, limit: number, offset: number, windowHours: number) =>
       ['trending', namespace, limit, offset, windowHours] as const,
   },
+
+  catalog: {
+    config: (namespace: string) => ['catalog-config', namespace] as const,
+    items: (namespace: string, state: string, limit: number, offset: number, objectID: string) =>
+      ['catalog-items', namespace, state, limit, offset, objectID] as const,
+    item: (namespace: string, id: number) => ['catalog-item', namespace, id] as const,
+    namespace: (namespace: string) => ['catalog', namespace] as const,
+  },
 }

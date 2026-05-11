@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { IconName } from './components/icons'
+import CatalogItemsPage from './pages/CatalogItemsPage'
 import HealthPage from './pages/HealthPage'
 import NamespaceDetailPage from './pages/NamespaceDetailPage'
 import NamespaceOverviewPage from './pages/NamespaceOverviewPage'
@@ -74,6 +75,11 @@ export const adminRoutes: AdminRoute[] = [
     path: 'namespaces/:ns',
     label: 'Edit Namespace',
     element: <NamespaceDetailPage />,
+  },
+  {
+    path: 'namespaces/:ns/catalog/items',
+    label: 'Catalog Items',
+    element: <CatalogItemsPage />,
   },
 ]
 

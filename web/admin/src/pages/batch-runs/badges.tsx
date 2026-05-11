@@ -23,17 +23,14 @@ export function RunStatus({ run }: { run: BatchRunLog }) {
   )
 }
 
-export function TriggerBadge({ source }: { source: 'cron' | 'manual' }) {
-  if (source === 'manual') {
-    return (
-      <Badge tone="warning">
-        manual
-      </Badge>
-    )
+export function TriggerBadge({ source }: { source: string }) {
+  switch (source) {
+    case 'manual':
+    case 'admin':
+      return <Badge tone="warning">{source}</Badge>
+    case 'admin_reembed':
+      return <Badge tone="accent">re-embed</Badge>
+    default:
+      return <Badge>{source || 'cron'}</Badge>
   }
-  return (
-    <Badge>
-      cron
-    </Badge>
-  )
 }
