@@ -87,6 +87,7 @@ func run() error {
 	catalogAdapter := newCatalogConfigAdapter(nsConfigSvc, embedstrategy.DefaultRegistry())
 	svc.SetCatalogConfigurator(catalogAdapter)
 	svc.SetCatalogStrategyPicker(catalogAdapter)
+	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
 
 	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
 

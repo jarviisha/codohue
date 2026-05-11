@@ -26,6 +26,7 @@ import {
   useDeleteCatalogItem,
   useRedriveCatalogItem,
 } from '../hooks/useCatalogActions'
+import { useCatalogConfig } from '../hooks/useCatalogConfig'
 import { useCatalogItems, useCatalogItemDetail } from '../hooks/useCatalogItems'
 import { ApiError } from '../services/api'
 import type { CatalogItemState, CatalogItemSummary } from '../types'
@@ -76,6 +77,7 @@ export default function CatalogItemsPage() {
     offset,
     objectID: appliedObject,
   })
+  const { data: catalogConfig, error: configErr } = useCatalogConfig(namespace)
   const { data: detail } = useCatalogItemDetail(namespace, selectedID)
   const redrive = useRedriveCatalogItem(namespace)
   const bulkRedrive = useBulkRedriveDeadletter(namespace)
@@ -85,6 +87,9 @@ export default function CatalogItemsPage() {
   const pageEnd = Math.min(offset + PAGE_SIZE, total)
   const totalPages = Math.ceil(total / PAGE_SIZE)
   const showBulkRedrive = state === 'dead_letter'
+  const catalogNotWired = configErr instanceof ApiError && configErr.status === 503
+  const catalogDisabled = !catalogNotWired && catalogConfig != null && !catalogConfig.catalog.enabled
+  const hasFilters = state !== 'all' || appliedObject !== ''
 
   function applyFilter() {
     setAppliedObject(objectFilter.trim())
@@ -213,7 +218,45 @@ export default function CatalogItemsPage() {
 
       {isLoading && !data && <LoadingState label="Loading catalog items..." />}
 
-      {data && data.items.length === 0 && (
+      {data && data.items.length === 0 && catalogNotWired && (
+        <EmptyState>
+          Catalog auto-embedding is not wired in this deployment.
+        </EmptyState>
+      )}
+
+      {data && data.items.length === 0 && !catalogNotWired && catalogDisabled && !hasFilters && (
+        <EmptyState>
+          <p className="m-0 mb-3 text-sm text-secondary">
+            Catalog auto-embedding is <strong>disabled</strong> for this namespace.
+          </p>
+          <p className="m-0 text-xs text-muted">
+            Enable it in{' '}
+            <Link
+              to={`/namespaces/${encodeURIComponent(namespace)}`}
+              className="font-medium text-accent hover:underline"
+            >
+              namespace settings
+            </Link>{' '}
+            to start ingesting raw catalog items via{' '}
+            <code>POST /v1/namespaces/{namespace}/catalog</code>.
+          </p>
+        </EmptyState>
+      )}
+
+      {data && data.items.length === 0 && !catalogNotWired && !catalogDisabled && !hasFilters && (
+        <EmptyState>
+          <p className="m-0 mb-2 text-sm text-secondary">
+            No catalog items have been ingested yet.
+          </p>
+          <p className="m-0 text-xs text-muted">
+            Clients can publish raw content to{' '}
+            <code>POST /v1/namespaces/{namespace}/catalog</code> — the embedder worker will
+            pick them up and produce dense vectors automatically.
+          </p>
+        </EmptyState>
+      )}
+
+      {data && data.items.length === 0 && !catalogNotWired && hasFilters && (
         <EmptyState>
           No catalog items{state !== 'all' ? ` in state "${state}"` : ''}
           {appliedObject ? ` matching "${appliedObject}"` : ''}.

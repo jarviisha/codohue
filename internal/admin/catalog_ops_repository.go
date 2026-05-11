@@ -154,6 +154,62 @@ func (r *Repository) CountStaleCatalogItems(ctx context.Context, namespace, targ
 	return n, nil
 }
 
+// CatalogItemStateCounts is the Postgres-side breakdown returned by
+// CountCatalogItemStates. Counts are exact (single GROUP BY query) and
+// scoped to one namespace. Any state not present in catalog_items for the
+// namespace stays at zero.
+type CatalogItemStateCounts struct {
+	Pending    int
+	InFlight   int
+	Embedded   int
+	Failed     int
+	DeadLetter int
+}
+
+// CountCatalogItemStates returns the per-state row count breakdown of
+// catalog_items for one namespace. Used by the admin backlog panel; the
+// query is index-served by idx_catalog_items_ns_state.
+func (r *Repository) CountCatalogItemStates(ctx context.Context, namespace string) (CatalogItemStateCounts, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT state, COUNT(*)
+		FROM catalog_items
+		WHERE namespace = $1
+		GROUP BY state`,
+		namespace,
+	)
+	if err != nil {
+		return CatalogItemStateCounts{}, fmt.Errorf("count catalog item states: %w", err)
+	}
+	defer rows.Close()
+
+	var out CatalogItemStateCounts
+	for rows.Next() {
+		var (
+			state string
+			n     int
+		)
+		if err := rows.Scan(&state, &n); err != nil {
+			return CatalogItemStateCounts{}, fmt.Errorf("scan catalog state row: %w", err)
+		}
+		switch state {
+		case "pending":
+			out.Pending = n
+		case "in_flight":
+			out.InFlight = n
+		case "embedded":
+			out.Embedded = n
+		case "failed":
+			out.Failed = n
+		case "dead_letter":
+			out.DeadLetter = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return CatalogItemStateCounts{}, fmt.Errorf("iterate catalog state rows: %w", err)
+	}
+	return out, nil
+}
+
 // CountEmbeddedAtVersion reports how many catalog_items are in state='embedded'
 // at the target strategy_version. Used by the watcher to record progress on
 // the batch_run_logs row when it completes.

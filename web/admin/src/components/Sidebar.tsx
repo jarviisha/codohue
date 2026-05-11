@@ -46,7 +46,10 @@ export default function Sidebar() {
             <NavLink key={route.path} to={`/${route.path}`} icon={route.icon}>{route.label}</NavLink>
           ))}
           {namespace && (
-            <NavLink to={`/namespaces/${namespace}`} icon="settings">Settings</NavLink>
+            <>
+              <NavLink to={`/namespaces/${namespace}/catalog/items`} icon="image">Catalog</NavLink>
+              <NavLink to={`/namespaces/${namespace}`} icon="settings" end>Settings</NavLink>
+            </>
           )}
         </div>
       </div>
