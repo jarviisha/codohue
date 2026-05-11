@@ -17,7 +17,11 @@ GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
 GO_CACHE_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp
 LINT_ENV     := $(GO_CACHE_ENV) GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
 
-COMPOSE          := docker compose
+# DOCKER_BUILDKIT / COMPOSE_DOCKER_CLI_BUILD are no-ops on modern Docker (23+,
+# compose v2) where BuildKit is already the default. Setting them keeps older
+# host installs working with the Dockerfile's `# syntax=` directive and
+# `--mount=type=cache` instructions.
+COMPOSE          := DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose
 COMPOSE_APP      := $(COMPOSE) -f docker-compose.app.yml
 COMPOSE_PROD     := $(COMPOSE) -f docker-compose.prod.yml
 COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_RECOMMENDER_API_KEY=dummy
