@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -88,7 +89,7 @@ func setEmbeddedAtNil(dest any) error {
 // fillScanRow populates the 15-field scan row used by Repository.Upsert.
 // Field positions match the SELECT in repository.go. Tests call this then
 // override specific fields they care about (state, content_hash, needsPublish).
-func fillScanRow(dest []any, contentHash []byte, metadata []byte, state string, needsPublish bool, now time.Time) error {
+func fillScanRow(dest []any, contentHash, metadata []byte, state string, needsPublish bool, now time.Time) error {
 	if len(dest) != 15 {
 		return errors.New("expected 15 scan targets")
 	}
@@ -146,7 +147,7 @@ func TestNewRepository(t *testing.T) {
 func TestContentHash_Determinism(t *testing.T) {
 	a := ContentHash("the quick brown fox")
 	b := ContentHash("the quick brown fox")
-	if string(a) != string(b) {
+	if !bytes.Equal(a, b) {
 		t.Fatalf("ContentHash not deterministic: %x vs %x", a, b)
 	}
 	if len(a) != 32 {
@@ -157,7 +158,7 @@ func TestContentHash_Determinism(t *testing.T) {
 func TestContentHash_DifferentContentDiffers(t *testing.T) {
 	a := ContentHash("hello")
 	b := ContentHash("hello!")
-	if string(a) == string(b) {
+	if bytes.Equal(a, b) {
 		t.Fatal("ContentHash collision on trivially different inputs")
 	}
 }
@@ -194,7 +195,7 @@ func TestRepositoryUpsert_FreshInsertNeedsPublish(t *testing.T) {
 	if res.Item.State != StatePending {
 		t.Errorf("expected pending state, got %s", res.Item.State)
 	}
-	if string(res.Item.ContentHash) != string(hash) {
+	if !bytes.Equal(res.Item.ContentHash, hash) {
 		t.Errorf("content hash mismatch")
 	}
 }

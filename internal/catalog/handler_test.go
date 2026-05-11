@@ -12,14 +12,14 @@ import (
 )
 
 type fakeIngester struct {
-	item *CatalogItem
+	item *Item
 	err  error
 
 	lastNS  string
 	lastReq *IngestRequest
 }
 
-func (f *fakeIngester) Ingest(_ context.Context, ns string, req *IngestRequest) (*CatalogItem, error) {
+func (f *fakeIngester) Ingest(_ context.Context, ns string, req *IngestRequest) (*Item, error) {
 	f.lastNS = ns
 	f.lastReq = req
 	return f.item, f.err
@@ -38,7 +38,7 @@ func newCatalogRequest(body, namespace string) *http.Request {
 }
 
 func TestHandlerIngest_HappyPath_202(t *testing.T) {
-	h := &Handler{service: &fakeIngester{item: &CatalogItem{ID: 1, Namespace: "ns", ObjectID: "o1"}}}
+	h := &Handler{service: &fakeIngester{item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}}}
 	rec := httptest.NewRecorder()
 	h.Ingest(rec, newCatalogRequest(`{"object_id":"o1","content":"hello"}`, "ns"))
 	if rec.Code != http.StatusAccepted {
@@ -52,7 +52,7 @@ func TestHandlerIngest_HappyPath_202(t *testing.T) {
 func TestHandlerIngest_PathNamespacePrevailsOverBody(t *testing.T) {
 	// If the body sneaks a "namespace" field, the URL path is the only
 	// source of truth — consistent with the 003 RESTful redesign.
-	ing := &fakeIngester{item: &CatalogItem{ID: 1}}
+	ing := &fakeIngester{item: &Item{ID: 1}}
 	h := &Handler{service: ing}
 	rec := httptest.NewRecorder()
 	h.Ingest(rec, newCatalogRequest(`{"object_id":"o1","content":"hi","namespace":"WRONG"}`, "real-ns"))

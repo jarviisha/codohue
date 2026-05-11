@@ -449,14 +449,21 @@ func qdrantPointCount(t testing.TB, collection string) uint64 {
 func numericIDFor(t testing.TB, stringID, namespace, entityType string) uint64 {
 	t.Helper()
 
+	// id_mappings keys numeric_id by string_id alone (PRIMARY KEY) — namespaces
+	// share the same numeric id for the same string id and multi-tenant
+	// separation is achieved at the Qdrant collection level instead. The
+	// namespace param is kept for call-site clarity but excluded from the
+	// query so multi-tenant tests don't trip over the first-writer-wins
+	// namespace stamp in the row.
+	_ = namespace
 	var id uint64
 	err := testDB.QueryRow(context.Background(), `
 		SELECT numeric_id
 		FROM id_mappings
-		WHERE string_id = $1 AND namespace = $2 AND entity_type = $3
-	`, stringID, namespace, entityType).Scan(&id)
+		WHERE string_id = $1 AND entity_type = $2
+	`, stringID, entityType).Scan(&id)
 	if err != nil {
-		t.Fatalf("numeric id for %q/%q/%q: %v", stringID, namespace, entityType, err)
+		t.Fatalf("numeric id for %q/%q: %v", stringID, entityType, err)
 	}
 	return id
 }

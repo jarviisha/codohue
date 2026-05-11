@@ -14,11 +14,11 @@ import (
 
 // fakeRepo records calls and returns canned values.
 type fakeRepo struct {
-	res     *UpsertResult
-	err     error
-	called  int
-	lastNS  string
-	lastObj string
+	res      *UpsertResult
+	err      error
+	called   int
+	lastNS   string
+	lastObj  string
 	lastHash []byte
 }
 
@@ -157,7 +157,7 @@ func TestServiceIngest_ContentTooLarge(t *testing.T) {
 func TestServiceIngest_HappyPath_PublishesToStream(t *testing.T) {
 	cfg := enabledCfg()
 	repo := &fakeRepo{res: &UpsertResult{
-		Item: &CatalogItem{
+		Item: &Item{
 			ID: 7, Namespace: "ns", ObjectID: "o1", State: StatePending,
 		},
 		NeedsPublish: true,
@@ -215,7 +215,7 @@ func TestServiceIngest_HappyPath_PublishesToStream(t *testing.T) {
 func TestServiceIngest_IdempotentDoesNotPublish(t *testing.T) {
 	cfg := enabledCfg()
 	repo := &fakeRepo{res: &UpsertResult{
-		Item: &CatalogItem{
+		Item: &Item{
 			ID: 7, Namespace: "ns", ObjectID: "o1", State: StateEmbedded,
 		},
 		NeedsPublish: false,
@@ -258,7 +258,7 @@ func TestServiceIngest_PublishFailureSurfaceErrorButDoesNotRollBack(t *testing.T
 	// rolled back — the recovery sweep will pick it up.
 	cfg := enabledCfg()
 	repo := &fakeRepo{res: &UpsertResult{
-		Item:         &CatalogItem{ID: 7, Namespace: "ns", ObjectID: "o1", State: StatePending},
+		Item:         &Item{ID: 7, Namespace: "ns", ObjectID: "o1", State: StatePending},
 		NeedsPublish: true,
 	}}
 	pub := &fakeXAdder{err: errors.New("redis down")}
@@ -279,7 +279,7 @@ func TestServiceIngest_ZeroMaxContentBytesMeansNoCheck(t *testing.T) {
 	cfg := enabledCfg()
 	cfg.CatalogMaxContentBytes = 0
 	repo := &fakeRepo{res: &UpsertResult{
-		Item:         &CatalogItem{ID: 1, Namespace: "ns", ObjectID: "o1", State: StatePending},
+		Item:         &Item{ID: 1, Namespace: "ns", ObjectID: "o1", State: StatePending},
 		NeedsPublish: true,
 	}}
 	svc := newSvc(repo, &fakeNSConfig{cfg: cfg}, &fakeXAdder{})

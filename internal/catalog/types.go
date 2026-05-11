@@ -12,6 +12,8 @@ import (
 // share a single source of truth.
 type State string
 
+// Lifecycle states for catalog_items rows. Values match the SQL CHECK
+// constraint in migration 010 and the mirror in internal/embedder.
 const (
 	StatePending    State = "pending"
 	StateInFlight   State = "in_flight"
@@ -34,8 +36,8 @@ type IngestRequest struct {
 	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
-// CatalogItem is the in-memory representation of a row in catalog_items.
-type CatalogItem struct {
+// Item is the in-memory representation of a row in catalog_items.
+type Item struct {
 	ID              int64
 	Namespace       string
 	ObjectID        string

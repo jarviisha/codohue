@@ -100,6 +100,21 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, namespace stri
 	}, nil
 }
 
+// GetCatalogStrategy implements admin.catalogStrategyPicker by looking up the
+// namespace's active (strategy_id, strategy_version) pair via nsconfig.Service.
+// enabled=false is returned for both "namespace missing" and "catalog disabled"
+// so the caller can map to a single 404 (FR-008).
+func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, namespace string) (strategyID, strategyVersion string, enabled bool, err error) {
+	cfg, err := a.nsSvc.Get(ctx, namespace)
+	if err != nil {
+		return "", "", false, fmt.Errorf("get namespace: %w", err)
+	}
+	if cfg == nil || !cfg.CatalogEnabled {
+		return "", "", false, nil
+	}
+	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil
+}
+
 // AvailableStrategies returns every registered strategy variant whose Dim
 // matches the namespace's embedding_dim. The admin UI uses this to render
 // the strategy picker with only admissible options. When namespaceEmbeddingDim

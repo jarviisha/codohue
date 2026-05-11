@@ -119,6 +119,10 @@ func run() error {
 		PollInterval: cfg.NamespacePollInterval,
 	})
 
+	// Re-embed completion watcher (US3): closes batch_run_logs rows once a
+	// namespace's catalog backlog at the new strategy_version has drained.
+	reembedWatcher := embedder.NewReembedWatcher(embedder.NewPgReembedRepo(db), 5*time.Second)
+
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.
 	healthSrv := newHealthServer(cfg.HealthPort, db, redisClient, qdrantClient)
@@ -134,6 +138,14 @@ func run() error {
 	workerDone := make(chan error, 1)
 	go func() {
 		workerDone <- worker.Run(ctx)
+	}()
+
+	// Re-embed watcher runs alongside the worker; its lifecycle is bound to
+	// the same context. Errors are logged inside Run; the goroutine exits
+	// cleanly on context cancellation.
+	watcherDone := make(chan error, 1)
+	go func() {
+		watcherDone <- reembedWatcher.Run(ctx)
 	}()
 
 	slog.Info("embedder started",
@@ -169,6 +181,13 @@ func run() error {
 	case <-workerDone:
 	case <-shutdownCtx.Done():
 		slog.Warn("worker shutdown timed out")
+	}
+
+	// Wait for the watcher goroutine to drain (it returns nil on context cancel).
+	select {
+	case <-watcherDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("reembed watcher shutdown timed out")
 	}
 
 	slog.Info("embedder stopped")
@@ -222,7 +241,9 @@ func healthzHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantp
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(checks)
+		if err := json.NewEncoder(w).Encode(checks); err != nil {
+			slog.Warn("healthz encode failed", "error", err)
+		}
 	}
 }
 

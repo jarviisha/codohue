@@ -27,6 +27,19 @@ type adminRepo interface {
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
 	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
+
+	// Catalog re-embed orchestration (US3).
+	FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
+	InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error)
+	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) ([]CatalogReembedTarget, error)
+
+	// Catalog item operator endpoints (US3).
+	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) ([]CatalogItemSummary, int, error)
+	GetCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
+	RedriveCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
+	BulkRedriveDeadletter(ctx context.Context, namespace string) ([]CatalogReembedTarget, error)
+	DeleteCatalogItem(ctx context.Context, namespace string, id int64) (string, bool, error)
+	LookupNumericObjectID(ctx context.Context, namespace, objectID string) (uint64, bool, error)
 }
 
 // nsConfigUpserter is the abstract collaborator that creates or updates a namespace
@@ -66,6 +79,28 @@ type batchRunner interface {
 	RunNamespace(ctx context.Context, namespace, triggerSource string)
 }
 
+// streamPublisher abstracts the Redis Streams write used by the catalog
+// re-embed and redrive paths. The concrete *goredis.Client implements this
+// interface; tests inject a fake. Defined here (not in catalog_ops_service.go)
+// so the Service struct can declare it as a field.
+type streamPublisher interface {
+	XAdd(ctx context.Context, args *goredis.XAddArgs) *goredis.StringCmd
+}
+
+// catalogStrategyPicker exposes the active (strategy_id, strategy_version) for
+// a namespace's catalog config. The cmd/admin wiring layer satisfies this with
+// an adapter over nsconfig.Service so we avoid a forbidden cross-domain import.
+type catalogStrategyPicker interface {
+	GetCatalogStrategy(ctx context.Context, namespace string) (strategyID, strategyVersion string, enabled bool, err error)
+}
+
+// qdrantPointDeleter abstracts Qdrant point deletion so the delete catalog
+// item path is testable. The concrete *qdrant.Client implements this via a
+// thin adapter (see qdrantClientPointDeleter); tests inject a fake.
+type qdrantPointDeleter interface {
+	DeletePoint(ctx context.Context, collection string, numericID uint64) error
+}
+
 // Service implements admin business logic.
 type Service struct {
 	repo            adminRepo
@@ -78,12 +113,17 @@ type Service struct {
 	nsConfigSvc     nsConfigUpserter
 	catalogConfig   nsCatalogConfigurator
 	catalogBacklog  catalogBacklogReader
+	catalogPicker   catalogStrategyPicker
+	streamPublisher streamPublisher
+	qdrantDeleter   qdrantPointDeleter
+	nowFn           func() time.Time
 	runningBatch    sync.Map // keyed by namespace name; prevents concurrent batch triggers
+	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
 }
 
 // NewService creates a new Service.
 func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job batchRunner, nsConfigSvc nsConfigUpserter) *Service {
-	return &Service{
+	s := &Service{
 		repo:         repo,
 		apiURL:       apiURL,
 		apiKey:       apiKey,
@@ -92,7 +132,15 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 		job:          job,
 		nsConfigSvc:  nsConfigSvc,
+		nowFn:        time.Now,
 	}
+	if redisClient != nil {
+		s.streamPublisher = redisClient
+	}
+	if qdrantClient != nil {
+		s.qdrantDeleter = newQdrantClientPointDeleter(qdrantClient)
+	}
+	return s
 }
 
 // SetCatalogConfigurator wires the catalog config adapter. Optional —
@@ -109,6 +157,36 @@ func (s *Service) SetCatalogConfigurator(c nsCatalogConfigurator) {
 // backlog counts (admin UI degrades gracefully).
 func (s *Service) SetCatalogBacklogReader(r catalogBacklogReader) {
 	s.catalogBacklog = r
+}
+
+// SetCatalogStrategyPicker wires the lookup of the active strategy id+version
+// for a namespace. Required by the re-embed orchestration path; when nil the
+// re-embed handler returns 503 Service Unavailable.
+func (s *Service) SetCatalogStrategyPicker(p catalogStrategyPicker) {
+	s.catalogPicker = p
+}
+
+// SetStreamPublisher overrides the default Redis-backed XAdd publisher.
+// Used by tests to inject a fake; production wiring leaves this as the
+// default redisClient.
+func (s *Service) SetStreamPublisher(p streamPublisher) {
+	s.streamPublisher = p
+}
+
+// SetQdrantPointDeleter overrides the default Qdrant client adapter used by
+// the DeleteCatalogItem path. Tests inject a fake.
+func (s *Service) SetQdrantPointDeleter(d qdrantPointDeleter) {
+	s.qdrantDeleter = d
+}
+
+// SetNowFn overrides the wall clock used to stamp catalog re-embed batch
+// rows. Tests use this for deterministic timestamps.
+func (s *Service) SetNowFn(fn func() time.Time) {
+	if fn == nil {
+		s.nowFn = time.Now
+		return
+	}
+	s.nowFn = fn
 }
 
 // GetHealth proxies GET <apiURL>/healthz and returns the parsed response.

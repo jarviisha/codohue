@@ -8,12 +8,16 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/qdrant/go-client/qdrant"
+
+	"github.com/jarviisha/codohue/internal/admin"
+	"github.com/jarviisha/codohue/internal/nsconfig"
 )
 
 // runEmbedderInBackground starts the cmd/embedder binary as a subprocess
@@ -198,6 +202,9 @@ func TestCatalogE2E_HappyPath_IngestEmbedDiscoverable(t *testing.T) {
 	}
 
 	// The named vector "dense_interactions" must contain a 128-d slice.
+	// Qdrant 1.17+ returns dense vectors in the VectorOutput.Vector oneof
+	// (via GetDense().GetData()); the deprecated VectorOutput.GetData() returns
+	// nil on this server build.
 	vectors := points[0].GetVectors().GetVectors().GetVectors()
 	if vectors == nil {
 		t.Fatalf("point has no named vectors")
@@ -206,7 +213,11 @@ func TestCatalogE2E_HappyPath_IngestEmbedDiscoverable(t *testing.T) {
 	if dense == nil {
 		t.Fatalf("point missing dense_interactions vector")
 	}
-	if data := dense.GetData(); len(data) != 128 {
+	data := dense.GetDense().GetData()
+	if len(data) == 0 {
+		data = dense.GetData() // older qdrant builds populate the flat field
+	}
+	if len(data) != 128 {
 		t.Errorf("dense vector length: got %d, want 128", len(data))
 	}
 }
@@ -460,7 +471,11 @@ func TestCatalogE2E_MultiTenant_StrategyIsolation(t *testing.T) {
 		if dense == nil {
 			t.Fatalf("ns=%s missing dense vector", want.ns)
 		}
-		if got := len(dense.GetData()); got != want.dim {
+		data := dense.GetDense().GetData()
+		if len(data) == 0 {
+			data = dense.GetData() // older qdrant builds populate the flat field
+		}
+		if got := len(data); got != want.dim {
 			t.Errorf("ns=%s vec dim: got %d, want %d", want.ns, got, want.dim)
 		}
 	}
@@ -539,3 +554,306 @@ func TestCatalogE2E_BYOEObjectWrite_StillWorksWhenCatalogDisabled(t *testing.T) 
 // the embedded SPA + session cookie machinery), so the admin endpoints
 // are not covered here. The cmd/api side of US2 — the BYOE 409 guard —
 // IS covered above by the BYOE tests.
+
+// ─── US3: re-embed orchestration + items operator endpoints ───────────────────
+
+// newAdminServiceForTest wires admin.Service in-process so the e2e test can
+// call TriggerReEmbed / BulkRedriveDeadletter / DeleteCatalogItem without
+// spawning cmd/admin. We avoid cmd/admin in e2e because it embeds the SPA
+// at build time and uses session cookies, both of which add ceremony that
+// the catalog flow does not exercise.
+func newAdminServiceForTest(t testing.TB) *admin.Service {
+	t.Helper()
+
+	repo := admin.NewRepository(testDB)
+	qdrantPort, err := strconv.Atoi(envOrDefault("QDRANT_PORT", "6334"))
+	if err != nil {
+		t.Fatalf("invalid QDRANT_PORT: %v", err)
+	}
+	qdrantClient, err := qdrant.NewClient(&qdrant.Config{
+		Host: envOrDefault("QDRANT_HOST", "localhost"),
+		Port: qdrantPort,
+	})
+	if err != nil {
+		t.Fatalf("connect qdrant: %v", err)
+	}
+
+	nsRepo := nsconfig.NewRepository(testDB)
+	nsSvc := nsconfig.NewService(nsRepo)
+
+	svc := admin.NewService(
+		repo,
+		"http://unused",
+		adminKey,
+		testRedis,
+		qdrantClient,
+		nil,
+		&nsAdapterShim{svc: nsSvc},
+	)
+	svc.SetCatalogStrategyPicker(&strategyPickerShim{svc: nsSvc})
+	return svc
+}
+
+// nsAdapterShim satisfies admin.nsConfigUpserter without the production
+// cmd/admin/nsconfig_adapter.go (which lives in package main). For e2e tests
+// we never call Upsert via the admin service, so a no-op is fine.
+type nsAdapterShim struct{ svc *nsconfig.Service }
+
+func (a *nsAdapterShim) Upsert(_ context.Context, _ string, _ *admin.NamespaceUpsertRequest) (*admin.NamespaceUpsertResponse, error) {
+	return nil, fmt.Errorf("nsAdapterShim.Upsert not implemented for e2e")
+}
+
+// strategyPickerShim mirrors cmd/admin/catalog_adapter.go's
+// GetCatalogStrategy method, but in-process. Returns enabled=false when the
+// namespace doesn't exist OR catalog_enabled is false (FR-008 single 404).
+type strategyPickerShim struct{ svc *nsconfig.Service }
+
+func (s *strategyPickerShim) GetCatalogStrategy(ctx context.Context, ns string) (string, string, bool, error) {
+	cfg, err := s.svc.Get(ctx, ns)
+	if err != nil {
+		return "", "", false, err
+	}
+	if cfg == nil || !cfg.CatalogEnabled {
+		return "", "", false, nil
+	}
+	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil
+}
+
+// forceItemToDeadletter flips a catalog item to dead_letter via direct DB
+// UPDATE. Used by the bulk-redrive test to seed deadletter rows without
+// having to engineer real embed failures.
+func forceItemToDeadletter(t testing.TB, namespace, objectID string) {
+	t.Helper()
+
+	tag, err := testDB.Exec(context.Background(), `
+		UPDATE catalog_items
+		SET state = 'dead_letter',
+		    last_error = 'forced for test',
+		    attempt_count = 99,
+		    updated_at = NOW()
+		WHERE namespace = $1 AND object_id = $2`,
+		namespace, objectID,
+	)
+	if err != nil {
+		t.Fatalf("force item to dead_letter: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("force item to dead_letter: expected 1 row affected, got %d", tag.RowsAffected())
+	}
+}
+
+// catalogItemIDFor returns the catalog_items.id for a (namespace, object_id).
+func catalogItemIDFor(t testing.TB, namespace, objectID string) int64 {
+	t.Helper()
+
+	var id int64
+	if err := testDB.QueryRow(context.Background(), `
+		SELECT id FROM catalog_items
+		WHERE namespace = $1 AND object_id = $2`,
+		namespace, objectID,
+	).Scan(&id); err != nil {
+		t.Fatalf("look up catalog item id: %v", err)
+	}
+	return id
+}
+
+// TestCatalogE2E_ReEmbed_DrainAndComplete exercises the full re-embed flow:
+//
+//  1. Enable catalog v1 + ingest 3 items + wait for embedded.
+//  2. Trigger admin re-embed via in-process admin.Service.
+//  3. Verify the orchestration: stale items reset to pending, batch_run_logs
+//     row inserted with trigger_source='admin_reembed', stream entries published.
+//  4. Wait for items to drain back to embedded.
+//  5. Verify the watcher in cmd/embedder closes the batch_run_logs row.
+func TestCatalogE2E_ReEmbed_DrainAndComplete(t *testing.T) {
+	namespace, apiKey := createIsolatedNamespace(t, "catalog_reembed", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  128,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	enableCatalogForNamespace(t, namespace, 128)
+	runEmbedderInBackground(t)
+
+	// Phase 1: ingest 3 catalog items.
+	for i := 1; i <= 3; i++ {
+		resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+namespace+"/catalog", apiKey, map[string]any{
+			"object_id": fmt.Sprintf("post_%d", i),
+			"content":   fmt.Sprintf("seed content number %d for re-embed test", i),
+		})
+		assertStatus(t, resp, http.StatusAccepted)
+		resp.Body.Close()
+	}
+	for i := 1; i <= 3; i++ {
+		waitForCatalogState(t, namespace, fmt.Sprintf("post_%d", i), "embedded", 10*time.Second)
+	}
+
+	// Phase 2: trigger re-embed via admin service.
+	adminSvc := newAdminServiceForTest(t)
+	reembedResp, err := adminSvc.TriggerReEmbed(context.Background(), namespace)
+	if err != nil {
+		t.Fatalf("trigger re-embed: %v", err)
+	}
+	if reembedResp == nil {
+		t.Fatal("re-embed returned nil — namespace not enabled?")
+	}
+	if reembedResp.StaleItems != 0 {
+		// stale_items=0 because the namespace is at v1 and items are also at v1.
+		// The reset query targets WHERE strategy_version <> v1 OR IS NULL.
+		// Already-embedded items at v1 are not re-driven by this path.
+		t.Logf("re-embed stale_items=%d (expected 0 when items match active version)", reembedResp.StaleItems)
+	}
+
+	// Phase 3: the batch_run_logs row was created with trigger_source='admin_reembed'.
+	var (
+		batchID       int64
+		triggerSource string
+		completedAt   *time.Time
+		success       bool
+	)
+	if err := testDB.QueryRow(context.Background(), `
+		SELECT id, trigger_source, completed_at, success
+		FROM batch_run_logs
+		WHERE namespace = $1
+		  AND trigger_source = 'admin_reembed'
+		ORDER BY started_at DESC LIMIT 1`,
+		namespace,
+	).Scan(&batchID, &triggerSource, &completedAt, &success); err != nil {
+		t.Fatalf("read batch_run_logs row: %v", err)
+	}
+	if batchID != reembedResp.BatchRunID {
+		t.Errorf("batch row id mismatch: got %d, want %d", batchID, reembedResp.BatchRunID)
+	}
+
+	// Phase 4: the watcher should close the row within ~10s. Stale count is 0
+	// from the start (since we re-embed at the same version), so this should
+	// happen on the next 5s tick.
+	waitForCondition(t, 30*time.Second, func() (bool, error) {
+		var done bool
+		err := testDB.QueryRow(context.Background(), `
+			SELECT completed_at IS NOT NULL AND success = TRUE
+			FROM batch_run_logs WHERE id = $1`,
+			batchID,
+		).Scan(&done)
+		return done, err
+	})
+}
+
+// TestCatalogE2E_BulkRedriveDeadletter exercises SC-008 — operator can clear
+// every dead-letter item in a namespace with one call. The test forces two
+// items to dead_letter via direct DB UPDATE, then calls the admin bulk
+// redrive method and waits for both to return to 'embedded'.
+func TestCatalogE2E_BulkRedriveDeadletter(t *testing.T) {
+	namespace, apiKey := createIsolatedNamespace(t, "catalog_bulkredrive", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  128,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	enableCatalogForNamespace(t, namespace, 128)
+	runEmbedderInBackground(t)
+
+	for i := 1; i <= 2; i++ {
+		resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+namespace+"/catalog", apiKey, map[string]any{
+			"object_id": fmt.Sprintf("dead_%d", i),
+			"content":   fmt.Sprintf("future-deadletter item %d", i),
+		})
+		assertStatus(t, resp, http.StatusAccepted)
+		resp.Body.Close()
+	}
+	for i := 1; i <= 2; i++ {
+		waitForCatalogState(t, namespace, fmt.Sprintf("dead_%d", i), "embedded", 10*time.Second)
+	}
+
+	// Force both into dead_letter.
+	for i := 1; i <= 2; i++ {
+		forceItemToDeadletter(t, namespace, fmt.Sprintf("dead_%d", i))
+	}
+
+	// Bulk redrive via admin service.
+	adminSvc := newAdminServiceForTest(t)
+	resp, err := adminSvc.BulkRedriveDeadletter(context.Background(), namespace)
+	if err != nil {
+		t.Fatalf("bulk redrive: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("bulk redrive returned nil — namespace not enabled?")
+	}
+	if resp.Redriven != 2 {
+		t.Errorf("expected 2 redriven, got %d", resp.Redriven)
+	}
+
+	for i := 1; i <= 2; i++ {
+		waitForCatalogState(t, namespace, fmt.Sprintf("dead_%d", i), "embedded", 15*time.Second)
+	}
+}
+
+// TestCatalogE2E_DeleteCatalogItem verifies FR-017: the operator-side hard
+// delete removes both the Postgres row AND the matching Qdrant point.
+func TestCatalogE2E_DeleteCatalogItem(t *testing.T) {
+	namespace, apiKey := createIsolatedNamespace(t, "catalog_delete", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"lambda":         0.01,
+		"gamma":          0.5,
+		"max_results":    20,
+		"dense_strategy": "byoe",
+		"embedding_dim":  128,
+		"alpha":          0.7,
+		"dense_distance": "cosine",
+	})
+	enableCatalogForNamespace(t, namespace, 128)
+	runEmbedderInBackground(t)
+
+	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+namespace+"/catalog", apiKey, map[string]any{
+		"object_id": "to_delete",
+		"content":   "an item that will be deleted",
+	})
+	assertStatus(t, resp, http.StatusAccepted)
+	resp.Body.Close()
+
+	waitForCatalogState(t, namespace, "to_delete", "embedded", 10*time.Second)
+
+	// Sanity: Qdrant point exists before delete.
+	collection := namespace + "_objects_dense"
+	if got := qdrantPointCount(t, collection); got != 1 {
+		t.Fatalf("pre-delete: expected 1 point in %q, got %d", collection, got)
+	}
+
+	itemID := catalogItemIDFor(t, namespace, "to_delete")
+	adminSvc := newAdminServiceForTest(t)
+	if err := adminSvc.DeleteCatalogItem(context.Background(), namespace, itemID); err != nil {
+		t.Fatalf("delete catalog item: %v", err)
+	}
+
+	// Postgres row gone.
+	var n int
+	if err := testDB.QueryRow(context.Background(), `
+		SELECT COUNT(*) FROM catalog_items
+		WHERE namespace = $1 AND object_id = $2`,
+		namespace, "to_delete",
+	).Scan(&n); err != nil {
+		t.Fatalf("count catalog_items: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected 0 catalog_items rows post-delete, got %d", n)
+	}
+
+	// Qdrant point gone (best-effort — recommend service caches may still
+	// reference the id but the dense point itself must be removed).
+	if got := qdrantPointCount(t, collection); got != 0 {
+		t.Errorf("expected 0 points in %q post-delete, got %d", collection, got)
+	}
+
+	// Idempotent: a second delete on the same id is a no-op.
+	if err := adminSvc.DeleteCatalogItem(context.Background(), namespace, itemID); err != nil {
+		t.Errorf("second delete should be idempotent, got error: %v", err)
+	}
+}

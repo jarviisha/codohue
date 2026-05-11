@@ -91,6 +91,62 @@ func (e *CatalogDimensionMismatch) Error() string {
 	return "catalog strategy dimension mismatch"
 }
 
+// CatalogReEmbedResponse is the body returned by POST .../catalog/re-embed.
+// 202 Accepted; the operator can poll batch_run_logs by ID for progress.
+type CatalogReEmbedResponse struct {
+	BatchRunID      int64     `json:"batch_run_id"`
+	Namespace       string    `json:"namespace"`
+	StrategyID      string    `json:"strategy_id"`
+	StrategyVersion string    `json:"strategy_version"`
+	StaleItems      int       `json:"stale_items"`
+	StartedAt       time.Time `json:"started_at"`
+}
+
+// CatalogItemSummary is the projection returned in the items list endpoint.
+// Excludes content/metadata (large) — operators fetch the full record via
+// GET .../catalog/items/{id} for drill-down.
+type CatalogItemSummary struct {
+	ID              int64      `json:"id"`
+	ObjectID        string     `json:"object_id"`
+	State           string     `json:"state"`
+	StrategyID      string     `json:"strategy_id,omitempty"`
+	StrategyVersion string     `json:"strategy_version,omitempty"`
+	AttemptCount    int        `json:"attempt_count"`
+	LastError       string     `json:"last_error,omitempty"`
+	EmbeddedAt      *time.Time `json:"embedded_at,omitempty"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// CatalogItemDetail is the full catalog_items row including content+metadata.
+type CatalogItemDetail struct {
+	CatalogItemSummary
+	Namespace string         `json:"namespace"`
+	Content   string         `json:"content"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+// CatalogItemsListResponse paginates a list of catalog items.
+type CatalogItemsListResponse struct {
+	Items  []CatalogItemSummary `json:"items"`
+	Total  int                  `json:"total"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+}
+
+// CatalogRedriveResponse is the body of single-item redrive (202 Accepted).
+type CatalogRedriveResponse struct {
+	ID       int64  `json:"id"`
+	ObjectID string `json:"object_id"`
+	State    string `json:"state"`
+}
+
+// CatalogBulkRedriveResponse is the body of bulk dead-letter redrive.
+type CatalogBulkRedriveResponse struct {
+	Namespace string `json:"namespace"`
+	Redriven  int    `json:"redriven"`
+}
+
 // LogEntry is a single captured log line from a batch run.
 type LogEntry struct {
 	Ts    string `json:"ts"`

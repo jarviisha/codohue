@@ -52,13 +52,13 @@ func NewService(repo *Repository, nsConfigSvc nsConfigGetter, publisher xAdder) 
 }
 
 // Ingest validates, persists, and conditionally publishes the catalog item
-// described by req. It returns the resulting CatalogItem regardless of
+// described by req. It returns the resulting Item regardless of
 // whether a publish was needed.
 //
 // The namespace argument is taken from the URL path (single source of truth
 // per the 003 RESTful redesign convention); any namespace value in req is
 // ignored at the handler layer before reaching this service.
-func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*CatalogItem, error) {
+func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*Item, error) {
 	if ns == "" {
 		return nil, fmt.Errorf("%w: namespace is required", ErrInvalidRequest)
 	}
@@ -130,7 +130,7 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*C
 // §5: catalog:embed:{namespace}.
 func streamName(ns string) string { return "catalog:embed:" + ns }
 
-func (s *Service) publish(ctx context.Context, ns string, item *CatalogItem, cfg *namespace.Config) error {
+func (s *Service) publish(ctx context.Context, ns string, item *Item, cfg *namespace.Config) error {
 	args := &redis.XAddArgs{
 		Stream: streamName(ns),
 		Values: map[string]any{

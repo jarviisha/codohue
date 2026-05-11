@@ -31,6 +31,12 @@ type adminSvc interface {
 	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error)
 	UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
+	TriggerReEmbed(ctx context.Context, namespace string) (*CatalogReEmbedResponse, error)
+	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) (*CatalogItemsListResponse, error)
+	GetCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
+	RedriveCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogRedriveResponse, error)
+	BulkRedriveDeadletter(ctx context.Context, namespace string) (*CatalogBulkRedriveResponse, error)
+	DeleteCatalogItem(ctx context.Context, namespace string, id int64) error
 }
 
 // Handler handles HTTP requests for the admin API.

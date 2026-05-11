@@ -31,7 +31,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // UpsertResult bundles the row and an indicator of whether the caller should
 // publish a new entry to the embedder stream.
 type UpsertResult struct {
-	Item         *CatalogItem
+	Item         *Item
 	NeedsPublish bool
 }
 
@@ -56,8 +56,8 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 	}
 
 	var (
-		item       CatalogItem
-		metaRaw    []byte
+		item         Item
+		metaRaw      []byte
 		needsPublish bool
 		// embedded_at can be NULL; pgx scans NULL into a nil *time.Time.
 	)
@@ -89,8 +89,11 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 			    updated_at    = NOW()
 			RETURNING
 				id, namespace, object_id, content, content_hash, metadata,
-				state, COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
-				embedded_at, attempt_count, COALESCE(last_error, ''),
+				state,
+				COALESCE(strategy_id, '')      AS strategy_id,
+				COALESCE(strategy_version, '') AS strategy_version,
+				embedded_at, attempt_count,
+				COALESCE(last_error, '')       AS last_error,
 				created_at, updated_at
 		)
 		SELECT
@@ -112,9 +115,11 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 		return nil, fmt.Errorf("upsert catalog item: %w", err)
 	}
 
-	if err := unmarshalMetadata(metaRaw, &item.Metadata); err != nil {
+	meta, err := unmarshalMetadata(metaRaw)
+	if err != nil {
 		return nil, err
 	}
+	item.Metadata = meta
 
 	return &UpsertResult{Item: &item, NeedsPublish: needsPublish}, nil
 }
@@ -130,16 +135,16 @@ func marshalMetadata(m map[string]any) ([]byte, error) {
 	return b, nil
 }
 
-func unmarshalMetadata(raw []byte, dest *map[string]any) error {
+func unmarshalMetadata(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
-		*dest = nil
-		return nil
+		return nil, nil
 	}
-	if err := json.Unmarshal(raw, dest); err != nil {
-		return fmt.Errorf("unmarshal metadata: %w", err)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("unmarshal metadata: %w", err)
 	}
-	if len(*dest) == 0 {
-		*dest = nil
+	if len(m) == 0 {
+		return nil, nil
 	}
-	return nil
+	return m, nil
 }

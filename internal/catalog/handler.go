@@ -15,7 +15,7 @@ import (
 // catalogIngester abstracts Service.Ingest for the handler layer; tests use
 // it to inject canned errors without exercising the full service.
 type catalogIngester interface {
-	Ingest(ctx context.Context, namespace string, req *IngestRequest) (*CatalogItem, error)
+	Ingest(ctx context.Context, namespace string, req *IngestRequest) (*Item, error)
 }
 
 // Handler exposes POST /v1/namespaces/{ns}/catalog.
