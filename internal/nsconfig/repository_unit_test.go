@@ -3,6 +3,7 @@ package nsconfig
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -389,5 +390,53 @@ func TestRepositorySetAPIKeyHash_ExecError(t *testing.T) {
 	err := repo.SetAPIKeyHash(context.Background(), "ns", "hash")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestMarshalCatalogParams_NilProducesEmptyObject(t *testing.T) {
+	b, err := marshalCatalogParams(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(b) != "{}" {
+		t.Errorf("got %q, want {}", string(b))
+	}
+}
+
+func TestMarshalCatalogParams_UnencodableValueErrors(t *testing.T) {
+	// channels are not JSON-marshalable; this exercises the error branch of
+	// marshalCatalogParams without relying on undocumented json behaviour.
+	_, err := marshalCatalogParams(map[string]any{"ch": make(chan int)})
+	if err == nil {
+		t.Fatal("expected marshal error for unencodable value")
+	}
+}
+
+func TestUnmarshalCatalogParams_EmptyBytesReturnsNil(t *testing.T) {
+	m, err := unmarshalCatalogParams(nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m != nil {
+		t.Errorf("got %v, want nil for empty input", m)
+	}
+}
+
+func TestUnmarshalCatalogParams_InvalidJSONErrors(t *testing.T) {
+	if _, err := unmarshalCatalogParams([]byte("{not-json")); err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestDimensionMismatchError_Error(t *testing.T) {
+	e := &DimensionMismatchError{StrategyDim: 256, NamespaceEmbeddingDim: 128}
+	got := e.Error()
+	if got == "" {
+		t.Fatal("Error() returned empty string")
+	}
+	for _, sub := range []string{"256", "128", "strategy", "namespace"} {
+		if !strings.Contains(got, sub) {
+			t.Errorf("Error()=%q missing %q", got, sub)
+		}
 	}
 }
