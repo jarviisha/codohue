@@ -15,21 +15,21 @@ import (
 // ─── fake repo ────────────────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	namespaces           []NamespaceConfig
-	nsListErr            error
-	namespace            *NamespaceConfig
-	nsGetErr             error
-	batchRuns            []BatchRunLog
-	batchRunsErr         error
-	lastBatchRuns        map[string]BatchRunLog
-	lastBatchRunsErr     error
-	recentEventCounts    map[string]int
-	recentEventCountsErr error
-	subjectStats         *SubjectStats
-	subjectStatsErr      error
-	events               []EventSummary
-	eventsTotal          int
-	eventsErr            error
+	namespaces             []NamespaceConfig
+	nsListErr              error
+	namespace              *NamespaceConfig
+	nsGetErr               error
+	batchRuns              []BatchRunLog
+	batchRunsErr           error
+	lastBatchRuns          map[string]BatchRunLog
+	lastBatchRunsErr       error
+	recentEventCounts      map[string]int
+	recentEventCountsErr   error
+	subjectStats           *SubjectStats
+	subjectStatsErr        error
+	events                 []EventSummary
+	eventsTotal            int
+	eventsErr              error
 	seededEvents           []demoEvent
 	seededNamespace        string
 	seedErr                error
