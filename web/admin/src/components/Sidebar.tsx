@@ -2,9 +2,13 @@ import NavLink from './NavLink'
 import NamespacePicker from './NamespacePicker'
 import Icon from './Icon'
 import { logout } from '../services/api'
-import { navRoutes } from '../routes'
+import { globalNavRoutes, namespaceNavRoutes } from '../routes'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { Button } from './ui'
+
+function namespacePath(path: string, namespace: string) {
+  return `/${path.replace(':ns', encodeURIComponent(namespace))}`
+}
 
 export default function Sidebar() {
   const { namespace } = useActiveNamespace()
@@ -29,27 +33,43 @@ export default function Sidebar() {
 
       <div className="shrink-0 border-y border-default py-4">
         <p className="m-0 mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
-          Namespace
+          Current Namespace
         </p>
         <NamespacePicker />
-        <div className="mt-2">
-          <NavLink to="/namespaces" icon="world" end>Manage namespaces</NavLink>
-        </div>
       </div>
 
       <div className="flex flex-1 flex-col overflow-y-auto py-4">
         <p className="m-0 mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
-          Navigation
+          Global
         </p>
         <div className="space-y-1">
-          {navRoutes.map(route => (
-            <NavLink key={route.path} to={`/${route.path}`} icon={route.icon}>{route.label}</NavLink>
+          {globalNavRoutes.map(route => (
+            <NavLink key={route.path} to={`/${route.path}`} icon={route.icon} end>
+              {route.label}
+            </NavLink>
           ))}
+        </div>
+
+        <p className="m-0 mb-2 mt-5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+          Namespace Tools
+        </p>
+        <div className="space-y-1">
           {namespace && (
-            <>
-              <NavLink to={`/namespaces/${namespace}/catalog/items`} icon="image">Catalog</NavLink>
-              <NavLink to={`/namespaces/${namespace}`} icon="settings" end>Settings</NavLink>
-            </>
+            namespaceNavRoutes.map(route => (
+              <NavLink
+                key={route.path}
+                to={namespacePath(route.path, namespace)}
+                icon={route.icon}
+                end
+              >
+                {route.label}
+              </NavLink>
+            ))
+          )}
+          {!namespace && (
+            <p className="m-0 rounded border border-default bg-subtle px-3 py-2 text-xs text-muted">
+              Select a namespace to view operational tools.
+            </p>
           )}
         </div>
       </div>
