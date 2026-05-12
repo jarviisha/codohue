@@ -14,6 +14,7 @@ import CatalogConfigForm from './namespace-detail/CatalogConfigForm'
 import CatalogOpsPanel from './namespace-detail/CatalogOpsPanel'
 import CatalogStatusPanel from './namespace-detail/CatalogStatusPanel'
 import CreatedApiKeyPanel from './namespace-detail/CreatedApiKeyPanel'
+import DemoDataPanel from './namespace-detail/DemoDataPanel'
 import NamespaceForm from './namespace-detail/NamespaceForm'
 import QdrantStatsPanel from './namespace-detail/QdrantStatsPanel'
 
@@ -71,6 +72,7 @@ export default function NamespaceDetailPage() {
 
       {!isNew && ns && (
         <>
+          <DemoDataPanel namespace={ns} />
           <CatalogConfigForm namespace={ns} />
           <CatalogStatusPanel namespace={ns} />
           <CatalogOpsPanel namespace={ns} />
