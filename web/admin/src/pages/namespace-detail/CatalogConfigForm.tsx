@@ -85,20 +85,15 @@ function CatalogConfigFormBody({
   data: NamespaceCatalogResponse
 }) {
   const update = useUpdateCatalogConfig(namespace)
+  const initialForm = useMemo(() => catalogFormFromResponse(data), [data])
 
-  const [form, setForm] = useState<FormState>(() => {
-    const c = data.catalog
-    return {
-      enabled: c.enabled,
-      strategy_id: c.strategy_id ?? '',
-      strategy_version: c.strategy_version ?? '',
-      max_attempts: c.max_attempts || DEFAULTS.max_attempts,
-      max_content_bytes: c.max_content_bytes || DEFAULTS.max_content_bytes,
-    }
-  })
+  const [form, setForm] = useState<FormState>(initialForm)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [dimMismatch, setDimMismatch] = useState<CatalogDimMismatchBody | null>(null)
   const [savedAt, setSavedAt] = useState<Date | null>(null)
+  const initialSignature = useMemo(() => catalogFormSignature(initialForm), [initialForm])
+  const currentSignature = useMemo(() => catalogFormSignature(form), [form])
+  const isDirty = currentSignature !== initialSignature
 
   // Available strategies are filtered by the API to those whose Dim matches
   // the namespace's embedding_dim. We further group by id for the picker.
@@ -137,6 +132,7 @@ function CatalogConfigFormBody({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!isDirty) return
     setSaveError(null)
     setDimMismatch(null)
 
@@ -280,15 +276,49 @@ function CatalogConfigFormBody({
           </div>
         )}
 
-        <div className="flex items-center gap-3 border-t border-default pt-3">
-          <Button type="submit" variant="primary" disabled={update.isPending}>
-            {update.isPending ? 'Saving…' : form.enabled ? 'Enable / save' : 'Disable / save'}
-          </Button>
-          <NamespaceDimHint dim={data.catalog.embedding_dim} />
+        <div className="flex flex-col gap-3 border-t border-default pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={update.isPending || !isDirty}
+            >
+              {update.isPending ? 'Saving…' : form.enabled ? 'Enable / save' : 'Disable / save'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={!isDirty || update.isPending}
+              onClick={() => setForm(initialForm)}
+            >
+              Reset
+            </Button>
+          </div>
+          <div className="flex items-center gap-2">
+            {isDirty && (
+              <span className="text-xs font-medium text-warning">Unsaved catalog changes</span>
+            )}
+            <NamespaceDimHint dim={data.catalog.embedding_dim} />
+          </div>
         </div>
       </form>
     </Panel>
   )
+}
+
+function catalogFormSignature(form: FormState) {
+  return JSON.stringify(form)
+}
+
+function catalogFormFromResponse(data: NamespaceCatalogResponse): FormState {
+  const c = data.catalog
+  return {
+    enabled: c.enabled,
+    strategy_id: c.strategy_id ?? '',
+    strategy_version: c.strategy_version ?? '',
+    max_attempts: c.max_attempts || DEFAULTS.max_attempts,
+    max_content_bytes: c.max_content_bytes || DEFAULTS.max_content_bytes,
+  }
 }
 
 function NamespaceDimHint({ dim }: { dim: number }) {
