@@ -4,6 +4,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import {
   Badge,
   Button,
+  ConfirmDialog,
   EmptyState,
   FormControl,
   Input,
@@ -69,8 +70,10 @@ export default function CatalogItemsPage() {
   const [appliedObject, setAppliedObject] = useState('')
   const [selectedID, setSelectedID] = useState<number | null>(null)
   const [actionError, setActionError] = useState('')
+  const [confirmBulkRedrive, setConfirmBulkRedrive] = useState(false)
+  const [deleteCandidate, setDeleteCandidate] = useState<CatalogItemSummary | null>(null)
 
-  const { data, error, isLoading } = useCatalogItems({
+  const { data, error, isLoading, isFetching, refetch } = useCatalogItems({
     namespace,
     state,
     limit: PAGE_SIZE,
@@ -111,21 +114,32 @@ export default function CatalogItemsPage() {
     }
   }
 
-  async function handleBulkRedrive() {
+  function handleBulkRedrive() {
     setActionError('')
-    if (!confirm(`Re-drive every dead-letter item in ${namespace}?`)) return
+    setConfirmBulkRedrive(true)
+  }
+
+  async function confirmBulkRedriveDeadletter() {
+    setActionError('')
     try {
       await bulkRedrive.mutateAsync()
+      setConfirmBulkRedrive(false)
     } catch (err) {
       setActionError(formatActionError('Bulk re-drive failed', err))
     }
   }
 
-  async function handleDelete(item: CatalogItemSummary) {
+  function handleDelete(item: CatalogItemSummary) {
     setActionError('')
-    if (!confirm(`Delete catalog item "${item.object_id}"? This removes the dense vector from Qdrant as well.`)) return
+    setDeleteCandidate(item)
+  }
+
+  async function confirmDelete() {
+    if (!deleteCandidate) return
+    setActionError('')
     try {
-      await deleteItem.mutateAsync(item.id)
+      await deleteItem.mutateAsync(deleteCandidate.id)
+      setDeleteCandidate(null)
     } catch (err) {
       setActionError(formatActionError('Delete failed', err))
     }
@@ -189,8 +203,17 @@ export default function CatalogItemsPage() {
             )}
           </div>
 
-          {showBulkRedrive && (
-            <div className="ml-auto">
+          <div className="ml-auto flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={isFetching}
+              onClick={() => void refetch()}
+            >
+              {isFetching ? 'Refreshing...' : 'Refresh'}
+            </Button>
+            {showBulkRedrive && (
               <Button
                 size="sm"
                 variant="primary"
@@ -199,8 +222,8 @@ export default function CatalogItemsPage() {
               >
                 {bulkRedrive.isPending ? 'Re-driving…' : `Re-drive all dead-letter (${formatCount(total)})`}
               </Button>
-            </div>
-          )}
+            )}
+          </div>
         </Toolbar>
       </Panel>
 
@@ -222,7 +245,7 @@ export default function CatalogItemsPage() {
           <p className="m-0 text-xs text-muted">
             Enable it in{' '}
             <Link
-              to={`/namespaces/${encodeURIComponent(namespace)}`}
+              to={`/namespaces/${encodeURIComponent(namespace)}/settings`}
               className="font-medium text-accent hover:underline"
             >
               namespace settings
@@ -354,6 +377,35 @@ export default function CatalogItemsPage() {
         item={detail ?? null}
         onClose={() => setSelectedID(null)}
       />
+
+      <ConfirmDialog
+        open={confirmBulkRedrive}
+        title="Re-drive dead-letter items"
+        confirmLabel="Re-drive all"
+        isPending={bulkRedrive.isPending}
+        onCancel={() => setConfirmBulkRedrive(false)}
+        onConfirm={confirmBulkRedriveDeadletter}
+      >
+        <p className="m-0">
+          Re-drive all <strong>{formatCount(total)}</strong> dead-letter catalog items in namespace{' '}
+          <code>{namespace}</code>. Items will be queued for embedding again.
+        </p>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={deleteCandidate != null}
+        title="Delete catalog item"
+        confirmLabel="Delete item"
+        tone="danger"
+        isPending={deleteItem.isPending}
+        onCancel={() => setDeleteCandidate(null)}
+        onConfirm={confirmDelete}
+      >
+        <p className="m-0">
+          Delete catalog item{' '}
+          <code>{deleteCandidate?.object_id}</code>. This also removes its dense vector from Qdrant.
+        </p>
+      </ConfirmDialog>
     </PageShell>
   )
 }
