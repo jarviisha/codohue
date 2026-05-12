@@ -10,6 +10,7 @@ import {
   LoadingState,
   PageHeader,
   PageShell,
+  Toolbar,
 } from '../components/ui'
 import type { BatchRunLog } from '../types'
 import { useActiveNamespace } from '../context/useActiveNamespace'
@@ -29,7 +30,7 @@ function BatchRunsContent({ namespace }: { namespace: string | null }) {
   const [page, setPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
 
-  const { data, error, isLoading } = useBatchRuns(
+  const { data, error, isLoading, isFetching, refetch } = useBatchRuns(
     namespace || undefined,
     page,
     statusFilter === 'all' ? '' : statusFilter,
@@ -90,11 +91,22 @@ function BatchRunsContent({ namespace }: { namespace: string | null }) {
         <>
           <SummaryStrip runs={runs} total={total} />
 
-          <FilterChips
-            value={statusFilter}
-            onChange={handleFilterChange}
-            counts={counts}
-          />
+          <Toolbar className="items-center justify-between">
+            <FilterChips
+              value={statusFilter}
+              onChange={handleFilterChange}
+              counts={counts}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={isFetching}
+              onClick={() => void refetch()}
+            >
+              {isFetching ? 'Refreshing...' : 'Refresh'}
+            </Button>
+          </Toolbar>
 
           <BatchRunsTable
             runs={runs}
