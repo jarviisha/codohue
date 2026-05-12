@@ -32,7 +32,7 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative z-10 mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col rounded-lg border border-default bg-surface shadow-overlay">
+      <div className="relative z-10 mx-4 flex max-h-[80vh] w-full max-w-3xl flex-col rounded border border-default bg-surface shadow-overlay">
         <div className="flex items-center justify-between px-5 py-4 border-b border-default shrink-0">
           <div className="text-sm font-semibold text-primary">{title}</div>
           <Button

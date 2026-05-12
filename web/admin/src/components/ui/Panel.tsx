@@ -18,7 +18,7 @@ export default function Panel({
   bodyClassName = '',
 }: PanelProps) {
   return (
-    <div className={`bg-surface border border-default rounded-lg ${className}`}>
+    <div className={`bg-surface border border-default rounded ${className}`}>
       {(title || actions) && (
         <div className="flex items-center justify-between gap-4 border-b border-default px-5 py-4">
           {title && (

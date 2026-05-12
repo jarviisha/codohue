@@ -12,7 +12,7 @@ export default function CreatedApiKeyPanel({
       <Notice tone="success" role="status" className="mb-4">
         Namespace created. API key (shown once only):
       </Notice>
-      <pre className="m-0 mb-4 break-all rounded-lg border border-accent/20 bg-accent-subtle p-3 text-sm font-medium text-accent">
+      <pre className="m-0 mb-4 break-all rounded border border-accent/20 bg-accent-subtle p-3 text-sm font-medium text-accent">
         {apiKey}
       </pre>
       <Button variant="primary" onClick={onDone}>

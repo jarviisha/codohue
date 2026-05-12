@@ -75,7 +75,7 @@ export default function BatchRunModal({ run, onClose }: { run: BatchRunLog; onCl
         {(run.phase1_ok != null || run.phase2_ok != null || run.phase3_ok != null) && (
           <div>
             <p className="m-0 mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">Phase breakdown</p>
-            <div className="overflow-hidden rounded-lg border border-default bg-surface py-2">
+            <div className="overflow-hidden rounded border border-default bg-surface py-2">
               <PhaseBreakdown run={run} phase2Skipped={phase2Skipped} phase3Skipped={phase3Skipped} />
             </div>
           </div>
@@ -86,14 +86,14 @@ export default function BatchRunModal({ run, onClose }: { run: BatchRunLog; onCl
             Run log
             <span className="ml-2 normal-case font-normal text-muted">({run.log_lines.length} entries)</span>
           </p>
-          <div className="overflow-hidden rounded-lg border border-default bg-surface">
+          <div className="overflow-hidden rounded border border-default bg-surface">
             <LogViewer entries={run.log_lines} />
           </div>
         </div>
 
         <div className="flex items-center justify-between gap-3 pt-1 border-t border-default">
           <Link
-            to={`/namespaces/${run.namespace}`}
+            to={`/namespaces/${encodeURIComponent(run.namespace)}/settings`}
             onClick={onClose}
             className="no-underline text-xs font-medium text-accent hover:text-accent-hover transition-colors"
           >

@@ -72,7 +72,7 @@ export default function NamespacePicker() {
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border bg-surface px-3 py-2.5 text-left transition-colors duration-150 focus:outline-none focus:shadow-focus ${
+        className={`flex w-full cursor-pointer items-center gap-2.5 rounded border bg-surface px-3 py-2.5 text-left transition-colors duration-150 focus:outline-none focus:shadow-focus ${
           namespace
             ? 'border-default hover:border-strong'
             : 'border-default hover:border-strong'
@@ -109,7 +109,7 @@ export default function NamespacePicker() {
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-default bg-surface shadow-floating">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded border border-default bg-surface shadow-floating">
           {isLoading && (
             <p className="m-0 px-3 py-2.5 text-xs text-muted">Loading...</p>
           )}

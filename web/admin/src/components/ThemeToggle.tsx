@@ -26,11 +26,11 @@ export default function ThemeToggle() {
       aria-checked={dark}
       aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
       onClick={() => setDark(value => !value)}
-      className="fixed bottom-5 right-5 z-50 inline-flex h-8 w-15 items-center rounded-full border border-default bg-surface p-1 text-secondary shadow-floating transition-colors duration-200 hover:border-strong hover:text-primary focus-visible:outline-none focus-visible:shadow-focus"
+      className="fixed bottom-5 right-5 z-50 inline-flex h-8 w-15 items-center rounded border border-default bg-surface p-1 text-secondary shadow-floating transition-colors duration-200 hover:border-strong hover:text-primary focus-visible:outline-none focus-visible:shadow-focus"
     >
       <span
         aria-hidden="true"
-        className={`flex size-6 items-center justify-center rounded-full bg-surface-raised text-primary shadow-raised transition-transform duration-200 ${dark ? 'translate-x-7' : 'translate-x-0'}`}
+        className={`flex size-6 items-center justify-center rounded bg-surface-raised text-primary shadow-raised transition-transform duration-200 ${dark ? 'translate-x-7' : 'translate-x-0'}`}
       >
         {dark ? <Icon name="moon" size={14} /> : <Icon name="sun" size={14} />}
       </span>

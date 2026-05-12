@@ -16,7 +16,7 @@ export default function FilterChips({
     { key: 'failed', label: 'Failed' },
   ]
   return (
-    <div className="flex flex-wrap gap-1.5 rounded-lg border border-default bg-surface p-1 w-fit">
+    <div className="flex flex-wrap gap-1.5 rounded border border-default bg-surface p-1 w-fit">
       {chips.map(({ key, label }) => (
         <button
           key={key}

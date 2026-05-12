@@ -25,7 +25,7 @@ export default function StatusCard({ name, status }: Props) {
   const s = STATUS[status] ?? ERROR_STATUS
 
   return (
-    <div className={`flex min-w-44 items-center justify-between gap-4 rounded-lg bg-surface px-5 py-4 ${s.frameClass}`}>
+    <div className={`flex min-w-44 items-center justify-between gap-4 rounded bg-surface px-5 py-4 ${s.frameClass}`}>
       <div>
         <div className="text-sm font-medium text-primary">{name}</div>
       </div>

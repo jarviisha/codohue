@@ -38,10 +38,10 @@ export default function LoginPage() {
 
         <form
           onSubmit={handleSubmit}
-          className="bg-surface border border-default rounded-lg p-8 shadow-overlay"
+          className="bg-surface border border-default rounded p-8 shadow-overlay"
         >
           {error && (
-            <div className="px-4 py-3 mb-5 text-sm font-medium rounded-lg bg-danger-bg border border-danger/25 text-danger">
+            <div className="px-4 py-3 mb-5 text-sm font-medium rounded bg-danger-bg border border-danger/25 text-danger">
               {error}
             </div>
           )}

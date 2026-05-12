@@ -18,7 +18,7 @@ export default function MetricTile({
   className = '',
 }: MetricTileProps) {
   return (
-    <div className={`bg-surface border border-default rounded-lg px-4 py-3 ${className}`}>
+    <div className={`bg-surface border border-default rounded px-4 py-3 ${className}`}>
       <p className="m-0 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
         {label}
       </p>

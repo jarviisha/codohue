@@ -29,7 +29,7 @@ export function Th({
   return (
     <th
       className={[
-        'border-b border-default px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted first:rounded-tl-lg last:rounded-tr-lg',
+        'border-b border-default px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted first:rounded-tl last:rounded-tr',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
         className,
       ]
