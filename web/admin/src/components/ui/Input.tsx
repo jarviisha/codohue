@@ -10,9 +10,9 @@ export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 const sizeClasses: Record<InputSize, string> = {
-  sm: 'h-8 px-2',
+  sm: 'h-7 px-2 text-xs',
   md: '',
-  compact: 'w-24 tabular-nums',
+  compact: 'w-20 tabular-nums',
 }
 
 function fieldClassName({

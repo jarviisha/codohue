@@ -17,8 +17,8 @@ export default function Layout() {
     <div className="min-h-screen bg-base">
       <Sidebar />
       <ThemeToggle />
-      <main className="min-h-screen bg-base md:ml-64">
-        <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 md:px-8 md:py-8">
+      <main className="min-h-screen bg-base md:ml-56">
+        <div className="mx-auto max-w-7xl px-4 py-4 sm:px-5 md:px-6 md:py-6">
           {needsNs && !namespace ? (
             <EmptyState className="mt-16">
               Select a namespace from the sidebar to continue.

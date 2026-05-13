@@ -30,8 +30,8 @@ Do not introduce new one-off colors in page files. If a new semantic color is ne
 Admin pages share one app frame: fixed sidebar, content area, breadcrumbs, page header, then page content.
 
 - Content max width: use the app shell width, currently `max-w-7xl`.
-- Page padding: `px-8 py-8` on desktop.
-- Page content spacing: prefer `gap-6` or `mb-6` between major sections.
+- Page padding: `px-6 py-6` on desktop.
+- Page content spacing: prefer `gap-4` or `mb-4` between major sections.
 - Use responsive grids:
   - Metric rows: `grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`.
   - Two-column panels: `grid-cols-1 xl:grid-cols-2`.
@@ -45,9 +45,10 @@ Mobile is not the primary target, but pages must not visually break on small scr
 
 Use restrained spacing and small radius.
 
-- Panel padding: `p-5`.
-- Compact table cell padding: around `px-2 py-2.5`.
+- Panel padding: `p-4`.
+- Compact table cell padding: around `px-2.5 py-2`.
 - Form field vertical spacing: `mb-3` or controlled by a form layout component.
+- Default control height: `h-8`; compact toolbar controls may use `h-7`.
 - Default radius: `rounded` or `rounded-lg`.
 - Maximum card/control radius: `8px`.
 - Pills and status badges may use `rounded-full`.
@@ -58,7 +59,7 @@ Use restrained spacing and small radius.
 
 Use clear hierarchy without display-style typography inside operational pages.
 
-- Page title: `text-2xl font-bold text-primary leading-tight`.
+- Page title: `text-xl font-semibold text-primary leading-tight`.
 - Panel title: `text-sm font-semibold text-primary`.
 - Section/meta label: `text-[11px] font-semibold uppercase tracking-[0.06em] text-muted`.
 - Body text: `text-sm text-secondary`.
@@ -103,6 +104,7 @@ Use buttons only for commands. Links should be actual navigation links.
 - Ghost button: low-emphasis inline action.
 - Destructive actions must have a dedicated danger variant before use.
 - Buttons must have stable dimensions and not shift layout when loading.
+- Default button height is `h-8`; compact inline/table buttons use `h-7`.
 - Loading labels may change text, but should not materially resize surrounding controls.
 
 Use icons only when they improve scan speed. Use the existing icon system consistently before adding another icon source.
@@ -114,6 +116,7 @@ Forms should be compact, aligned, and predictable.
 - Label placement should be consistent within a form.
 - Use inline label/value rows for dense settings forms.
 - Use top labels for filter bars and short input groups.
+- Default inputs and selects use `h-8`; compact filters and table controls may use `h-7`.
 - Numeric inputs should use compact widths and `tabular-nums`.
 - Selects and inputs should share the same height, radius, border, focus, and disabled behavior.
 - Group long forms with section headers, not extra card shells.

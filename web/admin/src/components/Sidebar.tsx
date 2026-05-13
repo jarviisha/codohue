@@ -21,24 +21,24 @@ export default function Sidebar() {
   return (
     <nav
       aria-label="Main navigation"
-      className="flex w-full shrink-0 flex-col border-b border-default bg-surface px-3 md:fixed md:left-0 md:top-0 md:h-screen md:w-64 md:border-b-0 md:border-r"
+      className="flex w-full shrink-0 flex-col border-b border-default bg-surface px-3 md:fixed md:left-0 md:top-0 md:h-screen md:w-56 md:border-b-0 md:border-r"
     >
-      <div className="flex h-14 justify-between items-center px-3">
+      <div className="flex h-12 justify-between items-center px-2">
         <div className="min-w-0">
-          <span className="block text-xl font-semibold leading-tight text-primary">
+          <span className="block text-lg font-semibold leading-tight text-primary">
             @codohue
           </span>
         </div>
       </div>
 
-      <div className="shrink-0 border-y border-default py-4">
+      <div className="shrink-0 border-y border-default py-3">
         <p className="m-0 mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
           Current Namespace
         </p>
         <NamespacePicker />
       </div>
 
-      <div className="flex flex-1 flex-col overflow-y-auto py-4">
+      <div className="flex flex-1 flex-col overflow-y-auto py-3">
         <p className="m-0 mb-2 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
           Global
         </p>
@@ -50,7 +50,7 @@ export default function Sidebar() {
           ))}
         </div>
 
-        <p className="m-0 mb-2 mt-5 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
+        <p className="m-0 mb-2 mt-4 px-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
           Namespace Tools
         </p>
         <div className="space-y-1">
