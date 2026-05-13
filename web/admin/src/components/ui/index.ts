@@ -7,6 +7,7 @@ export { default as PageHeader } from './PageHeader'
 
 // Content surfaces
 export { default as Panel } from './Panel'
+export { default as Section } from './Section'
 export { default as Toolbar } from './Toolbar'
 export { default as MetricTile } from './MetricTile'
 export { default as Badge } from './Badge'

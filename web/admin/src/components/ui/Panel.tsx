@@ -8,11 +8,19 @@ interface PanelProps {
 }
 
 // Bordered surface. No shadow, no nested panels (DESIGN.md §5).
+//
+// Title + actions sit flush above the content — no internal divider — to
+// keep the panel from feeling like nested rectangles. The mono uppercase
+// title is already visually distinct.
+//
+// For non-card grouping (e.g. form sections), prefer the borderless
+// `Section` primitive instead of stacking many Panels.
 export default function Panel({ title, actions, footer, children }: PanelProps) {
+  const hasHeader = Boolean(title || actions)
   return (
     <section className="bg-surface border border-default rounded-sm">
-      {(title || actions) && (
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-default">
+      {hasHeader ? (
+        <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
           {title ? (
             <h2 className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
               {title}
@@ -20,8 +28,8 @@ export default function Panel({ title, actions, footer, children }: PanelProps) 
           ) : <span />}
           {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
         </div>
-      )}
-      <div className="p-4">{children}</div>
+      ) : null}
+      <div className={hasHeader ? 'px-4 pb-4' : 'p-4'}>{children}</div>
       {footer ? (
         <div className="px-4 py-3 border-t border-default text-sm text-muted">{footer}</div>
       ) : null}

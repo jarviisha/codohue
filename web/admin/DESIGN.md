@@ -257,7 +257,8 @@ Page files compose primitives. Don't repeat Tailwind class strings.
 
 **Content**
 
-- `Panel` (bordered surface, optional title / actions / footer / tone)
+- `Panel` (bordered surface, optional title / actions / footer). Use for **card semantics** — a distinct content block standing on the canvas.
+- `Section` (borderless content group, optional mono-uppercase title / actions). Use for **grouping under a heading** without nesting a bordered card — pick this for form sections so a page doesn't become a stack of rectangles.
 - `Toolbar` (filter and action rows)
 - `Table`, `Thead`, `Th`, `Tbody`, `Tr`, `Td`
 - `MetricTile`, `Badge`, `KeyValueList`, `CodeBadge` (mono inline IDs)

@@ -6,7 +6,6 @@ import {
   Notice,
   PageHeader,
   PageShell,
-  Panel,
   StatusToken,
   Table,
   Tbody,
@@ -96,24 +95,23 @@ export default function NamespacesListPage() {
         </Notice>
       ) : null}
 
-      <Panel>
-        {isLoading ? (
-          <LoadingState rows={4} label="loading namespaces" />
-        ) : items.length === 0 && !isError ? (
-          <EmptyState
-            title="No namespaces yet"
-            description="Create the first namespace to start ingesting events and serving recommendations."
-            action={
-              <Button
-                variant="primary"
-                onClick={() => navigate(paths.namespaceCreate)}
-              >
-                Create your first namespace
-              </Button>
-            }
-          />
-        ) : (
-          <Table>
+      {isLoading ? (
+        <LoadingState rows={4} label="loading namespaces" />
+      ) : items.length === 0 && !isError ? (
+        <EmptyState
+          title="No namespaces yet"
+          description="Create the first namespace to start ingesting events and serving recommendations."
+          action={
+            <Button
+              variant="primary"
+              onClick={() => navigate(paths.namespaceCreate)}
+            >
+              Create your first namespace
+            </Button>
+          }
+        />
+      ) : (
+        <Table>
             <Thead>
               <Tr>
                 <Th>status</Th>
@@ -173,9 +171,8 @@ export default function NamespacesListPage() {
                 </Tr>
               ))}
             </Tbody>
-          </Table>
-        )}
-      </Panel>
+        </Table>
+      )}
     </PageShell>
   )
 }

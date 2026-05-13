@@ -9,8 +9,8 @@ import {
   Input,
   Notice,
   NumberInput,
-  Panel,
   RadioGroup,
+  Section,
   Select,
 } from '../../components/ui'
 import type { RadioOption } from '../../components/ui'
@@ -128,7 +128,7 @@ export default function NamespaceForm({
       ) : null}
 
       {mode === 'create' ? (
-        <Panel title="Identity">
+        <Section title="Identity">
           <Field
             label="Namespace name"
             htmlFor="ns-name"
@@ -145,10 +145,10 @@ export default function NamespaceForm({
               autoFocus
             />
           </Field>
-        </Panel>
+        </Section>
       ) : null}
 
-      <Panel
+      <Section
         title="Action weights"
         actions={<Badge>{state.action_weights.length}</Badge>}
       >
@@ -198,9 +198,9 @@ export default function NamespaceForm({
             </Button>
           </div>
         </div>
-      </Panel>
+      </Section>
 
-      <Panel title="Decay + scoring">
+      <Section title="Decay + scoring">
         <FormGrid columns={2}>
           <Field
             label="lambda (event decay rate)"
@@ -276,9 +276,9 @@ export default function NamespaceForm({
             />
           </Field>
         </FormGrid>
-      </Panel>
+      </Section>
 
-      <Panel title="Dense strategy">
+      <Section title="Dense strategy">
         <Field label="Strategy" htmlFor="ns-strategy">
           <RadioGroup<DenseStrategy>
             name="ns-strategy"
@@ -319,9 +319,9 @@ export default function NamespaceForm({
             </Field>
           </FormGrid>
         </div>
-      </Panel>
+      </Section>
 
-      <Panel title="Trending">
+      <Section title="Trending">
         <FormGrid columns={2}>
           <Field
             label="window (hours)"
@@ -371,7 +371,7 @@ export default function NamespaceForm({
             />
           </Field>
         </FormGrid>
-      </Panel>
+      </Section>
 
       <div className="flex justify-end gap-2 mt-1">
         <Button type="button" variant="ghost" onClick={handleCancel}>
