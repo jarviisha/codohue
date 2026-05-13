@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import {
   Badge,
   Button,
+  CollapsibleSection,
   Field,
   Form,
   FormGrid,
@@ -10,7 +11,6 @@ import {
   Notice,
   NumberInput,
   RadioGroup,
-  Section,
   Select,
 } from '../../components/ui'
 import type { RadioOption } from '../../components/ui'
@@ -128,7 +128,7 @@ export default function NamespaceForm({
       ) : null}
 
       {mode === 'create' ? (
-        <Section title="Identity">
+        <CollapsibleSection title="Identity">
           <Field
             label="Namespace name"
             htmlFor="ns-name"
@@ -145,11 +145,11 @@ export default function NamespaceForm({
               autoFocus
             />
           </Field>
-        </Section>
+        </CollapsibleSection>
       ) : null}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Section
+        <CollapsibleSection
           title="Action weights"
           actions={<Badge>{state.action_weights.length}</Badge>}
         >
@@ -199,9 +199,9 @@ export default function NamespaceForm({
               </Button>
             </div>
           </div>
-        </Section>
+        </CollapsibleSection>
 
-        <Section title="Decay + scoring">
+        <CollapsibleSection title="Decay + scoring">
           <FormGrid columns={2}>
             <Field
               label="lambda (event decay rate)"
@@ -277,11 +277,11 @@ export default function NamespaceForm({
               />
             </Field>
           </FormGrid>
-        </Section>
+        </CollapsibleSection>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Section title="Dense strategy">
+        <CollapsibleSection title="Dense strategy">
           <Field label="Strategy" htmlFor="ns-strategy">
             <RadioGroup<DenseStrategy>
               name="ns-strategy"
@@ -322,9 +322,9 @@ export default function NamespaceForm({
               </Field>
             </FormGrid>
           </div>
-        </Section>
+        </CollapsibleSection>
 
-        <Section title="Trending">
+        <CollapsibleSection title="Trending">
           <FormGrid columns={2}>
             <Field
               label="window (hours)"
@@ -374,7 +374,7 @@ export default function NamespaceForm({
               />
             </Field>
           </FormGrid>
-        </Section>
+        </CollapsibleSection>
       </div>
 
       <div className="sticky bottom-0 -mb-6 -mx-6 px-6 bg-base border-t border-default py-3 flex justify-end gap-2 z-10">
