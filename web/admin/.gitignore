@@ -10,5 +10,10 @@ node_modules/
 # TypeScript incremental build cache
 *.tsbuildinfo
 
+# Local env overrides — .env.example is tracked, real values stay local
+.env
+.env.local
+.env.*.local
+
 # Editor
 .DS_Store
