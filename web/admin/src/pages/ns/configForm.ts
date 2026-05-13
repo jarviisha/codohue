@@ -1,0 +1,174 @@
+import type {
+  NamespaceConfig,
+  NamespaceUpsertRequest,
+} from '../../services/namespaces'
+
+// Local form state. The wire types use a `Record<string, number>` for
+// action_weights, but the UI needs ordered rows with editable keys, so we
+// store an array internally and serialise at submit time.
+
+export type DenseStrategy = 'item2vec' | 'svd' | 'byoe' | 'disabled'
+
+export interface ActionWeightRow {
+  action: string
+  weight: number
+}
+
+export interface NamespaceFormState {
+  namespace: string
+  action_weights: ActionWeightRow[]
+  lambda: number
+  gamma: number
+  alpha: number
+  max_results: number
+  seen_items_days: number
+  dense_strategy: DenseStrategy
+  embedding_dim: number
+  dense_distance: string
+  trending_window: number
+  trending_ttl: number
+  lambda_trending: number
+}
+
+export const defaultFormState: NamespaceFormState = {
+  namespace: '',
+  action_weights: [
+    { action: 'click', weight: 1.0 },
+    { action: 'like', weight: 3.0 },
+    { action: 'share', weight: 5.0 },
+    { action: 'comment', weight: 4.0 },
+    { action: 'skip', weight: -1.0 },
+  ],
+  lambda: 0.05,
+  gamma: 0.1,
+  alpha: 0.7,
+  max_results: 50,
+  seen_items_days: 7,
+  dense_strategy: 'item2vec',
+  embedding_dim: 128,
+  dense_distance: 'cosine',
+  trending_window: 24,
+  trending_ttl: 300,
+  lambda_trending: 0.1,
+}
+
+/** Build a form state from an existing namespace config. */
+export function fromNamespaceConfig(c: NamespaceConfig): NamespaceFormState {
+  const validStrategy: DenseStrategy[] = ['item2vec', 'svd', 'byoe', 'disabled']
+  const denseStrategy: DenseStrategy = validStrategy.includes(
+    c.dense_strategy as DenseStrategy,
+  )
+    ? (c.dense_strategy as DenseStrategy)
+    : 'item2vec'
+
+  return {
+    namespace: c.namespace,
+    action_weights: Object.entries(c.action_weights).map(([action, weight]) => ({
+      action,
+      weight,
+    })),
+    lambda: c.lambda,
+    gamma: c.gamma,
+    alpha: c.alpha,
+    max_results: c.max_results,
+    seen_items_days: c.seen_items_days,
+    dense_strategy: denseStrategy,
+    embedding_dim: c.embedding_dim,
+    dense_distance: c.dense_distance || 'cosine',
+    trending_window: c.trending_window,
+    trending_ttl: c.trending_ttl,
+    lambda_trending: c.lambda_trending,
+  }
+}
+
+/** Serialise a form state into the wire-shaped upsert payload. */
+export function toUpsertPayload(state: NamespaceFormState): NamespaceUpsertRequest {
+  const action_weights: Record<string, number> = {}
+  for (const row of state.action_weights) {
+    const key = row.action.trim()
+    if (key) action_weights[key] = row.weight
+  }
+  return {
+    action_weights,
+    lambda: state.lambda,
+    gamma: state.gamma,
+    alpha: state.alpha,
+    max_results: state.max_results,
+    seen_items_days: state.seen_items_days,
+    dense_strategy: state.dense_strategy,
+    embedding_dim: state.embedding_dim,
+    dense_distance: state.dense_distance,
+    trending_window: state.trending_window,
+    trending_ttl: state.trending_ttl,
+    lambda_trending: state.lambda_trending,
+  }
+}
+
+export interface NamespaceFormErrors {
+  namespace?: string
+  action_weights?: string
+  embedding_dim?: string
+  alpha?: string
+  max_results?: string
+  seen_items_days?: string
+  trending_window?: string
+  trending_ttl?: string
+}
+
+const NAMESPACE_RE = /^[a-z0-9_-]+$/
+
+export function validateNamespaceForm(
+  state: NamespaceFormState,
+  mode: 'create' | 'edit',
+): NamespaceFormErrors {
+  const errs: NamespaceFormErrors = {}
+
+  if (mode === 'create') {
+    if (!state.namespace.trim()) {
+      errs.namespace = 'Required.'
+    } else if (!NAMESPACE_RE.test(state.namespace)) {
+      errs.namespace = 'Use lowercase letters, digits, _ or -.'
+    }
+  }
+
+  const hasAction = state.action_weights.some((r) => r.action.trim().length > 0)
+  if (!hasAction) {
+    errs.action_weights = 'At least one action weight is required.'
+  } else {
+    const seen = new Set<string>()
+    for (const r of state.action_weights) {
+      const key = r.action.trim()
+      if (!key) continue
+      if (seen.has(key)) {
+        errs.action_weights = `Duplicate action "${key}".`
+        break
+      }
+      seen.add(key)
+    }
+  }
+
+  if (state.alpha < 0 || state.alpha > 1) {
+    errs.alpha = 'Must be between 0 and 1.'
+  }
+  if (state.embedding_dim <= 0) {
+    errs.embedding_dim = 'Must be greater than 0.'
+  }
+  if (state.max_results <= 0) {
+    errs.max_results = 'Must be greater than 0.'
+  }
+  if (state.seen_items_days < 0) {
+    errs.seen_items_days = 'Must be 0 or greater.'
+  }
+  if (state.trending_window <= 0) {
+    errs.trending_window = 'Must be greater than 0.'
+  }
+  if (state.trending_ttl <= 0) {
+    errs.trending_ttl = 'Must be greater than 0.'
+  }
+
+  return errs
+}
+
+export function hasErrors(errs: NamespaceFormErrors): boolean {
+  return Object.keys(errs).length > 0
+}

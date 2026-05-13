@@ -32,7 +32,7 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
   - "Create" button routes to `/namespaces/new` via `paths.namespaceCreate`.
   - **Done when:** every row renders with the right status token, no raw `fetch`, Cmd+K registers a "Create namespace" command.
 
-- [ ] **2.A.3 `NamespaceCreatePage` — build-order #3**
+- [x] **2.A.3 `NamespaceCreatePage` — build-order #3**
   - Replace stub at `/namespaces/new`. Form with action-weight matrix, lambda, alpha, embedding_dim, dense-strategy RadioGroup, trending settings.
   - Local + server validation; `Notice` summarises errors at the form top.
   - On success, navigate to `/ns/:name`; surface returned `api_key` once via a one-shot `Notice` so the operator can copy it.
