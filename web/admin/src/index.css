@@ -120,6 +120,28 @@ pre,
   font-variant-ligatures: contextual;
 }
 
+/* Action affordances get a pointer cursor by default. Tailwind v4's preflight
+   no longer adds `cursor: pointer` to <button>, so we restore the operator
+   expectation here once. Disabled states (native or aria) flip to
+   not-allowed. Anchors with [href] already get pointer from the user agent.
+   Wrapped in @layer base so per-element `cursor-*` utilities can override. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="menuitem"]:not([aria-disabled="true"]),
+  [role="tab"]:not([aria-disabled="true"]),
+  [role="option"]:not([aria-disabled="true"]),
+  summary {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"],
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,
