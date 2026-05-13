@@ -1,6 +1,6 @@
 import { useTrending } from '../hooks/useTrending'
 import ErrorBanner from '../components/ErrorBanner'
-import { Badge, CodeBadge, EmptyState, LoadingState, MetricTile, PageHeader, PageShell, Panel, Table, Thead, Th, Tbody, Tr, Td } from '../components/ui'
+import { Badge, CodeBadge, EmptyState, LoadingState, MetricTile, PageShell, Panel, Table, Thead, Th, Tbody, Tr, Td } from '../components/ui'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { formatCount, formatTTL } from '../utils/format'
 
@@ -18,8 +18,7 @@ export default function TrendingPage() {
   const { data, error, isLoading } = useTrending(namespace)
 
   return (
-    <PageShell>
-      <PageHeader title="Trending Items" />
+    <PageShell title="Trending Items">
       {error && <ErrorBanner message="Failed to load trending data." />}
       {isLoading && <LoadingState />}
 

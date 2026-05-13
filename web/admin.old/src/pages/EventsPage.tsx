@@ -3,7 +3,7 @@ import { useNamespaceList } from '../hooks/useNamespaces'
 import { useEvents } from '../hooks/useEvents'
 import { useInjectEvent } from '../hooks/useInjectEvent'
 import ErrorBanner from '../components/ErrorBanner'
-import { Button, EmptyState, LoadingState, PageHeader, PageShell, Toolbar } from '../components/ui'
+import { Button, EmptyState, LoadingState, PageShell, Toolbar } from '../components/ui'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import EventsTable from './events/EventsTable'
 import InjectEventPanel, { type InjectEventPayload } from './events/InjectEventPanel'
@@ -47,9 +47,7 @@ export default function EventsPage() {
   }
 
   return (
-    <PageShell>
-      <PageHeader title="Events" />
-
+    <PageShell title="Events">
       {namespace && (
         <>
           <InjectEventPanel

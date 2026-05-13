@@ -1,24 +1,12 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Build output — only the placeholder is tracked; Vite-built assets stay local
+dist/*
+!dist/index.html
 
-node_modules
-dist
-dist-ssr
-*.local
+# Vite cache
+.vite/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# Node
+node_modules/
+
+# Editor
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?

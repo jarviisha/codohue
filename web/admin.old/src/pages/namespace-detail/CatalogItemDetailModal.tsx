@@ -53,7 +53,7 @@ export default function CatalogItemDetailModal({
             <h4 className="m-0 text-xs font-semibold uppercase tracking-[0.06em] text-muted">
               Content
             </h4>
-            <pre className="m-0 max-h-64 overflow-auto rounded border border-default bg-subtle p-3 text-xs text-primary whitespace-pre-wrap break-words">
+            <pre className="m-0 max-h-64 overflow-auto rounded border border-default bg-subtle p-3 text-xs text-primary whitespace-pre-wrap wrap-break-word">
               {item.content}
             </pre>
           </section>

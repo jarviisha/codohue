@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useNamespace, useUpsertNamespace } from '../hooks/useNamespaces'
 import { useQdrant } from '../hooks/useQdrant'
 import ErrorBanner from '../components/ErrorBanner'
-import { LoadingState, PageHeader, PageShell } from '../components/ui'
+import { LoadingState, PageShell } from '../components/ui'
 import {
   defaultNamespaceForm,
   namespaceConfigToForm,
@@ -57,9 +57,7 @@ export default function NamespaceDetailPage() {
       : null
 
   return (
-    <PageShell>
-      <PageHeader title={isNew ? 'Create Namespace' : `Namespace Settings: ${ns}`} />
-
+    <PageShell title={isNew ? 'Create Namespace' : `Namespace Settings: ${ns}`}>
       {newKey && (
         <CreatedApiKeyPanel apiKey={newKey} onDone={() => navigate('/namespaces')} />
       )}

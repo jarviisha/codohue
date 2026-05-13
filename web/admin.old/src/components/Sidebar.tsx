@@ -5,6 +5,7 @@ import { logout } from '../services/api'
 import { globalNavRoutes, namespaceNavRoutes } from '../routes'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { Button } from './ui'
+import { appLayoutClasses } from './appLayoutClasses'
 
 function namespacePath(path: string, namespace: string) {
   return `/${path.replace(':ns', encodeURIComponent(namespace))}`
@@ -21,7 +22,7 @@ export default function Sidebar() {
   return (
     <nav
       aria-label="Main navigation"
-      className="flex w-full shrink-0 flex-col border-b border-default bg-surface px-3 md:fixed md:left-0 md:top-0 md:h-screen md:w-56 md:border-b-0 md:border-r"
+      className={appLayoutClasses.sidebar}
     >
       <div className="flex h-12 justify-between items-center px-2">
         <div className="min-w-0">

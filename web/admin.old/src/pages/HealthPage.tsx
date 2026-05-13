@@ -1,7 +1,7 @@
 import { useHealth } from '../hooks/useHealth'
 import StatusCard from '../components/StatusCard'
 import ErrorBanner from '../components/ErrorBanner'
-import { Badge, LoadingState, PageHeader, PageShell } from '../components/ui'
+import { Badge, LoadingState, PageShell } from '../components/ui'
 import { formatTimeOfDay } from '../utils/format'
 
 export default function HealthPage() {
@@ -13,9 +13,7 @@ export default function HealthPage() {
   const statusTone = overallOk ? 'success' : overallDegraded ? 'warning' : 'danger'
 
   return (
-    <PageShell>
-      <PageHeader title="System Health" />
-
+    <PageShell title="System Health">
       {error && <ErrorBanner message="Could not reach the admin server." />}
       {isLoading && <LoadingState label="Checking health..." />}
 

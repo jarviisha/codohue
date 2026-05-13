@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useRecommendDebug } from '../hooks/useRecommendDebug'
 import { useSubjectProfile } from '../hooks/useSubjectProfile'
 import ErrorBanner from '../components/ErrorBanner'
-import { Badge, Button, CodeBadge, EmptyState, FormControl, MetricTile, PageHeader, PageShell, Panel, Select, Table, Thead, Th, Tbody, Tr, Td, TextInput, Toolbar } from '../components/ui'
+import { Badge, Button, CodeBadge, EmptyState, FormControl, MetricTile, PageShell, Panel, Select, Table, Thead, Th, Tbody, Tr, Td, TextInput, Toolbar } from '../components/ui'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 
 const LIMITS = [5, 10, 20, 50]
@@ -24,9 +24,7 @@ export default function RecommendDebugPage() {
   const isPending = debug.isPending || profile.isPending
 
   return (
-    <PageShell>
-      <PageHeader title="Recommendation Debug" />
-
+    <PageShell title="Recommendation Debug">
       <Panel>
         <form onSubmit={handleSubmit}>
           <Toolbar>

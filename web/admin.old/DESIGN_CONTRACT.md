@@ -29,7 +29,7 @@ Do not introduce new one-off colors in page files. If a new semantic color is ne
 
 Admin pages share one app frame: fixed sidebar, content area, breadcrumbs, page header, then page content.
 
-- Content max width: use the app shell width, currently `max-w-7xl`.
+- Content width: use the full app shell width after the sidebar; constrain only pages with a clear form-reading reason.
 - Page padding: `px-6 py-6` on desktop.
 - Page content spacing: prefer `gap-4` or `mb-4` between major sections.
 - Use responsive grids:

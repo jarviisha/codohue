@@ -11,7 +11,6 @@ import {
   Input,
   LoadingState,
   Notice,
-  PageHeader,
   PageShell,
   Panel,
   Select,
@@ -66,16 +65,14 @@ export default function NamespacesPage() {
   }
 
   return (
-    <PageShell>
-      <PageHeader
-        title="Namespaces"
-        actions={(
-          <Button variant="primary" onClick={() => navigate('/namespaces/new')}>
-            + Create Namespace
-          </Button>
-        )}
-      />
-
+    <PageShell
+      title="Namespaces"
+      actions={(
+        <Button variant="primary" onClick={() => navigate('/namespaces/new')}>
+          + Create Namespace
+        </Button>
+      )}
+    >
       {!activeNs && hasNamespaces && (
         <Notice tone="accent" role="status">
           Select a namespace below to start working.

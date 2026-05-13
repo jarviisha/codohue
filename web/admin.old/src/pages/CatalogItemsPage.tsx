@@ -10,7 +10,6 @@ import {
   Input,
   LoadingState,
   Notice,
-  PageHeader,
   PageShell,
   Panel,
   Select,
@@ -147,17 +146,14 @@ export default function CatalogItemsPage() {
 
   if (!namespace) {
     return (
-      <PageShell>
-        <PageHeader title="Catalog Items" />
+      <PageShell title="Catalog Items">
         <ErrorBanner message="Missing namespace in URL." />
       </PageShell>
     )
   }
 
   return (
-    <PageShell>
-      <PageHeader title={`Catalog Items: ${namespace}`} />
-
+    <PageShell title={`Catalog Items: ${namespace}`}>
       {actionError && (
         <Notice tone="danger" onDismiss={() => setActionError('')}>
           {actionError}

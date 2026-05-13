@@ -8,7 +8,6 @@ import {
   CodeBadge,
   EmptyState,
   LoadingState,
-  PageHeader,
   PageShell,
   Toolbar,
 } from '../components/ui'
@@ -55,29 +54,27 @@ function BatchRunsContent({ namespace }: { namespace: string | null }) {
   }
 
   return (
-    <PageShell>
-      <PageHeader
-        title="Batch Runs"
-        actions={
-          <div className="flex items-center gap-3">
-            {hasRunning && (
-              <Badge tone="accent" dot>
-                Live
-              </Badge>
-            )}
-            {namespace && (
-              <Button
-                size="sm"
-                onClick={() => runNow.mutate()}
-                disabled={runNow.isPending}
-              >
-                {runNow.isPending ? 'Running...' : 'Run now'}
-              </Button>
-            )}
-          </div>
-        }
-      />
-
+    <PageShell
+      title="Batch Runs"
+      actions={
+        <div className="flex items-center gap-3">
+          {hasRunning && (
+            <Badge tone="accent" dot>
+              Live
+            </Badge>
+          )}
+          {namespace && (
+            <Button
+              size="sm"
+              onClick={() => runNow.mutate()}
+              disabled={runNow.isPending}
+            >
+              {runNow.isPending ? 'Running...' : 'Run now'}
+            </Button>
+          )}
+        </div>
+      }
+    >
       {error && <ErrorBanner message="Failed to load batch runs." />}
       {isLoading && <LoadingState />}
 
