@@ -21,26 +21,7 @@ import {
   useNamespacesOverview,
 } from '../../services/namespaces'
 import { paths } from '../../routes/path'
-
-// Tiny relative-time formatter. Avoids pulling a date lib for one use case.
-function formatRelative(iso: string): string {
-  const delta = Date.now() - new Date(iso).getTime()
-  if (Number.isNaN(delta) || delta < 0) return 'just now'
-  const s = Math.floor(delta / 1000)
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ago`
-  const d = Math.floor(h / 24)
-  return `${d}d ago`
-}
-
-function formatDuration(ms: number | null): string {
-  if (ms === null) return '—'
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(3)}s`
-}
+import { formatDurationMs, formatNumber, formatRelative } from '../../utils/format'
 
 export default function NamespacesListPage() {
   const navigate = useNavigate()
@@ -139,7 +120,7 @@ export default function NamespacesListPage() {
                     </Link>
                   </Td>
                   <Td mono align="right">
-                    {h.active_events_24h.toLocaleString('en-US')}
+                    {formatNumber(h.active_events_24h)}
                   </Td>
                   <Td>
                     {h.last_run ? (
@@ -155,7 +136,7 @@ export default function NamespacesListPage() {
                         <span className="font-mono text-xs text-muted">
                           {formatRelative(h.last_run.started_at)}
                           {h.last_run.duration_ms !== null
-                            ? ` · ${formatDuration(h.last_run.duration_ms)}`
+                            ? ` · ${formatDurationMs(h.last_run.duration_ms)}`
                             : ''}
                         </span>
                       </span>

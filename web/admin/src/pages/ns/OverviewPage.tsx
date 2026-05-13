@@ -24,19 +24,11 @@ import {
   useNamespacesOverview,
 } from '../../services/namespaces'
 import { paths } from '../../routes/path'
-
-function formatDurationMs(ms: number | null | undefined): string {
-  if (ms === null || ms === undefined) return '—'
-  if (ms < 1000) return `${ms}ms`
-  return `${(ms / 1000).toFixed(3)}s`
-}
-
-function formatTimestamp(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toISOString().replace('T', ' ').replace('Z', ' UTC')
-}
+import {
+  formatDurationMs,
+  formatNumber,
+  formatTimestamp,
+} from '../../utils/format'
 
 function phaseToken(ok: boolean | null | undefined): StatusState {
   if (ok === null || ok === undefined) return 'idle'
@@ -199,7 +191,7 @@ export default function NamespaceOverviewPage() {
                 { label: 'duration', value: formatDurationMs(lastRun.duration_ms) },
                 {
                   label: 'subjects',
-                  value: lastRun.subjects_processed.toLocaleString('en-US'),
+                  value: formatNumber(lastRun.subjects_processed),
                 },
                 { label: 'trigger', value: lastRun.trigger_source },
                 {
@@ -247,7 +239,7 @@ export default function NamespaceOverviewPage() {
             <div className="grid grid-cols-2 gap-3">
               <MetricTile
                 label="events"
-                value={(thisNs?.active_events_24h ?? 0).toLocaleString('en-US')}
+                value={formatNumber(thisNs?.active_events_24h ?? 0)}
                 hint="last 24h"
               />
               <MetricTile
