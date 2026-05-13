@@ -15,7 +15,7 @@ interface PageHeaderProps {
 // the header from page content.
 export default function PageHeader({ title, meta, actions }: PageHeaderProps) {
   return (
-    <header className="border-b border-default pb-3">
+    <header className="border-b border-default pb-3 -mx-6 px-6">
       <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col gap-1 min-w-0">
           <h1 className="text-xl font-semibold text-primary leading-tight">

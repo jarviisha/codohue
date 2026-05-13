@@ -377,7 +377,7 @@ export default function NamespaceForm({
         </Section>
       </div>
 
-      <div className="sticky bottom-0 -mb-6 bg-base border-t border-default py-3 flex justify-end gap-2 z-10">
+      <div className="sticky bottom-0 -mb-6 -mx-6 px-6 bg-base border-t border-default py-3 flex justify-end gap-2 z-10">
         <Button type="button" variant="ghost" onClick={handleCancel}>
           Cancel
         </Button>
