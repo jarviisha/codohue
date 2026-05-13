@@ -30,8 +30,8 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 |------|-------|------|-----------|
 | `bg-base` | `#FFFFFF` | `#0d1117` | dark = Primer bgColor-default |
 | `bg-subtle` | `#F8FAFC` | `#151b23` | light = slate-50; dark = Primer bgColor-muted |
-| `bg-surface` | `#FFFFFF` | `#212830` | dark = Primer button-default-bgColor-rest |
-| `bg-surface-raised` | `#F1F5F9` | `#262c36` | light = slate-100; dark = Primer button-default-bgColor-hover |
+| `bg-surface` | `#FFFFFF` | `#0d1117` | **same as bg-base in both themes** — Panel separates by border, not bg fill |
+| `bg-surface-raised` | `#F1F5F9` | `#262c36` | light = slate-100; dark = Primer button-default-bgColor-hover (used for hover/raised states only) |
 | `border-default` | `#E2E8F0` | `#3d444d` | light = slate-200; dark = Primer borderColor-default |
 | `border-strong` | `#CBD5E1` | `#656c76` | light = slate-300; dark = Primer neutral-emphasis |
 | `text-primary` | `#0F172A` | `#f0f6fc` | dark = Primer fgColor-default |
@@ -49,7 +49,7 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 **Palette notes**
 
 - **`accent` vs `accent-emphasis`.** Dark theme splits the accent into two values because GitHub does: `accent` `#4493f8` is for accent-colored **text** on a neutral background (6.11:1 vs `bg-base` — passes AA-normal); `accent-emphasis` `#1f6feb` is for solid accent **backgrounds** with white text (4.63:1 — passes AA-normal). Using `accent` itself as a button bg with white text would fail (3.10:1). Light theme uses the same value for both because Meta Blue on white passes either way (4.82:1). Always pair `bg-accent-emphasis` with `text-accent-text`; use `text-accent` only on neutral surfaces.
-- **Layer count differs by theme.** Dark uses four distinct background layers stepping in luminance for explicit depth perception (matching Primer's bg scale: `default → muted → button-rest → button-hover`). Light uses three (`bg-base = bg-surface = #FFFFFF`); the bordered-surface-on-white contrast against `text-primary` carries enough signal on its own.
+- **Symmetric layer pattern.** Both themes use the same 3-tier surface system: `bg-base = bg-surface` is the canvas tone (white in light, `#0d1117` in dark); `bg-subtle` is a slight variation used for alt regions; `bg-surface-raised` is reserved for **hover and raised states only** (e.g. table row hover, dropdown item hover, ghost button hover). **Panels do not change background** — they sit on the canvas and separate via `border border-default`. The bg-fill-card pattern is rejected in favour of border-led layout to keep light and dark visually consistent; without it, dark would lean on bg shifts that don't translate to light. The trade-off in dark is that the Panel border is subtle (1.92:1 vs `bg-base`), but borders read clearly at hairline width on both themes.
 - **`text-muted` is tuned for WCAG AA-normal (4.5:1).** Light = slate-500 on white (4.76:1). Dark = Primer fgColor-muted on Primer bgColor-default (6.50:1). Helper-text-sized content stays readable.
 - **No status-bg tokens.** `Notice` uses a left-border pattern, not a tinted background — see §6 (Notice primitive).
 
