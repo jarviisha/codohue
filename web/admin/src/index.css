@@ -3,7 +3,7 @@
 /* Dark mode via .dark class on <html> (not prefers-color-scheme) */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* ─── Semantic color tokens (light) ─── */
+/* ─── Semantic color tokens (light) — Slate-based ─── */
 :root {
   --bg-base:           #FFFFFF;
   --bg-subtle:         #F8FAFC;
@@ -16,6 +16,7 @@
   --text-muted:        #64748B;
   --text-disabled:     #CBD5E1;
   --accent:            #0866FF;
+  --accent-emphasis:   #0866FF;
   --accent-subtle:     #EBF3FF;
   --accent-text:       #FFFFFF;
   --success:           #10B981;
@@ -23,24 +24,25 @@
   --danger:            #EF4444;
 }
 
-/* ─── Semantic color tokens (dark) ─── */
+/* ─── Semantic color tokens (dark) — GitHub Primer-aligned ─── */
 .dark {
-  --bg-base:           #0F172A;
-  --bg-subtle:         #162033;
-  --bg-surface:        #1E293B;
-  --bg-surface-raised: #283447;
-  --border-default:    #334155;
-  --border-strong:     #475569;
-  --text-primary:      #F1F5F9;
-  --text-secondary:    #94A3B8;
-  --text-muted:        #7B8AA1;
-  --text-disabled:     #475569;
-  --accent:            #3B82F6;
-  --accent-subtle:     #1E3A8A;
-  --accent-text:       #FFFFFF;
-  --success:           #34D399;
-  --warning:           #FBBF24;
-  --danger:            #F87171;
+  --bg-base:           #0d1117;
+  --bg-subtle:         #151b23;
+  --bg-surface:        #212830;
+  --bg-surface-raised: #262c36;
+  --border-default:    #3d444d;
+  --border-strong:     #656c76;
+  --text-primary:      #f0f6fc;
+  --text-secondary:    #c9d1d9;
+  --text-muted:        #9198a1;
+  --text-disabled:     #656c76;
+  --accent:            #4493f8;   /* text on neutral bg (links, accent labels) */
+  --accent-emphasis:   #1f6feb;   /* solid bg with white text (Button primary) */
+  --accent-subtle:     #132339;   /* selected/active row bg (15% blend of #388bfd) */
+  --accent-text:       #ffffff;
+  --success:           #3fb950;
+  --warning:           #d29922;
+  --danger:            #f85149;
 }
 
 /* ─── Static theme values: fonts, shadows, custom widths ─── */
@@ -78,9 +80,10 @@
   --color-secondary:      var(--text-secondary);
   --color-muted:          var(--text-muted);
   --color-disabled:       var(--text-disabled);
-  --color-accent:         var(--accent);
-  --color-accent-subtle:  var(--accent-subtle);
-  --color-accent-text:    var(--accent-text);
+  --color-accent:           var(--accent);
+  --color-accent-emphasis:  var(--accent-emphasis);
+  --color-accent-subtle:    var(--accent-subtle);
+  --color-accent-text:      var(--accent-text);
   --color-success:        var(--success);
   --color-warning:        var(--warning);
   --color-danger:         var(--danger);

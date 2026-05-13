@@ -24,33 +24,34 @@ Tokens live in [src/index.css](src/index.css). Page code consumes them via Tailw
 
 ### 2.1 Palette
 
-Accent is **Meta Blue** (with a dark-mode-tuned variant). Neutrals are Tailwind Slate in both themes.
+Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark theme is aligned to **GitHub Primer** dark tokens — neutrals follow Primer's `bgColor.*` / `borderColor.*` / `fgColor.*` scale, accent follows Primer's `accent` family.
 
 | Role | Light | Dark | Reference |
 |------|-------|------|-----------|
-| `bg-base` | `#FFFFFF` | `#0F172A` | dark = slate-900 |
-| `bg-subtle` | `#F8FAFC` | `#162033` | light = slate-50; dark = custom slate-850 |
-| `bg-surface` | `#FFFFFF` | `#1E293B` | dark = slate-800 |
-| `bg-surface-raised` | `#F1F5F9` | `#283447` | light = slate-100; dark = custom slate-750 |
-| `border-default` | `#E2E8F0` | `#334155` | light = slate-200; dark = slate-700 |
-| `border-strong` | `#CBD5E1` | `#475569` | light = slate-300; dark = slate-600 |
-| `text-primary` | `#0F172A` | `#F1F5F9` | slate-900 / slate-100 |
-| `text-secondary` | `#475569` | `#94A3B8` | slate-600 / slate-400 |
-| `text-muted` | `#64748B` | `#7B8AA1` | slate-500 / custom slate-450 |
-| `text-disabled` | `#CBD5E1` | `#475569` | slate-300 / slate-600 |
-| `accent` | `#0866FF` | `#3B82F6` | Meta Blue / Tailwind blue-500 |
-| `accent-subtle` | `#EBF3FF` | `#1E3A8A` | dark = Tailwind blue-900 |
-| `accent-text` | `#FFFFFF` | `#FFFFFF` | text on solid accent |
-| `success` | `#10B981` | `#34D399` | emerald-500 / emerald-400 |
-| `warning` | `#F59E0B` | `#FBBF24` | amber-500 / amber-400 |
-| `danger`  | `#EF4444` | `#F87171` | red-500 / red-400 |
+| `bg-base` | `#FFFFFF` | `#0d1117` | dark = Primer bgColor-default |
+| `bg-subtle` | `#F8FAFC` | `#151b23` | light = slate-50; dark = Primer bgColor-muted |
+| `bg-surface` | `#FFFFFF` | `#212830` | dark = Primer button-default-bgColor-rest |
+| `bg-surface-raised` | `#F1F5F9` | `#262c36` | light = slate-100; dark = Primer button-default-bgColor-hover |
+| `border-default` | `#E2E8F0` | `#3d444d` | light = slate-200; dark = Primer borderColor-default |
+| `border-strong` | `#CBD5E1` | `#656c76` | light = slate-300; dark = Primer neutral-emphasis |
+| `text-primary` | `#0F172A` | `#f0f6fc` | dark = Primer fgColor-default |
+| `text-secondary` | `#475569` | `#c9d1d9` | dark = Primer classic fg-default (mid tier) |
+| `text-muted` | `#64748B` | `#9198a1` | dark = Primer fgColor-muted |
+| `text-disabled` | `#CBD5E1` | `#656c76` | dark = Primer fgColor-disabled |
+| `accent` | `#0866FF` | `#4493f8` | **text on neutral bg** (links, accent labels) |
+| `accent-emphasis` | `#0866FF` | `#1f6feb` | **solid bg with white text** (Button primary) |
+| `accent-subtle` | `#EBF3FF` | `#132339` | selected / active row bg |
+| `accent-text` | `#FFFFFF` | `#FFFFFF` | text on solid accent (`bg-accent-emphasis`) |
+| `success` | `#10B981` | `#3fb950` | dark = Primer fgColor-success |
+| `warning` | `#F59E0B` | `#d29922` | dark = Primer fgColor-attention |
+| `danger`  | `#EF4444` | `#f85149` | dark = Primer fgColor-danger |
 
 **Palette notes**
 
-- **Dark accent is brighter than light accent.** `#0866FF` on dark `bg-base` measures ~3.9:1 — fails WCAG AA for normal text. `#3B82F6` measures 4.85:1. The dual-token swap keeps the perceived brand color while giving accent-colored text enough contrast on dark mode.
-- **Layer count differs by theme.** Dark uses four distinct background layers stepping ~1.5× in luminance for explicit depth perception. Light uses three (`bg-base = bg-surface = #FFFFFF`); the bordered-surface-on-white contrast against `text-primary` carries enough signal on its own. Same Tailwind utility names work in both themes; only the resolved CSS variable differs.
-- **`text-muted` is tuned for WCAG AA-normal (4.5:1).** Light = slate-500 on white (4.76:1). Dark = custom #7B8AA1 on slate-900 (5.09:1). Helper-text-sized content must remain readable.
-- **No status-bg tokens.** `Notice` uses a left-border pattern, not a tinted background. See §6 (Notice primitive).
+- **`accent` vs `accent-emphasis`.** Dark theme splits the accent into two values because GitHub does: `accent` `#4493f8` is for accent-colored **text** on a neutral background (6.11:1 vs `bg-base` — passes AA-normal); `accent-emphasis` `#1f6feb` is for solid accent **backgrounds** with white text (4.63:1 — passes AA-normal). Using `accent` itself as a button bg with white text would fail (3.10:1). Light theme uses the same value for both because Meta Blue on white passes either way (4.82:1). Always pair `bg-accent-emphasis` with `text-accent-text`; use `text-accent` only on neutral surfaces.
+- **Layer count differs by theme.** Dark uses four distinct background layers stepping in luminance for explicit depth perception (matching Primer's bg scale: `default → muted → button-rest → button-hover`). Light uses three (`bg-base = bg-surface = #FFFFFF`); the bordered-surface-on-white contrast against `text-primary` carries enough signal on its own.
+- **`text-muted` is tuned for WCAG AA-normal (4.5:1).** Light = slate-500 on white (4.76:1). Dark = Primer fgColor-muted on Primer bgColor-default (6.50:1). Helper-text-sized content stays readable.
+- **No status-bg tokens.** `Notice` uses a left-border pattern, not a tinted background — see §6 (Notice primitive).
 
 Light is the primary review target. Dark must preserve contrast, hierarchy, and state meaning.
 

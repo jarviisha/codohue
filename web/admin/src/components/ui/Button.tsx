@@ -11,8 +11,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const VARIANT: Record<ButtonVariant, string> = {
+  // Primary uses accent-emphasis (the darker accent variant) so white text
+  // hits WCAG AA-normal on dark mode (4.63:1) — `bg-accent` itself is the
+  // text-only variant and would fail contrast as a button background.
   primary:
-    'bg-accent text-accent-text hover:bg-accent active:bg-accent border border-transparent disabled:opacity-50',
+    'bg-accent-emphasis text-accent-text hover:opacity-90 border border-transparent disabled:opacity-50',
   secondary:
     'bg-surface text-primary border border-default hover:border-strong hover:bg-surface-raised disabled:opacity-50',
   ghost:
