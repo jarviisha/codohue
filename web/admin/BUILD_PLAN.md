@@ -18,7 +18,7 @@ Total: **~10–16 working days**, solo. Phase 2 parallelizable across two develo
 
 ## 2. Hard constraints
 
-1. **`cmd/admin` embed**: the Go binary at [cmd/admin/main.go](../../cmd/admin/main.go) imports the SPA via `github.com/jarviisha/codohue/web/admin` and embeds `web/admin/dist/` when built with `-tags=embedui` (see [embed_prod.go](embed_prod.go)). The dist path is the contract. Vite output path stays `web/admin/dist/`.
+1. **`cmd/admin` embed**: the Go binary at [cmd/admin/main.go](../../cmd/admin/main.go) imports the SPA via `github.com/jarviisha/codohue/web/admin` and embeds `web/admin/dist/` when built with `-tags=embedui` (see [embed_prod.go](embed_prod.go)). Local dev builds use the default tag and leave the embed FS empty (the SPA is served by `make dev-admin` via the Vite dev server). Production / Docker builds must run `npm install && npm run build` to produce `dist/` before `go build -tags=embedui ./cmd/admin`. The Vite output path stays `web/admin/dist/` — this is the contract.
 2. **`tests/urls.test.mjs`**: enumerates every route under `adminRoutes`. Updated alongside route changes in the same commit, never after.
 3. **Backend API**: data-plane (`cmd/api`, port 2001) and admin-plane (`cmd/admin`, port 2002) endpoints are fixed. Frontend consumes them; it does not propose API changes from this plan.
 

@@ -1,12 +1,14 @@
-# Build output — only the placeholder is tracked; Vite-built assets stay local
-dist/*
-!dist/index.html
+# Build output — Vite produces this; embedui Go builds expect dist/ to exist
+dist/
 
 # Vite cache
 .vite/
 
 # Node
 node_modules/
+
+# TypeScript incremental build cache
+*.tsbuildinfo
 
 # Editor
 .DS_Store
