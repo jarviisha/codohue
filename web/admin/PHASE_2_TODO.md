@@ -27,7 +27,7 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
   - Hooks: `useNamespaces`, `useNamespacesOverview`, `useNamespace`, `useUpsertNamespace`.
   - Key factory `namespaceKeys`; re-exported from `services/queryKeys.ts`.
 
-- [ ] **2.A.2 `NamespacesListPage` — BUILD_PLAN build-order #2**
+- [x] **2.A.2 `NamespacesListPage` — BUILD_PLAN build-order #2**
   - Replace stub at `/namespaces`. Table of every namespace with last-run status token (from overview include).
   - "Create" button routes to `/namespaces/new` via `paths.namespaceCreate`.
   - **Done when:** every row renders with the right status token, no raw `fetch`, Cmd+K registers a "Create namespace" command.
