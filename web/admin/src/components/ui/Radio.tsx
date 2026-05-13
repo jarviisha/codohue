@@ -1,6 +1,6 @@
 import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react'
 
-interface RadioProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {}
+type RadioProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'>
 
 // Native <input type="radio"> tinted by accent-color (base CSS rule).
 const Radio = forwardRef<HTMLInputElement, RadioProps>(function Radio(

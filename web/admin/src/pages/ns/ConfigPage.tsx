@@ -11,6 +11,7 @@ import {
 } from '../../components/ui'
 import { ApiError } from '../../services/http'
 import { useNamespace, useUpsertNamespace } from '../../services/namespaces'
+import type { NamespaceConfig } from '../../services/namespaces'
 import {
   fromNamespaceConfig,
   toUpsertPayload,
@@ -23,26 +24,50 @@ export default function NamespaceConfigPage() {
   const { name = '' } = useParams<{ name: string }>()
   const navigate = useNavigate()
   const config = useNamespace(name)
+  if (config.isLoading) {
+    return (
+      <PageShell>
+        <PageHeader title="Config" meta={`namespace ${name}`} />
+        <LoadingState rows={6} label="loading config" />
+      </PageShell>
+    )
+  }
+
+  if (config.isError || !config.data) {
+    return (
+      <PageShell>
+        <PageHeader title="Config" meta={`namespace ${name}`} />
+        <Notice tone="fail" title="Failed to load config">
+          {(config.error as Error)?.message ?? 'Unknown error.'}
+        </Notice>
+        <div>
+          <Button variant="secondary" onClick={() => navigate(paths.ns(name))}>
+            Back to overview
+          </Button>
+        </div>
+      </PageShell>
+    )
+  }
+
+  return <NamespaceConfigEditor key={config.data.namespace} config={config.data} />
+}
+
+function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
+  const { name = '' } = useParams<{ name: string }>()
+  const navigate = useNavigate()
   const upsert = useUpsertNamespace()
 
-  const [state, setState] = useState<NamespaceFormState | null>(null)
+  const [state, setState] = useState<NamespaceFormState>(() =>
+    fromNamespaceConfig(config),
+  )
   // JSON stringification is fine for dirty detection since the form state is
   // plain JSON-shaped (no Dates / Maps / class instances).
-  const [pristine, setPristine] = useState<string | null>(null)
+  const [pristine, setPristine] = useState(() =>
+    JSON.stringify(fromNamespaceConfig(config)),
+  )
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
 
-  // Hydrate the form once when the config arrives. Subsequent refetches do
-  // not blow away in-progress edits.
-  useEffect(() => {
-    if (config.data && state === null) {
-      const initial = fromNamespaceConfig(config.data)
-      setState(initial)
-      setPristine(JSON.stringify(initial))
-    }
-  }, [config.data, state])
-
-  const isDirty =
-    state !== null && pristine !== null && JSON.stringify(state) !== pristine
+  const isDirty = JSON.stringify(state) !== pristine
 
   // Browser-level guard. In-app navigation guard (sidebar / topbar) requires
   // a data-router migration and lands in a later phase.
@@ -83,31 +108,6 @@ export default function NamespaceConfigPage() {
   const handleCancel = () => {
     if (isDirty) setShowCancelConfirm(true)
     else navigate(paths.ns(name))
-  }
-
-  if (config.isLoading || state === null) {
-    return (
-      <PageShell>
-        <PageHeader title="Config" meta={`namespace ${name}`} />
-        <LoadingState rows={6} label="loading config" />
-      </PageShell>
-    )
-  }
-
-  if (config.isError || !config.data) {
-    return (
-      <PageShell>
-        <PageHeader title="Config" meta={`namespace ${name}`} />
-        <Notice tone="fail" title="Failed to load config">
-          {(config.error as Error)?.message ?? 'Unknown error.'}
-        </Notice>
-        <div>
-          <Button variant="secondary" onClick={() => navigate(paths.ns(name))}>
-            Back to overview
-          </Button>
-        </div>
-      </PageShell>
-    )
   }
 
   const errorMessage =

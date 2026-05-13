@@ -5,6 +5,7 @@ import {
   PageShell,
   Panel,
   StatusToken,
+  useRegisterCommand,
 } from '../../components/ui'
 import { probeState, useHealth } from '../../services/health'
 
@@ -14,7 +15,16 @@ interface ProbeRow {
 }
 
 export default function HealthPage() {
-  const { data, isLoading, isError, error } = useHealth()
+  const { data, isLoading, isError, error, refetch, isFetching } = useHealth()
+
+  useRegisterCommand(
+    'health.refresh',
+    'Refresh health probes',
+    () => {
+      if (!isFetching) void refetch()
+    },
+    'global',
+  )
 
   const probes: ProbeRow[] = data
     ? [

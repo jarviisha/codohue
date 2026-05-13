@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 
@@ -8,6 +8,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 function read(rel) {
   return readFileSync(resolve(__dirname, '..', rel), 'utf8')
+}
+
+function walk(relDir) {
+  const absDir = resolve(__dirname, '..', relDir)
+  const out = []
+  for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+    const rel = `${relDir}/${entry.name}`
+    if (entry.isDirectory()) {
+      out.push(...walk(rel))
+    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+      out.push(rel)
+    }
+  }
+  return out
 }
 
 const routesSrc = read('src/routes/index.tsx')
@@ -65,10 +79,8 @@ test('path.ts exposes every URL builder', () => {
 
 test('HTTP calls go through services/http.ts (no raw fetch in pages or services)', () => {
   const sources = [
-    'src/services/auth.ts',
-    'src/services/health.ts',
-    'src/pages/login/LoginPage.tsx',
-    'src/pages/health/HealthPage.tsx',
+    ...walk('src/services').filter((rel) => rel !== 'src/services/http.ts'),
+    ...walk('src/pages'),
   ]
   for (const rel of sources) {
     const src = read(rel)
@@ -77,6 +89,24 @@ test('HTTP calls go through services/http.ts (no raw fetch in pages or services)
     assert.ok(
       !rawFetch,
       `${rel} contains a raw fetch() call — route HTTP through services/http.ts instead`,
+    )
+  }
+})
+
+const COMMAND_PAGE_MODULES = [
+  'src/pages/health/HealthPage.tsx',
+  'src/pages/namespaces/ListPage.tsx',
+  'src/pages/namespaces/CreatePage.tsx',
+  'src/pages/ns/OverviewPage.tsx',
+  'src/pages/ns/ConfigPage.tsx',
+]
+
+test('implemented shell pages register at least one command', () => {
+  for (const rel of COMMAND_PAGE_MODULES) {
+    const src = read(rel)
+    assert.ok(
+      src.includes('useRegisterCommand('),
+      `${rel} does not register a command palette entry`,
     )
   }
 })

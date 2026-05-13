@@ -39,8 +39,9 @@ export { default as Button } from './Button'
 export { default as Modal } from './Modal'
 export { default as ConfirmDialog } from './ConfirmDialog'
 export { default as Dropdown, DropdownItem } from './Dropdown'
-export { default as CommandPalette, useRegisterCommand } from './CommandPalette'
-export type { Command } from './CommandPalette'
+export { default as CommandPalette } from './CommandPalette'
+export { useRegisterCommand } from './commandRegistry'
+export type { Command } from './commandRegistry'
 
 // Status + signals
 export { default as StatusToken } from './StatusToken'
