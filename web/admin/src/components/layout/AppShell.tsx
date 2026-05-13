@@ -1,9 +1,13 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
+import CommandPalette from '../ui/CommandPalette'
 
 // Top-level shell: fixed Sidebar (240px) + fixed TopBar (48px) + scrolling
 // content. Login route renders outside this shell.
+//
+// CommandPalette is mounted here so the ⌘K listener is active on every shell
+// page; the palette modal itself only renders when open.
 export default function AppShell() {
   return (
     <div className="min-h-screen bg-base text-primary">
@@ -16,6 +20,7 @@ export default function AppShell() {
           </div>
         </main>
       </div>
+      <CommandPalette />
     </div>
   )
 }
