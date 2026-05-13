@@ -37,7 +37,7 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
   - Local + server validation; `Notice` summarises errors at the form top.
   - On success, navigate to `/ns/:name`; surface returned `api_key` once via a one-shot `Notice` so the operator can copy it.
 
-- [ ] **2.A.4 `NamespaceOverviewPage` — build-order #4 (BUILD_PLAN §7.1 mockup)**
+- [x] **2.A.4 `NamespaceOverviewPage` — build-order #4 (BUILD_PLAN §7.1 mockup)**
   - Replace stub at `/ns/:name`. Panels: Health probes, Volume (24h), Embedding, Last batch run with per-phase tokens, Trending top-5.
   - "Run batch now" primary button + palette command.
   - Layout matches the §7.1 ASCII mockup.
