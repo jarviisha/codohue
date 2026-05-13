@@ -51,7 +51,7 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
 ## 2.B — Catalog domain
 
 - [ ] **2.B.1 `services/catalog.ts`**
-  - Types: `NamespaceCatalogConfig`, `NamespaceCatalogResponse`, `NamespaceCatalogUpdateRequest`, `CatalogStrategyDescriptor`, `CatalogBacklog`, `CatalogReEmbedResponse`, `CatalogItem`, `CatalogItemsListResponse`, `CatalogRedriveResponse`, `CatalogBulkRedriveResponse`.
+  - Types matching `internal/admin/types.go`: `NamespaceCatalogConfig`, `NamespaceCatalogResponse`, `NamespaceCatalogUpdateRequest`, `CatalogStrategyDescriptor`, `CatalogBacklog`, `CatalogReEmbedResponse`, `CatalogItemSummary`, `CatalogItemDetail`, `CatalogItemsListResponse`, `CatalogRedriveResponse`, `CatalogBulkRedriveResponse`.
   - Request functions + hooks for: get-config-plus-strategies-plus-backlog, update config, re-embed, list items (paginated + state + object_id filters), get single item, redrive one, bulk redrive deadletter, hard-delete item.
 
 - [ ] **2.B.2 `CatalogConfigPage` — build-order #10**
@@ -74,11 +74,12 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
 - [ ] **2.C.1 `services/events.ts`**
   - Types `Event`, `EventsListResponse`, `InjectEventRequest`.
   - Functions: `listEvents({ namespace, limit, offset, subject_id })`, `injectEvent(namespace, payload)`.
+  - `InjectEventRequest` mirrors the current backend contract: `subject_id`, `object_id`, `action`, optional `occurred_at`. Do not add `weight` in the UI unless backend support lands first.
   - Hooks: `useEvents` (poll cadence configurable), `useInjectEvent`.
 
 - [ ] **2.C.2 `EventsListPage` + `InjectEventModal` — build-order #6 (BUILD_PLAN §7.3 mockup)**
   - Replace stub at `/ns/:name/events`. Table with mono ms-precision timestamps, age delta column. Subject filter persisted to URL.
-  - Inject event modal: form with action, subject_id, object_id, weight, occurred_at.
+  - Inject event modal: form with action, subject_id, object_id, occurred_at.
   - Live-tail footer using the Phase 1.6 `Switch` to toggle a faster poll cadence; `[ RUN]` / `[IDLE]` status reflects state.
 
 ---
