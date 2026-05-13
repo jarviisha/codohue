@@ -7,3 +7,4 @@
 // surface for consumers that need to invalidate cross-domain.
 export { authKeys } from './auth'
 export { healthKeys } from './health'
+export { namespaceKeys } from './namespaces'

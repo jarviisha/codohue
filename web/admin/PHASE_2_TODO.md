@@ -21,7 +21,7 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
 
 ## 2.A — Namespaces domain
 
-- [ ] **2.A.1 `services/namespaces.ts`**
+- [x] **2.A.1 `services/namespaces.ts`**
   - Types matching `internal/admin/types.go`: `NamespaceConfig`, `NamespaceUpsertRequest`, `NamespaceUpsertResponse`, `NamespacesOverviewResponse`, `NamespaceHealth`.
   - Request functions: `listNamespaces({ include })`, `getNamespace(name)`, `upsertNamespace(name, payload)`.
   - Hooks: `useNamespaces`, `useNamespacesOverview`, `useNamespace`, `useUpsertNamespace`.
