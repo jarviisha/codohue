@@ -15,6 +15,7 @@ import TrendingPage from '../pages/ns/trending/Page'
 import BatchRunsListPage from '../pages/ns/batch-runs/ListPage'
 import DebugPage from '../pages/ns/debug/Page'
 import DemoDataPage from '../pages/ns/demo-data/Page'
+import KitchenSinkPage from '../pages/_kitchen-sink/Page'
 
 // Route declarations. The `/login` route renders outside AppShell; every other
 // route shares the shell (Sidebar + TopBar + content slot).
@@ -27,6 +28,7 @@ export default function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
         <Route index element={<HealthPage />} />
+        <Route path="_kitchen-sink" element={<KitchenSinkPage />} />
         <Route path="namespaces" element={<NamespacesListPage />} />
         <Route path="namespaces/new" element={<NamespaceCreatePage />} />
         <Route path="ns/:name" element={<NamespaceLayout />}>
