@@ -42,7 +42,7 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
   - "Run batch now" primary button + palette command.
   - Layout matches the §7.1 ASCII mockup.
 
-- [ ] **2.A.5 `NamespaceConfigPage` — build-order #5**
+- [x] **2.A.5 `NamespaceConfigPage` — build-order #5**
   - Replace stub at `/ns/:name/config`. Reuse the form layout from Create. Hydrate from `useNamespace(name)`; dirty-state guard on navigation away.
   - Save returns to Overview.
 

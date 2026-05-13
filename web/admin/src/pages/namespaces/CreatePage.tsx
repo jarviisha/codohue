@@ -22,6 +22,8 @@ export default function NamespaceCreatePage() {
   const navigate = useNavigate()
   const upsert = useUpsertNamespace()
 
+  const [state, setState] = useState<NamespaceFormState>(defaultFormState)
+
   // Holds the one-shot API key returned by the backend on first create.
   // When set, the page switches to a "key issued" view that must be
   // acknowledged before continuing to the namespace.
@@ -98,7 +100,8 @@ export default function NamespaceCreatePage() {
       />
       <NamespaceForm
         mode="create"
-        initialValues={defaultFormState}
+        state={state}
+        onChange={setState}
         onSubmit={handleSubmit}
         isPending={upsert.isPending}
         errorMessage={errorMessage}

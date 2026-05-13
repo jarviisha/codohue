@@ -23,8 +23,11 @@ import {
 
 interface NamespaceFormProps {
   mode: 'create' | 'edit'
-  initialValues: NamespaceFormState
+  state: NamespaceFormState
+  onChange: (next: NamespaceFormState) => void
   onSubmit: (values: NamespaceFormState) => void
+  /** When provided, Cancel calls this instead of `navigate(-1)`. */
+  onCancel?: () => void
   isPending: boolean
   errorMessage?: string
 }
@@ -54,25 +57,27 @@ const STRATEGY_OPTIONS: RadioOption<DenseStrategy>[] = [
 
 export default function NamespaceForm({
   mode,
-  initialValues,
+  state,
+  onChange,
   onSubmit,
+  onCancel,
   isPending,
   errorMessage,
 }: NamespaceFormProps) {
   const navigate = useNavigate()
-  const [state, setState] = useState<NamespaceFormState>(initialValues)
   const [errors, setErrors] = useState(() => validateNamespaceForm(state, mode))
   const [submitted, setSubmitted] = useState(false)
+
+  const propagate = (next: NamespaceFormState) => {
+    onChange(next)
+    if (submitted) setErrors(validateNamespaceForm(next, mode))
+  }
 
   const update = <K extends keyof NamespaceFormState>(
     key: K,
     value: NamespaceFormState[K],
   ) => {
-    setState((s) => {
-      const next = { ...s, [key]: value }
-      if (submitted) setErrors(validateNamespaceForm(next, mode))
-      return next
-    })
+    propagate({ ...state, [key]: value })
   }
 
   const updateAction = (
@@ -80,27 +85,28 @@ export default function NamespaceForm({
     field: keyof NamespaceFormState['action_weights'][number],
     value: string | number,
   ) => {
-    setState((s) => {
-      const rows = [...s.action_weights]
-      rows[i] = { ...rows[i], [field]: value }
-      const next = { ...s, action_weights: rows }
-      if (submitted) setErrors(validateNamespaceForm(next, mode))
-      return next
-    })
+    const rows = [...state.action_weights]
+    rows[i] = { ...rows[i], [field]: value }
+    propagate({ ...state, action_weights: rows })
   }
 
   const addAction = () => {
-    setState((s) => ({
-      ...s,
-      action_weights: [...s.action_weights, { action: '', weight: 0 }],
-    }))
+    propagate({
+      ...state,
+      action_weights: [...state.action_weights, { action: '', weight: 0 }],
+    })
   }
 
   const removeAction = (i: number) => {
-    setState((s) => ({
-      ...s,
-      action_weights: s.action_weights.filter((_, idx) => idx !== i),
-    }))
+    propagate({
+      ...state,
+      action_weights: state.action_weights.filter((_, idx) => idx !== i),
+    })
+  }
+
+  const handleCancel = () => {
+    if (onCancel) onCancel()
+    else navigate(-1)
   }
 
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -368,7 +374,7 @@ export default function NamespaceForm({
       </Panel>
 
       <div className="flex justify-end gap-2 mt-1">
-        <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
+        <Button type="button" variant="ghost" onClick={handleCancel}>
           Cancel
         </Button>
         <Button type="submit" variant="primary" loading={isPending}>
