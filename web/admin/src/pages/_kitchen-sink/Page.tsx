@@ -2,7 +2,9 @@ import { useState } from 'react'
 import {
   Badge,
   Button,
+  Checkbox,
   CodeBadge,
+  CodeBlock,
   ConfirmDialog,
   Dropdown,
   DropdownItem,
@@ -20,9 +22,12 @@ import {
   NumberInput,
   PageHeader,
   PageShell,
+  Pagination,
   Panel,
+  RadioGroup,
   Select,
   StatusToken,
+  Switch,
   Table,
   Tbody,
   Td,
@@ -39,6 +44,16 @@ export default function KitchenSinkPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [name, setName] = useState('')
+
+  // State for new Phase 1.6 primitives
+  const [autoEmbed, setAutoEmbed] = useState(true)
+  const [liveTail, setLiveTail] = useState(false)
+  const [bulkAll, setBulkAll] = useState(false)
+  const [bulkRow, setBulkRow] = useState<Record<string, boolean>>({ r1: true, r2: false })
+  const [strategy, setStrategy] = useState<'item2vec' | 'svd' | 'byoe' | 'disabled'>('item2vec')
+  const [offset, setOffset] = useState(0)
+  const limit = 25
+  const total = 137
 
   return (
     <PageShell>
@@ -243,6 +258,169 @@ export default function KitchenSinkPage() {
             keyboard hint <Kbd>Cmd+K</Kbd> opens the command palette.
           </span>
         </div>
+      </Panel>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <Panel title="Booleans — Checkbox + Switch">
+          <div className="flex flex-col gap-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                checked={bulkAll}
+                onChange={(e) => setBulkAll(e.target.checked)}
+              />
+              <span className="text-sm text-primary">Select all rows</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Checkbox indeterminate />
+              <span className="text-sm text-primary">
+                Indeterminate (partial selection)
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer opacity-50">
+              <Checkbox disabled />
+              <span className="text-sm text-primary">Disabled</span>
+            </label>
+
+            <div className="border-t border-default pt-3 mt-1 flex flex-col gap-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-primary">Catalog auto-embed</span>
+                <Switch
+                  checked={autoEmbed}
+                  onChange={setAutoEmbed}
+                  ariaLabel="Toggle catalog auto-embed"
+                />
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-primary">Live tail</span>
+                <Switch
+                  checked={liveTail}
+                  onChange={setLiveTail}
+                  ariaLabel="Toggle live tail"
+                />
+              </div>
+              <div className="flex items-center justify-between text-sm opacity-50">
+                <span className="text-primary">Disabled switch</span>
+                <Switch
+                  checked={false}
+                  onChange={() => undefined}
+                  disabled
+                  ariaLabel="Disabled example"
+                />
+              </div>
+            </div>
+          </div>
+        </Panel>
+
+        <Panel title="Single-choice — Radio">
+          <Field label="Dense strategy" htmlFor="ks-strategy-radio">
+            <RadioGroup<'item2vec' | 'svd' | 'byoe' | 'disabled'>
+              name="ks-strategy-radio"
+              value={strategy}
+              onChange={setStrategy}
+              options={[
+                {
+                  value: 'item2vec',
+                  label: 'item2vec',
+                  hint: 'Trained item embeddings via skip-gram on co-occurrence',
+                },
+                {
+                  value: 'svd',
+                  label: 'svd',
+                  hint: 'Truncated SVD over the interaction matrix',
+                },
+                {
+                  value: 'byoe',
+                  label: 'byoe',
+                  hint: 'Bring-your-own-embeddings via PUT /objects/:id/embedding',
+                },
+                {
+                  value: 'disabled',
+                  label: 'disabled',
+                  hint: 'Skip the dense phase entirely',
+                  disabled: true,
+                },
+              ]}
+            />
+          </Field>
+        </Panel>
+      </div>
+
+      <Panel title="Pagination">
+        <Table>
+          <Thead>
+            <Tr>
+              <Th>
+                <Checkbox
+                  checked={bulkRow.r1 && bulkRow.r2}
+                  indeterminate={
+                    (bulkRow.r1 || bulkRow.r2) && !(bulkRow.r1 && bulkRow.r2)
+                  }
+                  onChange={(e) =>
+                    setBulkRow({ r1: e.target.checked, r2: e.target.checked })
+                  }
+                  aria-label="Select all rows"
+                />
+              </Th>
+              <Th>state</Th>
+              <Th>object id</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            <Tr>
+              <Td>
+                <Checkbox
+                  checked={bulkRow.r1}
+                  onChange={(e) =>
+                    setBulkRow((p) => ({ ...p, r1: e.target.checked }))
+                  }
+                />
+              </Td>
+              <Td>
+                <StatusToken state="ok" />
+              </Td>
+              <Td mono>sku_demo_001</Td>
+            </Tr>
+            <Tr>
+              <Td>
+                <Checkbox
+                  checked={bulkRow.r2}
+                  onChange={(e) =>
+                    setBulkRow((p) => ({ ...p, r2: e.target.checked }))
+                  }
+                />
+              </Td>
+              <Td>
+                <StatusToken state="fail" />
+              </Td>
+              <Td mono>sku_demo_002</Td>
+            </Tr>
+          </Tbody>
+        </Table>
+        <div className="mt-3">
+          <Pagination
+            offset={offset}
+            limit={limit}
+            total={total}
+            onOffsetChange={setOffset}
+          />
+        </div>
+      </Panel>
+
+      <Panel title="CodeBlock" actions={<Badge>json</Badge>}>
+        <CodeBlock language="json" copyable maxHeight="14rem">
+{`{
+  "id": "sku_4291",
+  "namespace": "prod",
+  "state": "embedded",
+  "metadata": {
+    "category": "shoes",
+    "brand": "acme",
+    "price_cents": 5999,
+    "tags": ["new", "sale"]
+  },
+  "embedded_at": "2026-05-13T07:02:38.412Z"
+}`}
+        </CodeBlock>
       </Panel>
 
       <Modal

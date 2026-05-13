@@ -27,6 +27,10 @@ export { default as FormGrid } from './FormGrid'
 export { default as Input } from './Input'
 export { default as Select } from './Select'
 export { default as NumberInput } from './NumberInput'
+export { default as Checkbox } from './Checkbox'
+export { default as Radio, RadioGroup } from './Radio'
+export type { RadioOption } from './Radio'
+export { default as Switch } from './Switch'
 
 // Overlays
 export { default as Button } from './Button'
@@ -40,3 +44,9 @@ export type { Command } from './CommandPalette'
 export { default as StatusToken } from './StatusToken'
 export type { StatusState } from './StatusToken'
 export { default as Kbd } from './Kbd'
+
+// Navigation aids
+export { default as Pagination } from './Pagination'
+
+// Data display
+export { default as CodeBlock } from './CodeBlock'

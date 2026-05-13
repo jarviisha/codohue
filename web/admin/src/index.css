@@ -140,6 +140,14 @@ pre,
   [aria-disabled="true"] {
     cursor: not-allowed;
   }
+
+  /* Tint native checkbox / radio with the accent so they read as themed
+     controls without us drawing a custom check glyph. The browser keeps
+     rendering the native check / dot. */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--accent-emphasis);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
