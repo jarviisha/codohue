@@ -13,9 +13,9 @@ export default function TopBar() {
           type="button"
           className="hidden md:flex items-center gap-1.5 h-7 px-2 rounded-sm border border-default text-muted hover:text-primary hover:border-strong font-mono text-xs"
           aria-label="Open command palette"
-          title="Open command palette"
+          title="Open command palette (Cmd+K / Ctrl+K)"
         >
-          <span>⌘K</span>
+          <span>Cmd+K</span>
         </button>
         <ThemeToggle />
         <UserMenu />

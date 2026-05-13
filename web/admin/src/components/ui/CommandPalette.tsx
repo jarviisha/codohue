@@ -54,7 +54,7 @@ function useCommandList(): Command[] {
 }
 
 // Global palette. Mount once near the app root (e.g. inside AppShell). The
-// ⌘K / Ctrl+K listener is window-wide.
+// Cmd+K / Ctrl+K listener is window-wide.
 export default function CommandPalette() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -92,7 +92,7 @@ export default function CommandPalette() {
       onClose={close}
       title={
         <span className="flex items-center gap-2">
-          Command palette <Kbd>⌘K</Kbd>
+          Command palette <Kbd>Cmd+K</Kbd>
         </span>
       }
       size="md"

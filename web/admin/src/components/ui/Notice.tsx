@@ -47,10 +47,10 @@ export default function Notice({ tone = 'info', title, onDismiss, children }: No
         <button
           type="button"
           onClick={onDismiss}
-          className="text-muted hover:text-primary h-6 w-6 flex items-center justify-center rounded-sm font-mono"
+          className="text-muted hover:text-primary h-6 px-2 flex items-center justify-center rounded-sm font-mono text-xs uppercase tracking-[0.06em]"
           aria-label="Dismiss notice"
         >
-          ×
+          dismiss
         </button>
       ) : null}
     </aside>

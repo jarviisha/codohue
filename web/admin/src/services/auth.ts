@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ApiError, http } from './http'
 
 // Backend contract (see CLAUDE.md):
-//   POST   /api/v1/auth/sessions          → 201 + { expires_at }
-//   DELETE /api/v1/auth/sessions/current  → 204
+//   POST   /api/v1/auth/sessions          -> 201 + { expires_at }
+//   DELETE /api/v1/auth/sessions/current  -> 204
 //   Session is tracked by an httpOnly `codohue_admin_session` cookie.
 
 export interface LoginPayload {

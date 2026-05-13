@@ -12,6 +12,7 @@ function applyTheme(theme: Theme) {
   document.documentElement.classList.toggle('dark', theme === 'dark')
 }
 
+// Icons deferred — the button label shows the current theme as plain text.
 export default function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(() => readInitialTheme())
 
@@ -20,15 +21,17 @@ export default function ThemeToggle() {
     localStorage.setItem('theme', theme)
   }, [theme])
 
+  const next: Theme = theme === 'dark' ? 'light' : 'dark'
+
   return (
     <button
       type="button"
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-      className="h-7 w-7 flex items-center justify-center rounded-sm text-muted hover:text-primary hover:bg-surface-raised font-mono text-sm"
-      aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
-      title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+      onClick={() => setTheme(next)}
+      className="h-7 px-2 flex items-center justify-center rounded-sm border border-default text-muted hover:text-primary hover:border-strong font-mono text-xs uppercase tracking-[0.06em]"
+      aria-label={`Switch to ${next} theme`}
+      title={`Switch to ${next} theme (currently ${theme})`}
     >
-      {theme === 'dark' ? '☼' : '☾'}
+      {theme}
     </button>
   )
 }

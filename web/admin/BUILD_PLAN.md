@@ -182,6 +182,8 @@ Order can parallelize across two developers once Foundation merges: one takes 2�
 
 Three reference pages. Phase 2 entries use these as the visual brief alongside DESIGN.md.
 
+> Mockups show the eventual design intent. The current implementation renders **text labels** wherever the design would normally place an icon — see DESIGN.md §15. Status tokens (`[ OK ]`, `[FAIL]`, etc.) are text and stay as drawn.
+
 ### 7.1 Namespace Overview (`/ns/prod`)
 
 Top bar PS1 prompt: `codohue@prod:~ $`
@@ -224,7 +226,7 @@ Notes:
 - Section labels (`HEALTH`, `VOLUME (24h)`, etc.) are mono uppercase, `tracking-[0.12em]`, `text-muted`.
 - All numeric values are mono `tabular-nums`.
 - No "hero" metric. Four uniform panels in a 2×2 layout at xl breakpoint, single column on smaller widths.
-- "Run batch now" button is also available via `⌘K → run batch`.
+- "Run batch now" button is also available via `Cmd+K → run batch`.
 
 ### 7.2 Catalog Items (`/ns/prod/catalog/items`)
 
@@ -295,7 +297,7 @@ Notes:
 - Live tail strip at the bottom — always-on telemetry. `[ RUN]` pulses while streaming; `[IDLE]` when paused.
 - `TIME` column is mono with millisecond precision, no row hover bg (it would fight the scan during live tail).
 - `Δ` column is computed client-side (age delta) — updates every 1s; mono.
-- Inject event button is also reachable via `⌘K → inject event`.
+- Inject event button is also reachable via `Cmd+K → inject event`.
 
 ## 8. Out of scope
 

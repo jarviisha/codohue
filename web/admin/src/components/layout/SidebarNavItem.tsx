@@ -8,8 +8,9 @@ interface SidebarNavItemProps {
   children: ReactNode
 }
 
-// Sidebar nav row. Active state: leading `→` glyph + bg-accent-subtle + text-accent.
-// Inactive: 2-space leader for vertical alignment with active row.
+// Sidebar nav row. Active state is carried by bg-accent-subtle + text-accent.
+// No leading-glyph column — icons are deferred until the user supplies an
+// icon set.
 export default function SidebarNavItem({ to, end, trailing, children }: SidebarNavItemProps) {
   return (
     <NavLink
@@ -24,15 +25,8 @@ export default function SidebarNavItem({ to, end, trailing, children }: SidebarN
         ].join(' ')
       }
     >
-      {({ isActive }) => (
-        <>
-          <span className="font-mono w-3 mr-2 text-accent" aria-hidden>
-            {isActive ? '→' : ' '}
-          </span>
-          <span className="flex-1">{children}</span>
-          {trailing ? <span className="ml-2">{trailing}</span> : null}
-        </>
-      )}
+      <span className="flex-1">{children}</span>
+      {trailing ? <span className="ml-2">{trailing}</span> : null}
     </NavLink>
   )
 }

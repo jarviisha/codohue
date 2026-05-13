@@ -227,7 +227,7 @@ export default function KitchenSinkPage() {
           <Dropdown
             trigger={
               <span className="inline-flex items-center gap-1 h-8 px-3 rounded-sm border border-default text-sm text-primary hover:bg-surface-raised">
-                Actions ▾
+                Actions
               </span>
             }
           >
@@ -240,7 +240,7 @@ export default function KitchenSinkPage() {
             )}
           </Dropdown>
           <span className="text-sm text-muted">
-            keyboard hint <Kbd>⌘K</Kbd> opens the command palette.
+            keyboard hint <Kbd>Cmd+K</Kbd> opens the command palette.
           </span>
         </div>
       </Panel>

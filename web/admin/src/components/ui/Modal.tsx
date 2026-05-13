@@ -47,10 +47,10 @@ export default function Modal({ open, onClose, title, size = 'md', children, foo
             <button
               type="button"
               onClick={onClose}
-              className="h-6 w-6 flex items-center justify-center font-mono text-muted hover:text-primary rounded-sm"
+              className="h-6 px-2 flex items-center justify-center font-mono text-xs uppercase tracking-[0.06em] text-muted hover:text-primary rounded-sm"
               aria-label="Close"
             >
-              ×
+              close
             </button>
           </header>
         ) : null}

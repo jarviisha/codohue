@@ -114,14 +114,14 @@ This is the single signature operational element. Every status surface in the ap
 
 ```
 ┌──────────────────┬──────────────────────────────────────────────┐
-│ codohue          │ codohue@prod:~/events $    [⌘K]  [☼]  [user]│
+│ codohue          │ codohue@prod:~/events $   [Cmd+K] [theme] [user]│
 ├──────────────────┼──────────────────────────────────────────────┤
 │ GLOBAL           │                                              │
 │   Health   [ OK ]│  Page title                                  │
 │   Namespaces     │                                              │
 │                  │  Page content                                │
 │ prod             │                                              │
-│ → Overview       │                                              │
+│   Overview       │  (active row has bg-accent-subtle)           │
 │   Config         │                                              │
 │   Catalog        │                                              │
 │   Events         │                                              │
@@ -133,10 +133,10 @@ This is the single signature operational element. Every status surface in the ap
 ```
 
 - **Sidebar**: fixed, ~240px wide, always expanded on desktop. Two sections: **GLOBAL** and **{namespace name}** (when selected). Sidebar `Health` item carries an inline status token `[ OK ]` / `[WARN]` / `[FAIL]` — health is always-on awareness.
-- **Top bar**: holds the **PS1 prompt** (§3.1.1), command palette trigger `⌘K`, theme toggle, user menu. Namespace picker is invoked through the PS1 prompt or `⌘K` — not a dropdown chip.
+- **Top bar**: holds the **PS1 prompt** (§3.1.1), the command palette trigger (label `Cmd+K`), the theme toggle, and the user menu. Namespace picker is invoked through the PS1 prompt or `Cmd+K` — not a dropdown chip.
 - **Section labels** in sidebar use mono uppercase, slightly larger tracking (`tracking-[0.12em]`).
-- **Active nav item**: leading `→` glyph (mono, `text-accent`) + `bg-accent-subtle` background + `text-accent`. No bold weight change — the glyph and color carry the signal.
-- **Inactive nav item**: leading 2-space indent for vertical alignment with `→` of active item (`'  Config'` vs `'→ Overview'`).
+- **Active nav item**: `bg-accent-subtle` background + `text-accent`. No bold weight change — the bg and color carry the active signal. A leading glyph/icon marker is deferred until the icon system is in place (see §15).
+- **Inactive nav item**: same row height, no decoration — `text-secondary` until hover.
 - Mobile is not the primary target. Pages must not visually break under 1024px, but the sidebar may stay desktop-first until a dedicated nav pass.
 
 ### 3.1.1 PS1 prompt
@@ -270,7 +270,7 @@ Page files compose primitives. Don't repeat Tailwind class strings.
 
 - `Modal`, `ConfirmDialog`, `Dropdown`
 - `Button` (primary / secondary / ghost / danger; `h-7` `h-8` `h-9`)
-- `CommandPalette` — global modal triggered by `⌘K` / `Ctrl+K`. **Primary action interface** (§16). Index includes:
+- `CommandPalette` — global modal triggered by `Cmd+K` / `Ctrl+K`. **Primary action interface** (§16). Index includes:
   - Namespace switching (`prod`, `staging`, `demo`)
   - Page navigation (jump to any route in §3.2)
   - Recent items (last viewed catalog item, last batch run)
@@ -279,17 +279,17 @@ Page files compose primitives. Don't repeat Tailwind class strings.
 **Status & signals**
 
 - `StatusToken` — renders the 6-char `[XXXX]` bracketed status per §2.5.
-- `Kbd` — terminal-style key cap for shortcut hints (`⌘K`).
+- `Kbd` — terminal-style key cap for shortcut hints (`Cmd+K`).
 
 ### 6.1 Notice rendering
 
 `Notice` and any status-bearing surface use a **4px left border + status border color + no background fill**, not a tinted bg pill. The pattern is terminal/Unix-DNA (vim error highlights, `notify-send`, dmenu) and avoids the dark-mode problem where tinted backgrounds sit ~1:1 against `bg-base`.
 
 ```
-█  [WARN]  qdrant heartbeat missed at 14:02:38 UTC
-█  Embedder ran with degraded latency — investigating.
+|  [WARN]  qdrant heartbeat missed at 14:02:38 UTC
+|  Embedder ran with degraded latency — investigating.
 
-█ = border-l-4 border-warning, transparent background
+| = border-l-4 border-warning, transparent background
 ```
 
 Tailwind composition:
@@ -308,7 +308,7 @@ Border-color utility maps to status:
 - `border-l-4 border-danger`  for `[FAIL]`
 - `border-l-4 border-accent`  for informational notices
 
-Body text always uses `text-primary` so the message is fully legible; the status color appears in the border + the leading `StatusToken`. Notice may optionally include a dismiss `×` action on the right.
+Body text always uses `text-primary` so the message is fully legible; the status color appears in the border + the leading `StatusToken`. Notice may optionally include a dismiss action on the right (rendered as a text button — see §15 on icons).
 
 Everything else — typography, spacing, radius, shadow, motion — composes Tailwind utilities backed by the tokens declared in `@theme` (§2). No component writes its own CSS rules; every visual is reachable through utility classes or a shared primitive.
 
@@ -411,7 +411,7 @@ Use this for every page built:
 - [ ] Tables have overflow wrapper.
 - [ ] Both themes legible; focus visible in both.
 - [ ] Routes follow §3.2; route is the source of truth for namespace (`useParams`), not context state.
-- [ ] All quick actions reachable via `CommandPalette` (`⌘K`). Adding a new action means registering it in the palette index.
+- [ ] All quick actions reachable via `CommandPalette` (`Cmd+K`). Adding a new action means registering it in the palette index.
 - [ ] `npm run lint`, `npm run build`, and `tests/urls.test.mjs` pass from `web/admin`.
 
 ## 15. Out of Scope
@@ -424,6 +424,7 @@ Decisions deliberately deferred:
 - Theming beyond light/dark (no system-themed variants).
 - Customizable density toggle (default density is the only density).
 - Decorative atmosphere effects (grain overlays, scanlines, vignettes). Operational tools earn identity through ergonomics, not texture.
+- **Icon system.** Every spot that would normally take an icon (sidebar active-row marker, button glyphs, theme/user/menu/close affordances, dropdown chevrons) uses a **plain text label** for now. No SVG drawing, no decorative Unicode glyphs. An `Icon` primitive lands in a separate change once the icon set is supplied; status tokens such as `[ OK ]` / `[FAIL]` stay text (brackets + letters are the designed status format, not icons).
 
 ## 16. Memorability Anchors
 
@@ -431,7 +432,7 @@ Three signature elements give the admin a recognizable identity. Every page rein
 
 1. **PS1 prompt in top bar** (§3.1.1) — `codohue@prod:~/events $`. Location is shell context, not breadcrumb chips. Clickable segments.
 2. **Bracketed dmesg status tokens** (§2.5) — `[ OK ]` `[ RUN]` `[IDLE]` `[WARN]` `[FAIL]` `[PEND]`. Same 6-char token everywhere, color carries semantic, table-aligns naturally.
-3. **Command palette as primary action interface** (§6) — `⌘K` opens a fuzzy palette indexing every route, every quick action, every recently-viewed item. Mouse paths exist (sidebar, page buttons), but keyboard is the **intended** path. Every new action must register in the palette.
+3. **Command palette as primary action interface** (§6) — `Cmd+K` opens a fuzzy palette indexing every route, every quick action, every recently-viewed item. Mouse paths exist (sidebar, page buttons), but keyboard is the **intended** path. Every new action must register in the palette.
 
 These earn the product's memorability the way operations tools should: by making the operator faster, not by visual surprise. A new hire learns all three on day one and stops needing the sidebar by week two.
 
