@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Button, FormControl, Panel, TextInput } from '../../components/ui'
+import { useMemo, useState } from 'react'
+import { Badge, Button, FormControl, Panel, TextInput } from '../../components/ui'
 import type { NamespaceFormState } from '../namespaceForm'
 import ActionWeightsSection from './ActionWeightsSection'
 import DenseHybridSection from './DenseHybridSection'
@@ -22,6 +22,9 @@ export default function NamespaceForm({
   onSubmit,
 }: NamespaceFormProps) {
   const [form, setForm] = useState(initialForm)
+  const initialSignature = useMemo(() => formSignature(initialForm), [initialForm])
+  const currentSignature = useMemo(() => formSignature(form), [form])
+  const isDirty = currentSignature !== initialSignature
 
   function update<K extends keyof NamespaceFormState>(field: K, value: NamespaceFormState[K]) {
     setForm(current => ({ ...current, [field]: value }))
@@ -43,7 +46,12 @@ export default function NamespaceForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    if (!isDirty && !isNew) return
     await onSubmit(form)
+  }
+
+  function handleReset() {
+    setForm(initialForm)
   }
 
   return (
@@ -70,14 +78,45 @@ export default function NamespaceForm({
         <TrendingSection form={form} onNumberChange={updateNumber} />
       </div>
 
-      <div className="flex items-center gap-3 border-t border-default pt-4">
-        <Button type="submit" variant="primary" disabled={isPending}>
-          {isPending ? 'Saving...' : 'Save'}
-        </Button>
-        <Button type="button" onClick={onCancel}>
-          Cancel
-        </Button>
+      <div className="sticky bottom-0 z-10 -mx-1 rounded border border-default bg-surface/95 p-3 shadow-floating backdrop-blur">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <Badge tone={isDirty || isNew ? 'warning' : 'success'} dot>
+              {isDirty || isNew ? 'Unsaved changes' : 'Saved'}
+            </Badge>
+            <span className="text-xs text-muted">
+              {isDirty || isNew
+                ? 'Review and save changes before leaving settings.'
+                : 'No pending changes.'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={!isDirty || isPending}
+              onClick={handleReset}
+            >
+              Reset
+            </Button>
+            <Button type="button" onClick={onCancel} disabled={isPending}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={isPending || (!isDirty && !isNew)}>
+              {isPending ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </div>
       </div>
     </form>
   )
+}
+
+function formSignature(form: NamespaceFormState) {
+  return JSON.stringify({
+    ...form,
+    action_weights: Object.fromEntries(
+      Object.entries(form.action_weights).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  })
 }

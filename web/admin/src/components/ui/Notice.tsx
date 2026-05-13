@@ -30,7 +30,7 @@ export default function Notice({
     <div
       role={role}
       className={[
-        'flex items-center justify-between rounded-lg border px-4 py-3 text-sm font-medium',
+        'flex items-center justify-between rounded border px-4 py-3 text-sm font-medium',
         toneClasses[tone],
         className,
       ].filter(Boolean).join(' ')}

@@ -21,6 +21,132 @@ type NamespaceConfig struct {
 	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
+// NamespaceCatalogConfig is the per-namespace catalog auto-embedding state.
+type NamespaceCatalogConfig struct {
+	Namespace       string         `json:"namespace"`
+	Enabled         bool           `json:"enabled"`
+	StrategyID      string         `json:"strategy_id,omitempty"`
+	StrategyVersion string         `json:"strategy_version,omitempty"`
+	Params          map[string]any `json:"params,omitempty"`
+	EmbeddingDim    int            `json:"embedding_dim"`
+	MaxAttempts     int            `json:"max_attempts"`
+	MaxContentBytes int            `json:"max_content_bytes"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+// CatalogStrategyDescriptor is one entry in the available_strategies list
+// returned to the admin UI. Mirrors embedstrategy.StrategyDescriptor but
+// stays in the admin domain so handlers don't need to import embedstrategy
+// in their JSON wire types.
+type CatalogStrategyDescriptor struct {
+	ID            string `json:"id"`
+	Version       string `json:"version"`
+	Dim           int    `json:"dim"`
+	MaxInputBytes int    `json:"max_input_bytes,omitempty"`
+	Description   string `json:"description,omitempty"`
+}
+
+// CatalogBacklog is a snapshot of operational counts surfaced by
+// GET .../catalog. Counts are approximate (sampled, not transactional).
+type CatalogBacklog struct {
+	Pending    int `json:"pending"`
+	InFlight   int `json:"in_flight"`
+	Embedded   int `json:"embedded"`
+	Failed     int `json:"failed"`
+	DeadLetter int `json:"dead_letter"`
+	StreamLen  int `json:"stream_len"`
+}
+
+// NamespaceCatalogResponse is the body of GET /api/admin/v1/namespaces/{ns}/catalog.
+// available_strategies is filtered to descriptors whose Dim matches the
+// namespace's embedding_dim so the operator UI only shows admissible options.
+type NamespaceCatalogResponse struct {
+	Catalog             NamespaceCatalogConfig      `json:"catalog"`
+	AvailableStrategies []CatalogStrategyDescriptor `json:"available_strategies"`
+	Backlog             CatalogBacklog              `json:"backlog"`
+}
+
+// NamespaceCatalogUpdateRequest is the body of PUT /api/admin/v1/namespaces/{ns}/catalog.
+// All optional pointer fields preserve the existing value on nil; only Enabled
+// is required. When Enabled flips to true, StrategyID and StrategyVersion
+// MUST be present (the service rejects with 400 otherwise).
+type NamespaceCatalogUpdateRequest struct {
+	Enabled         bool           `json:"enabled"`
+	StrategyID      *string        `json:"strategy_id,omitempty"`
+	StrategyVersion *string        `json:"strategy_version,omitempty"`
+	Params          map[string]any `json:"params,omitempty"`
+	MaxAttempts     *int           `json:"max_attempts,omitempty"`
+	MaxContentBytes *int           `json:"max_content_bytes,omitempty"`
+}
+
+// CatalogDimensionMismatch is the typed error the service returns when the
+// chosen strategy's natural output dimension does not equal the namespace's
+// embedding_dim. The handler maps it to 400 with both numbers in the body.
+type CatalogDimensionMismatch struct {
+	StrategyDim           int
+	NamespaceEmbeddingDim int
+}
+
+func (e *CatalogDimensionMismatch) Error() string {
+	return "catalog strategy dimension mismatch"
+}
+
+// CatalogReEmbedResponse is the body returned by POST .../catalog/re-embed.
+// 202 Accepted; the operator can poll batch_run_logs by ID for progress.
+type CatalogReEmbedResponse struct {
+	BatchRunID      int64     `json:"batch_run_id"`
+	Namespace       string    `json:"namespace"`
+	StrategyID      string    `json:"strategy_id"`
+	StrategyVersion string    `json:"strategy_version"`
+	StaleItems      int       `json:"stale_items"`
+	StartedAt       time.Time `json:"started_at"`
+}
+
+// CatalogItemSummary is the projection returned in the items list endpoint.
+// Excludes content/metadata (large) — operators fetch the full record via
+// GET .../catalog/items/{id} for drill-down.
+type CatalogItemSummary struct {
+	ID              int64      `json:"id"`
+	ObjectID        string     `json:"object_id"`
+	State           string     `json:"state"`
+	StrategyID      string     `json:"strategy_id,omitempty"`
+	StrategyVersion string     `json:"strategy_version,omitempty"`
+	AttemptCount    int        `json:"attempt_count"`
+	LastError       string     `json:"last_error,omitempty"`
+	EmbeddedAt      *time.Time `json:"embedded_at,omitempty"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// CatalogItemDetail is the full catalog_items row including content+metadata.
+type CatalogItemDetail struct {
+	CatalogItemSummary
+	Namespace string         `json:"namespace"`
+	Content   string         `json:"content"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+	CreatedAt time.Time      `json:"created_at"`
+}
+
+// CatalogItemsListResponse paginates a list of catalog items.
+type CatalogItemsListResponse struct {
+	Items  []CatalogItemSummary `json:"items"`
+	Total  int                  `json:"total"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+}
+
+// CatalogRedriveResponse is the body of single-item redrive (202 Accepted).
+type CatalogRedriveResponse struct {
+	ID       int64  `json:"id"`
+	ObjectID string `json:"object_id"`
+	State    string `json:"state"`
+}
+
+// CatalogBulkRedriveResponse is the body of bulk dead-letter redrive.
+type CatalogBulkRedriveResponse struct {
+	Namespace string `json:"namespace"`
+	Redriven  int    `json:"redriven"`
+}
+
 // LogEntry is a single captured log line from a batch run.
 type LogEntry struct {
 	Ts    string `json:"ts"`
@@ -254,10 +380,11 @@ type InjectEventRequest struct {
 
 // DemoDatasetResponse is returned after seeding or clearing the bundled demo dataset.
 type DemoDatasetResponse struct {
-	Namespace     string `json:"namespace"`
-	EventsCreated int    `json:"events_created,omitempty"`
-	EventsDeleted int    `json:"events_deleted,omitempty"`
-	APIKey        string `json:"api_key,omitempty"`
+	Namespace           string `json:"namespace"`
+	EventsCreated       int    `json:"events_created,omitempty"`
+	EventsDeleted       int    `json:"events_deleted,omitempty"`
+	CatalogItemsCreated int    `json:"catalog_items_created,omitempty"`
+	APIKey              string `json:"api_key,omitempty"`
 }
 
 // SubjectStats holds raw DB data for a subject used internally by Service.

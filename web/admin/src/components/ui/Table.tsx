@@ -29,7 +29,7 @@ export function Th({
   return (
     <th
       className={[
-        'border-b border-default px-3 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted first:rounded-tl-lg last:rounded-tr-lg',
+        'border-b border-default px-2.5 py-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted first:rounded-tl last:rounded-tr',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left',
         className,
       ]
@@ -90,7 +90,7 @@ export function Td({
   return (
     <td
       className={[
-        'border-b border-default/80 px-3 py-3 text-sm transition-colors duration-100',
+        'border-b border-default/80 px-2.5 py-2 text-sm transition-colors duration-100',
         muted ? 'text-muted' : 'text-secondary group-hover:text-primary',
         align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : '',
         mono ? 'tabular-nums' : '',

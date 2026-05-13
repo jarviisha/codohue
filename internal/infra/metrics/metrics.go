@@ -53,6 +53,46 @@ var (
 		Name: "codohue_trending_requests_total",
 		Help: "Total GET /v1/trending requests by namespace.",
 	}, []string{"namespace"})
+
+	// Catalog auto-embedding metrics (feature 004-catalog-embedder).
+
+	// CatalogItemsEmbeddedTotal counts catalog items successfully embedded
+	// per namespace + strategy. The strategy label set is identical to the
+	// label set on duration / failures / work_volume so dashboards can join
+	// across them.
+	CatalogItemsEmbeddedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_catalog_items_embedded_total",
+		Help: "Total catalog items successfully embedded.",
+	}, []string{"namespace", "strategy_id", "strategy_version"})
+
+	// CatalogEmbedDuration is the per-item embed wall time histogram.
+	// Buckets are tuned for the V1 in-process strategy (sub-millisecond to
+	// hundreds of ms); future external-LLM strategies may exceed the top
+	// bucket but Prometheus' "+Inf" bucket still captures them.
+	CatalogEmbedDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "codohue_catalog_embed_duration_seconds",
+		Help:    "Per-item catalog embed wall-clock duration in seconds.",
+		Buckets: []float64{0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
+	}, []string{"namespace", "strategy_id", "strategy_version"})
+
+	// CatalogEmbedFailuresTotal counts embed failures by reason. Reason is
+	// one of: "zero_norm", "dim_mismatch", "input_too_large", "transient",
+	// "strategy_resolve", "qdrant", "idmap", "ensure_collections",
+	// "mark_embedded", "max_attempts", "unknown".
+	CatalogEmbedFailuresTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_catalog_embed_failures_total",
+		Help: "Total catalog embed failures by reason.",
+	}, []string{"namespace", "strategy_id", "strategy_version", "reason"})
+
+	// CatalogStrategyWorkVolumeTotal is the strategy-specific work-volume
+	// indicator. The `unit` label MUST be incrementally extensible without
+	// metric redesign (FR-015 / SC-007): V1 ships unit="items"; future
+	// external-LLM strategies will add unit="billed_tokens" and
+	// unit="billed_cost_micro_usd" through the SAME metric.
+	CatalogStrategyWorkVolumeTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_catalog_strategy_work_volume_total",
+		Help: "Total strategy-specific work volume (units depend on strategy: items, billed_tokens, billed_cost_micro_usd, etc.).",
+	}, []string{"namespace", "strategy_id", "strategy_version", "unit"})
 )
 
 // Register registers all Codohue metrics with the default Prometheus registry.
@@ -66,5 +106,9 @@ func Register() {
 		IDMappingErrors,
 		TrendingItemsTotal,
 		TrendingRequestsTotal,
+		CatalogItemsEmbeddedTotal,
+		CatalogEmbedDuration,
+		CatalogEmbedFailuresTotal,
+		CatalogStrategyWorkVolumeTotal,
 	)
 }

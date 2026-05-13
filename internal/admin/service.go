@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -26,7 +27,21 @@ type adminRepo interface {
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
 	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
+	SeedDemoCatalogItems(ctx context.Context, namespace string, items []demoCatalogItem, now time.Time) (int, error)
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
+
+	// Catalog re-embed orchestration (US3).
+	FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
+	InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error)
+	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) ([]CatalogReembedTarget, error)
+
+	// Catalog item operator endpoints (US3).
+	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) ([]CatalogItemSummary, int, error)
+	GetCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
+	RedriveCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
+	BulkRedriveDeadletter(ctx context.Context, namespace string) ([]CatalogReembedTarget, error)
+	DeleteCatalogItem(ctx context.Context, namespace string, id int64) (string, bool, error)
+	LookupNumericObjectID(ctx context.Context, namespace, objectID string) (uint64, bool, error)
 }
 
 // nsConfigUpserter is the abstract collaborator that creates or updates a namespace
@@ -36,26 +51,81 @@ type nsConfigUpserter interface {
 	Upsert(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error)
 }
 
+// nsCatalogConfigurator owns the catalog-specific config update path. Wired
+// by an adapter in cmd/admin so this domain need not import nsconfig or
+// embedstrategy directly.
+type nsCatalogConfigurator interface {
+	// GetNamespace returns the current admin view of a namespace, including
+	// its catalog config; nil when the namespace does not exist.
+	GetCatalog(ctx context.Context, namespace string) (*NamespaceCatalogConfig, error)
+
+	// UpdateCatalog applies the request and returns the resulting state.
+	// The implementation is expected to translate dim-mismatch into
+	// *CatalogDimensionMismatch and unknown-namespace into a nil result.
+	UpdateCatalog(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
+
+	// AvailableStrategies returns every registered strategy variant whose
+	// Dim matches the namespace's embedding_dim. Empty slice when no
+	// matching variant is registered.
+	AvailableStrategies(namespaceEmbeddingDim int) []CatalogStrategyDescriptor
+}
+
+// catalogBacklogReader reports the operational catalog counts for a
+// namespace by querying both Postgres (catalog_items state buckets) and
+// Redis (XLEN of catalog:embed:{ns}). Wired by an adapter in cmd/admin.
+type catalogBacklogReader interface {
+	Read(ctx context.Context, namespace string) (CatalogBacklog, error)
+}
+
 type batchRunner interface {
 	RunNamespace(ctx context.Context, namespace, triggerSource string)
 }
 
+// streamPublisher abstracts the Redis Streams write used by the catalog
+// re-embed and redrive paths. The concrete *goredis.Client implements this
+// interface; tests inject a fake. Defined here (not in catalog_ops_service.go)
+// so the Service struct can declare it as a field.
+type streamPublisher interface {
+	XAdd(ctx context.Context, args *goredis.XAddArgs) *goredis.StringCmd
+}
+
+// catalogStrategyPicker exposes the active (strategy_id, strategy_version) for
+// a namespace's catalog config. The cmd/admin wiring layer satisfies this with
+// an adapter over nsconfig.Service so we avoid a forbidden cross-domain import.
+type catalogStrategyPicker interface {
+	GetCatalogStrategy(ctx context.Context, namespace string) (strategyID, strategyVersion string, enabled bool, err error)
+}
+
+// qdrantPointDeleter abstracts Qdrant point deletion so the delete catalog
+// item path is testable. The concrete *qdrant.Client implements this via a
+// thin adapter (see qdrantClientPointDeleter); tests inject a fake.
+type qdrantPointDeleter interface {
+	DeletePoint(ctx context.Context, collection string, numericID uint64) error
+}
+
 // Service implements admin business logic.
 type Service struct {
-	repo         adminRepo
-	apiURL       string
-	apiKey       string
-	redisClient  *goredis.Client
-	qdrantClient *qdrant.Client
-	httpClient   *http.Client
-	job          batchRunner
-	nsConfigSvc  nsConfigUpserter
-	runningBatch sync.Map // keyed by namespace name; prevents concurrent batch triggers
+	repo            adminRepo
+	apiURL          string
+	apiKey          string
+	redisClient     *goredis.Client
+	qdrantClient    *qdrant.Client
+	httpClient      *http.Client
+	job             batchRunner
+	nsConfigSvc     nsConfigUpserter
+	catalogConfig   nsCatalogConfigurator
+	catalogBacklog  catalogBacklogReader
+	catalogPicker   catalogStrategyPicker
+	streamPublisher streamPublisher
+	qdrantDeleter   qdrantPointDeleter
+	nowFn           func() time.Time
+	runningBatch    sync.Map // keyed by namespace name; prevents concurrent batch triggers
+	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
 }
 
 // NewService creates a new Service.
 func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job batchRunner, nsConfigSvc nsConfigUpserter) *Service {
-	return &Service{
+	s := &Service{
 		repo:         repo,
 		apiURL:       apiURL,
 		apiKey:       apiKey,
@@ -64,7 +134,61 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 		httpClient:   &http.Client{Timeout: 10 * time.Second},
 		job:          job,
 		nsConfigSvc:  nsConfigSvc,
+		nowFn:        time.Now,
 	}
+	if redisClient != nil {
+		s.streamPublisher = redisClient
+	}
+	if qdrantClient != nil {
+		s.qdrantDeleter = newQdrantClientPointDeleter(qdrantClient)
+	}
+	return s
+}
+
+// SetCatalogConfigurator wires the catalog config adapter. Optional —
+// when nil, the catalog admin endpoints return 503 Service Unavailable
+// to signal that the catalog feature is not enabled in this deployment.
+// (Plain method rather than constructor parameter so existing callers
+// of NewService stay source-compatible.)
+func (s *Service) SetCatalogConfigurator(c nsCatalogConfigurator) {
+	s.catalogConfig = c
+}
+
+// SetCatalogBacklogReader wires the optional Postgres+Redis backlog reader
+// for the catalog admin endpoint. When nil, GetCatalog returns zero
+// backlog counts (admin UI degrades gracefully).
+func (s *Service) SetCatalogBacklogReader(r catalogBacklogReader) {
+	s.catalogBacklog = r
+}
+
+// SetCatalogStrategyPicker wires the lookup of the active strategy id+version
+// for a namespace. Required by the re-embed orchestration path; when nil the
+// re-embed handler returns 503 Service Unavailable.
+func (s *Service) SetCatalogStrategyPicker(p catalogStrategyPicker) {
+	s.catalogPicker = p
+}
+
+// SetStreamPublisher overrides the default Redis-backed XAdd publisher.
+// Used by tests to inject a fake; production wiring leaves this as the
+// default redisClient.
+func (s *Service) SetStreamPublisher(p streamPublisher) {
+	s.streamPublisher = p
+}
+
+// SetQdrantPointDeleter overrides the default Qdrant client adapter used by
+// the DeleteCatalogItem path. Tests inject a fake.
+func (s *Service) SetQdrantPointDeleter(d qdrantPointDeleter) {
+	s.qdrantDeleter = d
+}
+
+// SetNowFn overrides the wall clock used to stamp catalog re-embed batch
+// rows. Tests use this for deterministic timestamps.
+func (s *Service) SetNowFn(fn func() time.Time) {
+	if fn == nil {
+		s.nowFn = time.Now
+		return
+	}
+	s.nowFn = fn
 }
 
 // GetHealth proxies GET <apiURL>/healthz and returns the parsed response.
@@ -110,6 +234,60 @@ func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *Na
 		status = http.StatusCreated
 	}
 	return resp, status, nil
+}
+
+// ErrCatalogConfiguratorUnavailable signals that the catalog config adapter
+// has not been wired (catalog feature disabled at this deployment). The
+// handler maps this to 503 Service Unavailable so the admin UI can hide
+// catalog controls gracefully rather than crash.
+var ErrCatalogConfiguratorUnavailable = errors.New("admin: catalog configurator not wired")
+
+// GetCatalogConfig returns the catalog config + available strategies +
+// backlog snapshot for a namespace. Returns nil when the namespace does
+// not exist; ErrCatalogConfiguratorUnavailable when the adapter is missing.
+func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error) {
+	if s.catalogConfig == nil {
+		return nil, ErrCatalogConfiguratorUnavailable
+	}
+	cfg, err := s.catalogConfig.GetCatalog(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get catalog config: %w", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+
+	resp := &NamespaceCatalogResponse{
+		Catalog:             *cfg,
+		AvailableStrategies: s.catalogConfig.AvailableStrategies(cfg.EmbeddingDim),
+	}
+	if s.catalogBacklog != nil {
+		// Backlog read failures are non-fatal; surface zero counts so the
+		// admin UI still renders. The error is logged at DEBUG via the
+		// caller's choice, not from inside the service.
+		if backlog, err := s.catalogBacklog.Read(ctx, namespace); err == nil {
+			resp.Backlog = backlog
+		}
+	}
+	return resp, nil
+}
+
+// UpdateCatalogConfig applies the catalog auto-embedding config change
+// for a namespace. Returns:
+//   - the updated config on success
+//   - nil result + nil error when the namespace does not exist
+//   - *CatalogDimensionMismatch when the chosen strategy's dim != embedding_dim
+//   - ErrCatalogConfiguratorUnavailable when the adapter is missing
+//   - any other error (DB, registry) wrapped
+func (s *Service) UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error) {
+	if s.catalogConfig == nil {
+		return nil, ErrCatalogConfiguratorUnavailable
+	}
+	cfg, err := s.catalogConfig.UpdateCatalog(ctx, namespace, req)
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 // GetBatchRuns returns paginated batch run logs, filtered total, and aggregate stats.
@@ -517,7 +695,8 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 		return nil, fmt.Errorf("create demo namespace: %w", err)
 	}
 
-	created, err := s.repo.SeedDemoEvents(ctx, demoNamespace, demoDataset, time.Now().UTC())
+	now := time.Now().UTC()
+	created, err := s.repo.SeedDemoEvents(ctx, demoNamespace, demoDataset, now)
 	if err != nil {
 		return nil, fmt.Errorf("seed demo events: %w", err)
 	}
@@ -529,6 +708,54 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 	if upsert != nil && upsert.APIKey != nil {
 		resp.APIKey = *upsert.APIKey
 	}
+
+	// Enable catalog auto-embedding and seed the bundled catalog content so
+	// the admin catalog browse page has data to render. The configurator may
+	// be unwired in trimmed deployments (e.g. some tests) — in that case the
+	// catalog seeding is skipped silently rather than failing demo setup.
+	if s.catalogConfig != nil {
+		enable := true
+		strategyID := demoCatalogStrategyID
+		strategyVersion := demoCatalogStrategyVersion
+		if _, err := s.catalogConfig.UpdateCatalog(ctx, demoNamespace, &NamespaceCatalogUpdateRequest{
+			Enabled:         enable,
+			StrategyID:      &strategyID,
+			StrategyVersion: &strategyVersion,
+			Params:          map[string]any{"dim": demoCatalogStrategyDim},
+		}); err != nil {
+			return nil, fmt.Errorf("enable demo catalog: %w", err)
+		}
+
+		catalogCreated, err := s.repo.SeedDemoCatalogItems(ctx, demoNamespace, demoCatalogDataset, now)
+		if err != nil {
+			return nil, fmt.Errorf("seed demo catalog items: %w", err)
+		}
+		resp.CatalogItemsCreated = catalogCreated
+
+		// Best-effort: publish each seeded row to the embed stream so a
+		// running cmd/embedder picks them up the same way a data-plane
+		// ingest would. Publish failures are non-fatal — rows remain in
+		// state='pending' and can be picked up later (e.g. via re-embed).
+		if s.streamPublisher != nil {
+			for _, it := range demoCatalogDataset {
+				args := &goredis.XAddArgs{
+					Stream: "catalog:embed:" + demoNamespace,
+					Values: map[string]any{
+						"namespace":        demoNamespace,
+						"object_id":        it.ObjectID,
+						"strategy_id":      strategyID,
+						"strategy_version": strategyVersion,
+						"enqueued_at":      now.Format(time.RFC3339Nano),
+					},
+				}
+				if err := s.streamPublisher.XAdd(ctx, args).Err(); err != nil {
+					slog.Warn("demo catalog xadd failed",
+						"object_id", it.ObjectID, "error", err)
+				}
+			}
+		}
+	}
+
 	return resp, nil
 }
 
@@ -555,7 +782,10 @@ func (s *Service) DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, err
 }
 
 func (s *Service) clearDemoRedis(ctx context.Context) error {
-	keys := []string{"trending:" + demoNamespace}
+	keys := []string{
+		"trending:" + demoNamespace,
+		"catalog:embed:" + demoNamespace,
+	}
 	iter := s.redisClient.Scan(ctx, 0, "rec:"+demoNamespace+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())

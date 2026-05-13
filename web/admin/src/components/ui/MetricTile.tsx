@@ -14,11 +14,11 @@ export default function MetricTile({
   value,
   sub,
   subClassName = 'text-muted',
-  valueClassName = 'text-2xl',
+  valueClassName = 'text-xl',
   className = '',
 }: MetricTileProps) {
   return (
-    <div className={`bg-surface border border-default rounded-lg px-4 py-3 ${className}`}>
+    <div className={`bg-surface border border-default rounded px-3 py-2.5 ${className}`}>
       <p className="m-0 mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
         {label}
       </p>

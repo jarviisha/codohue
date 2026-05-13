@@ -24,7 +24,7 @@ export default function NamespaceCard({ health, onEdit, onSelect, isActive }: Pr
   else if (degraded) borderClass = 'border-danger/30'
 
   return (
-    <div className={`flex flex-col gap-4 rounded-lg border bg-surface p-5 duration-150 ${borderClass}`}>
+    <div className={`flex flex-col gap-4 rounded border bg-surface p-5 duration-150 ${borderClass}`}>
       <div className="flex justify-between items-start gap-2">
         <div className="flex items-center gap-2 min-w-0">
           <CodeBadge className="text-sm text-primary break-all">{ns.namespace}</CodeBadge>

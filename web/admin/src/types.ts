@@ -71,7 +71,7 @@ export interface BatchRunLog {
   subjects_processed: number
   success: boolean
   error_message: string | null
-  trigger_source: 'cron' | 'manual'
+  trigger_source: 'cron' | 'manual' | 'admin' | 'admin_reembed' | string
   log_lines: LogEntry[]
 
   phase1_ok: boolean | null
@@ -138,6 +138,7 @@ export interface DemoDatasetResponse {
   namespace: string
   events_created?: number
   events_deleted?: number
+  catalog_items_created?: number
   api_key?: string
 }
 
@@ -229,4 +230,116 @@ export interface BatchRunCreateResponse {
   namespace: string
   status: string
   started_at: string
+}
+
+// ─── Catalog auto-embedding (feature 004) ─────────────────────────────────────
+
+export interface NamespaceCatalogConfig {
+  namespace: string
+  enabled: boolean
+  strategy_id?: string
+  strategy_version?: string
+  params?: Record<string, unknown>
+  embedding_dim: number
+  max_attempts: number
+  max_content_bytes: number
+  updated_at: string
+}
+
+export interface CatalogStrategyDescriptor {
+  id: string
+  version: string
+  dim: number
+  max_input_bytes?: number
+  description?: string
+}
+
+export interface CatalogBacklog {
+  pending: number
+  in_flight: number
+  embedded: number
+  failed: number
+  dead_letter: number
+  stream_len: number
+}
+
+export interface NamespaceCatalogResponse {
+  catalog: NamespaceCatalogConfig
+  available_strategies: CatalogStrategyDescriptor[]
+  backlog: CatalogBacklog
+}
+
+export interface NamespaceCatalogUpdateRequest {
+  enabled: boolean
+  strategy_id?: string
+  strategy_version?: string
+  params?: Record<string, unknown>
+  max_attempts?: number
+  max_content_bytes?: number
+}
+
+// CatalogDimMismatchBody is the flat 400 body the admin API returns when the
+// chosen strategy's natural dim does not equal the namespace's embedding_dim.
+// Surfaced to the form via ApiError.body so the operator sees both numbers.
+export interface CatalogDimMismatchBody {
+  error: string
+  strategy_dim: number
+  namespace_embedding_dim: number
+}
+
+
+export type CatalogItemState = 'pending' | 'in_flight' | 'embedded' | 'failed' | 'dead_letter'
+
+export interface CatalogItemSummary {
+  id: number
+  object_id: string
+  state: CatalogItemState
+  strategy_id?: string
+  strategy_version?: string
+  attempt_count: number
+  last_error?: string
+  embedded_at?: string
+  updated_at: string
+}
+
+export interface CatalogItemDetail extends CatalogItemSummary {
+  namespace: string
+  content: string
+  metadata?: Record<string, unknown>
+  created_at: string
+}
+
+export interface CatalogItemsListResponse {
+  items: CatalogItemSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface CatalogReEmbedResponse {
+  batch_run_id: number
+  namespace: string
+  strategy_id: string
+  strategy_version: string
+  stale_items: number
+  started_at: string
+}
+
+export interface CatalogRedriveResponse {
+  id: number
+  object_id: string
+  state: CatalogItemState
+}
+
+export interface CatalogBulkRedriveResponse {
+  namespace: string
+  redriven: number
+}
+
+export interface CatalogItemsListParams {
+  namespace: string
+  state?: CatalogItemState | 'all'
+  limit?: number
+  offset?: number
+  objectID?: string
 }

@@ -7,7 +7,7 @@ interface EmptyStateProps {
 
 export default function EmptyState({ children, className = '' }: EmptyStateProps) {
   return (
-    <div className={`rounded-lg border border-dashed border-default p-10 text-center text-sm text-muted ${className}`}>
+    <div className={`rounded border border-dashed border-default p-10 text-center text-sm text-muted ${className}`}>
       {children}
     </div>
   )

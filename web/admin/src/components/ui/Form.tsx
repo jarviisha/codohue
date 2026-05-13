@@ -23,14 +23,14 @@ export function FormControl({
 }: FormControlProps) {
   return (
     <div className={[
-      inline ? 'flex items-center gap-4' : 'flex flex-col gap-1.5',
+      inline ? 'flex items-center gap-3' : 'flex flex-col gap-1',
       className,
     ].filter(Boolean).join(' ')}
     >
       <label
         htmlFor={htmlFor}
         className={[
-          inline ? 'min-w-48' : '',
+          inline ? 'min-w-40' : '',
           'text-[13px] font-medium text-primary',
           labelClassName,
         ].filter(Boolean).join(' ')}
@@ -52,7 +52,7 @@ export function FormSection({
   className?: string
 }) {
   return (
-    <section className={`flex flex-col gap-3 ${className}`}>
+    <section className={`flex flex-col gap-2.5 ${className}`}>
       <h3 className="m-0 border-b border-default pb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-muted">
         {title}
       </h3>

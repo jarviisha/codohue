@@ -3,12 +3,19 @@ const BASE = import.meta.env.VITE_ADMIN_API_BASE_URL ?? ''
 export class ApiError extends Error {
   status: number
   code: string
+  // body carries the full parsed response body for endpoints whose error
+  // shape diverges from the standard {error: {code, message}} envelope.
+  // The catalog PUT endpoint, for example, returns a flat
+  // {error, strategy_dim, namespace_embedding_dim} on dim mismatch — the
+  // form needs both numbers to render a precise message.
+  body: unknown
 
-  constructor(status: number, code: string, message: string) {
+  constructor(status: number, code: string, message: string, body?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.body = body
   }
 }
 
@@ -39,8 +46,21 @@ async function request<T>(
   const data = await res.json().catch(() => null)
 
   if (!res.ok) {
-    const err = data?.error
-    throw new ApiError(res.status, err?.code ?? 'unknown', err?.message ?? 'Request failed')
+    // Two error envelopes are produced by the admin API:
+    //   1. Standard:  {error: {code, message}}
+    //   2. Flat:      {error: "...", ...domain fields}  (e.g. dim mismatch)
+    // Detect which we got so the message and code stay informative either way.
+    const errField = (data as { error?: unknown } | null)?.error
+    let code = 'unknown'
+    let message = 'Request failed'
+    if (errField && typeof errField === 'object') {
+      const e = errField as { code?: string; message?: string }
+      code = e.code ?? code
+      message = e.message ?? message
+    } else if (typeof errField === 'string') {
+      message = errField
+    }
+    throw new ApiError(res.status, code, message, data)
   }
 
   return data as T

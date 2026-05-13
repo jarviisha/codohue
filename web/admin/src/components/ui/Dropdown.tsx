@@ -16,7 +16,7 @@ export interface DropdownProps extends SelectHTMLAttributes<HTMLSelectElement> {
 }
 
 const sizeClasses: Record<NonNullable<DropdownProps['controlSize']>, string> = {
-  sm: 'h-8 px-2 pr-8',
+  sm: 'h-7 px-2 pr-7 text-xs',
   md: '',
 }
 
@@ -48,15 +48,15 @@ export default function Dropdown({
         id={id}
         className={[
           fieldBaseClass,
-          'appearance-none bg-[right_0.75rem_center] bg-no-repeat pr-9',
+          'appearance-none bg-no-repeat pr-8',
           sizeClasses[controlSize],
           error ? fieldInvalidClass : '',
           className,
         ].filter(Boolean).join(' ')}
         style={{
           backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%)',
-          backgroundPosition: 'calc(100% - 16px) 50%, calc(100% - 11px) 50%',
-          backgroundSize: '5px 5px, 5px 5px',
+          backgroundPosition: 'calc(100% - 14px) 50%, calc(100% - 10px) 50%',
+          backgroundSize: '4px 4px, 4px 4px',
           ...style,
         }}
         aria-invalid={ariaInvalid ?? (error ? true : undefined)}

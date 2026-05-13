@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useNamespacesOverview } from '../hooks/useNamespacesOverview'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import { STATUS_META } from '../pages/namespaces/statusMeta'
@@ -28,6 +28,8 @@ export default function NamespacePicker() {
   const { data, isLoading } = useNamespacesOverview()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (!open) return
@@ -51,6 +53,16 @@ export default function NamespacePicker() {
   function handleSelect(ns: string) {
     setNamespace(ns)
     setOpen(false)
+
+    // Pages mounted under /namespaces/:ns/* read the namespace from the URL
+    // (useParams), not the context. Rewrite the :ns segment in place so they
+    // refetch with the new namespace. /namespaces/new is excluded because it
+    // is not a real namespace route.
+    const match = location.pathname.match(/^\/namespaces\/([^/]+)(\/.*)?$/)
+    if (match && match[1] !== 'new' && match[1] !== ns) {
+      const rest = match[2] ?? ''
+      navigate(`/namespaces/${encodeURIComponent(ns)}${rest}`, { replace: true })
+    }
   }
 
   return (
@@ -60,7 +72,7 @@ export default function NamespacePicker() {
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        className={`flex w-full cursor-pointer items-center gap-2.5 rounded-lg border bg-surface px-3 py-2.5 text-left transition-colors duration-150 focus:outline-none focus:shadow-focus ${
+        className={`flex w-full cursor-pointer items-center gap-2.5 rounded border bg-surface px-3 py-2.5 text-left transition-colors duration-150 focus:outline-none focus:shadow-focus ${
           namespace
             ? 'border-default hover:border-strong'
             : 'border-default hover:border-strong'
@@ -97,7 +109,7 @@ export default function NamespacePicker() {
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded-lg border border-default bg-surface shadow-floating">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden rounded border border-default bg-surface shadow-floating">
           {isLoading && (
             <p className="m-0 px-3 py-2.5 text-xs text-muted">Loading...</p>
           )}

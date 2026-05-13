@@ -16,36 +16,63 @@ import (
 // ─── fake service ─────────────────────────────────────────────────────────────
 
 type fakeSvc struct {
-	healthResp      *HealthResponse
-	healthStatus    int
-	healthErr       error
-	nsListResp      []NamespaceConfig
-	nsListErr       error
-	nsGetResp       *NamespaceConfig
-	nsGetErr        error
-	nsOverviewResp  *NamespacesOverviewResponse
-	nsOverviewErr   error
-	upsertResp      *NamespaceUpsertResponse
-	upsertStatus    int
-	upsertErr       error
-	batchRuns       []BatchRunLog
-	batchRunsErr    error
-	debugResp       *RecommendResponse
-	debugStatus     int
-	debugErr        error
-	trendingResp    *TrendingAdminResponse
-	trendingErr     error
-	profileResp     *SubjectProfileResponse
-	profileErr      error
-	qdrantStatsResp *QdrantInspectResponse
-	qdrantStatsErr  error
-	triggerResp     *BatchRunCreateResponse
-	triggerErr      error
-	eventsResp      *EventsListResponse
-	eventsErr       error
-	injectErr       error
-	demoResp        *DemoDatasetResponse
-	demoErr         error
+	healthResp        *HealthResponse
+	healthStatus      int
+	healthErr         error
+	nsListResp        []NamespaceConfig
+	nsListErr         error
+	nsGetResp         *NamespaceConfig
+	nsGetErr          error
+	nsOverviewResp    *NamespacesOverviewResponse
+	nsOverviewErr     error
+	upsertResp        *NamespaceUpsertResponse
+	upsertStatus      int
+	upsertErr         error
+	batchRuns         []BatchRunLog
+	batchRunsErr      error
+	debugResp         *RecommendResponse
+	debugStatus       int
+	debugErr          error
+	trendingResp      *TrendingAdminResponse
+	trendingErr       error
+	profileResp       *SubjectProfileResponse
+	profileErr        error
+	qdrantStatsResp   *QdrantInspectResponse
+	qdrantStatsErr    error
+	triggerResp       *BatchRunCreateResponse
+	triggerErr        error
+	eventsResp        *EventsListResponse
+	eventsErr         error
+	injectErr         error
+	demoResp          *DemoDatasetResponse
+	demoErr           error
+	catalogGetResp    *NamespaceCatalogResponse
+	catalogGetErr     error
+	catalogUpdateResp *NamespaceCatalogConfig
+	catalogUpdateErr  error
+	catalogUpdateReq  *NamespaceCatalogUpdateRequest
+
+	// US3 operator endpoints
+	reembedResp       *CatalogReEmbedResponse
+	reembedErr        error
+	reembedNS         string
+	listItemsResp     *CatalogItemsListResponse
+	listItemsErr      error
+	listItemsState    string
+	listItemsLimit    int
+	listItemsOffset   int
+	listItemsObjectID string
+	getItemResp       *CatalogItemDetail
+	getItemErr        error
+	getItemID         int64
+	redriveResp       *CatalogRedriveResponse
+	redriveErr        error
+	redriveID         int64
+	bulkRedriveResp   *CatalogBulkRedriveResponse
+	bulkRedriveErr    error
+	bulkRedriveNS     string
+	deleteItemErr     error
+	deleteItemID      int64
 }
 
 func (f *fakeSvc) GetHealth(_ context.Context) (*HealthResponse, int, error) {
@@ -106,6 +133,48 @@ func (f *fakeSvc) CreateDemoData(_ context.Context) (*DemoDatasetResponse, error
 
 func (f *fakeSvc) DeleteDemoData(_ context.Context) (*DemoDatasetResponse, error) {
 	return f.demoResp, f.demoErr
+}
+
+func (f *fakeSvc) GetCatalogConfig(_ context.Context, _ string) (*NamespaceCatalogResponse, error) {
+	return f.catalogGetResp, f.catalogGetErr
+}
+
+func (f *fakeSvc) UpdateCatalogConfig(_ context.Context, _ string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error) {
+	f.catalogUpdateReq = req
+	return f.catalogUpdateResp, f.catalogUpdateErr
+}
+
+func (f *fakeSvc) TriggerReEmbed(_ context.Context, namespace string) (*CatalogReEmbedResponse, error) {
+	f.reembedNS = namespace
+	return f.reembedResp, f.reembedErr
+}
+
+func (f *fakeSvc) ListCatalogItems(_ context.Context, _, state string, limit, offset int, objectIDFilter string) (*CatalogItemsListResponse, error) {
+	f.listItemsState = state
+	f.listItemsLimit = limit
+	f.listItemsOffset = offset
+	f.listItemsObjectID = objectIDFilter
+	return f.listItemsResp, f.listItemsErr
+}
+
+func (f *fakeSvc) GetCatalogItem(_ context.Context, _ string, id int64) (*CatalogItemDetail, error) {
+	f.getItemID = id
+	return f.getItemResp, f.getItemErr
+}
+
+func (f *fakeSvc) RedriveCatalogItem(_ context.Context, _ string, id int64) (*CatalogRedriveResponse, error) {
+	f.redriveID = id
+	return f.redriveResp, f.redriveErr
+}
+
+func (f *fakeSvc) BulkRedriveDeadletter(_ context.Context, namespace string) (*CatalogBulkRedriveResponse, error) {
+	f.bulkRedriveNS = namespace
+	return f.bulkRedriveResp, f.bulkRedriveErr
+}
+
+func (f *fakeSvc) DeleteCatalogItem(_ context.Context, _ string, id int64) error {
+	f.deleteItemID = id
+	return f.deleteItemErr
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -743,5 +812,460 @@ func TestDeleteDemoData_OK(t *testing.T) {
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ─── catalog config endpoints (US2) ───────────────────────────────────────────
+
+func TestGetCatalogConfig_OK(t *testing.T) {
+	want := &NamespaceCatalogResponse{
+		Catalog: NamespaceCatalogConfig{
+			Namespace: "ns", Enabled: true,
+			StrategyID: "internal-hashing-ngrams", StrategyVersion: "v1",
+			EmbeddingDim: 128, MaxAttempts: 5, MaxContentBytes: 32768,
+			UpdatedAt: time.Now(),
+		},
+		AvailableStrategies: []CatalogStrategyDescriptor{
+			{ID: "internal-hashing-ngrams", Version: "v1", Dim: 128},
+		},
+	}
+	svc := &fakeSvc{catalogGetResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, "")
+
+	h.GetCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var got NamespaceCatalogResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.Catalog.StrategyID != "internal-hashing-ngrams" || got.Catalog.EmbeddingDim != 128 {
+		t.Errorf("unexpected catalog body: %+v", got.Catalog)
+	}
+	if len(got.AvailableStrategies) != 1 {
+		t.Errorf("expected 1 available strategy, got %d", len(got.AvailableStrategies))
+	}
+}
+
+func TestGetCatalogConfig_NotFound(t *testing.T) {
+	svc := &fakeSvc{catalogGetResp: nil}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/missing/catalog", map[string]string{"ns": "missing"}, "")
+
+	h.GetCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetCatalogConfig_Unavailable(t *testing.T) {
+	svc := &fakeSvc{catalogGetErr: ErrCatalogConfiguratorUnavailable}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, "")
+
+	h.GetCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestGetCatalogConfig_InternalError(t *testing.T) {
+	svc := &fakeSvc{catalogGetErr: fmt.Errorf("db down")}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, "")
+
+	h.GetCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateCatalogConfig_OK(t *testing.T) {
+	want := &NamespaceCatalogConfig{Namespace: "ns", Enabled: true, EmbeddingDim: 128, StrategyID: "internal-hashing-ngrams", StrategyVersion: "v1"}
+	svc := &fakeSvc{catalogUpdateResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	body := `{"enabled":true,"strategy_id":"internal-hashing-ngrams","strategy_version":"v1","params":{"dim":128}}`
+	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, body)
+
+	h.UpdateCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.catalogUpdateReq == nil || !svc.catalogUpdateReq.Enabled {
+		t.Errorf("expected service to receive enabled=true request, got %+v", svc.catalogUpdateReq)
+	}
+	if svc.catalogUpdateReq.StrategyID == nil || *svc.catalogUpdateReq.StrategyID != "internal-hashing-ngrams" {
+		t.Errorf("strategy_id not propagated: %+v", svc.catalogUpdateReq)
+	}
+}
+
+func TestUpdateCatalogConfig_DimensionMismatch_400(t *testing.T) {
+	svc := &fakeSvc{catalogUpdateErr: &CatalogDimensionMismatch{StrategyDim: 64, NamespaceEmbeddingDim: 128}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	body := `{"enabled":true,"strategy_id":"x","strategy_version":"v1"}`
+	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, body)
+
+	h.UpdateCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+	// Body must include both dimensions verbatim per contract.
+	got := rec.Body.String()
+	if !bytes.Contains([]byte(got), []byte(`"strategy_dim":64`)) ||
+		!bytes.Contains([]byte(got), []byte(`"namespace_embedding_dim":128`)) {
+		t.Errorf("body missing dim fields: %s", got)
+	}
+}
+
+func TestUpdateCatalogConfig_InvalidJSON_400(t *testing.T) {
+	svc := &fakeSvc{}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, "{not-json")
+
+	h.UpdateCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateCatalogConfig_NotFound_404(t *testing.T) {
+	svc := &fakeSvc{catalogUpdateResp: nil} // nil result + nil error = not found
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	body := `{"enabled":false}`
+	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/missing/catalog", map[string]string{"ns": "missing"}, body)
+
+	h.UpdateCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUpdateCatalogConfig_Unavailable_503(t *testing.T) {
+	svc := &fakeSvc{catalogUpdateErr: ErrCatalogConfiguratorUnavailable}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	body := `{"enabled":true,"strategy_id":"x","strategy_version":"v1"}`
+	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, body)
+
+	h.UpdateCatalogConfig(rec, r)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// ─── catalog re-embed + items endpoints (US3) ─────────────────────────────────
+
+func TestTriggerReEmbed_Accepted(t *testing.T) {
+	want := &CatalogReEmbedResponse{
+		BatchRunID: 42, Namespace: "ns",
+		StrategyID: "internal-hashing-ngrams", StrategyVersion: "v1",
+		StaleItems: 7, StartedAt: time.Now(),
+	}
+	svc := &fakeSvc{reembedResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/re-embed", map[string]string{"ns": "ns"}, "")
+
+	h.TriggerReEmbed(rec, r)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if loc := rec.Header().Get("Location"); loc != "/api/admin/v1/namespaces/ns/batch-runs/42" {
+		t.Errorf("unexpected Location: %q", loc)
+	}
+	var got CatalogReEmbedResponse
+	assertJSON(t, rec, &got)
+	if got.BatchRunID != 42 || got.StaleItems != 7 {
+		t.Errorf("body mismatch: %+v", got)
+	}
+	if svc.reembedNS != "ns" {
+		t.Errorf("expected namespace=ns to reach service, got %q", svc.reembedNS)
+	}
+}
+
+func TestTriggerReEmbed_NotFound(t *testing.T) {
+	svc := &fakeSvc{reembedResp: nil}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/missing/catalog/re-embed", map[string]string{"ns": "missing"}, "")
+
+	h.TriggerReEmbed(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTriggerReEmbed_Conflict_409(t *testing.T) {
+	svc := &fakeSvc{reembedErr: ErrReembedAlreadyRunning}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/re-embed", map[string]string{"ns": "ns"}, "")
+
+	h.TriggerReEmbed(rec, r)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTriggerReEmbed_Unavailable_503(t *testing.T) {
+	svc := &fakeSvc{reembedErr: ErrCatalogStrategyPickerUnavailable}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/re-embed", map[string]string{"ns": "ns"}, "")
+
+	h.TriggerReEmbed(rec, r)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestListCatalogItems_OK(t *testing.T) {
+	want := &CatalogItemsListResponse{
+		Items: []CatalogItemSummary{
+			{ID: 1, ObjectID: "o1", State: "embedded", AttemptCount: 1, UpdatedAt: time.Now()},
+		},
+		Total: 1, Limit: 50, Offset: 0,
+	}
+	svc := &fakeSvc{listItemsResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog/items?state=embedded&limit=20&offset=10&object_id=foo", map[string]string{"ns": "ns"}, "")
+
+	h.ListCatalogItems(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.listItemsState != "embedded" || svc.listItemsLimit != 20 || svc.listItemsOffset != 10 || svc.listItemsObjectID != "foo" {
+		t.Errorf("query params not propagated: state=%q limit=%d offset=%d object_id=%q",
+			svc.listItemsState, svc.listItemsLimit, svc.listItemsOffset, svc.listItemsObjectID)
+	}
+}
+
+func TestListCatalogItems_DefaultsState(t *testing.T) {
+	svc := &fakeSvc{listItemsResp: &CatalogItemsListResponse{Items: []CatalogItemSummary{}}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog/items", map[string]string{"ns": "ns"}, "")
+
+	h.ListCatalogItems(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if svc.listItemsState != "all" {
+		t.Errorf("expected state default 'all', got %q", svc.listItemsState)
+	}
+}
+
+func TestListCatalogItems_BadLimit(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog/items?limit=99999", map[string]string{"ns": "ns"}, "")
+
+	h.ListCatalogItems(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestGetCatalogItem_OK(t *testing.T) {
+	want := &CatalogItemDetail{
+		CatalogItemSummary: CatalogItemSummary{ID: 7, ObjectID: "o7", State: "embedded"},
+		Namespace:          "ns",
+		Content:            "hello",
+		Metadata:           map[string]any{"author_id": "u1"},
+	}
+	svc := &fakeSvc{getItemResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog/items/7",
+		map[string]string{"ns": "ns", "id": "7"}, "")
+
+	h.GetCatalogItem(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.getItemID != 7 {
+		t.Errorf("expected id=7, got %d", svc.getItemID)
+	}
+}
+
+func TestGetCatalogItem_NotFound(t *testing.T) {
+	svc := &fakeSvc{getItemResp: nil}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog/items/999",
+		map[string]string{"ns": "ns", "id": "999"}, "")
+
+	h.GetCatalogItem(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestGetCatalogItem_BadID(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns/catalog/items/notanint",
+		map[string]string{"ns": "ns", "id": "notanint"}, "")
+
+	h.GetCatalogItem(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestRedriveCatalogItem_Accepted(t *testing.T) {
+	want := &CatalogRedriveResponse{ID: 5, ObjectID: "o5", State: "pending"}
+	svc := &fakeSvc{redriveResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/items/5/redrive",
+		map[string]string{"ns": "ns", "id": "5"}, "")
+
+	h.RedriveCatalogItem(rec, r)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.redriveID != 5 {
+		t.Errorf("expected id=5, got %d", svc.redriveID)
+	}
+}
+
+func TestRedriveCatalogItem_NotFound(t *testing.T) {
+	svc := &fakeSvc{redriveResp: nil}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/items/5/redrive",
+		map[string]string{"ns": "ns", "id": "5"}, "")
+
+	h.RedriveCatalogItem(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestRedriveCatalogItem_Unavailable_503(t *testing.T) {
+	svc := &fakeSvc{redriveErr: ErrCatalogStrategyPickerUnavailable}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/items/5/redrive",
+		map[string]string{"ns": "ns", "id": "5"}, "")
+
+	h.RedriveCatalogItem(rec, r)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestBulkRedriveDeadletter_OK(t *testing.T) {
+	want := &CatalogBulkRedriveResponse{Namespace: "ns", Redriven: 3}
+	svc := &fakeSvc{bulkRedriveResp: want}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/items/redrive-deadletter",
+		map[string]string{"ns": "ns"}, "")
+
+	h.BulkRedriveDeadletter(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.bulkRedriveNS != "ns" {
+		t.Errorf("expected namespace=ns to reach service, got %q", svc.bulkRedriveNS)
+	}
+	var got CatalogBulkRedriveResponse
+	assertJSON(t, rec, &got)
+	if got.Redriven != 3 {
+		t.Errorf("expected redriven=3, got %d", got.Redriven)
+	}
+}
+
+func TestBulkRedriveDeadletter_NotFound(t *testing.T) {
+	svc := &fakeSvc{bulkRedriveResp: nil}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/missing/catalog/items/redrive-deadletter",
+		map[string]string{"ns": "missing"}, "")
+
+	h.BulkRedriveDeadletter(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestDeleteCatalogItem_NoContent(t *testing.T) {
+	svc := &fakeSvc{}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodDelete, "/api/admin/v1/namespaces/ns/catalog/items/9",
+		map[string]string{"ns": "ns", "id": "9"}, "")
+
+	h.DeleteCatalogItem(rec, r)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.deleteItemID != 9 {
+		t.Errorf("expected id=9, got %d", svc.deleteItemID)
+	}
+}
+
+func TestDeleteCatalogItem_BadID(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodDelete, "/api/admin/v1/namespaces/ns/catalog/items/-1",
+		map[string]string{"ns": "ns", "id": "-1"}, "")
+
+	h.DeleteCatalogItem(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestDeleteCatalogItem_InternalError(t *testing.T) {
+	svc := &fakeSvc{deleteItemErr: fmt.Errorf("db down")}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodDelete, "/api/admin/v1/namespaces/ns/catalog/items/9",
+		map[string]string{"ns": "ns", "id": "9"}, "")
+
+	h.DeleteCatalogItem(rec, r)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
 	}
 }

@@ -65,6 +65,34 @@ services:
       qdrant:
         condition: service_started
 
+  embedder:
+    build:
+      context: .
+      target: embedder
+    container_name: codohue-embedder
+    ports:
+      - "${EMBEDDER_HEALTH_PORT:-2003}:${EMBEDDER_HEALTH_PORT:-2003}"
+    environment:
+      - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - LOG_FORMAT=${LOG_FORMAT:-text}
+      - CATALOG_MAX_CONTENT_BYTES=${CATALOG_MAX_CONTENT_BYTES:-32768}
+      - EMBED_MAX_ATTEMPTS=${EMBED_MAX_ATTEMPTS:-5}
+      - EMBEDDER_HEALTH_PORT=${EMBEDDER_HEALTH_PORT:-2003}
+      - EMBEDDER_REPLICA_NAME=${EMBEDDER_REPLICA_NAME:-}
+      - EMBEDDER_NAMESPACE_POLL_INTERVAL=${EMBEDDER_NAMESPACE_POLL_INTERVAL:-30s}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+
   admin:
     build:
       context: .

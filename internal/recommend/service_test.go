@@ -468,6 +468,57 @@ func TestStoreSubjectEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 	}
 }
 
+// FR-018 / R8: when catalog auto-embedding is enabled, BYOE writes for
+// OBJECT dense vectors are rejected with ErrCatalogActive so the catalog
+// stays the single source of truth.
+func TestStoreObjectEmbedding_CatalogEnabled_ReturnsErrCatalogActive(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+		cfg: &namespace.Config{
+			EmbeddingDim:           4,
+			CatalogEnabled:         true,
+			CatalogStrategyID:      "internal-hashing-ngrams",
+			CatalogStrategyVersion: "v1",
+		},
+	}, newFakeIDMapper())
+
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2, 0.3, 0.4})
+	if !errors.Is(err, ErrCatalogActive) {
+		t.Fatalf("expected ErrCatalogActive, got %v", err)
+	}
+}
+
+// Subject BYOE writes are NOT guarded under catalog mode — the spec
+// keeps subject vectors flowing through the cron mean-pool path.
+func TestStoreSubjectEmbedding_CatalogEnabled_NotGuarded(t *testing.T) {
+	idmap := newFakeIDMapper()
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+		cfg: &namespace.Config{
+			EmbeddingDim:           4,
+			DenseDistance:          "cosine",
+			CatalogEnabled:         true,
+			CatalogStrategyID:      "internal-hashing-ngrams",
+			CatalogStrategyVersion: "v1",
+		},
+	}, idmap)
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+	called := false
+	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+		called = true
+		return nil
+	}
+
+	err := s.StoreSubjectEmbedding(context.Background(), "ns", "sub-1", []float32{0.1, 0.2, 0.3, 0.4})
+	if errors.Is(err, ErrCatalogActive) {
+		t.Errorf("subject BYOE writes must NOT be guarded under catalog mode; got %v", err)
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !called {
+		t.Error("expected qdrant upsert to fire for subject BYOE write under catalog mode")
+	}
+}
+
 func TestStoreEmbedding_Success(t *testing.T) {
 	idmap := newFakeIDMapper()
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{

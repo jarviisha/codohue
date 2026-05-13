@@ -442,6 +442,43 @@ func TestStoreEmbedding_ServiceError_Returns500(t *testing.T) {
 	}
 }
 
+// FR-018 / R8: when the namespace is in catalog mode, BYOE writes for
+// object dense vectors are rejected with 409 Conflict (anti-overwrite).
+// Subject embeddings are NOT guarded — the spec keeps subject vectors
+// flowing through the cron mean-pool path.
+func TestStoreObjectEmbedding_CatalogActive_Returns409(t *testing.T) {
+	h := &Handler{service: &fakeSvc{storeErr: ErrCatalogActive}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
+		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
+	rec := httptest.NewRecorder()
+	h.StoreObjectEmbedding(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected 409, got %d body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeErrorResponse(t, rec)
+	if body.Error.Code != "catalog_active" {
+		t.Errorf("expected error code 'catalog_active', got %q", body.Error.Code)
+	}
+}
+
+// Subject embeddings stay unguarded under catalog mode; if the service
+// somehow surfaces ErrCatalogActive on the subject path it's still mapped
+// to 409 (the handler does not distinguish), but the service-level guard
+// only fires for entityType == "object" — see service_test below.
+func TestStoreSubjectEmbedding_CatalogActiveAtServiceLayerWouldStill409(t *testing.T) {
+	// Synthetic test: if any service surfaces ErrCatalogActive, the handler
+	// uniformly renders 409. The spec only guards the OBJECT path; this test
+	// pins handler behaviour, not service contract.
+	h := &Handler{service: &fakeSvc{storeErr: ErrCatalogActive}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/subjects/u1/embedding",
+		map[string]string{"ns": "ns", "id": "u1"}, `{"vector":[0.1,0.2]}`)
+	rec := httptest.NewRecorder()
+	h.StoreSubjectEmbedding(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Errorf("expected 409 (uniform handler mapping), got %d", rec.Code)
+	}
+}
+
 func TestStoreObjectEmbeddingHandler_Success(t *testing.T) {
 	h := &Handler{service: &fakeSvc{}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",

@@ -7,7 +7,7 @@ interface ToolbarProps {
 
 export default function Toolbar({ children, className = '' }: ToolbarProps) {
   return (
-    <div className={`flex flex-wrap items-end gap-3 ${className}`}>
+    <div className={`flex flex-wrap items-end gap-2 ${className}`}>
       {children}
     </div>
   )

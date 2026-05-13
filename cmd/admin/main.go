@@ -9,18 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
-	"github.com/jarviisha/codohue/internal/core/httpapi"
+	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+
+	// Side-effect import: internal/embedder.init() registers the V1 hashing
+	// strategy with embedstrategy.DefaultRegistry, which the catalog admin
+	// endpoints expose to operators via available_strategies.
+	_ "github.com/jarviisha/codohue/internal/embedder"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -79,57 +80,18 @@ func run() error {
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
 	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient, job, nsAdapter)
+
+	// Catalog auto-embedding admin endpoints (US2). The adapter bridges
+	// admin.Service → nsconfig.Service + embedstrategy.DefaultRegistry
+	// without forcing internal/admin to import either directly.
+	catalogAdapter := newCatalogConfigAdapter(nsConfigSvc, embedstrategy.DefaultRegistry())
+	svc.SetCatalogConfigurator(catalogAdapter)
+	svc.SetCatalogStrategyPicker(catalogAdapter)
+	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
+
 	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
 
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			httpapi.WriteError(w, http.StatusNotFound, "not_found", "not found")
-			return
-		}
-		httpapi.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
-	})
-
-	// Auth (sessions as a resource)
-	r.Post("/api/v1/auth/sessions", h.CreateSession)
-
-	// Protected admin API routes
-	r.Group(func(r chi.Router) {
-		r.Use(admin.RequireSession(cfg.RecommenderAPIKey))
-		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
-
-		r.Get("/api/admin/v1/health", h.GetHealth)
-
-		// Namespaces
-		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
-		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
-		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
-
-		// Batch runs
-		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
-		r.Get("/api/admin/v1/namespaces/{ns}/batch-runs", h.GetBatchRuns)
-		r.Post("/api/admin/v1/namespaces/{ns}/batch-runs", h.CreateBatchRun)
-
-		// Qdrant inspection
-		r.Get("/api/admin/v1/namespaces/{ns}/qdrant", h.GetQdrant)
-
-		// Subjects
-		r.Get("/api/admin/v1/namespaces/{ns}/subjects/{id}/profile", h.GetSubjectProfile)
-		r.Get("/api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations", h.GetSubjectRecommendations)
-
-		// Trending
-		r.Get("/api/admin/v1/namespaces/{ns}/trending", h.GetTrending)
-
-		// Events
-		r.Get("/api/admin/v1/namespaces/{ns}/events", h.GetRecentEvents)
-		r.Post("/api/admin/v1/namespaces/{ns}/events", h.InjectEvent)
-
-		// Demo data
-		r.Post("/api/admin/v1/demo-data", h.CreateDemoData)
-		r.Delete("/api/admin/v1/demo-data", h.DeleteDemoData)
-	})
+	r := newAdminRouter(h, cfg.RecommenderAPIKey)
 
 	// Static file serving — React SPA embedded in the binary
 	distFS, err := fs.Sub(adminui.Files, "dist")

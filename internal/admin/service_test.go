@@ -8,32 +8,80 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	goredis "github.com/redis/go-redis/v9"
 )
 
 // ─── fake repo ────────────────────────────────────────────────────────────────
 
 type fakeRepo struct {
-	namespaces           []NamespaceConfig
-	nsListErr            error
-	namespace            *NamespaceConfig
-	nsGetErr             error
-	batchRuns            []BatchRunLog
-	batchRunsErr         error
-	lastBatchRuns        map[string]BatchRunLog
-	lastBatchRunsErr     error
-	recentEventCounts    map[string]int
-	recentEventCountsErr error
-	subjectStats         *SubjectStats
-	subjectStatsErr      error
-	events               []EventSummary
-	eventsTotal          int
-	eventsErr            error
-	seededEvents         []demoEvent
-	seededNamespace      string
-	seedErr              error
-	clearNamespace       string
-	clearDeleted         int
-	clearErr             error
+	namespaces             []NamespaceConfig
+	nsListErr              error
+	namespace              *NamespaceConfig
+	nsGetErr               error
+	batchRuns              []BatchRunLog
+	batchRunsErr           error
+	lastBatchRuns          map[string]BatchRunLog
+	lastBatchRunsErr       error
+	recentEventCounts      map[string]int
+	recentEventCountsErr   error
+	subjectStats           *SubjectStats
+	subjectStatsErr        error
+	events                 []EventSummary
+	eventsTotal            int
+	eventsErr              error
+	seededEvents           []demoEvent
+	seededNamespace        string
+	seedErr                error
+	seededCatalogItems     []demoCatalogItem
+	seededCatalogNamespace string
+	seedCatalogErr         error
+	clearNamespace         string
+	clearDeleted           int
+	clearErr               error
+
+	// US3 catalog operator endpoints
+	runningReembed    *BatchRunLog
+	runningReembedErr error
+
+	insertReembedID  int64
+	insertReembedErr error
+	insertedReembed  struct {
+		namespace, strategyID, strategyVersion string
+		startedAt                              time.Time
+	}
+
+	staleResetTargets []CatalogReembedTarget
+	staleResetErr     error
+	staleResetCalled  struct {
+		namespace, version string
+	}
+
+	listItemsResp   []CatalogItemSummary
+	listItemsTotal  int
+	listItemsErr    error
+	listItemsCalled struct {
+		namespace, state, objectIDFilter string
+		limit, offset                    int
+	}
+
+	getCatalogItem    *CatalogItemDetail
+	getCatalogItemErr error
+
+	redriveItem    *CatalogItemDetail
+	redriveItemErr error
+
+	bulkRedriveTargets []CatalogReembedTarget
+	bulkRedriveErr     error
+
+	deleteCatalogItemFound  bool
+	deleteCatalogItemObject string
+	deleteCatalogItemErr    error
+	deleteCatalogItemCalled int64
+
+	numericObjectID    uint64
+	numericObjectFound bool
+	numericObjectErr   error
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -76,9 +124,114 @@ func (f *fakeRepo) SeedDemoEvents(_ context.Context, namespace string, events []
 	return len(events), f.seedErr
 }
 
+func (f *fakeRepo) SeedDemoCatalogItems(_ context.Context, namespace string, items []demoCatalogItem, _ time.Time) (int, error) {
+	f.seededCatalogNamespace = namespace
+	f.seededCatalogItems = items
+	return len(items), f.seedCatalogErr
+}
+
 func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {
 	f.clearNamespace = namespace
 	return f.clearDeleted, f.clearErr
+}
+
+func (f *fakeRepo) FindRunningReembedRun(_ context.Context, _ string) (*BatchRunLog, error) {
+	return f.runningReembed, f.runningReembedErr
+}
+
+func (f *fakeRepo) InsertReembedRun(_ context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error) {
+	f.insertedReembed.namespace = namespace
+	f.insertedReembed.strategyID = strategyID
+	f.insertedReembed.strategyVersion = strategyVersion
+	f.insertedReembed.startedAt = startedAt
+	if f.insertReembedID == 0 && f.insertReembedErr == nil {
+		return 1, nil
+	}
+	return f.insertReembedID, f.insertReembedErr
+}
+
+func (f *fakeRepo) SelectAndResetStaleCatalogItems(_ context.Context, namespace, version string) ([]CatalogReembedTarget, error) {
+	f.staleResetCalled.namespace = namespace
+	f.staleResetCalled.version = version
+	return f.staleResetTargets, f.staleResetErr
+}
+
+func (f *fakeRepo) ListCatalogItems(_ context.Context, namespace, state string, limit, offset int, objectFilter string) ([]CatalogItemSummary, int, error) {
+	f.listItemsCalled.namespace = namespace
+	f.listItemsCalled.state = state
+	f.listItemsCalled.limit = limit
+	f.listItemsCalled.offset = offset
+	f.listItemsCalled.objectIDFilter = objectFilter
+	return f.listItemsResp, f.listItemsTotal, f.listItemsErr
+}
+
+func (f *fakeRepo) GetCatalogItem(_ context.Context, _ string, _ int64) (*CatalogItemDetail, error) {
+	return f.getCatalogItem, f.getCatalogItemErr
+}
+
+func (f *fakeRepo) RedriveCatalogItem(_ context.Context, _ string, _ int64) (*CatalogItemDetail, error) {
+	return f.redriveItem, f.redriveItemErr
+}
+
+func (f *fakeRepo) BulkRedriveDeadletter(_ context.Context, _ string) ([]CatalogReembedTarget, error) {
+	return f.bulkRedriveTargets, f.bulkRedriveErr
+}
+
+func (f *fakeRepo) DeleteCatalogItem(_ context.Context, _ string, id int64) (objectID string, found bool, err error) {
+	f.deleteCatalogItemCalled = id
+	return f.deleteCatalogItemObject, f.deleteCatalogItemFound, f.deleteCatalogItemErr
+}
+
+func (f *fakeRepo) LookupNumericObjectID(_ context.Context, _, _ string) (numericID uint64, found bool, err error) {
+	return f.numericObjectID, f.numericObjectFound, f.numericObjectErr
+}
+
+// ─── fake stream publisher ────────────────────────────────────────────────────
+
+type fakeStreamPublisher struct {
+	calls []goredis.XAddArgs
+	err   error
+}
+
+func (f *fakeStreamPublisher) XAdd(_ context.Context, args *goredis.XAddArgs) *goredis.StringCmd {
+	cmd := goredis.NewStringCmd(context.Background())
+	if args != nil {
+		f.calls = append(f.calls, *args)
+	}
+	if f.err != nil {
+		cmd.SetErr(f.err)
+	}
+	return cmd
+}
+
+// ─── fake catalog strategy picker ─────────────────────────────────────────────
+
+type fakeStrategyPicker struct {
+	id, version string
+	enabled     bool
+	err         error
+}
+
+func (f *fakeStrategyPicker) GetCatalogStrategy(_ context.Context, _ string) (strategyID, strategyVersion string, enabled bool, err error) {
+	return f.id, f.version, f.enabled, f.err
+}
+
+// ─── fake qdrant point deleter ────────────────────────────────────────────────
+
+type fakeQdrantDeleter struct {
+	calls []struct {
+		collection string
+		id         uint64
+	}
+	err error
+}
+
+func (f *fakeQdrantDeleter) DeletePoint(_ context.Context, collection string, id uint64) error {
+	f.calls = append(f.calls, struct {
+		collection string
+		id         uint64
+	}{collection, id})
+	return f.err
 }
 
 // ─── fake nsconfig upserter ──────────────────────────────────────────────────

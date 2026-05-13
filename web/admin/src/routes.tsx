@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { IconName } from './components/icons'
+import CatalogItemsPage from './pages/CatalogItemsPage'
 import HealthPage from './pages/HealthPage'
 import NamespaceDetailPage from './pages/NamespaceDetailPage'
 import NamespaceOverviewPage from './pages/NamespaceOverviewPage'
@@ -14,43 +15,49 @@ export interface AdminRoute {
   label: string
   element: ReactNode
   nav?: boolean
+  scope?: 'global' | 'namespace'
   icon?: IconName
 }
 
 export const adminRoutes: AdminRoute[] = [
   {
-    path: 'overview',
+    path: 'namespaces/:ns/overview',
     label: 'Overview',
     element: <NamespaceOverviewPage />,
     nav: true,
+    scope: 'namespace',
     icon: 'home',
   },
   {
-    path: 'batch-runs',
+    path: 'namespaces/:ns/batch-runs',
     label: 'Batch Runs',
     element: <BatchRunsPage />,
     nav: true,
+    scope: 'namespace',
     icon: 'clock-hour-11',
   },
   {
-    path: 'events',
+    path: 'namespaces/:ns/events',
     label: 'Events',
     element: <EventsPage />,
     nav: true,
+    scope: 'namespace',
     icon: 'bell',
   },
   {
-    path: 'trending',
+    path: 'namespaces/:ns/trending',
     label: 'Trending',
     element: <TrendingPage />,
     nav: true,
+    scope: 'namespace',
     icon: 'arrow-big-up-line',
   },
   {
-    path: 'debug',
+    path: 'namespaces/:ns/debug',
     label: 'Recommend Debug',
     element: <RecommendDebugPage />,
     nav: true,
+    scope: 'namespace',
     icon: 'search',
   },
   {
@@ -58,12 +65,16 @@ export const adminRoutes: AdminRoute[] = [
     label: 'System Health',
     element: <HealthPage />,
     nav: true,
+    scope: 'global',
     icon: 'compass',
   },
   {
     path: 'namespaces',
     label: 'Namespaces',
     element: <NamespacesPage />,
+    nav: true,
+    scope: 'global',
+    icon: 'world',
   },
   {
     path: 'namespaces/new',
@@ -71,10 +82,22 @@ export const adminRoutes: AdminRoute[] = [
     element: <NamespaceDetailPage />,
   },
   {
-    path: 'namespaces/:ns',
+    path: 'namespaces/:ns/settings',
     label: 'Edit Namespace',
     element: <NamespaceDetailPage />,
+    nav: true,
+    scope: 'namespace',
+    icon: 'settings',
+  },
+  {
+    path: 'namespaces/:ns/catalog/items',
+    label: 'Catalog Items',
+    element: <CatalogItemsPage />,
+    nav: true,
+    scope: 'namespace',
+    icon: 'image',
   },
 ]
 
-export const navRoutes = adminRoutes.filter(r => r.nav)
+export const globalNavRoutes = adminRoutes.filter(r => r.nav && r.scope === 'global')
+export const namespaceNavRoutes = adminRoutes.filter(r => r.nav && r.scope === 'namespace')

@@ -12,7 +12,7 @@ export default function PageShell({
   className = '',
 }: PageShellProps) {
   return (
-    <div className={`${constrained ? 'max-w-140' : ''} flex flex-col gap-6 ${className}`}>
+    <div className={`${constrained ? 'max-w-140' : ''} flex flex-col gap-4 ${className}`}>
       {children}
     </div>
   )

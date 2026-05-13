@@ -20,6 +20,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/auth"
+	"github.com/jarviisha/codohue/internal/catalog"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
@@ -114,6 +115,13 @@ func run() error {
 		return fmt.Errorf("init ingest worker: %w", err)
 	}
 
+	// catalog auto-embedding ingest path. Producer-only here in cmd/api;
+	// the embedder consumer lives in cmd/embedder. The handler validates
+	// the request, persists the row, and publishes to Redis Streams.
+	catalogRepo := catalog.NewRepository(db)
+	catalogSvc := catalog.NewService(catalogRepo, nsConfigSvc, redisClient)
+	catalogHandler := catalog.NewHandler(catalogSvc)
+
 	// recommend
 	recommendRepo := recommend.NewRepository(db)
 	recommendSvc := recommend.NewService(recommendRepo, nsConfigSvc, idmapSvc, qdrantClient, redisClient)
@@ -148,6 +156,7 @@ func run() error {
 			return chi.URLParam(r, "ns")
 		}))
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
+		r.Post("/v1/namespaces/{ns}/catalog", catalogHandler.Ingest)
 		r.Get("/v1/namespaces/{ns}/subjects/{id}/recommendations", recommendHandler.GetSubjectRecommendations)
 		r.Post("/v1/namespaces/{ns}/rankings", recommendHandler.Rank)
 		r.Get("/v1/namespaces/{ns}/trending", recommendHandler.GetTrending)

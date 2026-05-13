@@ -10,7 +10,7 @@ interface SubjectFilterProps {
 
 export default function SubjectFilter({ value, applied, onChange, onApply, onClear }: SubjectFilterProps) {
   return (
-    <Toolbar className="mb-4">
+    <Toolbar>
       <FormControl label="Filter by Subject ID" htmlFor="event-subject-filter">
         <TextInput
           id="event-subject-filter"

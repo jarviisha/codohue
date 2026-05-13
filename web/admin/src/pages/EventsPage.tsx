@@ -3,7 +3,7 @@ import { useNamespaceList } from '../hooks/useNamespaces'
 import { useEvents } from '../hooks/useEvents'
 import { useInjectEvent } from '../hooks/useInjectEvent'
 import ErrorBanner from '../components/ErrorBanner'
-import { EmptyState, LoadingState, PageHeader, PageShell } from '../components/ui'
+import { Button, EmptyState, LoadingState, PageHeader, PageShell, Toolbar } from '../components/ui'
 import { useActiveNamespace } from '../context/useActiveNamespace'
 import EventsTable from './events/EventsTable'
 import InjectEventPanel, { type InjectEventPayload } from './events/InjectEventPanel'
@@ -20,7 +20,7 @@ export default function EventsPage() {
   const [subjectFilter, setSubjectFilter] = useState('')
   const [appliedSubject, setAppliedSubject] = useState('')
 
-  const { data, error, isLoading } = useEvents(namespace, PAGE_SIZE, offset, appliedSubject)
+  const { data, error, isLoading, isFetching, refetch } = useEvents(namespace, PAGE_SIZE, offset, appliedSubject)
   const inject = useInjectEvent(namespace)
 
   const total = data?.total ?? 0
@@ -59,13 +59,24 @@ export default function EventsPage() {
             onInject={handleInject}
           />
 
-          <SubjectFilter
-            value={subjectFilter}
-            applied={appliedSubject !== ''}
-            onChange={setSubjectFilter}
-            onApply={handleApplyFilter}
-            onClear={handleClearFilter}
-          />
+          <Toolbar className="items-center justify-between">
+            <SubjectFilter
+              value={subjectFilter}
+              applied={appliedSubject !== ''}
+              onChange={setSubjectFilter}
+              onApply={handleApplyFilter}
+              onClear={handleClearFilter}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={isFetching}
+              onClick={() => void refetch()}
+            >
+              {isFetching ? 'Refreshing...' : 'Refresh'}
+            </Button>
+          </Toolbar>
 
           {error && <ErrorBanner message="Failed to load events." />}
 

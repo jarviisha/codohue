@@ -29,6 +29,14 @@ type adminSvc interface {
 	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
 	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
+	GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error)
+	UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
+	TriggerReEmbed(ctx context.Context, namespace string) (*CatalogReEmbedResponse, error)
+	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) (*CatalogItemsListResponse, error)
+	GetCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
+	RedriveCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogRedriveResponse, error)
+	BulkRedriveDeadletter(ctx context.Context, namespace string) (*CatalogBulkRedriveResponse, error)
+	DeleteCatalogItem(ctx context.Context, namespace string, id int64) error
 }
 
 // Handler handles HTTP requests for the admin API.
@@ -153,6 +161,80 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, statusCode, result)
+}
+
+// GetCatalogConfig handles GET /api/admin/v1/namespaces/{ns}/catalog.
+// Returns 200 with the catalog config + available strategies + backlog
+// snapshot, 404 when the namespace does not exist, or 503 when the
+// catalog feature is not wired in this deployment.
+func (h *Handler) GetCatalogConfig(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	resp, err := h.svc.GetCatalogConfig(r.Context(), ns)
+	if err != nil {
+		if errors.Is(err, ErrCatalogConfiguratorUnavailable) {
+			httpapi.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable",
+				"catalog auto-embedding is not wired in this deployment")
+			return
+		}
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not load catalog config")
+		return
+	}
+	if resp == nil {
+		httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+// UpdateCatalogConfig handles PUT /api/admin/v1/namespaces/{ns}/catalog.
+// Status code mapping:
+//
+//	200 OK                       — config applied; body is the new catalog state
+//	400 Bad Request              — strategy unknown, or strategy dim mismatch
+//	                               (body names both dims)
+//	404 Not Found                — namespace does not exist
+//	503 Service Unavailable      — catalog adapter not wired
+func (h *Handler) UpdateCatalogConfig(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+
+	var req NamespaceCatalogUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+
+	cfg, err := h.svc.UpdateCatalogConfig(r.Context(), ns, &req)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrCatalogConfiguratorUnavailable):
+			httpapi.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable",
+				"catalog auto-embedding is not wired in this deployment")
+
+		default:
+			var dimErr *CatalogDimensionMismatch
+			if errors.As(err, &dimErr) {
+				// Body must name both dimensions verbatim per
+				// contracts/rest-api.md.
+				httpapi.WriteJSON(w, http.StatusBadRequest, struct {
+					Error                 string `json:"error"`
+					StrategyDim           int    `json:"strategy_dim"`
+					NamespaceEmbeddingDim int    `json:"namespace_embedding_dim"`
+				}{
+					Error:                 "strategy dimension mismatch",
+					StrategyDim:           dimErr.StrategyDim,
+					NamespaceEmbeddingDim: dimErr.NamespaceEmbeddingDim,
+				})
+				return
+			}
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		}
+		return
+	}
+	if cfg == nil {
+		httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, cfg)
 }
 
 // GetNamespacesOverview handles GET /api/admin/v1/namespaces?include=overview.

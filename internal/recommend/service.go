@@ -3,6 +3,7 @@ package recommend
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -31,6 +32,13 @@ const (
 	denseOverFetchFactor = 3
 	normEpsilon          = 1e-9
 )
+
+// ErrCatalogActive is returned by StoreObjectEmbedding when the namespace
+// has catalog auto-embedding enabled, per FR-018 / R8 source-of-truth
+// precedence: BYOE writes for object dense vectors are rejected with 409
+// because the catalog is the single source of truth in catalog mode.
+// Subject embeddings are unaffected.
+var ErrCatalogActive = errors.New("recommend: namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted")
 
 type recommendRepo interface {
 	CountInteractions(ctx context.Context, namespace, subjectID string) (int, error)
@@ -146,6 +154,15 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("get ns config: %w", err)
+	}
+
+	// FR-018 / R8 source-of-truth precedence: when catalog auto-embedding
+	// is enabled for this namespace, BYOE writes for OBJECT dense vectors
+	// are rejected so the catalog stays the single source of truth. Subject
+	// embeddings are NOT guarded — the spec assumption keeps subject vectors
+	// flowing through the cron mean-pool path even under catalog mode.
+	if cfg != nil && cfg.CatalogEnabled && entityType == "object" {
+		return ErrCatalogActive
 	}
 
 	// Validate dimension when config is present.

@@ -36,22 +36,18 @@ export default function BatchRunsTable({
           <Th>Duration</Th>
           <Th>Subjects</Th>
           <Th>Status</Th>
+          <Th align="right">Actions</Th>
         </Thead>
         <Tbody>
           {runs.length === 0 && (
             <Tr>
-              <Td colSpan={8} muted className="text-center py-6 italic">
+              <Td colSpan={9} muted className="text-center py-6 italic">
                 No {statusFilter === 'all' ? '' : statusFilter + ' '}runs on this page
               </Td>
             </Tr>
           )}
           {runs.map(run => (
-            <Tr
-              key={run.id}
-              hoverable
-              onClick={() => onSelectRun(run)}
-              className="cursor-pointer"
-            >
+            <Tr key={run.id} hoverable>
               <Td mono>{run.id}</Td>
               <Td>
                 <CodeBadge>{run.namespace}</CodeBadge>
@@ -73,6 +69,16 @@ export default function BatchRunsTable({
               <Td mono>{run.subjects_processed}</Td>
               <Td>
                 <RunStatus run={run} />
+              </Td>
+              <Td align="right">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onSelectRun(run)}
+                >
+                  Details
+                </Button>
               </Td>
             </Tr>
           ))}

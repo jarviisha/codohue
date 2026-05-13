@@ -1,8 +1,9 @@
 BIN_DIR := ./tmp
 
-API_BIN   := $(BIN_DIR)/api
-CRON_BIN  := $(BIN_DIR)/cron
-ADMIN_BIN := $(BIN_DIR)/admin
+API_BIN      := $(BIN_DIR)/api
+CRON_BIN     := $(BIN_DIR)/cron
+ADMIN_BIN    := $(BIN_DIR)/admin
+EMBEDDER_BIN := $(BIN_DIR)/embedder
 
 MIGRATIONS_DIR := ./migrations
 COVERAGE_DIR   := $(BIN_DIR)/coverage
@@ -16,7 +17,11 @@ GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
 GO_CACHE_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp
 LINT_ENV     := $(GO_CACHE_ENV) GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
 
-COMPOSE          := docker compose
+# DOCKER_BUILDKIT / COMPOSE_DOCKER_CLI_BUILD are no-ops on modern Docker (23+,
+# compose v2) where BuildKit is already the default. Setting them keeps older
+# host installs working with the Dockerfile's `# syntax=` directive and
+# `--mount=type=cache` instructions.
+COMPOSE          := DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose
 COMPOSE_APP      := $(COMPOSE) -f docker-compose.app.yml
 COMPOSE_PROD     := $(COMPOSE) -f docker-compose.prod.yml
 COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_RECOMMENDER_API_KEY=dummy
@@ -34,14 +39,18 @@ MIN_INFRA_QDRANT   ?= 75
 MIN_INFRA_POSTGRES ?= 85
 MIN_CMD_API        ?= 40
 MIN_CMD_CRON       ?= 45
+# Feature 004 — catalog auto-embedding domains.
+MIN_CATALOG        ?= 85
+MIN_EMBEDDER       ?= 70
+MIN_EMBEDSTRATEGY  ?= 90
 
 .PHONY: \
-	build build-api build-cron build-admin \
-	run run-cron run-admin dev dev-admin dev-all \
+	build build-api build-cron build-admin build-embedder \
+	run run-cron run-admin run-embedder dev dev-admin dev-embedder dev-all \
 	up up-all up-build up-d up-build-d \
 	up-infra up-infra-build up-infra-d up-infra-build-d \
 	up-app up-app-build up-app-d up-app-build-d down down-v down-app \
-	logs logs-api logs-cron logs-admin logs-app \
+	logs logs-api logs-cron logs-admin logs-embedder logs-app \
 	compose-check compose-check-app compose-check-prod \
 	lint fmt \
 	test test-pkg test-verbose test-race \
@@ -53,7 +62,7 @@ MIN_CMD_CRON       ?= 45
 
 # Build
 
-build: build-api build-cron build-admin
+build: build-api build-cron build-admin build-embedder
 
 build-api:
 	go build -o $(API_BIN) ./cmd/api
@@ -63,6 +72,9 @@ build-cron:
 
 build-admin:
 	go build -o $(ADMIN_BIN) ./cmd/admin
+
+build-embedder:
+	go build -o $(EMBEDDER_BIN) ./cmd/embedder
 
 # Run and development
 
@@ -75,11 +87,17 @@ run-cron:
 run-admin:
 	go run ./cmd/admin
 
+run-embedder:
+	go run ./cmd/embedder
+
 dev:
 	air
 
 dev-admin:
 	cd web/admin && npm run dev
+
+dev-embedder:
+	go run ./cmd/embedder
 
 dev-all:
 	@go build -o $(ADMIN_BIN) ./cmd/admin
@@ -138,6 +156,9 @@ logs-cron:
 
 logs-admin:
 	$(COMPOSE) logs -f admin
+
+logs-embedder:
+	$(COMPOSE) logs -f embedder
 
 logs-app:
 	$(COMPOSE_APP) logs -f
@@ -263,6 +284,9 @@ coverage-check-all: coverage-unit
 	$(MAKE) coverage-check-pkg PKG=./internal/infra/postgres/... MIN=$(MIN_INFRA_POSTGRES)
 	$(MAKE) coverage-check-pkg PKG=./cmd/api/... MIN=$(MIN_CMD_API)
 	$(MAKE) coverage-check-pkg PKG=./cmd/cron/... MIN=$(MIN_CMD_CRON)
+	$(MAKE) coverage-check-pkg PKG=./internal/catalog/... MIN=$(MIN_CATALOG)
+	$(MAKE) coverage-check-pkg PKG=./internal/embedder/... MIN=$(MIN_EMBEDDER)
+	$(MAKE) coverage-check-pkg PKG=./internal/core/embedstrategy/... MIN=$(MIN_EMBEDSTRATEGY)
 
 coverage-clean:
 	rm -rf $(COVERAGE_DIR)
@@ -276,7 +300,7 @@ test-e2e-api: build-api
 	go test -v -tags=e2e -timeout=120s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
 
 test-e2e-heavy: build
-	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid'
+	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog'
 
 # Migrations
 

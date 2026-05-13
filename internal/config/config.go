@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -132,4 +133,90 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// EmbedderConfig holds configuration for the embedder binary (cmd/embedder).
+type EmbedderConfig struct {
+	DatabaseURL string
+	RedisURL    string
+	QdrantHost  string
+	QdrantPort  int
+	LogFormat   string
+
+	// CatalogMaxContentBytes is the global default per-namespace cap on the
+	// size of catalog item content. Per-namespace overrides live in
+	// namespace_configs.catalog_max_content_bytes.
+	CatalogMaxContentBytes int
+
+	// EmbedMaxAttempts is the global default for the number of transient
+	// retries before an item is moved to dead_letter. Overridable per
+	// namespace via namespace_configs.catalog_max_attempts.
+	EmbedMaxAttempts int
+
+	// HealthPort is the listen port for the embedder's /healthz and /metrics
+	// endpoints (default "2003").
+	HealthPort string
+
+	// ReplicaName is the consumer name used when joining the Redis Streams
+	// consumer group. Empty string means "use the hostname at runtime".
+	ReplicaName string
+
+	// NamespacePollInterval is how often the embedder polls
+	// namespace_configs for newly-enabled namespaces.
+	NamespacePollInterval time.Duration
+}
+
+// LoadEmbedder reads and validates configuration for the embedder binary.
+// It requires DATABASE_URL but not RECOMMENDER_API_KEY (the embedder is a
+// background worker that does not expose authenticated endpoints).
+func LoadEmbedder() (*EmbedderConfig, error) {
+	loadDotenv()
+
+	cfg := &EmbedderConfig{
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
+		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
+		LogFormat:   getEnv("LOG_FORMAT", "text"),
+		HealthPort:  getEnv("EMBEDDER_HEALTH_PORT", "2003"),
+		ReplicaName: getEnv("EMBEDDER_REPLICA_NAME", ""),
+	}
+
+	if cfg.DatabaseURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	qdrantPort, err := strconv.Atoi(getEnv("QDRANT_PORT", "6334"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid QDRANT_PORT: %w", err)
+	}
+	cfg.QdrantPort = qdrantPort
+
+	maxBytes, err := strconv.Atoi(getEnv("CATALOG_MAX_CONTENT_BYTES", "32768"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CATALOG_MAX_CONTENT_BYTES: %w", err)
+	}
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("CATALOG_MAX_CONTENT_BYTES must be positive, got %d", maxBytes)
+	}
+	cfg.CatalogMaxContentBytes = maxBytes
+
+	maxAttempts, err := strconv.Atoi(getEnv("EMBED_MAX_ATTEMPTS", "5"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid EMBED_MAX_ATTEMPTS: %w", err)
+	}
+	if maxAttempts <= 0 {
+		return nil, fmt.Errorf("EMBED_MAX_ATTEMPTS must be positive, got %d", maxAttempts)
+	}
+	cfg.EmbedMaxAttempts = maxAttempts
+
+	pollInterval, err := time.ParseDuration(getEnv("EMBEDDER_NAMESPACE_POLL_INTERVAL", "30s"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid EMBEDDER_NAMESPACE_POLL_INTERVAL: %w", err)
+	}
+	if pollInterval <= 0 {
+		return nil, fmt.Errorf("EMBEDDER_NAMESPACE_POLL_INTERVAL must be positive, got %s", pollInterval)
+	}
+	cfg.NamespacePollInterval = pollInterval
+
+	return cfg, nil
 }
