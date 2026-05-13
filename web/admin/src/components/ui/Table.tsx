@@ -6,7 +6,7 @@ import type { HTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } fr
 export function Table({ children }: { children: ReactNode }) {
   return (
     <div className="border border-default rounded-sm overflow-x-auto bg-surface">
-      <table className="w-full border-collapse text-sm">{children}</table>
+      <table className="w-full border-collapse text-sm leading-5">{children}</table>
     </div>
   )
 }
@@ -49,7 +49,7 @@ export function Th({ align = 'left', className = '', children, ...rest }: ThProp
   return (
     <th
       scope="col"
-      className={`px-2.5 py-2 font-mono text-[11px] uppercase tracking-[0.06em] text-muted ${ALIGN[align]} ${className}`}
+      className={`px-3 py-2.5 font-mono text-xs uppercase tracking-[0.04em] text-secondary ${ALIGN[align]} ${className}`}
       {...rest}
     >
       {children}
@@ -66,7 +66,7 @@ interface TdProps extends TdHTMLAttributes<HTMLTableCellElement> {
 export function Td({ align = 'left', mono = false, className = '', children, ...rest }: TdProps) {
   return (
     <td
-      className={`px-2.5 py-2 text-secondary ${ALIGN[align]} ${mono ? 'font-mono tabular-nums text-primary' : ''} ${className}`}
+      className={`px-3 py-2.5 text-secondary ${ALIGN[align]} ${mono ? 'font-mono tabular-nums text-primary' : ''} ${className}`}
       {...rest}
     >
       {children}

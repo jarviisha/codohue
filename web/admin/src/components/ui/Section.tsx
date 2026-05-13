@@ -3,8 +3,8 @@ import type { ReactNode } from 'react'
 interface SectionProps {
   title?: ReactNode
   actions?: ReactNode
-  /** Vertical gap inside the section. Defaults to `gap-3`. */
-  gap?: 'gap-2' | 'gap-3' | 'gap-4'
+  /** Vertical gap inside the section. Defaults to `gap-4`. */
+  gap?: 'gap-2' | 'gap-3' | 'gap-4' | 'gap-5'
   children: ReactNode
 }
 
@@ -16,7 +16,7 @@ interface SectionProps {
 export default function Section({
   title,
   actions,
-  gap = 'gap-3',
+  gap = 'gap-4',
   children,
 }: SectionProps) {
   const hasHeader = Boolean(title || actions)
@@ -25,7 +25,7 @@ export default function Section({
       {hasHeader ? (
         <header className="flex items-center justify-between gap-2">
           {title ? (
-            <h2 className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
+            <h2 className="font-mono text-xs uppercase tracking-[0.04em] text-secondary">
               {title}
             </h2>
           ) : (

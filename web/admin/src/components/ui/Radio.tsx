@@ -71,9 +71,9 @@ export function RadioGroup<V extends string = string>({
               className="mt-0.5"
             />
             <span className="flex flex-col">
-              <span className="text-sm text-primary">{opt.label}</span>
+                <span className="text-sm text-primary leading-5">{opt.label}</span>
               {opt.hint ? (
-                <span className="text-xs text-muted">{opt.hint}</span>
+                <span className="text-sm text-muted leading-5">{opt.hint}</span>
               ) : null}
             </span>
           </label>

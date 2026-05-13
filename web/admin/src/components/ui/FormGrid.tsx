@@ -10,7 +10,7 @@ interface FormGridProps {
 export default function FormGrid({ columns = 2, children }: FormGridProps) {
   return (
     <div
-      className={`grid grid-cols-1 gap-3 ${columns === 2 ? 'md:grid-cols-2' : ''}`}
+      className={`grid grid-cols-1 gap-4 ${columns === 2 ? 'md:grid-cols-2' : ''}`}
     >
       {children}
     </div>

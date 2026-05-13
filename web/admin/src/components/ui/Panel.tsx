@@ -20,18 +20,18 @@ export default function Panel({ title, actions, footer, children }: PanelProps) 
   return (
     <section className="bg-surface border border-default rounded-sm">
       {hasHeader ? (
-        <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3">
           {title ? (
-            <h2 className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
+            <h2 className="font-mono text-xs uppercase tracking-[0.04em] text-secondary">
               {title}
             </h2>
           ) : <span />}
           {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
         </div>
       ) : null}
-      <div className={hasHeader ? 'px-4 pb-4' : 'p-4'}>{children}</div>
+      <div className={hasHeader ? 'px-5 pb-5' : 'p-5'}>{children}</div>
       {footer ? (
-        <div className="px-4 py-3 border-t border-default text-sm text-muted">{footer}</div>
+        <div className="px-5 py-3 border-t border-default text-sm text-muted leading-5">{footer}</div>
       ) : null}
     </section>
   )

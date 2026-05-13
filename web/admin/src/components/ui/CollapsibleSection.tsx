@@ -23,7 +23,7 @@ export default function CollapsibleSection({
 
   return (
     <section className="bg-surface border border-default rounded-sm">
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 px-5 py-4">
         <h3 className="text-sm font-semibold text-primary flex-1 min-w-0">
           {title}
         </h3>
@@ -34,14 +34,14 @@ export default function CollapsibleSection({
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             aria-label={open ? 'Collapse section' : 'Expand section'}
-            className="font-mono text-xs uppercase tracking-[0.06em] text-muted hover:text-primary"
+            className="font-mono text-xs uppercase tracking-[0.04em] text-secondary hover:text-primary"
           >
             {open ? 'collapse' : 'expand'}
           </button>
         </div>
       </div>
       {open ? (
-        <div className="px-4 pb-4 pt-3 border-t border-default">{children}</div>
+        <div className="px-5 pb-5 pt-4 border-t border-default">{children}</div>
       ) : null}
     </section>
   )

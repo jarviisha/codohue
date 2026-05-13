@@ -40,7 +40,7 @@ export default function CodeBlock({
       {showHeader ? (
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-default bg-surface-raised">
           {language ? (
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">
+            <span className="font-mono text-xs uppercase tracking-[0.04em] text-secondary">
               {language}
             </span>
           ) : (
@@ -50,7 +50,7 @@ export default function CodeBlock({
             <button
               type="button"
               onClick={copy}
-              className="font-mono text-xs uppercase tracking-[0.06em] text-muted hover:text-primary"
+              className="font-mono text-xs uppercase tracking-[0.04em] text-secondary hover:text-primary"
               aria-label="Copy to clipboard"
             >
               {copied ? 'copied' : 'copy'}
@@ -59,7 +59,7 @@ export default function CodeBlock({
         </div>
       ) : null}
       <pre
-        className="overflow-auto p-3 m-0"
+        className="overflow-auto p-4 m-0"
         style={maxHeight ? { maxHeight } : undefined}
       >
         <code className="font-mono text-sm text-primary whitespace-pre">

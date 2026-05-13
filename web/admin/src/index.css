@@ -5,19 +5,19 @@
 
 /* ─── Semantic color tokens (light) — Slate-based ─── */
 :root {
-  --bg-base: #ffffff;
-  --bg-subtle: #f8fafc;
+  --bg-base: #f8fafc;
+  --bg-subtle: #f1f5f9;
   --bg-surface: #ffffff;
-  --bg-surface-raised: #f1f5f9;
-  --border-default: #e2e8f0;
-  --border-strong: #cbd5e1;
+  --bg-surface-raised: #e2e8f0;
+  --border-default: #cbd5e1;
+  --border-strong: #94a3b8;
   --text-primary: #0f172a;
-  --text-secondary: #475569;
-  --text-muted: #64748b;
-  --text-disabled: #cbd5e1;
+  --text-secondary: #334155;
+  --text-muted: #475569;
+  --text-disabled: #94a3b8;
   --accent: #0866ff;
   --accent-emphasis: #0866ff;
-  --accent-subtle: #ebf3ff;
+  --accent-subtle: #dbeafe;
   --accent-text: #ffffff;
   --success: #10b981;
   --warning: #f59e0b;
@@ -25,23 +25,22 @@
 }
 
 /* ─── Semantic color tokens (dark) — GitHub Primer-aligned ─── */
-/* Surface pattern mirrors light: bg-base = bg-surface (the canvas tone), with
-   bg-subtle and bg-surface-raised as raised variants. Panels separate from
-   the canvas via border, not bg fill. */
+/* Surface pattern mirrors light: bg-base is the canvas, bg-surface is content,
+   with bg-subtle and bg-surface-raised as secondary/raised variants. */
 .dark {
   --bg-base: #0d1117;
   --bg-subtle: #151b23;
-  --bg-surface: #0d1117;
-  --bg-surface-raised: #262c36;
+  --bg-surface: #161b22;
+  --bg-surface-raised: #21262d;
   --border-default: #3d444d;
-  --border-strong: #656c76;
+  --border-strong: #6e7681;
   --text-primary: #f0f6fc;
-  --text-secondary: #c9d1d9;
-  --text-muted: #9198a1;
-  --text-disabled: #656c76;
+  --text-secondary: #d1d7e0;
+  --text-muted: #aeb6c2;
+  --text-disabled: #6e7681;
   --accent: #4493f8; /* text on neutral bg (links, accent labels) */
   --accent-emphasis: #1f6feb; /* solid bg with white text (Button primary) */
-  --accent-subtle: #132339; /* selected/active row bg (15% blend of #388bfd) */
+  --accent-subtle: #1b2f4a;
   --accent-text: #ffffff;
   --success: #3fb950;
   --warning: #d29922;
@@ -110,6 +109,7 @@ html {
 body {
   font-family: var(--font-sans);
   color: var(--text-secondary);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

@@ -7,7 +7,7 @@ interface LoadingStateProps {
 export default function LoadingState({ rows = 3, label = 'loading' }: LoadingStateProps) {
   return (
     <div className="flex flex-col gap-2" aria-busy="true" aria-live="polite">
-      <p className="font-mono text-[11px] uppercase tracking-[0.12em] text-muted">{label}</p>
+      <p className="font-mono text-xs uppercase tracking-[0.04em] text-secondary">{label}</p>
       {Array.from({ length: rows }).map((_, i) => (
         <div
           key={i}

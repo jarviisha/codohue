@@ -4,7 +4,7 @@ export default function UserMenu() {
   return (
     <button
       type="button"
-      className="h-7 px-2 flex items-center justify-center rounded-sm border border-default text-muted hover:text-primary hover:border-strong font-mono text-xs uppercase tracking-[0.06em]"
+      className="h-8 px-2.5 flex items-center justify-center rounded-sm border border-default text-secondary hover:text-primary hover:border-strong font-mono text-xs uppercase tracking-[0.04em]"
       aria-label="User menu"
       title="User menu"
     >

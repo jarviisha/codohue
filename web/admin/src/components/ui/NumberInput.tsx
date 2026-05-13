@@ -15,7 +15,7 @@ const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(function Numb
       type="number"
       inputMode="numeric"
       className={[
-        'h-8 px-2.5 text-sm rounded-sm border bg-surface',
+        'h-9 px-3 text-sm rounded-sm border bg-surface',
         'font-mono tabular-nums text-primary text-right',
         'placeholder:text-muted',
         'focus:outline-none focus:shadow-focus',

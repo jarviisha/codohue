@@ -26,7 +26,7 @@ export default function Sidebar() {
         : 'warn'
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-60 bg-surface border-r border-default flex flex-col z-40">
+    <aside className="fixed left-0 top-0 h-screen w-60 bg-subtle border-r border-default flex flex-col z-40">
       <div className="h-12 px-4 flex items-center border-b border-default">
         <span className="font-mono text-xs font-semibold uppercase tracking-[0.12em] text-primary">
           codohue

@@ -8,8 +8,8 @@ interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'siz
 }
 
 const SIZE: Record<SelectSize, string> = {
-  sm: 'h-7 px-2 text-xs',
-  md: 'h-8 px-2.5 text-sm',
+  sm: 'h-8 px-2.5 text-sm',
+  md: 'h-9 px-3 text-sm',
 }
 
 const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
@@ -20,7 +20,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
     <select
       ref={ref}
       className={[
-        'rounded-sm border bg-surface text-primary appearance-none pr-7',
+        'rounded-sm border bg-surface text-primary appearance-none pr-8',
         'bg-no-repeat bg-[right_0.5rem_center]',
         'focus:outline-none focus:shadow-focus',
         invalid ? 'border-danger' : 'border-default hover:border-strong focus:border-accent',
