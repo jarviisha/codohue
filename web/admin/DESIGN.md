@@ -15,6 +15,8 @@ The new design language is **terminal/console-influenced**:
 - Borders and dividers do the structural work. Shadows are exceptional, not decorative.
 - Status is expressed by **glyph + color + text**, never color alone.
 - No marketing-style hero content, no nested decorative cards, no oversized surfaces.
+- Readability beats density. If a compact choice makes operators slow down,
+  squint, or re-read, increase contrast, size, or spacing before adding more UI.
 
 If a design choice would not look at home next to `kubectl`, `htop`, `psql`, or Grafana — reconsider it.
 
@@ -28,19 +30,19 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 
 | Role | Light | Dark | Reference |
 |------|-------|------|-----------|
-| `bg-base` | `#FFFFFF` | `#0d1117` | dark = Primer bgColor-default |
-| `bg-subtle` | `#F8FAFC` | `#151b23` | light = slate-50; dark = Primer bgColor-muted |
-| `bg-surface` | `#FFFFFF` | `#0d1117` | **same as bg-base in both themes** — Panel separates by border, not bg fill |
-| `bg-surface-raised` | `#F1F5F9` | `#262c36` | light = slate-100; dark = Primer button-default-bgColor-hover (used for hover/raised states only) |
-| `border-default` | `#E2E8F0` | `#3d444d` | light = slate-200; dark = Primer borderColor-default |
-| `border-strong` | `#CBD5E1` | `#656c76` | light = slate-300; dark = Primer neutral-emphasis |
+| `bg-base` | `#F8FAFC` | `#0d1117` | app canvas |
+| `bg-subtle` | `#F1F5F9` | `#151b23` | alternate bands, sidebar, low-emphasis regions |
+| `bg-surface` | `#FFFFFF` | `#161b22` | panels, tables, inputs, modals |
+| `bg-surface-raised` | `#E2E8F0` | `#21262d` | hover, selected-adjacent, raised controls |
+| `border-default` | `#CBD5E1` | `#3d444d` | resting dividers and panel boundaries |
+| `border-strong` | `#94A3B8` | `#6e7681` | hover, focus-adjacent, high-importance dividers |
 | `text-primary` | `#0F172A` | `#f0f6fc` | dark = Primer fgColor-default |
-| `text-secondary` | `#475569` | `#c9d1d9` | dark = Primer classic fg-default (mid tier) |
-| `text-muted` | `#64748B` | `#9198a1` | dark = Primer fgColor-muted |
-| `text-disabled` | `#CBD5E1` | `#656c76` | dark = Primer fgColor-disabled |
+| `text-secondary` | `#334155` | `#d1d7e0` | default body, form labels, table body |
+| `text-muted` | `#475569` | `#aeb6c2` | metadata, hints, secondary timestamps |
+| `text-disabled` | `#94A3B8` | `#6e7681` | disabled controls only |
 | `accent` | `#0866FF` | `#4493f8` | **text on neutral bg** (links, accent labels) |
 | `accent-emphasis` | `#0866FF` | `#1f6feb` | **solid bg with white text** (Button primary) |
-| `accent-subtle` | `#EBF3FF` | `#132339` | selected / active row bg |
+| `accent-subtle` | `#DBEAFE` | `#1b2f4a` | selected / active row bg |
 | `accent-text` | `#FFFFFF` | `#FFFFFF` | text on solid accent (`bg-accent-emphasis`) |
 | `success` | `#10B981` | `#3fb950` | dark = Primer fgColor-success |
 | `warning` | `#F59E0B` | `#d29922` | dark = Primer fgColor-attention |
@@ -49,11 +51,22 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 **Palette notes**
 
 - **`accent` vs `accent-emphasis`.** Dark theme splits the accent into two values because GitHub does: `accent` `#4493f8` is for accent-colored **text** on a neutral background (6.11:1 vs `bg-base` — passes AA-normal); `accent-emphasis` `#1f6feb` is for solid accent **backgrounds** with white text (4.63:1 — passes AA-normal). Using `accent` itself as a button bg with white text would fail (3.10:1). Light theme uses the same value for both because Meta Blue on white passes either way (4.82:1). Always pair `bg-accent-emphasis` with `text-accent-text`; use `text-accent` only on neutral surfaces.
-- **Symmetric layer pattern.** Both themes use the same 3-tier surface system: `bg-base = bg-surface` is the canvas tone (white in light, `#0d1117` in dark); `bg-subtle` is a slight variation used for alt regions; `bg-surface-raised` is reserved for **hover and raised states only** (e.g. table row hover, dropdown item hover, ghost button hover). **Panels do not change background** — they sit on the canvas and separate via `border border-default`. The bg-fill-card pattern is rejected in favour of border-led layout to keep light and dark visually consistent; without it, dark would lean on bg shifts that don't translate to light. The trade-off in dark is that the Panel border is subtle (1.92:1 vs `bg-base`), but borders read clearly at hairline width on both themes.
-- **`text-muted` is tuned for WCAG AA-normal (4.5:1).** Light = slate-500 on white (4.76:1). Dark = Primer fgColor-muted on Primer bgColor-default (6.50:1). Helper-text-sized content stays readable.
+- **Layer pattern.** Both themes use visible surface separation: `bg-base` is the page canvas, `bg-surface` is the content surface, `bg-subtle` is the secondary region, and `bg-surface-raised` is reserved for hover/raised states. Panels and tables use both `bg-surface` and `border-default`; they do not rely on hairline borders alone. This is intentionally less flat than the original border-only pass because the app must stay readable during long operator sessions.
+- **Text contrast tiers.** `text-primary` is for titles, IDs, numbers, and current values. `text-secondary` is the default body/readable UI text. `text-muted` is only for metadata, hints, empty-state detail, and secondary timestamps; it must not carry required form labels, table body values, or primary navigation labels.
+- **`text-muted` still passes WCAG AA-normal, but it is no longer the default small-text color.** Small text (`text-xs`, 11px mono labels, timestamps) should prefer `text-secondary` unless the information is genuinely optional.
 - **No status-bg tokens.** `Notice` uses a left-border pattern, not a tinted background — see §6 (Notice primitive).
 
 Light is the primary review target. Dark must preserve contrast, hierarchy, and state meaning.
+
+### 2.1.1 Readability Targets
+
+Before shipping a page, verify both themes against these targets:
+
+- Main body text and table body values use at least `text-sm` with readable line-height (`leading-5` or browser-normal). Avoid `text-xs` for values operators must compare.
+- Required labels, active nav items, table body values, and command names use `text-secondary` or stronger.
+- `text-muted` is allowed for helper text, section metadata, timestamps when adjacent to a primary value, and disabled/empty context only.
+- Adjacent surfaces must differ by either background or a strong enough border. A panel on the app canvas cannot rely on `#E2E8F0`-style hairline contrast alone.
+- Compact controls are scoped to dense toolbars and table actions. Forms and primary actions use the default control size.
 
 ### 2.2 Type tokens
 
@@ -214,30 +227,32 @@ Width: full app shell width after the sidebar. Constrain only pages with a clear
 |------|-------|-------|
 | Page title | `text-xl font-semibold text-primary leading-tight` | sans |
 | Panel title | `text-sm font-semibold text-primary` | sans |
-| Section / meta label | `text-[11px] font-mono uppercase tracking-[0.04em] text-muted` | mono uppercase |
-| Body | `text-sm text-secondary` | sans |
-| Muted body | `text-sm text-muted` or `text-xs text-muted` | sans |
+| Section / meta label | `text-xs font-mono uppercase tracking-[0.04em] text-secondary` | mono uppercase; use `text-muted` only for low-importance labels |
+| Body | `text-sm text-secondary leading-5` | sans |
+| Muted body | `text-sm text-muted leading-5` | sans; avoid for required content |
 | Numeric value | `font-mono tabular-nums text-primary` | always mono |
-| ID / code inline | `font-mono text-xs bg-surface-raised px-1 rounded-sm` | use `CodeBadge` |
+| ID / code inline | `font-mono text-xs bg-surface-raised px-1.5 py-0.5 rounded-sm` | use `CodeBadge` |
 | Timestamp / duration | `font-mono tabular-nums` | always mono |
-| Table column header | `font-mono text-[11px] uppercase text-muted` | mono |
+| Table column header | `font-mono text-xs uppercase text-secondary` | mono |
 
 No negative letter spacing in admin content. Uppercase is reserved for metadata, section labels, and table headers.
+
+Small text rule: 11px mono is allowed only for sidebar section labels, status-adjacent metadata, and extremely compact table headers. If the text is a value or an action, use `text-xs` minimum; if it is a paragraph, use `text-sm`.
 
 ## 5. Spacing & Shape
 
 | Surface | Rule |
 |---------|------|
-| Panel padding | `p-4` |
-| Compact table cell | `px-2.5 py-2` (sans label cells), `px-2.5 py-2 font-mono tabular-nums` (numeric) |
-| Form field vertical spacing | `mb-3` (or via `FormGrid`) |
-| Default control height | `h-8` |
-| Compact toolbar / filter control | `h-7` |
+| Panel padding | `p-5` default; `p-4` only for dense repeated panels |
+| Compact table cell | `px-3 py-2.5` (sans label cells), `px-3 py-2.5 font-mono tabular-nums` (numeric) |
+| Form field vertical spacing | `gap-2` inside field, `gap-4` between form rows |
+| Default control height | `h-9` |
+| Compact toolbar / filter control | `h-8` |
 | Default radius | `rounded-sm` (see §2.3) |
 | Panel border | `border border-default` |
 | Panel divider (in-panel sections) | `border-t border-default` |
 
-Vertical rhythm between major sections: prefer `gap-4` or `mb-4`.
+Vertical rhythm between major sections: prefer `gap-5` or `mb-5`; dense dashboards may use `gap-4` when the page remains easy to scan.
 
 **Hard rules**:
 - No `rounded-lg`, no `rounded-md`. Only `rounded-none`, `rounded-sm`, `rounded`, `rounded-full`.
