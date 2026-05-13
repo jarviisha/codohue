@@ -16,7 +16,7 @@ interface PageHeaderProps {
 export default function PageHeader({ title, meta, actions }: PageHeaderProps) {
   return (
     <header className="border-b border-default pb-3">
-      <div className="flex items-baseline justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex flex-col gap-1 min-w-0">
           <h1 className="text-xl font-semibold text-primary leading-tight">
             {title}
