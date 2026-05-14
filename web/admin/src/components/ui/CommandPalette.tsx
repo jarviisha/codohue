@@ -57,7 +57,8 @@ export default function CommandPalette() {
       />
       {filtered.length === 0 ? (
         <p className="text-sm text-muted">
-          <span className="font-mono">[PEND]</span> no commands match
+          <span className="font-mono text-xs uppercase tracking-[0.04em]">PEND</span>{' '}
+          no commands match
           {query ? <> for "{query}"</> : <> (registry empty)</>}.
         </p>
       ) : (

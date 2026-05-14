@@ -2,29 +2,32 @@ import type { ReactNode } from 'react'
 
 interface PageHeaderProps {
   title: ReactNode
-  /** Mono meta strip rendered directly under the title in the same
-   *  left column. Always reserves a row so the header height stays
-   *  constant across pages. */
+  /** Deprecated: page metadata now belongs in the page body, not the fixed header. */
   meta?: ReactNode
-  /** Right-aligned page-level actions. Baseline-aligned to the title. */
+  /** Right-aligned page-level commands. Prefer secondary/ghost actions. */
   actions?: ReactNode
+  /** Deprecated: labels are no longer rendered in the compact fixed header. */
+  label?: ReactNode
 }
 
-// title + meta stacked in the left column as one block; actions sit on the
-// right, baseline-aligned to the title text. A subtle bottom border separates
-// the header from page content.
-export default function PageHeader({ title, meta, actions }: PageHeaderProps) {
+// Compact console-style page header. It stays pinned to the top of the
+// scrollable page body; page-specific status/details belong in panels below.
+export default function PageHeader({
+  title,
+  actions,
+}: PageHeaderProps) {
   return (
-    <header className="border-b border-default pb-4 -mx-6 px-6">
+    <header className="sticky top-0 z-20 -mx-6 px-6 py-6 bg-base border-b border-default">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-1 min-w-0">
-          <h1 className="text-xl font-semibold text-primary leading-tight">
+        <div className="min-w-0">
+          <h1 className="font-mono text-xl text-primary leading-6 truncate lowercase">
             {title}
           </h1>
-          <div className="text-sm font-mono text-muted leading-5 min-h-5">{meta}</div>
         </div>
         {actions ? (
-          <div className="flex items-center gap-2 shrink-0">{actions}</div>
+          <div className="page-header-actions flex items-center gap-2 shrink-0">
+            {actions}
+          </div>
         ) : null}
       </div>
     </header>

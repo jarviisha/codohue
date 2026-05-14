@@ -148,6 +148,12 @@ pre,
   input[type="radio"] {
     accent-color: var(--accent-emphasis);
   }
+
+  .page-header-actions button {
+    height: 1.75rem;
+    padding-inline: 0.5rem;
+    font-size: 0.75rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

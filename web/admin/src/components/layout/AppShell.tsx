@@ -10,12 +10,12 @@ import CommandPalette from '../ui/CommandPalette'
 // shell page; the palette modal itself only renders when open.
 export default function AppShell() {
   return (
-    <div className="min-h-screen bg-base text-primary">
+    <div className="min-h-screen bg-surface text-primary">
       <Sidebar />
       <div className="ml-60">
         <TopBar />
-        <main className="pt-12">
-          <div className="px-6 py-6">
+        <main className="fixed left-60 right-0 top-12 bottom-0 overflow-y-auto bg-base">
+          <div className="min-h-full px-6 pb-6">
             <Outlet />
           </div>
         </main>

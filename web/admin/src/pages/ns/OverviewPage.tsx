@@ -270,13 +270,19 @@ export default function NamespaceOverviewPage() {
                 {
                   label: 'catalog auto-embed',
                   value: (
-                    <span className="text-muted">[PEND] wires in 2.B</span>
+                    <span className="text-muted">
+                      <span className="font-mono text-xs uppercase tracking-[0.04em]">PEND</span>{' '}
+                      wires in 2.B
+                    </span>
                   ),
                 },
                 {
                   label: 'catalog backlog',
                   value: (
-                    <span className="text-muted">[PEND] wires in 2.B</span>
+                    <span className="text-muted">
+                      <span className="font-mono text-xs uppercase tracking-[0.04em]">PEND</span>{' '}
+                      wires in 2.B
+                    </span>
                   ),
                 },
               ]}

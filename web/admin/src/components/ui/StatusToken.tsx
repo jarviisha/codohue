@@ -1,6 +1,6 @@
-// Bracketed dmesg-style status token. Fixed 6-char width, mono font, color
-// carries the semantic. The [ RUN] state pulses via the pulse-run keyframe in
-// index.css.
+// Log-level style status token. Fixed-width mono text carries the console feel;
+// color carries the semantic. The RUN state pulses via the pulse-run keyframe
+// in index.css.
 //
 // See DESIGN.md §2.5 for the canonical token table.
 
@@ -12,12 +12,12 @@ interface StatusTokenProps {
 }
 
 const LABEL: Record<StatusState, string> = {
-  ok:   '[ OK ]',
-  run:  '[ RUN]',
-  idle: '[IDLE]',
-  warn: '[WARN]',
-  fail: '[FAIL]',
-  pend: '[PEND]',
+  ok:   'OK',
+  run:  'RUN',
+  idle: 'IDLE',
+  warn: 'WARN',
+  fail: 'FAIL',
+  pend: 'PEND',
 }
 
 const COLOR: Record<StatusState, string> = {
@@ -32,7 +32,7 @@ const COLOR: Record<StatusState, string> = {
 export default function StatusToken({ state, title }: StatusTokenProps) {
   return (
     <span
-      className={`font-mono whitespace-pre ${COLOR[state]}`}
+      className={`inline-block w-10 font-mono text-xs uppercase tracking-[0.04em] ${COLOR[state]}`}
       title={title}
       aria-label={`status: ${state}`}
     >

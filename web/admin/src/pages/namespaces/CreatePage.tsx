@@ -70,6 +70,15 @@ export default function NamespaceCreatePage() {
         <PageHeader
           title={`Created "${createdKey.namespace}"`}
           meta="copy the API key before continuing — this is the only time it is shown"
+          actions={
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate(paths.namespaces)}
+            >
+              Namespaces
+            </Button>
+          }
         />
         <Notice tone="ok" title="API key issued">
           <p className="mb-3">
@@ -97,6 +106,15 @@ export default function NamespaceCreatePage() {
       <PageHeader
         title="Create namespace"
         meta="An API key will be issued once on success."
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(paths.namespaces)}
+          >
+            Back
+          </Button>
+        }
       />
       <NamespaceForm
         mode="create"

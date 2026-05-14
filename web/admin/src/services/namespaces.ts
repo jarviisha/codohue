@@ -215,7 +215,7 @@ export function namespaceStatusToken(status: NamespaceStatus): StatusState {
 
 /**
  * Map a `last_run` summary to the token shown next to a namespace row. When
- * there is no run yet we surface `[IDLE]`; a failed run beats success
+ * there is no run yet we surface IDLE; a failed run beats success
  * (operators want failures to stand out).
  */
 export function lastRunToken(run: BatchRunSummary | null): StatusState {

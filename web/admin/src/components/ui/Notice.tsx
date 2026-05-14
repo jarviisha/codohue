@@ -21,7 +21,7 @@ const TOKEN_STATE: Record<NoticeTone, StatusState | null> = {
   ok:   'ok',
   warn: 'warn',
   fail: 'fail',
-  info: null,  // info notice skips the [TOKEN] prefix
+  info: null,  // info notice skips the status-token prefix
 }
 
 // 4px left border + status text + no bg fill. Terminal/Unix-DNA pattern from

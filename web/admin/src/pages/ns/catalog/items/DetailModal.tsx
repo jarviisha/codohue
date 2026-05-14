@@ -6,7 +6,8 @@ export default function CatalogItemDetailModal() {
   return (
     <div className="mt-6 border border-default rounded-sm bg-surface p-4">
       <p className="text-sm text-muted">
-        <span className="font-mono text-muted">[PEND]</span> catalog item modal · id={' '}
+        <span className="font-mono text-xs uppercase tracking-[0.04em] text-muted">PEND</span>{' '}
+        catalog item modal · id{' '}
         <span className="font-mono text-primary">{id}</span>
       </p>
     </div>

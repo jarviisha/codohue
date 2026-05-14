@@ -5,7 +5,7 @@ import type { HTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } fr
 
 export function Table({ children }: { children: ReactNode }) {
   return (
-    <div className="border border-default rounded-sm overflow-x-auto bg-surface">
+    <div className="rounded-sm overflow-x-auto bg-surface">
       <table className="w-full border-collapse text-sm leading-5">{children}</table>
     </div>
   )

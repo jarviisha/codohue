@@ -805,7 +805,7 @@ export default function KitchenSinkPage() {
           <ComponentEntry
             id="statustoken"
             name="StatusToken"
-            hint="6-char dmesg bracket. [ RUN] uses the pulse-run animation."
+            hint="Fixed-width log-level token. RUN uses the pulse-run animation."
           >
             <Row label="states">
               {(['ok', 'run', 'idle', 'warn', 'fail', 'pend'] as const).map((s) => (
@@ -925,7 +925,7 @@ export default function KitchenSinkPage() {
             <CodeBlock>
 {`# minimal — no header strip
 $ codohue admin run-batch --namespace prod
-[ OK ] cron #1847 done in 4.812s`}
+OK   cron #1847 done in 4.812s`}
             </CodeBlock>
           </ComponentEntry>
         </div>

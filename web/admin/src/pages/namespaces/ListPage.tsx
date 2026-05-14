@@ -48,13 +48,12 @@ export default function NamespacesListPage() {
   return (
     <PageShell>
       <PageHeader
-        title="Namespaces"
+        title="[namespaces]"
         meta={data ? `${data.total} total` : null}
         actions={
           <>
             <Button
               variant="ghost"
-              size="sm"
               loading={isFetching && !isLoading}
               onClick={() => void refetch()}
             >
