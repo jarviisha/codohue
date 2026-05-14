@@ -143,11 +143,23 @@ var statusFilter = map[string]string{
 	"failed":  "completed_at IS NOT NULL AND success = FALSE",
 }
 
+// kindFilter maps operator-facing kind names to the underlying batch_run_logs
+// trigger_source values. "cf" covers both scheduled cron ticks and admin-
+// triggered "Run batch now" actions (both produce phase1/2/3 data). "reembed"
+// is the catalog re-embed orchestration, which writes a phase-less row.
+//
+// Empty kind (lookup miss) leaves the query unfiltered.
+var kindFilter = map[string][]string{
+	"cf":      {"cron", "admin"},
+	"reembed": {"admin_reembed"},
+}
+
 // GetBatchRunLogs returns recent batch run history.
 // If namespace is non-empty, results are filtered to that namespace.
 // Status filters by run state: "running", "ok", "failed", or "" for all.
+// Kind filters by batch kind: "cf", "reembed", or "" for all.
 // Limit is capped at 100.
-func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
+func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
@@ -155,7 +167,25 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status stri
 		offset = 0
 	}
 
-	// Aggregate stats (always unfiltered by status, scoped to namespace).
+	// Scope predicates shared between the stats aggregate and the row query:
+	// namespace + kind. Status is intentionally NOT here so the stats badges
+	// (running/ok/failed) always reflect the full tab, not the inner filter.
+	var scopeConds []string
+	var scopeArgs []any
+	if namespace != "" {
+		scopeArgs = append(scopeArgs, namespace)
+		scopeConds = append(scopeConds, fmt.Sprintf("namespace = $%d", len(scopeArgs)))
+	}
+	if triggers, ok := kindFilter[kind]; ok {
+		scopeArgs = append(scopeArgs, triggers)
+		scopeConds = append(scopeConds, fmt.Sprintf("trigger_source = ANY($%d::text[])", len(scopeArgs)))
+	}
+	scopeWhere := ""
+	if len(scopeConds) > 0 {
+		scopeWhere = " WHERE " + strings.Join(scopeConds, " AND ")
+	}
+
+	// Aggregate stats — scoped to (namespace, kind) but unfiltered by status.
 	var stats BatchRunStats
 	statsQuery := `
 		SELECT
@@ -163,26 +193,15 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status stri
 		  COUNT(*) FILTER (WHERE completed_at IS NULL)                     AS running,
 		  COUNT(*) FILTER (WHERE success = TRUE)                           AS ok,
 		  COUNT(*) FILTER (WHERE completed_at IS NOT NULL AND success = FALSE) AS failed
-		FROM batch_run_logs`
-	var statsErr error
-	if namespace != "" {
-		statsErr = r.db.QueryRow(ctx, statsQuery+` WHERE namespace = $1`, namespace).
-			Scan(&stats.Total, &stats.Running, &stats.OK, &stats.Failed)
-	} else {
-		statsErr = r.db.QueryRow(ctx, statsQuery).
-			Scan(&stats.Total, &stats.Running, &stats.OK, &stats.Failed)
-	}
-	if statsErr != nil {
-		return nil, 0, BatchRunStats{}, fmt.Errorf("count batch_run_stats: %w", statsErr)
+		FROM batch_run_logs` + scopeWhere
+	if err := r.db.QueryRow(ctx, statsQuery, scopeArgs...).
+		Scan(&stats.Total, &stats.Running, &stats.OK, &stats.Failed); err != nil {
+		return nil, 0, BatchRunStats{}, fmt.Errorf("count batch_run_stats: %w", err)
 	}
 
-	// Build WHERE clause.
-	var conds []string
-	var args []any
-	if namespace != "" {
-		args = append(args, namespace)
-		conds = append(conds, fmt.Sprintf("namespace = $%d", len(args)))
-	}
+	// Build the row WHERE clause — scope + optional status.
+	conds := append([]string(nil), scopeConds...)
+	args := append([]any(nil), scopeArgs...)
 	if clause, ok := statusFilter[status]; ok {
 		conds = append(conds, clause)
 	}
@@ -254,8 +273,11 @@ func scanBatchRunLog(scan func(...any) error) (BatchRunLog, error) {
 	return b, nil
 }
 
-// GetLastBatchRunPerNamespace returns the most recent completed batch run for each
-// namespace, keyed by namespace name.
+// GetLastBatchRunPerNamespace returns the most recent completed CF batch run
+// per namespace, keyed by namespace name. Re-embed runs (trigger_source=
+// 'admin_reembed') are excluded because they don't populate the per-phase
+// columns the Overview "last batch run" panel renders — including them would
+// surface a phase-less row that looks like an idle cron tick.
 func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT ON (namespace)
@@ -266,6 +288,7 @@ func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[strin
 		    phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
 		FROM batch_run_logs
 		WHERE completed_at IS NOT NULL
+		  AND trigger_source IN ('cron', 'admin')
 		ORDER BY namespace, started_at DESC`,
 	)
 	if err != nil {

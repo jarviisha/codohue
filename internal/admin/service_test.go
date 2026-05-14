@@ -98,7 +98,7 @@ func (f *fakeRepo) GetNamespace(_ context.Context, _ string) (*NamespaceConfig, 
 	return f.namespace, f.nsGetErr
 }
 
-func (f *fakeRepo) GetBatchRunLogs(_ context.Context, _, _ string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
+func (f *fakeRepo) GetBatchRunLogs(_ context.Context, _, _, _ string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
 	return f.batchRuns, len(f.batchRuns), BatchRunStats{Total: len(f.batchRuns)}, f.batchRunsErr
 }
 

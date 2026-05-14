@@ -21,7 +21,7 @@ import (
 type adminRepo interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
-	GetBatchRunLogs(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
+	GetBatchRunLogs(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
@@ -336,9 +336,11 @@ func (s *Service) UpdateCatalogConfig(ctx context.Context, namespace string, req
 	return cfg, nil
 }
 
-// GetBatchRuns returns paginated batch run logs, filtered total, and aggregate stats.
-func (s *Service) GetBatchRuns(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
-	return s.repo.GetBatchRunLogs(ctx, namespace, status, limit, offset)
+// GetBatchRuns returns paginated batch run logs, filtered total, and aggregate
+// stats. kind selects between CF runs (cron + admin "Run batch now") and
+// catalog re-embed orchestration runs; an empty kind returns all kinds.
+func (s *Service) GetBatchRuns(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
+	return s.repo.GetBatchRunLogs(ctx, namespace, status, kind, limit, offset)
 }
 
 // GetNamespacesOverview returns all namespaces with computed health status.
@@ -653,7 +655,7 @@ func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreat
 	start := time.Now()
 	s.job.RunNamespace(batchCtx, ns, "manual")
 
-	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", 1, 0)
+	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", "", 1, 0)
 	if err != nil || len(logs) == 0 {
 		return &BatchRunCreateResponse{
 			Namespace: ns,

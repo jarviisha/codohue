@@ -19,7 +19,7 @@ type adminSvc interface {
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
 	GetNamespacesOverview(ctx context.Context) (*NamespacesOverviewResponse, error)
 	UpsertNamespace(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error)
-	GetBatchRuns(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
+	GetBatchRuns(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
 	GetSubjectRecommendations(ctx context.Context, namespace, subjectID string, limit, offset int, debug bool) (*RecommendResponse, int, error)
 	GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error)
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
@@ -268,8 +268,13 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 	}
 
 	status := q.Get("status")
+	kind := q.Get("kind")
+	if kind != "" && kind != "cf" && kind != "reembed" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "kind must be 'cf' or 'reembed'")
+		return
+	}
 
-	runs, total, stats, err := h.svc.GetBatchRuns(r.Context(), ns, status, limit, offset)
+	runs, total, stats, err := h.svc.GetBatchRuns(r.Context(), ns, status, kind, limit, offset)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get batch runs")
 		return

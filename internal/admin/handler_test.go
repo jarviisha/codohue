@@ -30,6 +30,7 @@ type fakeSvc struct {
 	upsertErr         error
 	batchRuns         []BatchRunLog
 	batchRunsErr      error
+	batchRunsGotKind  string
 	debugResp         *RecommendResponse
 	debugStatus       int
 	debugErr          error
@@ -95,7 +96,8 @@ func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ *NamespaceUpser
 	return f.upsertResp, f.upsertStatus, f.upsertErr
 }
 
-func (f *fakeSvc) GetBatchRuns(_ context.Context, _, _ string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
+func (f *fakeSvc) GetBatchRuns(_ context.Context, _, _, kind string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
+	f.batchRunsGotKind = kind
 	return f.batchRuns, len(f.batchRuns), BatchRunStats{Total: len(f.batchRuns)}, f.batchRunsErr
 }
 
@@ -455,6 +457,42 @@ func TestGetBatchRuns_LimitCapped(t *testing.T) {
 	h.GetBatchRuns(rec, r)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+}
+
+func TestGetBatchRuns_KindForwarded(t *testing.T) {
+	cases := []struct {
+		query    string
+		wantKind string
+	}{
+		{"?kind=cf", "cf"},
+		{"?kind=reembed", "reembed"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.query, func(t *testing.T) {
+			svc := &fakeSvc{batchRuns: []BatchRunLog{}}
+			h := newTestHandler(svc)
+			rec := httptest.NewRecorder()
+			r := newChiRequest(http.MethodGet, "/api/admin/v1/batch-runs"+tc.query, nil, "")
+			h.GetBatchRuns(rec, r)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", rec.Code)
+			}
+			if svc.batchRunsGotKind != tc.wantKind {
+				t.Errorf("kind = %q, want %q", svc.batchRunsGotKind, tc.wantKind)
+			}
+		})
+	}
+}
+
+func TestGetBatchRuns_KindInvalid_400(t *testing.T) {
+	h := newTestHandler(&fakeSvc{batchRuns: []BatchRunLog{}})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/batch-runs?kind=bogus", nil, "")
+	h.GetBatchRuns(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
 
