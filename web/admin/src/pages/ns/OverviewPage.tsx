@@ -1,4 +1,3 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Button,
@@ -14,11 +13,10 @@ import {
   useRegisterCommand,
 } from '@/components/ui'
 import type { StatusState } from '@/components/ui'
-import { http } from '@/services/http'
 import { probeState, useHealth } from '@/services/health'
+import { useTriggerBatchRun } from '@/services/batchRuns'
 import {
   lastRunToken,
-  namespaceKeys,
   namespaceStatusToken,
   useNamespace,
   useNamespacesOverview,
@@ -35,40 +33,20 @@ function phaseToken(ok: boolean | null | undefined): StatusState {
   return ok ? 'ok' : 'fail'
 }
 
-interface BatchRunCreateResponse {
-  id: number
-  namespace: string
-}
-
 export default function NamespaceOverviewPage() {
   const { name = '' } = useParams<{ name: string }>()
   const navigate = useNavigate()
-  const qc = useQueryClient()
 
   const health = useHealth()
   const overview = useNamespacesOverview()
   const config = useNamespace(name)
-
-  // Inline batch-run trigger; services/batchRuns.ts (Phase 2.D.1) will move
-  // this into a proper hook. Kept here so Overview can ship its primary
-  // action without depending on a domain that hasn't landed yet.
-  const triggerBatch = useMutation({
-    mutationFn: () =>
-      http.post<BatchRunCreateResponse>(
-        `/api/admin/v1/namespaces/${encodeURIComponent(name)}/batch-runs`,
-        {},
-      ),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: namespaceKeys.overview() })
-      qc.invalidateQueries({ queryKey: namespaceKeys.byName(name) })
-    },
-  })
+  const triggerBatch = useTriggerBatchRun()
 
   useRegisterCommand(
     `ns.${name}.batch.run`,
     `Run batch on ${name}`,
     () => {
-      if (!triggerBatch.isPending) triggerBatch.mutate()
+      if (!triggerBatch.isPending) triggerBatch.mutate(name)
     },
     name,
   )
@@ -114,7 +92,7 @@ export default function NamespaceOverviewPage() {
           <Button
             variant="primary"
             loading={triggerBatch.isPending}
-            onClick={() => triggerBatch.mutate()}
+            onClick={() => triggerBatch.mutate(name)}
           >
             Run batch now
           </Button>
@@ -174,17 +152,15 @@ export default function NamespaceOverviewPage() {
                 {
                   label: 'status',
                   value: (
-                    <span className="inline-flex items-center gap-2">
-                      <StatusToken
-                        state={lastRunToken(lastRun)}
-                        title={
-                          lastRun.success
-                            ? 'success'
-                            : lastRun.error_message ?? 'failed'
-                        }
-                      />
-                      <span>#{lastRun.id}</span>
-                    </span>
+                    <StatusToken
+                      state={lastRunToken(lastRun)}
+                      title={
+                        lastRun.success
+                          ? 'success'
+                          : lastRun.error_message ?? 'failed'
+                      }
+                      label={`#${lastRun.id}`}
+                    />
                   ),
                 },
                 { label: 'started', value: formatTimestamp(lastRun.started_at) },
@@ -197,28 +173,28 @@ export default function NamespaceOverviewPage() {
                 {
                   label: 'phase 1 sparse',
                   value: (
-                    <span className="inline-flex items-center gap-2">
-                      <StatusToken state={phaseToken(lastRun.phase1_ok)} />
-                      <span>{formatDurationMs(lastRun.phase1_duration_ms)}</span>
-                    </span>
+                    <StatusToken
+                      state={phaseToken(lastRun.phase1_ok)}
+                      label={formatDurationMs(lastRun.phase1_duration_ms)}
+                    />
                   ),
                 },
                 {
                   label: 'phase 2 dense',
                   value: (
-                    <span className="inline-flex items-center gap-2">
-                      <StatusToken state={phaseToken(lastRun.phase2_ok)} />
-                      <span>{formatDurationMs(lastRun.phase2_duration_ms)}</span>
-                    </span>
+                    <StatusToken
+                      state={phaseToken(lastRun.phase2_ok)}
+                      label={formatDurationMs(lastRun.phase2_duration_ms)}
+                    />
                   ),
                 },
                 {
                   label: 'phase 3 trending',
                   value: (
-                    <span className="inline-flex items-center gap-2">
-                      <StatusToken state={phaseToken(lastRun.phase3_ok)} />
-                      <span>{formatDurationMs(lastRun.phase3_duration_ms)}</span>
-                    </span>
+                    <StatusToken
+                      state={phaseToken(lastRun.phase3_ok)}
+                      label={formatDurationMs(lastRun.phase3_duration_ms)}
+                    />
                   ),
                 },
               ]}
@@ -269,21 +245,11 @@ export default function NamespaceOverviewPage() {
                 { label: 'alpha', value: config.data.alpha.toFixed(2) },
                 {
                   label: 'catalog auto-embed',
-                  value: (
-                    <span className="text-muted">
-                      <span className="font-mono text-xs uppercase tracking-[0.04em]">PEND</span>{' '}
-                      wires in 2.B
-                    </span>
-                  ),
+                  value: <StatusToken state="pend" label="wires in 2.B" />,
                 },
                 {
                   label: 'catalog backlog',
-                  value: (
-                    <span className="text-muted">
-                      <span className="font-mono text-xs uppercase tracking-[0.04em]">PEND</span>{' '}
-                      wires in 2.B
-                    </span>
-                  ),
+                  value: <StatusToken state="pend" label="wires in 2.B" />,
                 },
               ]}
             />

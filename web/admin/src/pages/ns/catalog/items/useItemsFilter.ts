@@ -1,6 +1,6 @@
 import { useSearchParams } from 'react-router-dom'
 import type { CatalogItemsStateFilter } from '@/services/catalog'
-import { nonNegativeInt, positiveInt } from '@/utils/search-params'
+import { nonNegativeInt, positiveInt } from '@/utils/searchParams'
 
 const DEFAULT_LIMIT = 50
 

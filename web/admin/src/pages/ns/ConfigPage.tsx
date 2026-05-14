@@ -17,7 +17,7 @@ import {
   toUpsertPayload,
   type NamespaceFormState,
 } from './configForm'
-import NamespaceForm from './NamespaceForm'
+import NamespaceForm from './namespace-form'
 import { paths } from '@/routes/path'
 
 const FORM_ID = 'namespace-config-form'

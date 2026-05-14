@@ -6,6 +6,7 @@
 // Each domain service file owns its keys; this file is the single import
 // surface for consumers that need to invalidate cross-domain.
 export { authKeys } from './auth'
+export { batchRunKeys } from './batchRuns'
 export { catalogKeys } from './catalog'
 export { healthKeys } from './health'
 export { namespaceKeys } from './namespaces'
