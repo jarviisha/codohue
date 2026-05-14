@@ -20,6 +20,8 @@ import {
 import NamespaceForm from './NamespaceForm'
 import { paths } from '../../routes/path'
 
+const FORM_ID = 'namespace-config-form'
+
 export default function NamespaceConfigPage() {
   const { name = '' } = useParams<{ name: string }>()
   const navigate = useNavigate()
@@ -129,14 +131,30 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
             ) : null}
           </span>
         }
+        actions={
+          <>
+            <Button variant="ghost" size="sm" onClick={handleCancel}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form={FORM_ID}
+              variant="primary"
+              size="sm"
+              loading={upsert.isPending}
+            >
+              Save
+            </Button>
+          </>
+        }
       />
 
       <NamespaceForm
         mode="edit"
+        formId={FORM_ID}
         state={state}
         onChange={setState}
         onSubmit={handleSubmit}
-        onCancel={handleCancel}
         isPending={upsert.isPending}
         errorMessage={errorMessage}
       />

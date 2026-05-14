@@ -65,7 +65,7 @@ export default function NamespacesListPage() {
               variant="primary"
               onClick={() => navigate(paths.namespaceCreate)}
             >
-              + Create namespace
+              Create namespace
             </Button>
           </>
         }
@@ -94,65 +94,65 @@ export default function NamespacesListPage() {
         />
       ) : (
         <Table>
-            <Thead>
-              <Tr>
-                <Th>status</Th>
-                <Th>namespace</Th>
-                <Th align="right">events 24h</Th>
-                <Th>last run</Th>
-                <Th>updated</Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {items.map((h) => (
-                <Tr key={h.config.namespace}>
-                  <Td>
-                    <StatusToken
-                      state={namespaceStatusToken(h.status)}
-                      title={h.status}
-                    />
-                  </Td>
-                  <Td mono>
-                    <Link
-                      to={paths.ns(h.config.namespace)}
-                      className="hover:text-accent"
-                    >
-                      {h.config.namespace}
-                    </Link>
-                  </Td>
-                  <Td mono align="right">
-                    {formatNumber(h.active_events_24h)}
-                  </Td>
-                  <Td>
-                    {h.last_run ? (
-                      <span className="inline-flex items-center gap-2">
-                        <StatusToken
-                          state={lastRunToken(h.last_run)}
-                          title={
-                            h.last_run.success
-                              ? 'success'
-                              : h.last_run.error_message ?? 'failed'
-                          }
-                        />
-                        <span className="font-mono text-xs text-muted">
-                          {formatRelative(h.last_run.started_at)}
-                          {h.last_run.duration_ms !== null
-                            ? ` · ${formatDurationMs(h.last_run.duration_ms)}`
-                            : ''}
-                        </span>
+          <Thead>
+            <Tr>
+              <Th>status</Th>
+              <Th>namespace</Th>
+              <Th align="right">events 24h</Th>
+              <Th>last run</Th>
+              <Th>updated</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {items.map((h) => (
+              <Tr key={h.config.namespace}>
+                <Td>
+                  <StatusToken
+                    state={namespaceStatusToken(h.status)}
+                    title={h.status}
+                  />
+                </Td>
+                <Td mono>
+                  <Link
+                    to={paths.ns(h.config.namespace)}
+                    className="hover:text-accent"
+                  >
+                    {h.config.namespace}
+                  </Link>
+                </Td>
+                <Td mono align="right">
+                  {formatNumber(h.active_events_24h)}
+                </Td>
+                <Td>
+                  {h.last_run ? (
+                    <span className="inline-flex items-center gap-2">
+                      <StatusToken
+                        state={lastRunToken(h.last_run)}
+                        title={
+                          h.last_run.success
+                            ? 'success'
+                            : h.last_run.error_message ?? 'failed'
+                        }
+                      />
+                      <span className="font-mono text-xs text-muted">
+                        {formatRelative(h.last_run.started_at)}
+                        {h.last_run.duration_ms !== null
+                          ? ` · ${formatDurationMs(h.last_run.duration_ms)}`
+                          : ''}
                       </span>
-                    ) : (
-                      <StatusToken state="idle" title="no batch run yet" />
-                    )}
-                  </Td>
-                  <Td>
-                    <span className="font-mono text-xs text-muted">
-                      {formatRelative(h.config.updated_at)}
                     </span>
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
+                  ) : (
+                    <StatusToken state="idle" title="no batch run yet" />
+                  )}
+                </Td>
+                <Td>
+                  <span className="font-mono text-xs text-muted">
+                    {formatRelative(h.config.updated_at)}
+                  </span>
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
         </Table>
       )}
     </PageShell>

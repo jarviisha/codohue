@@ -12,17 +12,23 @@ import { ApiError } from '../../services/http'
 import { useUpsertNamespace } from '../../services/namespaces'
 import {
   defaultFormState,
+  normalizeNamespaceName,
   toUpsertPayload,
   type NamespaceFormState,
 } from '../ns/configForm'
 import NamespaceForm from '../ns/NamespaceForm'
 import { paths } from '../../routes/path'
 
+const FORM_ID = 'namespace-create-form'
+
 export default function NamespaceCreatePage() {
   const navigate = useNavigate()
   const upsert = useUpsertNamespace()
 
-  const [state, setState] = useState<NamespaceFormState>(defaultFormState)
+  const [state, setState] = useState<NamespaceFormState>(() => ({
+    ...defaultFormState,
+    action_weights: defaultFormState.action_weights.map((row) => ({ ...row })),
+  }))
 
   // Holds the one-shot API key returned by the backend on first create.
   // When set, the page switches to a "key issued" view that must be
@@ -40,9 +46,10 @@ export default function NamespaceCreatePage() {
   )
 
   const handleSubmit = (values: NamespaceFormState) => {
-    const payload = toUpsertPayload(values)
+    const namespace = normalizeNamespaceName(values.namespace)
+    const payload = toUpsertPayload({ ...values, namespace })
     upsert.mutate(
-      { name: values.namespace, payload },
+      { name: namespace, payload },
       {
         onSuccess: (res) => {
           if (res.api_key) {
@@ -107,17 +114,29 @@ export default function NamespaceCreatePage() {
         title="Create namespace"
         meta="An API key will be issued once on success."
         actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(paths.namespaces)}
-          >
-            Back
-          </Button>
+          <>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate(paths.namespaces)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              form={FORM_ID}
+              variant="primary"
+              size="sm"
+              loading={upsert.isPending}
+            >
+              Create
+            </Button>
+          </>
         }
       />
       <NamespaceForm
         mode="create"
+        formId={FORM_ID}
         state={state}
         onChange={setState}
         onSubmit={handleSubmit}

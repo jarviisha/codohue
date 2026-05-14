@@ -1,6 +1,6 @@
-// Log-level style status token. Fixed-width mono text carries the console feel;
-// color carries the semantic. The RUN state pulses via the pulse-run keyframe
-// in index.css.
+// Compact status token. Text and background tint carry the semantic state
+// while preserving a fixed-width mono shape for table scanning. The RUN
+// state pulses via the pulse-run keyframe in index.css.
 //
 // See DESIGN.md §2.5 for the canonical token table.
 
@@ -20,19 +20,19 @@ const LABEL: Record<StatusState, string> = {
   pend: 'PEND',
 }
 
-const COLOR: Record<StatusState, string> = {
-  ok:   'text-success',
-  run:  'text-accent animate-pulse-run',
-  idle: 'text-muted',
-  warn: 'text-warning',
-  fail: 'text-danger',
-  pend: 'text-muted',
+const STYLE: Record<StatusState, string> = {
+  ok:   'bg-success/20 text-success',
+  run:  'bg-accent/20 text-accent animate-pulse-run',
+  idle: 'bg-surface-raised text-secondary',
+  warn: 'bg-warning/20 text-warning',
+  fail: 'bg-danger/20 text-danger',
+  pend: 'bg-surface-raised text-secondary',
 }
 
 export default function StatusToken({ state, title }: StatusTokenProps) {
   return (
     <span
-      className={`inline-block w-10 font-mono text-xs uppercase tracking-[0.04em] ${COLOR[state]}`}
+      className={`inline-flex h-5 min-w-10 items-center justify-center rounded-sm px-1.5 font-mono text-[11px] font-semibold uppercase leading-none tracking-[0.04em] ${STYLE[state]}`}
       title={title}
       aria-label={`status: ${state}`}
     >

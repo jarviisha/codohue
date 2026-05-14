@@ -30,15 +30,14 @@ export interface NamespaceFormState {
   lambda_trending: number
 }
 
+export const defaultActionWeights: ActionWeightRow[] = [
+  { action: 'VIEW', weight: 1.0 },
+  { action: 'LIKE', weight: 4.0 },
+]
+
 export const defaultFormState: NamespaceFormState = {
   namespace: '',
-  action_weights: [
-    { action: 'click', weight: 1.0 },
-    { action: 'like', weight: 3.0 },
-    { action: 'share', weight: 5.0 },
-    { action: 'comment', weight: 4.0 },
-    { action: 'skip', weight: -1.0 },
-  ],
+  action_weights: defaultActionWeights,
   lambda: 0.05,
   gamma: 0.1,
   alpha: 0.7,
@@ -52,6 +51,10 @@ export const defaultFormState: NamespaceFormState = {
   lambda_trending: 0.1,
 }
 
+export function normalizeNamespaceName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
 /** Build a form state from an existing namespace config. */
 export function fromNamespaceConfig(c: NamespaceConfig): NamespaceFormState {
   const validStrategy: DenseStrategy[] = ['item2vec', 'svd', 'byoe', 'disabled']
@@ -63,10 +66,12 @@ export function fromNamespaceConfig(c: NamespaceConfig): NamespaceFormState {
 
   return {
     namespace: c.namespace,
-    action_weights: Object.entries(c.action_weights).map(([action, weight]) => ({
-      action,
-      weight,
-    })),
+    action_weights: Object.entries(c.action_weights ?? {}).map(
+      ([action, weight]) => ({
+        action,
+        weight,
+      }),
+    ),
     lambda: c.lambda,
     gamma: c.gamma,
     alpha: c.alpha,
@@ -86,7 +91,7 @@ export function toUpsertPayload(state: NamespaceFormState): NamespaceUpsertReque
   const action_weights: Record<string, number> = {}
   for (const row of state.action_weights) {
     const key = row.action.trim()
-    if (key) action_weights[key] = row.weight
+    if (key && Number.isFinite(row.weight)) action_weights[key] = row.weight
   }
   return {
     action_weights,
@@ -107,12 +112,15 @@ export function toUpsertPayload(state: NamespaceFormState): NamespaceUpsertReque
 export interface NamespaceFormErrors {
   namespace?: string
   action_weights?: string
+  lambda?: string
+  gamma?: string
   embedding_dim?: string
   alpha?: string
   max_results?: string
   seen_items_days?: string
   trending_window?: string
   trending_ttl?: string
+  lambda_trending?: string
 }
 
 const NAMESPACE_RE = /^[a-z0-9_-]+$/
@@ -124,9 +132,10 @@ export function validateNamespaceForm(
   const errs: NamespaceFormErrors = {}
 
   if (mode === 'create') {
-    if (!state.namespace.trim()) {
+    const namespace = normalizeNamespaceName(state.namespace)
+    if (!namespace) {
       errs.namespace = 'Required.'
-    } else if (!NAMESPACE_RE.test(state.namespace)) {
+    } else if (!NAMESPACE_RE.test(namespace)) {
       errs.namespace = 'Use lowercase letters, digits, _ or -.'
     }
   }
@@ -143,27 +152,40 @@ export function validateNamespaceForm(
         errs.action_weights = `Duplicate action "${key}".`
         break
       }
+      if (!Number.isFinite(r.weight)) {
+        errs.action_weights = `Weight for "${key}" must be a number.`
+        break
+      }
       seen.add(key)
     }
   }
 
-  if (state.alpha < 0 || state.alpha > 1) {
+  if (!Number.isFinite(state.lambda) || state.lambda < 0) {
+    errs.lambda = 'Must be 0 or greater.'
+  }
+  if (!Number.isFinite(state.gamma) || state.gamma < 0) {
+    errs.gamma = 'Must be 0 or greater.'
+  }
+  if (!Number.isFinite(state.alpha) || state.alpha < 0 || state.alpha > 1) {
     errs.alpha = 'Must be between 0 and 1.'
   }
-  if (state.embedding_dim <= 0) {
+  if (!Number.isFinite(state.embedding_dim) || state.embedding_dim <= 0) {
     errs.embedding_dim = 'Must be greater than 0.'
   }
-  if (state.max_results <= 0) {
+  if (!Number.isFinite(state.max_results) || state.max_results <= 0) {
     errs.max_results = 'Must be greater than 0.'
   }
-  if (state.seen_items_days < 0) {
+  if (!Number.isFinite(state.seen_items_days) || state.seen_items_days < 0) {
     errs.seen_items_days = 'Must be 0 or greater.'
   }
-  if (state.trending_window <= 0) {
+  if (!Number.isFinite(state.trending_window) || state.trending_window <= 0) {
     errs.trending_window = 'Must be greater than 0.'
   }
-  if (state.trending_ttl <= 0) {
+  if (!Number.isFinite(state.trending_ttl) || state.trending_ttl <= 0) {
     errs.trending_ttl = 'Must be greater than 0.'
+  }
+  if (!Number.isFinite(state.lambda_trending) || state.lambda_trending < 0) {
+    errs.lambda_trending = 'Must be 0 or greater.'
   }
 
   return errs

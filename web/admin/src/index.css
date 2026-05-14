@@ -149,6 +149,17 @@ pre,
     accent-color: var(--accent-emphasis);
   }
 
+  input.number-input {
+    appearance: textfield;
+    -moz-appearance: textfield;
+  }
+
+  input.number-input::-webkit-outer-spin-button,
+  input.number-input::-webkit-inner-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+
   .page-header-actions button {
     height: 1.75rem;
     padding-inline: 0.5rem;
