@@ -1,10 +1,10 @@
 import { useLocation } from 'react-router-dom'
 import SidebarNavGroup from './SidebarNavGroup'
 import SidebarNavItem from './SidebarNavItem'
-import StatusToken, { type StatusState } from '../ui/StatusToken'
-import { namespaceNav, parsePs1 } from '../../routes/nav'
-import { paths } from '../../routes/path'
-import { probeState, useHealth } from '../../services/health'
+import StatusToken, { type StatusState } from '@/components/ui/StatusToken'
+import { namespaceNav, parsePs1 } from '@/routes/nav'
+import { paths } from '@/routes/path'
+import { probeState, useHealth } from '@/services/health'
 
 // Fixed left sidebar. Two sections: GLOBAL (always shown) and {namespace}
 // (shown when current route is /ns/:name/...). See DESIGN.md §3.1.

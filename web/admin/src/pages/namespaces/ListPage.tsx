@@ -14,14 +14,14 @@ import {
   Thead,
   Tr,
   useRegisterCommand,
-} from '../../components/ui'
+} from '@/components/ui'
 import {
   lastRunToken,
   namespaceStatusToken,
   useNamespacesOverview,
-} from '../../services/namespaces'
-import { paths } from '../../routes/path'
-import { formatDurationMs, formatNumber, formatRelative } from '../../utils/format'
+} from '@/services/namespaces'
+import { paths } from '@/routes/path'
+import { formatDurationMs, formatNumber, formatRelative } from '@/utils/format'
 
 export default function NamespacesListPage() {
   const navigate = useNavigate()

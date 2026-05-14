@@ -1,4 +1,4 @@
-import { Button } from '../ui'
+import { Button } from '@/components/ui'
 import Ps1Prompt from './Ps1Prompt'
 import ThemeToggle from './ThemeToggle'
 import UserMenu from './UserMenu'

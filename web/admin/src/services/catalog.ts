@@ -71,6 +71,7 @@ export type CatalogItemsStateFilter = CatalogItemState | 'all'
 export interface CatalogItemSummary {
   id: number
   object_id: string
+  content_preview?: string
   state: CatalogItemState
   strategy_id?: string
   strategy_version?: string
@@ -84,7 +85,15 @@ export interface CatalogItemDetail extends CatalogItemSummary {
   namespace: string
   content: string
   metadata?: Record<string, unknown>
+  vector?: CatalogVector
   created_at: string
+}
+
+export interface CatalogVector {
+  collection: string
+  numeric_id: number
+  dim: number
+  values: number[]
 }
 
 export interface CatalogItemsListResponse {

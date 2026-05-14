@@ -29,10 +29,12 @@ export { default as FormGrid } from './FormGrid'
 export { default as Input } from './Input'
 export { default as Select } from './Select'
 export { default as NumberInput } from './NumberInput'
+export { default as Textarea } from './Textarea'
 export { default as Checkbox } from './Checkbox'
 export { default as Radio, RadioGroup } from './Radio'
 export type { RadioOption } from './Radio'
 export { default as Switch } from './Switch'
+export { default as ToggleRow } from './ToggleRow'
 
 // Overlays
 export { default as Button } from './Button'
@@ -50,6 +52,7 @@ export { default as Kbd } from './Kbd'
 
 // Navigation aids
 export { default as Pagination } from './Pagination'
+export { Tabs, TabLink } from './Tabs'
 
 // Data display
 export { default as CodeBlock } from './CodeBlock'

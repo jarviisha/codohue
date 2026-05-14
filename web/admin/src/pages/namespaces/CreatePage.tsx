@@ -7,17 +7,17 @@ import {
   PageHeader,
   PageShell,
   useRegisterCommand,
-} from '../../components/ui'
-import { ApiError } from '../../services/http'
-import { useUpsertNamespace } from '../../services/namespaces'
+} from '@/components/ui'
+import { ApiError } from '@/services/http'
+import { useUpsertNamespace } from '@/services/namespaces'
 import {
   defaultFormState,
   normalizeNamespaceName,
   toUpsertPayload,
   type NamespaceFormState,
-} from '../ns/configForm'
-import NamespaceForm from '../ns/NamespaceForm'
-import { paths } from '../../routes/path'
+} from '@/pages/ns/configForm'
+import NamespaceForm from '@/pages/ns/NamespaceForm'
+import { paths } from '@/routes/path'
 
 const FORM_ID = 'namespace-create-form'
 

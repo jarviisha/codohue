@@ -1,6 +1,6 @@
 // Shared placeholder for Phase 1.2 routing skeleton.
 // Real pages replace these stubs in Phase 1.5 (Login, Health) and Phase 2.
-import { PageHeader, PageShell } from '../components/ui'
+import { PageHeader, PageShell } from '@/components/ui'
 
 interface PageStubProps {
   title: string

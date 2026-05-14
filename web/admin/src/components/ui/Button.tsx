@@ -32,7 +32,7 @@ const SIZE: Record<ButtonSize, string> = {
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = 'secondary', size = 'md', loading, leadingIcon, children, className = '', disabled, type = 'button', ...rest },
+  { variant = 'secondary', size = 'sm', loading, leadingIcon, children, className = '', disabled, type = 'button', ...rest },
   ref,
 ) {
   return (

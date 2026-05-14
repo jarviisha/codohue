@@ -1,6 +1,6 @@
 import { Fragment } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { parsePs1, segmentTo } from '../../routes/nav'
+import { parsePs1, segmentTo } from '@/routes/nav'
 
 // Top-bar location prompt. Renders `codohue@{ns}:~/{segments} $` with `@ns`
 // and each path segment as clickable links (per DESIGN.md §3.1.1).

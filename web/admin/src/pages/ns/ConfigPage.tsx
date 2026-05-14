@@ -8,17 +8,17 @@ import {
   PageHeader,
   PageShell,
   useRegisterCommand,
-} from '../../components/ui'
-import { ApiError } from '../../services/http'
-import { useNamespace, useUpsertNamespace } from '../../services/namespaces'
-import type { NamespaceConfig } from '../../services/namespaces'
+} from '@/components/ui'
+import { ApiError } from '@/services/http'
+import { useNamespace, useUpsertNamespace } from '@/services/namespaces'
+import type { NamespaceConfig } from '@/services/namespaces'
 import {
   fromNamespaceConfig,
   toUpsertPayload,
   type NamespaceFormState,
 } from './configForm'
 import NamespaceForm from './NamespaceForm'
-import { paths } from '../../routes/path'
+import { paths } from '@/routes/path'
 
 const FORM_ID = 'namespace-config-form'
 

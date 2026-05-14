@@ -10,36 +10,18 @@ import {
   Notice,
   StatusToken,
   useRegisterCommand,
-} from '../../../../components/ui'
-import type { CatalogItemState } from '../../../../services/catalog'
+} from '@/components/ui'
 import {
   useCatalogItem,
   useDeleteCatalogItem,
   useRedriveCatalogItem,
-} from '../../../../services/catalog'
-import { paths } from '../../../../routes/path'
-import { formatNumber, formatTimestamp } from '../../../../utils/format'
+} from '@/services/catalog'
+import { paths } from '@/routes/path'
+import { formatNumber, formatTimestamp } from '@/utils/format'
+import { canRedrive, stateToken } from './helpers'
 
-function stateToken(state: CatalogItemState) {
-  switch (state) {
-    case 'embedded':
-      return 'ok'
-    case 'in_flight':
-      return 'run'
-    case 'failed':
-    case 'dead_letter':
-      return 'fail'
-    case 'pending':
-      return 'pend'
-    default:
-      return 'idle'
-  }
-}
-
-function canRedrive(state: CatalogItemState) {
-  return state === 'failed' || state === 'dead_letter'
-}
-
+// Modal route for /ns/:name/catalog/items/:id. Wraps ItemsPage's <Outlet> so
+// the underlying list stays mounted while inspecting one row.
 export default function CatalogItemDetailModal() {
   const { name = '', id = '' } = useParams<{ name: string; id: string }>()
   const navigate = useNavigate()
@@ -51,10 +33,7 @@ export default function CatalogItemDetailModal() {
   const [showRedriveConfirm, setShowRedriveConfirm] = useState(false)
 
   const close = () => {
-    navigate({
-      pathname: paths.nsCatalogItems(name),
-      search: location.search,
-    })
+    navigate({ pathname: paths.nsCatalogItems(name), search: location.search })
   }
 
   useRegisterCommand(
@@ -76,9 +55,7 @@ export default function CatalogItemDetailModal() {
         title={data ? `catalog item ${data.id}` : 'catalog item'}
         footer={
           <>
-            <Button variant="ghost" onClick={close}>
-              Close
-            </Button>
+            <Button variant="ghost" onClick={close}>Close</Button>
             <Button
               variant="secondary"
               disabled={!data || !canRedrive(data.state)}
@@ -112,8 +89,7 @@ export default function CatalogItemDetailModal() {
 
             {deleteItem.isError ? (
               <Notice tone="fail" title="Delete failed">
-                {(deleteItem.error as Error)?.message ??
-                  'Unable to delete catalog item.'}
+                {(deleteItem.error as Error)?.message ?? 'Unable to delete catalog item.'}
               </Notice>
             ) : null}
 
@@ -122,10 +98,11 @@ export default function CatalogItemDetailModal() {
                 {
                   label: 'state',
                   value: (
-                    <span className="inline-flex items-center gap-2">
-                      <StatusToken state={stateToken(data.state)} title={data.state} />
-                      <span>{data.state}</span>
-                    </span>
+                    <StatusToken
+                      state={stateToken(data.state)}
+                      title={data.state}
+                      label={data.state}
+                    />
                   ),
                 },
                 { label: 'object_id', value: data.object_id },
@@ -137,6 +114,12 @@ export default function CatalogItemDetailModal() {
                       : 'none',
                 },
                 { label: 'attempts', value: formatNumber(data.attempt_count) },
+                {
+                  label: 'vector',
+                  value: data.vector
+                    ? `${data.vector.collection} #${data.vector.numeric_id} · ${data.vector.dim}d`
+                    : 'not indexed',
+                },
                 { label: 'embedded_at', value: formatTimestamp(data.embedded_at) },
                 { label: 'created_at', value: formatTimestamp(data.created_at) },
                 { label: 'updated_at', value: formatTimestamp(data.updated_at) },
@@ -152,6 +135,17 @@ export default function CatalogItemDetailModal() {
                 {data.content}
               </CodeBlock>
             </div>
+
+            {data.vector ? (
+              <div>
+                <h3 className="mb-2 font-mono text-xs uppercase tracking-[0.04em] text-secondary">
+                  dense vector
+                </h3>
+                <CodeBlock language="json" copyable maxHeight="16rem">
+                  {JSON.stringify(data.vector.values, null, 2)}
+                </CodeBlock>
+              </div>
+            ) : null}
 
             <div>
               <h3 className="mb-2 font-mono text-xs uppercase tracking-[0.04em] text-secondary">
@@ -205,9 +199,7 @@ export default function CatalogItemDetailModal() {
           if (!data) return
           deleteItem.mutate(
             { namespace: name, id: data.id },
-            {
-              onSuccess: close,
-            },
+            { onSuccess: close },
           )
         }}
         onCancel={() => setShowDeleteConfirm(false)}

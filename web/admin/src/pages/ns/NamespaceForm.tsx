@@ -10,8 +10,8 @@ import {
   NumberInput,
   RadioGroup,
   Select,
-} from '../../components/ui'
-import type { RadioOption } from '../../components/ui'
+} from '@/components/ui'
+import type { RadioOption } from '@/components/ui'
 import {
   defaultActionWeights,
   hasErrors,

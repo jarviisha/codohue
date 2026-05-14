@@ -1,7 +1,7 @@
 import type {
   NamespaceConfig,
   NamespaceUpsertRequest,
-} from '../../services/namespaces'
+} from '@/services/namespaces'
 
 // Local form state. The wire types use a `Record<string, number>` for
 // action_weights, but the UI needs ordered rows with editable keys, so we

@@ -192,7 +192,7 @@ export function useUpsertNamespace() {
 // Helpers used by namespace pages
 // ────────────────────────────────────────────────────────────────────────────
 
-import type { StatusState } from '../components/ui/StatusToken'
+import type { StatusState } from '@/components/ui/StatusToken'
 
 /**
  * Map a backend NamespaceStatus to the shared 6-state StatusToken vocabulary.

@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ApiError } from '../../services/http'
-import { useLogin } from '../../services/auth'
-import { Button, Field, Form, Input, Notice } from '../../components/ui'
+import { ApiError } from '@/services/http'
+import { useLogin } from '@/services/auth'
+import { Button, Field, Form, Input, Notice } from '@/components/ui'
 
 export default function LoginPage() {
   const [apiKey, setApiKey] = useState('')

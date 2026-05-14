@@ -7,8 +7,8 @@ import {
   Panel,
   StatusToken,
   useRegisterCommand,
-} from '../../components/ui'
-import { probeState, useHealth } from '../../services/health'
+} from '@/components/ui'
+import { probeState, useHealth } from '@/services/health'
 
 interface ProbeRow {
   name: string

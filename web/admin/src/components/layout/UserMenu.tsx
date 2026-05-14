@@ -1,6 +1,6 @@
 // Placeholder. Real menu (logout + session info) lands when auth wires up in
 
-import { Button } from "../ui";
+import { Button } from "@/components/ui";
 
 // Phase 1.4 follow-up. Icons deferred — uses a plain text label.
 export default function UserMenu() {

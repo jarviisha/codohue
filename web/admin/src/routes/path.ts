@@ -8,6 +8,7 @@ export const paths = {
   ns: (name: string) => `/ns/${name}`,
   nsConfig: (name: string) => `/ns/${name}/config`,
   nsCatalog: (name: string) => `/ns/${name}/catalog`,
+  nsCatalogConfig: (name: string) => `/ns/${name}/catalog/config`,
   nsCatalogItems: (name: string) => `/ns/${name}/catalog/items`,
   nsCatalogItem: (name: string, id: string) => `/ns/${name}/catalog/items/${id}`,
   nsEvents: (name: string) => `/ns/${name}/events`,

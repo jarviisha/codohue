@@ -12,23 +12,23 @@ import {
   Panel,
   StatusToken,
   useRegisterCommand,
-} from '../../components/ui'
-import type { StatusState } from '../../components/ui'
-import { http } from '../../services/http'
-import { probeState, useHealth } from '../../services/health'
+} from '@/components/ui'
+import type { StatusState } from '@/components/ui'
+import { http } from '@/services/http'
+import { probeState, useHealth } from '@/services/health'
 import {
   lastRunToken,
   namespaceKeys,
   namespaceStatusToken,
   useNamespace,
   useNamespacesOverview,
-} from '../../services/namespaces'
-import { paths } from '../../routes/path'
+} from '@/services/namespaces'
+import { paths } from '@/routes/path'
 import {
   formatDurationMs,
   formatNumber,
   formatTimestamp,
-} from '../../utils/format'
+} from '@/utils/format'
 
 function phaseToken(ok: boolean | null | undefined): StatusState {
   if (ok === null || ok === undefined) return 'idle'

@@ -1,7 +1,7 @@
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import TopBar from './TopBar'
-import CommandPalette from '../ui/CommandPalette'
+import CommandPalette from '@/components/ui/CommandPalette'
 
 // Top-level shell: fixed Sidebar (240px) + fixed TopBar (48px) + scrolling
 // content. Login route renders outside this shell.

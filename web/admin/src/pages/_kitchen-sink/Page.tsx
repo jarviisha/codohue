@@ -35,7 +35,7 @@ import {
   Thead,
   Toolbar,
   Tr,
-} from '../../components/ui'
+} from '@/components/ui'
 
 // /_kitchen-sink — preview every primitive in src/components/ui with state
 // variants. Not part of operator nav; reach it by typing the URL during dev.
