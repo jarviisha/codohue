@@ -14,6 +14,7 @@ export const paths = {
   nsEvents: (name: string) => `/ns/${name}/events`,
   nsTrending: (name: string) => `/ns/${name}/trending`,
   nsBatchRuns: (name: string) => `/ns/${name}/batch-runs`,
+  nsBatchRunsReEmbeds: (name: string) => `/ns/${name}/batch-runs/re-embeds`,
   nsDebug: (name: string) => `/ns/${name}/debug`,
   nsDemoData: (name: string) => `/ns/${name}/demo-data`,
 } as const

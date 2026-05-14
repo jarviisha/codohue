@@ -14,7 +14,9 @@ import CatalogItemsPage from '@/pages/ns/catalog/items/ItemsPage'
 import CatalogItemDetailModal from '@/pages/ns/catalog/items/DetailModal'
 import EventsListPage from '@/pages/ns/events/ListPage'
 import TrendingPage from '@/pages/ns/trending/Page'
-import BatchRunsListPage from '@/pages/ns/batch-runs/ListPage'
+import BatchRunsLayout from '@/pages/ns/batch-runs/BatchRunsLayout'
+import CfRunsPage from '@/pages/ns/batch-runs/CfRunsPage'
+import ReEmbedsPage from '@/pages/ns/batch-runs/ReEmbedsPage'
 import DebugPage from '@/pages/ns/debug/Page'
 import DemoDataPage from '@/pages/ns/demo-data/Page'
 import KitchenSinkPage from '@/pages/_kitchen-sink/Page'
@@ -45,7 +47,10 @@ export default function AppRoutes() {
           </Route>
           <Route path="events" element={<EventsListPage />} />
           <Route path="trending" element={<TrendingPage />} />
-          <Route path="batch-runs" element={<BatchRunsListPage />} />
+          <Route path="batch-runs" element={<BatchRunsLayout />}>
+            <Route index element={<CfRunsPage />} />
+            <Route path="re-embeds" element={<ReEmbedsPage />} />
+          </Route>
           <Route path="debug" element={<DebugPage />} />
           <Route path="demo-data" element={<DemoDataPage />} />
         </Route>
