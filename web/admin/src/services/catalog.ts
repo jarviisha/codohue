@@ -38,6 +38,22 @@ export interface NamespaceCatalogResponse {
   catalog: NamespaceCatalogConfig
   available_strategies: CatalogStrategyDescriptor[]
   backlog: CatalogBacklog
+  last_embedded_at?: string | null
+  last_re_embed?: CatalogReEmbedSummary | null
+}
+
+export type CatalogReEmbedStatus = 'running' | 'success' | 'failed'
+
+export interface CatalogReEmbedSummary {
+  batch_run_id: number
+  status: CatalogReEmbedStatus
+  strategy_id?: string
+  strategy_version?: string
+  started_at: string
+  completed_at?: string | null
+  duration_ms?: number
+  processed_items: number
+  error_message?: string
 }
 
 export interface NamespaceCatalogUpdateRequest {

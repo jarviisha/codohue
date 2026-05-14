@@ -25,6 +25,118 @@ func withCatalogPlumbing(t *testing.T, repo *fakeRepo, picker *fakeStrategyPicke
 	return svc, pub, del
 }
 
+// ─── GetCatalogConfig liveness signals ────────────────────────────────────────
+
+func TestGetCatalogConfig_LivenessSignals(t *testing.T) {
+	completedAt := time.Date(2026, 5, 10, 11, 45, 0, 0, time.UTC)
+	startedAt := time.Date(2026, 5, 10, 11, 30, 0, 0, time.UTC)
+	embedAt := time.Date(2026, 5, 10, 11, 59, 0, 0, time.UTC)
+	target := "reembed:strat-x/v2"
+	dur := 900_000 // 15 minutes
+
+	cases := []struct {
+		name           string
+		run            *BatchRunLog
+		wantStatus     string
+		wantErrMessage string
+	}{
+		{
+			name: "running",
+			run: &BatchRunLog{
+				ID:        7,
+				StartedAt: startedAt,
+				// CompletedAt nil → running
+				ErrorMessage:      &target,
+				SubjectsProcessed: 0,
+			},
+			wantStatus: "running",
+		},
+		{
+			name: "success",
+			run: &BatchRunLog{
+				ID:                8,
+				StartedAt:         startedAt,
+				CompletedAt:       &completedAt,
+				DurationMs:        &dur,
+				Success:           true,
+				SubjectsProcessed: 42,
+			},
+			wantStatus: "success",
+		},
+		{
+			name: "failed",
+			run: &BatchRunLog{
+				ID:                9,
+				StartedAt:         startedAt,
+				CompletedAt:       &completedAt,
+				Success:           false,
+				ErrorMessage:      ptrStr("strategy not registered"),
+				SubjectsProcessed: 10,
+			},
+			wantStatus:     "failed",
+			wantErrMessage: "strategy not registered",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRepo{
+				lastEmbeddedAt: &embedAt,
+				latestReembed:  tc.run,
+			}
+			svc := newTestService(repo, "", "")
+			svc.SetCatalogConfigurator(&fakeCatalogConfig{getResp: &NamespaceCatalogConfig{Namespace: "ns"}})
+
+			resp, err := svc.GetCatalogConfig(context.Background(), "ns")
+			if err != nil {
+				t.Fatalf("GetCatalogConfig returned error: %v", err)
+			}
+			if resp == nil {
+				t.Fatal("expected non-nil response")
+			}
+			if resp.LastEmbeddedAt == nil || !resp.LastEmbeddedAt.Equal(embedAt) {
+				t.Errorf("LastEmbeddedAt = %v, want %v", resp.LastEmbeddedAt, embedAt)
+			}
+			if resp.LastReEmbed == nil {
+				t.Fatal("LastReEmbed nil, want populated")
+			}
+			if resp.LastReEmbed.Status != tc.wantStatus {
+				t.Errorf("Status = %q, want %q", resp.LastReEmbed.Status, tc.wantStatus)
+			}
+			if resp.LastReEmbed.ErrorMessage != tc.wantErrMessage {
+				t.Errorf("ErrorMessage = %q, want %q", resp.LastReEmbed.ErrorMessage, tc.wantErrMessage)
+			}
+		})
+	}
+}
+
+func TestGetCatalogConfig_LivenessSignals_RepoErrorsNonFatal(t *testing.T) {
+	// Repo failures for liveness signals must not break the response — the
+	// status panel still renders with whatever it had.
+	repo := &fakeRepo{
+		lastEmbeddedAtErr: errors.New("db transient"),
+		latestReembedErr:  errors.New("db transient"),
+	}
+	svc := newTestService(repo, "", "")
+	svc.SetCatalogConfigurator(&fakeCatalogConfig{getResp: &NamespaceCatalogConfig{Namespace: "ns"}})
+
+	resp, err := svc.GetCatalogConfig(context.Background(), "ns")
+	if err != nil {
+		t.Fatalf("GetCatalogConfig returned error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response")
+	}
+	if resp.LastEmbeddedAt != nil {
+		t.Errorf("LastEmbeddedAt = %v, want nil on repo error", resp.LastEmbeddedAt)
+	}
+	if resp.LastReEmbed != nil {
+		t.Errorf("LastReEmbed = %+v, want nil on repo error", resp.LastReEmbed)
+	}
+}
+
+func ptrStr(s string) *string { return &s }
+
 // ─── TriggerReEmbed ───────────────────────────────────────────────────────────
 
 func TestTriggerReEmbed_Service_HappyPath(t *testing.T) {

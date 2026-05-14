@@ -45,6 +45,67 @@ func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string
 	return &b, nil
 }
 
+// FindLatestReembedRun returns the most recent re-embed batch_run_logs row
+// for the namespace regardless of completion state, or (nil, nil) when none
+// exists. Used by the admin Status tab to show "last re-embed" even after a
+// run has finished. The error_message column for an open run carries the
+// reembed target encoding (see InsertReembedRun); callers must use
+// parseReembedTarget to extract strategy id/version.
+func (r *Repository) FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error) {
+	row := r.db.QueryRow(ctx, `
+		SELECT id, namespace, started_at, completed_at, duration_ms,
+		       subjects_processed, success, error_message, trigger_source, log_lines,
+		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
+		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
+		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
+		FROM batch_run_logs
+		WHERE namespace = $1
+		  AND trigger_source = $2
+		ORDER BY started_at DESC
+		LIMIT 1`,
+		namespace, triggerReembed,
+	)
+	b, err := scanBatchRunLog(row.Scan)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find latest reembed: %w", err)
+	}
+	return &b, nil
+}
+
+// ReembedTargetFromBatchRow extracts the (strategy_id, strategy_version) tuple
+// encoded in a re-embed batch_run_logs row's error_message column while the
+// run is open. Returns empty strings when the row is closed or the column was
+// repurposed for a failure message. Exposed so the service layer can build
+// the CatalogReEmbedSummary without duplicating the encoding contract.
+func ReembedTargetFromBatchRow(row *BatchRunLog) (strategyID, strategyVersion string) {
+	if row == nil {
+		return "", ""
+	}
+	return parseReembedTarget(row.ErrorMessage)
+}
+
+// GetLastCatalogEmbeddedAt returns the most recent embedded_at timestamp
+// across all catalog_items in the namespace, or (nil, nil) when nothing has
+// been embedded yet. Used by the admin Status tab to expose pipeline
+// liveness ("last embed: X ago").
+func (r *Repository) GetLastCatalogEmbeddedAt(ctx context.Context, namespace string) (*time.Time, error) {
+	var t *time.Time
+	err := r.db.QueryRow(ctx, `
+		SELECT MAX(embedded_at)
+		FROM catalog_items
+		WHERE namespace = $1
+		  AND state = 'embedded'`,
+		namespace,
+	).Scan(&t)
+	if err != nil {
+		return nil, fmt.Errorf("get last catalog embedded_at: %w", err)
+	}
+	return t, nil
+}
+
 // InsertReembedRun creates a new batch_run_logs row representing a catalog
 // re-embed orchestration. The row is open (completed_at NULL); the watcher
 // goroutine in cmd/embedder closes it when the backlog drains.

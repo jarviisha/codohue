@@ -32,8 +32,12 @@ type adminRepo interface {
 
 	// Catalog re-embed orchestration (US3).
 	FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
+	FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
 	InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error)
 	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) ([]CatalogReembedTarget, error)
+
+	// Catalog liveness signal for the admin Status tab.
+	GetLastCatalogEmbeddedAt(ctx context.Context, namespace string) (*time.Time, error)
 
 	// Catalog item operator endpoints (US3).
 	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) ([]CatalogItemSummary, int, error)
@@ -269,7 +273,49 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 			resp.Backlog = backlog
 		}
 	}
+	// Liveness signals — best-effort, both rows surface as nil when read fails.
+	if t, err := s.repo.GetLastCatalogEmbeddedAt(ctx, namespace); err == nil {
+		resp.LastEmbeddedAt = t
+	}
+	if run, err := s.repo.FindLatestReembedRun(ctx, namespace); err == nil && run != nil {
+		resp.LastReEmbed = summarizeReembedRun(run)
+	}
 	return resp, nil
+}
+
+// summarizeReembedRun derives the CatalogReEmbedSummary projection from a
+// batch_run_logs row that was created with trigger_source='admin_reembed'.
+// Encapsulates the row's quirky error_message encoding so callers (or future
+// JSON consumers) never see "reembed:<id>/<version>" leaking out.
+func summarizeReembedRun(row *BatchRunLog) *CatalogReEmbedSummary {
+	if row == nil {
+		return nil
+	}
+	strategyID, strategyVersion := ReembedTargetFromBatchRow(row)
+
+	out := &CatalogReEmbedSummary{
+		BatchRunID:      row.ID,
+		StartedAt:       row.StartedAt,
+		CompletedAt:     row.CompletedAt,
+		ProcessedItems:  row.SubjectsProcessed,
+		StrategyID:      strategyID,
+		StrategyVersion: strategyVersion,
+	}
+	if row.DurationMs != nil {
+		out.DurationMs = *row.DurationMs
+	}
+	switch {
+	case row.CompletedAt == nil:
+		out.Status = "running"
+	case row.Success:
+		out.Status = "success"
+	default:
+		out.Status = "failed"
+		if row.ErrorMessage != nil {
+			out.ErrorMessage = *row.ErrorMessage
+		}
+	}
+	return out
 }
 
 // UpdateCatalogConfig applies the catalog auto-embedding config change

@@ -60,10 +60,41 @@ type CatalogBacklog struct {
 // NamespaceCatalogResponse is the body of GET /api/admin/v1/namespaces/{ns}/catalog.
 // available_strategies is filtered to descriptors whose Dim matches the
 // namespace's embedding_dim so the operator UI only shows admissible options.
+//
+// last_embedded_at and last_re_embed are best-effort signals for the Status
+// tab; backend read failures surface as nil so the panel still renders.
 type NamespaceCatalogResponse struct {
 	Catalog             NamespaceCatalogConfig      `json:"catalog"`
 	AvailableStrategies []CatalogStrategyDescriptor `json:"available_strategies"`
 	Backlog             CatalogBacklog              `json:"backlog"`
+	LastEmbeddedAt      *time.Time                  `json:"last_embedded_at,omitempty"`
+	LastReEmbed         *CatalogReEmbedSummary      `json:"last_re_embed,omitempty"`
+}
+
+// CatalogReEmbedSummary is a compact view of the most recent admin-triggered
+// re-embed batch run for a namespace, surfaced on the catalog Status tab so
+// operators can confirm their action landed without leaving the page.
+//
+// Status derivation rules:
+//   - completed_at IS NULL                  → "running"
+//   - completed_at IS NOT NULL, success=true  → "success"
+//   - completed_at IS NOT NULL, success=false → "failed"
+//
+// strategy_id / strategy_version are decoded from the batch_run_logs row's
+// error_message column while the run is open (re-embed encodes the target
+// strategy there per InsertReembedRun). After completion the column is
+// cleared or repurposed for the failure message; the summary preserves the
+// last-known target so the UI still has context.
+type CatalogReEmbedSummary struct {
+	BatchRunID      int64      `json:"batch_run_id"`
+	Status          string     `json:"status"`
+	StrategyID      string     `json:"strategy_id,omitempty"`
+	StrategyVersion string     `json:"strategy_version,omitempty"`
+	StartedAt       time.Time  `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	DurationMs      int        `json:"duration_ms,omitempty"`
+	ProcessedItems  int        `json:"processed_items"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
 }
 
 // NamespaceCatalogUpdateRequest is the body of PUT /api/admin/v1/namespaces/{ns}/catalog.

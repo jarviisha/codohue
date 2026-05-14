@@ -44,6 +44,12 @@ type fakeRepo struct {
 	runningReembed    *BatchRunLog
 	runningReembedErr error
 
+	latestReembed    *BatchRunLog
+	latestReembedErr error
+
+	lastEmbeddedAt    *time.Time
+	lastEmbeddedAtErr error
+
 	insertReembedID  int64
 	insertReembedErr error
 	insertedReembed  struct {
@@ -133,6 +139,14 @@ func (f *fakeRepo) SeedDemoCatalogItems(_ context.Context, namespace string, ite
 func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {
 	f.clearNamespace = namespace
 	return f.clearDeleted, f.clearErr
+}
+
+func (f *fakeRepo) FindLatestReembedRun(_ context.Context, _ string) (*BatchRunLog, error) {
+	return f.latestReembed, f.latestReembedErr
+}
+
+func (f *fakeRepo) GetLastCatalogEmbeddedAt(_ context.Context, _ string) (*time.Time, error) {
+	return f.lastEmbeddedAt, f.lastEmbeddedAtErr
 }
 
 func (f *fakeRepo) FindRunningReembedRun(_ context.Context, _ string) (*BatchRunLog, error) {
@@ -257,10 +271,11 @@ func (f *fakeNSConfig) Upsert(_ context.Context, namespace string, req *Namespac
 type fakeCatalogConfig struct {
 	updateReq *NamespaceCatalogUpdateRequest
 	err       error
+	getResp   *NamespaceCatalogConfig
 }
 
 func (f *fakeCatalogConfig) GetCatalog(_ context.Context, _ string) (*NamespaceCatalogConfig, error) {
-	return nil, nil
+	return f.getResp, nil
 }
 
 func (f *fakeCatalogConfig) UpdateCatalog(_ context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error) {
