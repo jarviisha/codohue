@@ -30,8 +30,8 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 
 | Role | Light | Dark | Reference |
 |------|-------|------|-----------|
-| `bg-base` | `#F8FAFC` | `#0d1117` | app canvas |
-| `bg-subtle` | `#F1F5F9` | `#151b23` | alternate bands, sidebar, low-emphasis regions |
+| `bg-base` | `#F8FAFC` | `#0d1117` | app canvas and fixed shell chrome |
+| `bg-subtle` | `#F1F5F9` | `#151b23` | alternate bands and low-emphasis regions |
 | `bg-surface` | `#FFFFFF` | `#161b22` | panels, tables, inputs, modals |
 | `bg-surface-raised` | `#E2E8F0` | `#21262d` | hover, selected-adjacent, raised controls |
 | `border-default` | `#CBD5E1` | `#3d444d` | resting dividers and panel boundaries |
@@ -51,7 +51,7 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 **Palette notes**
 
 - **`accent` vs `accent-emphasis`.** Dark theme splits the accent into two values because GitHub does: `accent` `#4493f8` is for accent-colored **text** on a neutral background (6.11:1 vs `bg-base` — passes AA-normal); `accent-emphasis` `#1f6feb` is for solid accent **backgrounds** with white text (4.63:1 — passes AA-normal). Using `accent` itself as a button bg with white text would fail (3.10:1). Light theme uses the same value for both because Meta Blue on white passes either way (4.82:1). Always pair `bg-accent-emphasis` with `text-accent-text`; use `text-accent` only on neutral surfaces.
-- **Layer pattern.** Both themes use visible surface separation: `bg-base` is the page canvas, `bg-surface` is the content surface, `bg-subtle` is the secondary region, and `bg-surface-raised` is reserved for hover/raised states. Panels and tables use both `bg-surface` and `border-default`; they do not rely on hairline borders alone. This is intentionally less flat than the original border-only pass because the app must stay readable during long operator sessions.
+- **Layer pattern.** Both themes use visible surface separation: `bg-base` is the page canvas and fixed shell chrome, `bg-surface` is the content surface, `bg-subtle` is the secondary region, and `bg-surface-raised` is reserved for hover/raised states. Panels and tables use both `bg-surface` and `border-default`; they do not rely on hairline borders alone. This is intentionally less flat than the original border-only pass because the app must stay readable during long operator sessions.
 - **Text contrast tiers.** `text-primary` is for titles, IDs, numbers, and current values. `text-secondary` is the default body/readable UI text. `text-muted` is only for metadata, hints, empty-state detail, and secondary timestamps; it must not carry required form labels, table body values, or primary navigation labels.
 - **`text-muted` still passes WCAG AA-normal, but it is no longer the default small-text color.** Small text (`text-xs`, 11px mono labels, timestamps) should prefer `text-secondary` unless the information is genuinely optional.
 - **No status-bg tokens.** `Notice` uses a left-border pattern, not a tinted background — see §6 (Notice primitive).
@@ -66,7 +66,7 @@ Before shipping a page, verify both themes against these targets:
 - Required labels, active nav items, table body values, and command names use `text-secondary` or stronger.
 - `text-muted` is allowed for helper text, section metadata, timestamps when adjacent to a primary value, and disabled/empty context only.
 - Adjacent surfaces must differ by either background or a strong enough border. A panel on the app canvas cannot rely on `#E2E8F0`-style hairline contrast alone.
-- Compact controls are scoped to dense toolbars and table actions. Forms and primary actions use the default control size.
+- Compact controls are scoped to fixed shell chrome, dense toolbars, page-header actions, and table actions. Forms use the default control size.
 
 ### 2.2 Type tokens
 
@@ -146,8 +146,8 @@ This is the single signature operational element. Every status surface in the ap
 └──────────────────┴──────────────────────────────────────────────┘
 ```
 
-- **Sidebar**: fixed, ~240px wide, always expanded on desktop. Two sections: **GLOBAL** and **{namespace name}** (when selected). Sidebar `Health` item carries an inline status token `[ OK ]` / `[WARN]` / `[FAIL]` — health is always-on awareness.
-- **Top bar**: holds the **PS1 prompt** (§3.1.1), the command palette trigger (label `Cmd+K`), the theme toggle, and the user menu. Namespace picker is invoked through the PS1 prompt or `Cmd+K` — not a dropdown chip.
+- **Sidebar**: fixed, ~240px wide, always expanded on desktop, `bg-base` with `border-r border-default`. Two sections: **GLOBAL** and **{namespace name}** (when selected). Sidebar `Health` item carries an inline status token `[ OK ]` / `[WARN]` / `[FAIL]` — health is always-on awareness.
+- **Top bar**: fixed, `bg-base` with `border-b border-default`. Holds the **PS1 prompt** (§3.1.1), the command palette trigger (label `Cmd+K`), the theme toggle, and the user menu. Namespace picker is invoked through the PS1 prompt or `Cmd+K` — not a dropdown chip.
 - **Section labels** in sidebar use mono uppercase, slightly larger tracking (`tracking-[0.12em]`).
 - **Active nav item**: `bg-accent-subtle` background + `text-accent`. No bold weight change — the bg and color carry the active signal. A leading glyph/icon marker is deferred until the icon system is in place (see §15).
 - **Inactive nav item**: same row height, no decoration — `text-secondary` until hover.
@@ -213,7 +213,7 @@ PageShell (vertical rhythm, px-6 py-6)
 
 Width: full app shell width after the sidebar. Constrain only pages with a clear form-reading reason (login card, narrow config form) using `max-w-140` token.
 
-`PageHeader` itself stays light — title + optional meta + actions. No duplicated location chips.
+`PageHeader` itself stays compact and light: sticky at the top of the scrollable page body, `bg-base border-b border-default`, `px-6 py-4`, bracketed title + optional actions. No duplicated location chips; page metadata belongs in the body below the header.
 
 ### 3.4 Grids
 
@@ -225,7 +225,7 @@ Width: full app shell width after the sidebar. Constrain only pages with a clear
 
 | Role | Class | Notes |
 |------|-------|-------|
-| Page title | `text-xl font-semibold text-primary leading-tight` | sans |
+| Page title | `font-mono text-2xl text-primary leading-6 lowercase` | console-style page label, rendered as `[title]` |
 | Panel title | `text-sm font-semibold text-primary` | sans |
 | Section / meta label | `text-xs font-mono uppercase tracking-[0.04em] text-secondary` | mono uppercase; use `text-muted` only for low-importance labels |
 | Body | `text-sm text-secondary leading-5` | sans |
@@ -286,7 +286,7 @@ Page files compose primitives. Don't repeat Tailwind class strings.
 **Overlays & interaction**
 
 - `Modal`, `ConfirmDialog`, `Dropdown`
-- `Button` (primary / secondary / ghost / danger; `h-7` `h-8` `h-9`)
+- `Button` (primary / secondary / ghost / danger; `xs` `sm` `md` `lg`). Top-bar controls (`Cmd+K`, theme, user) use shared `Button size="xs"` rather than bespoke button classes.
 - `CommandPalette` — global modal triggered by `Cmd+K` / `Ctrl+K`. **Primary action interface** (§16). Index includes:
   - Namespace switching (`prod`, `staging`, `demo`)
   - Page navigation (jump to any route in §3.2)
@@ -337,13 +337,14 @@ Use buttons only for commands. Links must be real navigation links.
 
 | Variant | Use | Visual |
 |---------|-----|--------|
-| Primary | one main page or panel action | `bg-accent text-accent-text` |
+| Primary | one main page or panel action | `bg-accent-emphasis text-accent-text` |
 | Secondary | standard non-destructive action | `bg-surface border border-default text-primary` |
 | Ghost | low-emphasis inline action, table-row action | transparent, `text-secondary`, hover `bg-surface-raised` |
 | Danger | destructive action (delete, drop) | `bg-danger text-white`, requires `ConfirmDialog` |
 
 Rules:
-- Default height `h-8`, compact `h-7`, prominent `h-9`.
+- Button sizes: `xs` = `h-6 px-2 text-xs` for fixed shell chrome; `sm` = `h-8 px-2.5 text-sm` for page-header actions, compact toolbars, and table actions; `md` = `h-9 px-3.5 text-sm` as the default form/content action size; `lg` = `h-10 px-4 text-sm` for rare prominent actions.
+- Page-header primary create actions may use a leading ASCII `+` in the label, for example `+ Create namespace`, until the icon system lands.
 - Stable dimensions on loading. Spinner replaces leading glyph; label may change but width must not jump.
 - Icons only when they improve scan speed. Don't introduce a new icon source — use [components/icons.tsx](src/components/icons.tsx).
 
@@ -362,6 +363,7 @@ Rules:
 Tables are the default presentation for events, batch runs, recommendations, catalog items, trending.
 
 - Column headers: mono uppercase per §4.
+- Table wrapper: `border border-default rounded-sm overflow-x-auto bg-surface`.
 - Row borders subtle. Optional hover `bg-surface-raised`.
 - Numeric columns right-aligned, mono, `tabular-nums`.
 - Timestamps mono.
@@ -394,7 +396,7 @@ Terminals snap, they don't slide. The system should feel **immediate**.
 - Every input has a visible or programmatic label.
 - Focus state must be visible in both themes — use `shadow-focus`.
 - Color is never the only status signal. Pair with glyph + text.
-- Interactive controls have a practical hit area. Sidebar items min `h-8`, toolbar `h-7`.
+- Interactive controls have a practical hit area. Sidebar items min `h-8`; fixed shell buttons may use `Button size="xs"` (`h-6`) because they sit in the persistent top bar; page-header and toolbar controls use at least `Button size="sm"` (`h-8`).
 - Keyboard nav: tab order matches visual order. `Esc` closes modals/dropdowns. `Enter` submits forms.
 - `Modal`, `Dropdown`, `ConfirmDialog` must trap focus and restore on close.
 
@@ -426,6 +428,7 @@ Use this for every page built:
 - [ ] Loading, empty, error states use shared patterns.
 - [ ] Grids are responsive.
 - [ ] Tables have overflow wrapper.
+- [ ] Page-header actions use shared `Button size="sm"`; fixed top-bar actions use shared `Button size="xs"`.
 - [ ] Both themes legible; focus visible in both.
 - [ ] Routes follow §3.2; route is the source of truth for namespace (`useParams`), not context state.
 - [ ] All quick actions reachable via `CommandPalette` (`Cmd+K`). Adding a new action means registering it in the palette index.

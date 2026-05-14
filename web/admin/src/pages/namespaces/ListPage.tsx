@@ -54,16 +54,18 @@ export default function NamespacesListPage() {
           <>
             <Button
               variant="ghost"
+              size='sm'
               loading={isFetching && !isLoading}
               onClick={() => void refetch()}
             >
               Refresh
             </Button>
             <Button
+              size='sm'
               variant="primary"
               onClick={() => navigate(paths.namespaceCreate)}
             >
-              Create namespace
+              + Create namespace
             </Button>
           </>
         }

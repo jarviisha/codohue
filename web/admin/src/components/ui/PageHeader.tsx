@@ -17,11 +17,17 @@ export default function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <header className="sticky top-0 z-20 -mx-6 px-6 py-6 bg-base border-b border-default">
+    <header className="sticky top-0 z-20 -mx-6 px-6 py-4 bg-base border-b border-default">
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="font-mono text-xl text-primary leading-6 truncate lowercase">
-            {title}
+          <h1 className="font-mono text-2xl text-primary leading-6 truncate lowercase">
+            {typeof title === 'string' &&
+            title.startsWith('[') &&
+            title.endsWith(']') ? (
+              title
+            ) : (
+              <>[{title}]</>
+            )}
           </h1>
         </div>
         {actions ? (
