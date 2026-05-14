@@ -103,11 +103,12 @@ type CatalogReEmbedResponse struct {
 }
 
 // CatalogItemSummary is the projection returned in the items list endpoint.
-// Excludes content/metadata (large) — operators fetch the full record via
-// GET .../catalog/items/{id} for drill-down.
+// Includes a bounded content preview for table scanning. Operators fetch the
+// full record via GET .../catalog/items/{id} for full content and metadata.
 type CatalogItemSummary struct {
 	ID              int64      `json:"id"`
 	ObjectID        string     `json:"object_id"`
+	ContentPreview  string     `json:"content_preview,omitempty"`
 	State           string     `json:"state"`
 	StrategyID      string     `json:"strategy_id,omitempty"`
 	StrategyVersion string     `json:"strategy_version,omitempty"`
@@ -123,7 +124,16 @@ type CatalogItemDetail struct {
 	Namespace string         `json:"namespace"`
 	Content   string         `json:"content"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
+	Vector    *CatalogVector `json:"vector,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// CatalogVector is the dense object vector stored in Qdrant for a catalog item.
+type CatalogVector struct {
+	Collection string    `json:"collection"`
+	NumericID  uint64    `json:"numeric_id"`
+	Dim        int       `json:"dim"`
+	Values     []float32 `json:"values"`
 }
 
 // CatalogItemsListResponse paginates a list of catalog items.

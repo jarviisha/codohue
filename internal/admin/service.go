@@ -737,18 +737,15 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 		// ingest would. Publish failures are non-fatal — rows remain in
 		// state='pending' and can be picked up later (e.g. via re-embed).
 		if s.streamPublisher != nil {
-			for _, it := range demoCatalogDataset {
-				args := &goredis.XAddArgs{
-					Stream: "catalog:embed:" + demoNamespace,
-					Values: map[string]any{
-						"namespace":        demoNamespace,
-						"object_id":        it.ObjectID,
-						"strategy_id":      strategyID,
-						"strategy_version": strategyVersion,
-						"enqueued_at":      now.Format(time.RFC3339Nano),
-					},
-				}
-				if err := s.streamPublisher.XAdd(ctx, args).Err(); err != nil {
+			items, _, err := s.repo.ListCatalogItems(ctx, demoNamespace, "pending", len(demoCatalogDataset), 0, "")
+			if err != nil {
+				return nil, fmt.Errorf("list seeded demo catalog items: %w", err)
+			}
+			for _, it := range items {
+				if err := s.publishCatalogEnqueue(ctx, demoNamespace, CatalogReembedTarget{
+					ID:       it.ID,
+					ObjectID: it.ObjectID,
+				}, strategyID, strategyVersion); err != nil {
 					slog.Warn("demo catalog xadd failed",
 						"object_id", it.ObjectID, "error", err)
 				}

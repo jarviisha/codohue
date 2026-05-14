@@ -341,7 +341,7 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, object_id, state,
+		SELECT id, object_id, LEFT(content, 240), state,
 		       COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 		       attempt_count, COALESCE(last_error, ''),
 		       embedded_at, updated_at
@@ -358,7 +358,7 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 	for rows.Next() {
 		var it CatalogItemSummary
 		if err := rows.Scan(
-			&it.ID, &it.ObjectID, &it.State,
+			&it.ID, &it.ObjectID, &it.ContentPreview, &it.State,
 			&it.StrategyID, &it.StrategyVersion,
 			&it.AttemptCount, &it.LastError,
 			&it.EmbeddedAt, &it.UpdatedAt,
