@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/nsconfig"
@@ -55,6 +56,13 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 
 	resp, err := a.svc.Upsert(ctx, namespace, nsReq)
 	if err != nil {
+		var conflictErr *nsconfig.DenseStrategyConflictError
+		if errors.As(err, &conflictErr) {
+			return nil, &admin.CatalogStrategyConflict{
+				DenseStrategy:  conflictErr.DenseStrategy,
+				CatalogEnabled: conflictErr.CatalogEnabled,
+			}
+		}
 		return nil, err
 	}
 

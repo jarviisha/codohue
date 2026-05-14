@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
 // Repository holds prepared queries against PostgreSQL.
@@ -150,8 +152,8 @@ var statusFilter = map[string]string{
 //
 // Empty kind (lookup miss) leaves the query unfiltered.
 var kindFilter = map[string][]string{
-	"cf":      {"cron", "admin"},
-	"reembed": {"admin_reembed"},
+	"cf":      {string(batchrun.TriggerCron), string(batchrun.TriggerManual)},
+	"reembed": {string(batchrun.TriggerReembed)},
 }
 
 // GetBatchRunLogs returns recent batch run history.
@@ -223,7 +225,8 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status, kin
 		       subjects_processed, success, error_message, trigger_source, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
-		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
+		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
+		       target_strategy_id, target_strategy_version
 		FROM batch_run_logs`
 	rows, err := r.db.Query(ctx,
 		sel+where+fmt.Sprintf(" ORDER BY started_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)),
@@ -258,6 +261,7 @@ func scanBatchRunLog(scan func(...any) error) (BatchRunLog, error) {
 		&b.Phase1OK, &b.Phase1DurMs, &b.Phase1Subjects, &b.Phase1Objects, &b.Phase1Error,
 		&b.Phase2OK, &b.Phase2DurMs, &b.Phase2Items, &b.Phase2Subjects, &b.Phase2Error,
 		&b.Phase3OK, &b.Phase3DurMs, &b.Phase3Items, &b.Phase3Error,
+		&b.TargetStrategyID, &b.TargetStrategyVersion,
 	)
 	if err != nil {
 		return b, err
@@ -285,11 +289,13 @@ func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[strin
 		    subjects_processed, success, error_message, trigger_source, log_lines,
 		    phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		    phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
-		    phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
+		    phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
+		    target_strategy_id, target_strategy_version
 		FROM batch_run_logs
 		WHERE completed_at IS NOT NULL
-		  AND trigger_source IN ('cron', 'admin')
+		  AND trigger_source = ANY($1::text[])
 		ORDER BY namespace, started_at DESC`,
+		[]string{string(batchrun.TriggerCron), string(batchrun.TriggerManual)},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query last batch runs: %w", err)

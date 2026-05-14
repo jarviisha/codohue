@@ -9,6 +9,7 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
@@ -47,7 +48,7 @@ type PhaseResults struct {
 }
 
 type batchLogger interface {
-	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource string) (int64, error)
+	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource batchrun.TriggerSource) (int64, error)
 	UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string, logLines []LogEntry) error
 	UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error
 }
@@ -130,7 +131,7 @@ func (j *Job) runOnce(ctx context.Context) {
 	}
 
 	for _, ns := range namespaces {
-		j.RunNamespace(ctx, ns, "cron")
+		j.RunNamespace(ctx, ns, batchrun.TriggerCron)
 	}
 
 	elapsed := time.Since(start)
@@ -138,9 +139,10 @@ func (j *Job) runOnce(ctx context.Context) {
 	slog.Info("batch run done", "duration_ms", elapsed.Milliseconds())
 }
 
-// RunNamespace runs all batch phases for a single namespace and writes batch_run_logs.
-// triggerSource is "cron" for scheduled runs or "manual" for admin-triggered runs.
-func (j *Job) RunNamespace(ctx context.Context, ns, triggerSource string) {
+// RunNamespace runs all batch phases for a single namespace and writes
+// batch_run_logs. triggerSource is the typed enum from core/batchrun so the
+// caller cannot pass an unconstrained string by accident.
+func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) {
 	nsStart := time.Now()
 	capture := &LogCapture{}
 

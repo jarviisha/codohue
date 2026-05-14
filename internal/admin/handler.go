@@ -226,6 +226,21 @@ func (h *Handler) UpdateCatalogConfig(w http.ResponseWriter, r *http.Request) {
 				})
 				return
 			}
+			var conflictErr *CatalogStrategyConflict
+			if errors.As(err, &conflictErr) {
+				httpapi.WriteJSON(w, http.StatusBadRequest, struct {
+					Error          string `json:"error"`
+					Code           string `json:"code"`
+					DenseStrategy  string `json:"dense_strategy"`
+					CatalogEnabled bool   `json:"catalog_enabled"`
+				}{
+					Error:          "dense_strategy must be byoe or disabled when catalog_enabled=true",
+					Code:           "dense_strategy_conflict",
+					DenseStrategy:  conflictErr.DenseStrategy,
+					CatalogEnabled: conflictErr.CatalogEnabled,
+				})
+				return
+			}
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		}
 		return

@@ -31,50 +31,61 @@ func TestGetCatalogConfig_LivenessSignals(t *testing.T) {
 	completedAt := time.Date(2026, 5, 10, 11, 45, 0, 0, time.UTC)
 	startedAt := time.Date(2026, 5, 10, 11, 30, 0, 0, time.UTC)
 	embedAt := time.Date(2026, 5, 10, 11, 59, 0, 0, time.UTC)
-	target := "reembed:strat-x/v2"
 	dur := 900_000 // 15 minutes
 
 	cases := []struct {
-		name           string
-		run            *BatchRunLog
-		wantStatus     string
-		wantErrMessage string
+		name            string
+		run             *BatchRunLog
+		wantStatus      string
+		wantErrMessage  string
+		wantStrategyID  string
+		wantStrategyVer string
 	}{
 		{
 			name: "running",
 			run: &BatchRunLog{
-				ID:        7,
-				StartedAt: startedAt,
-				// CompletedAt nil → running
-				ErrorMessage:      &target,
-				SubjectsProcessed: 0,
+				ID:                    7,
+				StartedAt:             startedAt,
+				TargetStrategyID:      ptrStr("strat-x"),
+				TargetStrategyVersion: ptrStr("v2"),
+				SubjectsProcessed:     0,
 			},
-			wantStatus: "running",
+			wantStatus:      "running",
+			wantStrategyID:  "strat-x",
+			wantStrategyVer: "v2",
 		},
 		{
 			name: "success",
 			run: &BatchRunLog{
-				ID:                8,
-				StartedAt:         startedAt,
-				CompletedAt:       &completedAt,
-				DurationMs:        &dur,
-				Success:           true,
-				SubjectsProcessed: 42,
+				ID:                    8,
+				StartedAt:             startedAt,
+				CompletedAt:           &completedAt,
+				DurationMs:            &dur,
+				Success:               true,
+				SubjectsProcessed:     42,
+				TargetStrategyID:      ptrStr("strat-x"),
+				TargetStrategyVersion: ptrStr("v2"),
 			},
-			wantStatus: "success",
+			wantStatus:      "success",
+			wantStrategyID:  "strat-x",
+			wantStrategyVer: "v2",
 		},
 		{
 			name: "failed",
 			run: &BatchRunLog{
-				ID:                9,
-				StartedAt:         startedAt,
-				CompletedAt:       &completedAt,
-				Success:           false,
-				ErrorMessage:      ptrStr("strategy not registered"),
-				SubjectsProcessed: 10,
+				ID:                    9,
+				StartedAt:             startedAt,
+				CompletedAt:           &completedAt,
+				Success:               false,
+				ErrorMessage:          ptrStr("strategy not registered"),
+				SubjectsProcessed:     10,
+				TargetStrategyID:      ptrStr("strat-x"),
+				TargetStrategyVersion: ptrStr("v2"),
 			},
-			wantStatus:     "failed",
-			wantErrMessage: "strategy not registered",
+			wantStatus:      "failed",
+			wantErrMessage:  "strategy not registered",
+			wantStrategyID:  "strat-x",
+			wantStrategyVer: "v2",
 		},
 	}
 
@@ -105,6 +116,12 @@ func TestGetCatalogConfig_LivenessSignals(t *testing.T) {
 			}
 			if resp.LastReEmbed.ErrorMessage != tc.wantErrMessage {
 				t.Errorf("ErrorMessage = %q, want %q", resp.LastReEmbed.ErrorMessage, tc.wantErrMessage)
+			}
+			if resp.LastReEmbed.StrategyID != tc.wantStrategyID {
+				t.Errorf("StrategyID = %q, want %q", resp.LastReEmbed.StrategyID, tc.wantStrategyID)
+			}
+			if resp.LastReEmbed.StrategyVersion != tc.wantStrategyVer {
+				t.Errorf("StrategyVersion = %q, want %q", resp.LastReEmbed.StrategyVersion, tc.wantStrategyVer)
 			}
 		})
 	}

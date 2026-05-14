@@ -9,13 +9,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-)
 
-// triggerReembed is the trigger_source value written to batch_run_logs by
-// the catalog re-embed orchestrator. Distinct from the "admin" value used by
-// CreateBatchRun so the watcher and `running` check can scope precisely to
-// re-embed activity rather than every operator-initiated batch.
-const triggerReembed = "admin_reembed"
+	"github.com/jarviisha/codohue/internal/core/batchrun"
+)
 
 // FindRunningReembedRun returns the active re-embed batch_run_logs row for
 // the namespace, or (nil, nil) when none is running. A re-embed is "active"
@@ -26,14 +22,15 @@ func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string
 		       subjects_processed, success, error_message, trigger_source, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
-		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
+		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
+		       target_strategy_id, target_strategy_version
 		FROM batch_run_logs
 		WHERE namespace = $1
 		  AND trigger_source = $2
 		  AND completed_at IS NULL
 		ORDER BY started_at DESC
 		LIMIT 1`,
-		namespace, triggerReembed,
+		namespace, batchrun.TriggerReembed,
 	)
 	b, err := scanBatchRunLog(row.Scan)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -48,22 +45,21 @@ func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string
 // FindLatestReembedRun returns the most recent re-embed batch_run_logs row
 // for the namespace regardless of completion state, or (nil, nil) when none
 // exists. Used by the admin Status tab to show "last re-embed" even after a
-// run has finished. The error_message column for an open run carries the
-// reembed target encoding (see InsertReembedRun); callers must use
-// parseReembedTarget to extract strategy id/version.
+// run has finished.
 func (r *Repository) FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
 		       subjects_processed, success, error_message, trigger_source, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
-		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error
+		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
+		       target_strategy_id, target_strategy_version
 		FROM batch_run_logs
 		WHERE namespace = $1
 		  AND trigger_source = $2
 		ORDER BY started_at DESC
 		LIMIT 1`,
-		namespace, triggerReembed,
+		namespace, batchrun.TriggerReembed,
 	)
 	b, err := scanBatchRunLog(row.Scan)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -75,16 +71,20 @@ func (r *Repository) FindLatestReembedRun(ctx context.Context, namespace string)
 	return &b, nil
 }
 
-// ReembedTargetFromBatchRow extracts the (strategy_id, strategy_version) tuple
-// encoded in a re-embed batch_run_logs row's error_message column while the
-// run is open. Returns empty strings when the row is closed or the column was
-// repurposed for a failure message. Exposed so the service layer can build
-// the CatalogReEmbedSummary without duplicating the encoding contract.
+// ReembedTargetFromBatchRow returns the (strategy_id, strategy_version) the
+// re-embed run was kicked off against. Reads the dedicated columns added by
+// migration 013; rows from before that migration may have NULL values.
 func ReembedTargetFromBatchRow(row *BatchRunLog) (strategyID, strategyVersion string) {
 	if row == nil {
 		return "", ""
 	}
-	return parseReembedTarget(row.ErrorMessage)
+	if row.TargetStrategyID != nil {
+		strategyID = *row.TargetStrategyID
+	}
+	if row.TargetStrategyVersion != nil {
+		strategyVersion = *row.TargetStrategyVersion
+	}
+	return
 }
 
 // GetLastCatalogEmbeddedAt returns the most recent embedded_at timestamp
@@ -108,22 +108,20 @@ func (r *Repository) GetLastCatalogEmbeddedAt(ctx context.Context, namespace str
 
 // InsertReembedRun creates a new batch_run_logs row representing a catalog
 // re-embed orchestration. The row is open (completed_at NULL); the watcher
-// goroutine in cmd/embedder closes it when the backlog drains.
-//
-// The error_message column is repurposed to encode the (strategy_id, strategy_version)
-// of the re-embed target so the watcher can later derive which version is the
-// "new" tag; we use a dedicated prefix "reembed:" to keep the encoding obvious.
+// goroutine in cmd/embedder closes it when the backlog drains. The target
+// (strategy_id, strategy_version) lives in dedicated columns added by
+// migration 013 — error_message stays NULL until/unless the run fails.
 func (r *Repository) InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error) {
-	target := fmt.Sprintf("reembed:%s/%s", strategyID, strategyVersion)
 	var id int64
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO batch_run_logs (
 			namespace, started_at, subjects_processed, success,
-			error_message, trigger_source, log_lines
+			trigger_source, log_lines,
+			target_strategy_id, target_strategy_version
 		)
-		VALUES ($1, $2, 0, FALSE, $3, $4, '[]'::jsonb)
+		VALUES ($1, $2, 0, FALSE, $3, '[]'::jsonb, $4, $5)
 		RETURNING id`,
-		namespace, startedAt, target, triggerReembed,
+		namespace, startedAt, batchrun.TriggerReembed, strategyID, strategyVersion,
 	).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("insert reembed run: %w", err)
@@ -309,15 +307,17 @@ type OpenReembedRun struct {
 }
 
 // ListOpenReembedRuns returns every namespace currently in the middle of a
-// re-embed batch run. The error_message column carries the target strategy
-// id+version encoded as "reembed:<id>/<version>" — see InsertReembedRun.
+// re-embed batch run. Target strategy comes from the dedicated columns added
+// by migration 013.
 func (r *Repository) ListOpenReembedRuns(ctx context.Context) ([]OpenReembedRun, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, namespace, started_at, error_message
+		SELECT id, namespace, started_at,
+		       COALESCE(target_strategy_id, ''),
+		       COALESCE(target_strategy_version, '')
 		FROM batch_run_logs
 		WHERE trigger_source = $1
 		  AND completed_at IS NULL`,
-		triggerReembed,
+		batchrun.TriggerReembed,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list open reembed runs: %w", err)
@@ -326,37 +326,17 @@ func (r *Repository) ListOpenReembedRuns(ctx context.Context) ([]OpenReembedRun,
 
 	var out []OpenReembedRun
 	for rows.Next() {
-		var (
-			row    OpenReembedRun
-			target *string
-		)
-		if err := rows.Scan(&row.ID, &row.Namespace, &row.StartedAt, &target); err != nil {
+		var row OpenReembedRun
+		if err := rows.Scan(&row.ID, &row.Namespace, &row.StartedAt,
+			&row.TargetStrategyID, &row.TargetStrategyVersion); err != nil {
 			return nil, fmt.Errorf("scan open reembed run: %w", err)
 		}
-		row.TargetStrategyID, row.TargetStrategyVersion = parseReembedTarget(target)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate open reembed runs: %w", err)
 	}
 	return out, nil
-}
-
-func parseReembedTarget(target *string) (strategyID, strategyVersion string) {
-	if target == nil {
-		return "", ""
-	}
-	const prefix = "reembed:"
-	s := *target
-	if !strings.HasPrefix(s, prefix) {
-		return "", ""
-	}
-	body := strings.TrimPrefix(s, prefix)
-	idx := strings.Index(body, "/")
-	if idx < 0 {
-		return body, ""
-	}
-	return body[:idx], body[idx+1:]
 }
 
 // catalogItemSelectCols is the projection used by both the list and detail

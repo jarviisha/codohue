@@ -59,3 +59,23 @@ func (e *DimensionMismatchError) Error() string {
 	return fmt.Sprintf("strategy dimension mismatch: strategy_dim=%d namespace_embedding_dim=%d",
 		e.StrategyDim, e.NamespaceEmbeddingDim)
 }
+
+// DenseStrategyConflictError is returned when an operator tries to combine
+// catalog auto-embedding with a dense_strategy that also produces object
+// vectors (item2vec / svd). Both pipelines would write to {ns}_objects_dense
+// and silently overwrite each other, so the service rejects the combo at
+// config time rather than letting the conflict surface as flapping vectors.
+//
+// The handler maps this to 400 Bad Request with both values in the body so
+// the admin UI can render an actionable message.
+type DenseStrategyConflictError struct {
+	DenseStrategy string
+	CatalogEnabled bool
+}
+
+func (e *DenseStrategyConflictError) Error() string {
+	return fmt.Sprintf(
+		"dense_strategy=%q conflicts with catalog_enabled=%v (catalog auto-embed only allowed with dense_strategy in {byoe, disabled})",
+		e.DenseStrategy, e.CatalogEnabled,
+	)
+}

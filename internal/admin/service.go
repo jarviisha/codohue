@@ -15,6 +15,8 @@ import (
 
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
 // adminRepo is the repository interface used by Service.
@@ -82,7 +84,7 @@ type catalogBacklogReader interface {
 }
 
 type batchRunner interface {
-	RunNamespace(ctx context.Context, namespace, triggerSource string)
+	RunNamespace(ctx context.Context, namespace string, triggerSource batchrun.TriggerSource)
 }
 
 // streamPublisher abstracts the Redis Streams write used by the catalog
@@ -231,6 +233,10 @@ func (s *Service) GetNamespace(ctx context.Context, namespace string) (*Namespac
 func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error) {
 	resp, err := s.nsConfigSvc.Upsert(ctx, namespace, req)
 	if err != nil {
+		var conflictErr *CatalogStrategyConflict
+		if errors.As(err, &conflictErr) {
+			return nil, http.StatusBadRequest, err
+		}
 		return nil, http.StatusInternalServerError, fmt.Errorf("upsert namespace: %w", err)
 	}
 	status := http.StatusOK
@@ -653,7 +659,7 @@ func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreat
 	defer cancel()
 
 	start := time.Now()
-	s.job.RunNamespace(batchCtx, ns, "manual")
+	s.job.RunNamespace(batchCtx, ns, batchrun.TriggerManual)
 
 	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", "", 1, 0)
 	if err != nil || len(logs) == 0 {

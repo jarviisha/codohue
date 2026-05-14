@@ -74,6 +74,7 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, namespace stri
 	cfg, err := a.nsSvc.UpdateCatalogConfig(ctx, namespace, nsReq)
 	if err != nil {
 		var dimErr *nsconfig.DimensionMismatchError
+		var conflictErr *nsconfig.DenseStrategyConflictError
 		switch {
 		case errors.Is(err, nsconfig.ErrNamespaceNotFound):
 			return nil, nil
@@ -81,6 +82,11 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, namespace stri
 			return nil, &admin.CatalogDimensionMismatch{
 				StrategyDim:           dimErr.StrategyDim,
 				NamespaceEmbeddingDim: dimErr.NamespaceEmbeddingDim,
+			}
+		case errors.As(err, &conflictErr):
+			return nil, &admin.CatalogStrategyConflict{
+				DenseStrategy:  conflictErr.DenseStrategy,
+				CatalogEnabled: conflictErr.CatalogEnabled,
 			}
 		default:
 			return nil, err

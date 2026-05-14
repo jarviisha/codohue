@@ -122,6 +122,21 @@ func (e *CatalogDimensionMismatch) Error() string {
 	return "catalog strategy dimension mismatch"
 }
 
+// CatalogStrategyConflict is the typed error the service returns when the
+// requested combination of dense_strategy and catalog_enabled would have two
+// pipelines write to {ns}_objects_dense (cron Phase 2 dense training AND the
+// catalog embedder). The handler maps it to 400 with both fields in the body.
+//
+// dense_strategy ∈ {byoe, disabled} is the only safe pair with catalog_enabled.
+type CatalogStrategyConflict struct {
+	DenseStrategy  string
+	CatalogEnabled bool
+}
+
+func (e *CatalogStrategyConflict) Error() string {
+	return "dense_strategy conflicts with catalog_enabled"
+}
+
 // CatalogReEmbedResponse is the body returned by POST .../catalog/re-embed.
 // 202 Accepted; the operator can poll batch_run_logs by ID for progress.
 type CatalogReEmbedResponse struct {
@@ -225,6 +240,11 @@ type BatchRunLog struct {
 	Phase3DurMs *int    `json:"phase3_duration_ms"`
 	Phase3Items *int    `json:"phase3_items"`
 	Phase3Error *string `json:"phase3_error"`
+
+	// Re-embed runs only — the target (strategy_id, strategy_version) the
+	// run was kicked off against. NULL for cron/manual rows.
+	TargetStrategyID      *string `json:"target_strategy_id,omitempty"`
+	TargetStrategyVersion *string `json:"target_strategy_version,omitempty"`
 }
 
 // TrendingAdminEntry extends a trending item with Redis cache TTL info.
