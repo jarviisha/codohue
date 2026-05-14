@@ -50,21 +50,21 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
 
 ## 2.B — Catalog domain
 
-- [ ] **2.B.1 `services/catalog.ts`**
+- [x] **2.B.1 `services/catalog.ts`**
   - Types matching `internal/admin/types.go`: `NamespaceCatalogConfig`, `NamespaceCatalogResponse`, `NamespaceCatalogUpdateRequest`, `CatalogStrategyDescriptor`, `CatalogBacklog`, `CatalogReEmbedResponse`, `CatalogItemSummary`, `CatalogItemDetail`, `CatalogItemsListResponse`, `CatalogRedriveResponse`, `CatalogBulkRedriveResponse`.
   - Request functions + hooks for: get-config-plus-strategies-plus-backlog, update config, re-embed, list items (paginated + state + object_id filters), get single item, redrive one, bulk redrive deadletter, hard-delete item.
 
-- [ ] **2.B.2 `CatalogConfigPage` — build-order #10**
+- [x] **2.B.2 `CatalogConfigPage` — build-order #10**
   - Replace stub at `/ns/:name/catalog`. Status panel + form (strategy picker + params + max-attempts + max-content-bytes).
   - Dim-mismatch 400 → inline `Notice` showing both strategy dim and namespace dim.
   - "Re-embed all" via `ConfirmDialog`; 409 (already running) handled with a friendly `Notice`.
 
-- [ ] **2.B.3 `CatalogItemsListPage` — build-order #11 (BUILD_PLAN §7.2 mockup)**
+- [x] **2.B.3 `CatalogItemsListPage` — build-order #11 (BUILD_PLAN §7.2 mockup)**
   - Replace stub at `/ns/:name/catalog/items`. Filter toolbar (state Select, object_id Input). Table with `StatusToken` per row.
   - `Pagination` footer. Per-row "redrive" ghost button on `[FAIL]` rows; bulk "Redrive deadletter (N)" action in the header.
   - Filter state mirrored to URL query params.
 
-- [ ] **2.B.4 `CatalogItemDetailModal` — build-order #12**
+- [x] **2.B.4 `CatalogItemDetailModal` — build-order #12**
   - Replace stub modal at `/ns/:name/catalog/items/:id`. Content via `CodeBlock`, metadata via `KeyValueList`. Redrive / delete via `ConfirmDialog`. Renders as an `Outlet` over the list page.
 
 ---

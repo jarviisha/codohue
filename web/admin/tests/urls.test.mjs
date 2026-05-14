@@ -99,6 +99,9 @@ const COMMAND_PAGE_MODULES = [
   'src/pages/namespaces/CreatePage.tsx',
   'src/pages/ns/OverviewPage.tsx',
   'src/pages/ns/ConfigPage.tsx',
+  'src/pages/ns/catalog/ConfigPage.tsx',
+  'src/pages/ns/catalog/items/ListPage.tsx',
+  'src/pages/ns/catalog/items/DetailModal.tsx',
 ]
 
 test('implemented shell pages register at least one command', () => {
