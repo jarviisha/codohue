@@ -1,7 +1,8 @@
 package batchrun
 
 // TriggerSource enumerates every value the batch_run_logs.trigger_source
-// column is allowed to hold. The DB CHECK constraint (migration 012) mirrors
+// column is allowed to hold. The DB CHECK constraint (migration 012, pre-prod
+// hardening) mirrors
 // these literals — adding a value here must always come with a migration
 // that widens the constraint.
 type TriggerSource string

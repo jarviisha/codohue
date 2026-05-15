@@ -81,7 +81,7 @@ type NamespaceCatalogResponse struct {
 //   - completed_at IS NOT NULL, success=false → "failed"
 //
 // strategy_id / strategy_version come from the dedicated target_strategy_*
-// columns on batch_run_logs (migration 013). error_message holds only the
+// columns on batch_run_logs (migration 012). error_message holds only the
 // failure reason when success=false.
 type CatalogReEmbedSummary struct {
 	BatchRunID      int64      `json:"batch_run_id"`

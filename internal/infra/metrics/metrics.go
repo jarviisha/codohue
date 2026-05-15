@@ -32,7 +32,7 @@ var (
 
 	// BatchEntitiesProcessed tracks the number of entities processed per batch run.
 	// For CF runs this counts subjects; future re-embed runs would count items.
-	// Mirrors batch_run_logs.entities_processed column (migration 014).
+	// Mirrors batch_run_logs.entities_processed column (migration 012).
 	BatchEntitiesProcessed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "codohue_batch_entities_processed",
 		Help: "Number of entities processed in the last batch run.",
