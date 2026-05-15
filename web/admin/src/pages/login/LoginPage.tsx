@@ -49,7 +49,7 @@ export default function LoginPage() {
               autoComplete="current-password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder="RECOMMENDER_API_KEY"
+              placeholder="CODOHUE_ADMIN_API_KEY"
             />
           </Field>
           <Button

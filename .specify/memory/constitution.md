@@ -61,7 +61,7 @@ structural — tied to file names — to make compliance easy to audit via tooli
 
 All REST endpoints MUST follow the `/v1/<resource>` path convention. Error
 responses MUST use a uniform JSON structure across all handlers. Authentication
-MUST use the two-tier model: the global `RECOMMENDER_API_KEY` for admin routes
+MUST use the two-tier model: the global `CODOHUE_ADMIN_API_KEY` for admin routes
 (namespace config upsert); per-namespace bcrypt-hashed keys for data routes,
 with fallback to the global key when a namespace has no provisioned key.
 

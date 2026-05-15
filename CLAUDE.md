@@ -149,7 +149,7 @@ The cron binary runs three phases per namespace on each tick:
 - **Time decay**: Events older than 90 days excluded. Freshness multiplier `e^(-λ × days_since)` applied during vector build; γ-based object freshness applied at rerank time.
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
-- **Two-tier auth**: Global `RECOMMENDER_API_KEY` is used by the admin server (`cmd/admin`) for session creation and is **not** accepted by the data plane for mutations — namespace configuration lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate data-plane requests, with fallback to the global key when a namespace has no key provisioned.
+- **Two-tier auth**: Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and is **not** accepted by the data plane for mutations — namespace configuration lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate data-plane requests, with fallback to the global key when a namespace has no key provisioned.
 
 ### REST API — `cmd/api` (port 2001)
 
@@ -161,7 +161,7 @@ The cron binary runs three phases per namespace on each tick:
 | `GET`   | `/healthz` | Health check for postgres, redis, qdrant |
 | `GET`   | `/metrics` | Prometheus metrics                       |
 
-**Client-facing — per-namespace Bearer token (falls back to `RECOMMENDER_API_KEY`)**
+**Client-facing — per-namespace Bearer token (falls back to `CODOHUE_ADMIN_API_KEY`)**
 
 Every business capability is reachable from exactly one canonical path. Legacy duplicate paths have been removed and return 404.
 
@@ -184,7 +184,7 @@ Authentication models sessions as a resource. Login = create session; logout = d
 
 | Method   | Path                                                                | Auth          | Description                                                             |
 | -------- | ------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------- |
-| `POST`   | `/api/v1/auth/sessions`                                             | none (public) | Validate `RECOMMENDER_API_KEY`; set session cookie (201 + `expires_at`) |
+| `POST`   | `/api/v1/auth/sessions`                                             | none (public) | Validate `CODOHUE_ADMIN_API_KEY`; set session cookie (201 + `expires_at`) |
 | `DELETE` | `/api/v1/auth/sessions/current`                                     | session       | Clear session cookie (204)                                              |
 | `GET`    | `/api/admin/v1/health`                                              | session       | Proxy `GET /healthz` from `cmd/api`                                     |
 | `GET`    | `/api/admin/v1/namespaces`                                          | session       | List all namespace configs from PostgreSQL (`?include=overview`)        |
@@ -238,7 +238,7 @@ DATABASE_URL=postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
 REDIS_URL=redis://localhost:6379
 QDRANT_HOST=localhost
 QDRANT_PORT=6334
-RECOMMENDER_API_KEY=dev-secret-key
+CODOHUE_ADMIN_API_KEY=dev-secret-key
 BATCH_INTERVAL_MINUTES=5
 LOG_FORMAT=text   # "text" (default) | "json"
 API_PORT=2001     # cmd/api listen port

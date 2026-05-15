@@ -71,7 +71,7 @@ jobs:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
           QDRANT_HOST: ""
           QDRANT_PORT: "6334"
-          RECOMMENDER_API_KEY: ci-test-key
+          CODOHUE_ADMIN_API_KEY: ci-test-key
 
   e2e:
     needs: [lint, test]
@@ -130,4 +130,4 @@ jobs:
           REDIS_URL: redis://localhost:6379
           QDRANT_HOST: localhost
           QDRANT_PORT: "6334"
-          RECOMMENDER_API_KEY: ci-test-key
+          CODOHUE_ADMIN_API_KEY: ci-test-key

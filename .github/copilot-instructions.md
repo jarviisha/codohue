@@ -62,4 +62,4 @@ Core storage model:
 3. Every package must include `docs.go` with the package doc comment and `package` declaration only.
 4. All comments in Go files must be English.
 5. Business-logic files (`service.go`, `repository.go`, `job.go`, `worker.go`) require matching `_test.go` files; handler tests belong in `handler_test.go`.
-6. Protected API routes use bearer auth header `Authorization: Bearer <RECOMMENDER_API_KEY>`.
+6. Protected API routes use bearer auth header `Authorization: Bearer <CODOHUE_ADMIN_API_KEY>`.

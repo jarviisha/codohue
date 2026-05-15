@@ -150,9 +150,9 @@ func run() error {
 
 	// All client-facing routes live under /v1/namespaces/{ns}/* and authenticate
 	// via per-namespace bcrypt-hashed keys (with fallback to the global
-	// RECOMMENDER_API_KEY when no namespace key is provisioned).
+	// CODOHUE_ADMIN_API_KEY when no namespace key is provisioned).
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireNamespace(cfg.RecommenderAPIKey, keyHashFn, func(r *http.Request) string {
+		r.Use(auth.RequireNamespace(cfg.AdminAPIKey, keyHashFn, func(r *http.Request) string {
 			return chi.URLParam(r, "ns")
 		}))
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)

@@ -81,7 +81,7 @@ Codohue reads configuration from environment variables and also loads `.env` aut
 Required:
 
 - `DATABASE_URL`
-- `RECOMMENDER_API_KEY`
+- `CODOHUE_ADMIN_API_KEY`
 
 Common variables:
 
@@ -99,7 +99,7 @@ DATABASE_URL=postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
 REDIS_URL=redis://localhost:6379
 QDRANT_HOST=localhost
 QDRANT_PORT=6334
-RECOMMENDER_API_KEY=dev-secret-key
+CODOHUE_ADMIN_API_KEY=dev-secret-key
 BATCH_INTERVAL_MINUTES=5
 LOG_FORMAT=text
 API_PORT=2001
@@ -198,7 +198,7 @@ DATABASE_URL=postgres://user:password@localhost:5432/codohue?sslmode=disable
 REDIS_URL=redis://localhost:6379
 QDRANT_HOST=localhost
 QDRANT_PORT=6334
-RECOMMENDER_API_KEY=dev-secret-key
+CODOHUE_ADMIN_API_KEY=dev-secret-key
 BATCH_INTERVAL_MINUTES=5
 LOG_FORMAT=text
 API_PORT=2001
@@ -228,7 +228,7 @@ If your infrastructure is on another host or network, set `DATABASE_URL`, `REDIS
 
 ```bash
 export CODOHUE_DATABASE_URL="postgres://user:password@host:5432/dbname?sslmode=require"
-export CODOHUE_RECOMMENDER_API_KEY="your-secret-key"
+export CODOHUE_ADMIN_API_KEY="your-secret-key"
 ```
 
 **Start the stack**
@@ -252,7 +252,7 @@ migrate -path migrations -database "$DATABASE_URL" up
 
 ## Namespace Setup
 
-Before calling namespace-scoped endpoints, create a namespace configuration through the admin server with the admin API key from `RECOMMENDER_API_KEY`.
+Before calling namespace-scoped endpoints, create a namespace configuration through the admin server with the admin API key from `CODOHUE_ADMIN_API_KEY`.
 
 Create an admin session:
 
@@ -366,7 +366,7 @@ Namespace routes:
 
 Authentication model:
 
-- admin routes use a session cookie created with `RECOMMENDER_API_KEY`
+- admin routes use a session cookie created with `CODOHUE_ADMIN_API_KEY`
 - namespace routes use the per-namespace API key returned when the namespace is created
 - `GET /ping` and `GET /healthz` are public
 
@@ -476,7 +476,7 @@ e2e/                     end-to-end tests
 
 - `docker-compose.yml` is aimed at local development
 - `docker-compose.prod.yml` runs the prebuilt `api` and `cron` images
-- The production compose file expects `CODOHUE_DATABASE_URL` and `CODOHUE_RECOMMENDER_API_KEY` from the environment
+- The production compose file expects `CODOHUE_DATABASE_URL` and `CODOHUE_ADMIN_API_KEY` from the environment
 
 ## Notes
 

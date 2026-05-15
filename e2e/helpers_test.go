@@ -336,7 +336,7 @@ func runCronOnceUntil(t testing.TB, timeout time.Duration, condition func() (boo
 		"REDIS_URL="+envOrDefault("REDIS_URL", ""),
 		"QDRANT_HOST="+envOrDefault("QDRANT_HOST", "localhost"),
 		"QDRANT_PORT="+envOrDefault("QDRANT_PORT", "6334"),
-		"RECOMMENDER_API_KEY="+adminKey,
+		"CODOHUE_ADMIN_API_KEY="+adminKey,
 		"LOG_FORMAT=text",
 		"BATCH_INTERVAL_MINUTES=60",
 	)

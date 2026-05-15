@@ -69,10 +69,10 @@ Use the `Makefile` as the source of truth:
 - Run `make test-e2e` whenever you touch API behavior, migrations, Redis/Qdrant integration, or cron/compute flows.
 
 ## API, Data, and Config Notes
-- Namespace config is created via `PUT /v1/config/namespaces/{namespace}` using `RECOMMENDER_API_KEY`.
+- Namespace config is created via `PUT /v1/config/namespaces/{namespace}` using `CODOHUE_ADMIN_API_KEY`.
 - All non-admin routes use the namespace key returned once at namespace creation.
 - Recommendation sources include `collaborative_filtering`, `hybrid`, `hybrid_cold`, `fallback_popular`, and `hybrid_rank`.
-- Local development expects `.env` values such as `DATABASE_URL`, `REDIS_URL`, `QDRANT_HOST`, `QDRANT_PORT`, `RECOMMENDER_API_KEY`, and `BATCH_INTERVAL_MINUTES`.
+- Local development expects `.env` values such as `DATABASE_URL`, `REDIS_URL`, `QDRANT_HOST`, `QDRANT_PORT`, `CODOHUE_ADMIN_API_KEY`, and `BATCH_INTERVAL_MINUTES`.
 - Do not commit secrets or plaintext namespace keys.
 
 ## Commit & Pull Request Guidelines
