@@ -273,6 +273,26 @@ All code comments (inline comments, doc comments, TODO notes) must be written in
 
 Every file that contains business logic (`service.go`, `repository.go`, `job.go`, `worker.go`) must have a corresponding `_test.go` file. Handler tests live in `handler_test.go`. Files that only declare types (`types.go`) or wire dependencies (`docs.go`) do not require test files.
 
+### Commit messages
+
+Commit messages describe **what changed and what was added** in repo terms (files, functions, behaviour). Format:
+
+```
+type(scope): subject (≤72 chars)
+
+Brief body (2–4 lines max). What the change does, not narrative.
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+```
+
+Rules:
+
+- Subject line follows Conventional Commits (`feat`, `fix`, `refactor`, `style`, `chore`, `docs`, `test`).
+- **Never reference internal/transient concepts** like "Phase 5", "Tier 1", "Step 2", `T012`, plan/spec task numbers. Reviewers reading `git log` six months later don't have that context — describe the code change in code terms.
+- Skip per-file enumeration — the diff already has it.
+- Skip trailing "Verified npm run build…" stanzas unless a test result is genuinely surprising and worth recording.
+- One paragraph of context maximum. "X had problem Y; this does Z." in one line is usually enough.
+
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
