@@ -22,7 +22,7 @@ make build
 Then in a separate shell:
 
 ```bash
-export ADMIN_KEY="dev-secret-key"       # value of RECOMMENDER_API_KEY
+export ADMIN_KEY="dev-secret-key"       # value of CODOHUE_ADMIN_API_KEY
 export NS="quickstart"
 export SUBJECT="user_1"
 ```

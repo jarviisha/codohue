@@ -17,7 +17,7 @@
 - [x] T001 Create directory structure: `cmd/admin/`, `internal/admin/`, `web/admin/`, update `.gitignore` to exclude `web/admin/dist/` and `web/admin/node_modules/`
 - [x] T002 Initialize Vite + React + TypeScript project in `web/admin/` (`npm create vite@latest . -- --template react-ts`), add TanStack Query v5 and React Router v6 dependencies
 - [x] T003 [P] Add `make build-admin`, `make run-admin` targets to `Makefile`; `build-admin` runs `npm run build` in `web/admin/` then `go build ./cmd/admin`
-- [x] T004 [P] Add `admin` service to `docker-compose.yml` (port 2002, depends on `api`, env vars: `DATABASE_URL`, `REDIS_URL`, `RECOMMENDER_API_KEY`, `CODOHUE_API_URL`, `CODOHUE_ADMIN_PORT`)
+- [x] T004 [P] Add `admin` service to `docker-compose.yml` (port 2002, depends on `api`, env vars: `DATABASE_URL`, `REDIS_URL`, `CODOHUE_ADMIN_API_KEY`, `CODOHUE_API_URL`, `CODOHUE_ADMIN_PORT`)
 - [x] T005 [P] Add `CODOHUE_ADMIN_PORT` and `CODOHUE_API_URL` variables to `.env.example`
 - [x] T006 [P] Configure Vite proxy in `web/admin/vite.config.ts` to forward `/api/*` to `http://localhost:2002` during development
 
@@ -32,9 +32,9 @@
 - [x] T007 Write migration `migrations/006_batch_run_logs.up.sql` (table + index per data-model.md) and `migrations/006_batch_run_logs.down.sql` (`DROP TABLE batch_run_logs`)
 - [x] T008 Create `internal/admin/docs.go` with `// Package admin implements the HTTP handlers, service logic, and repository layer for the web admin dashboard.`
 - [x] T009 Create `internal/admin/types.go` with all request/response types: `NamespaceConfig`, `BatchRunLog`, `TrendingAdminEntry`, `LoginRequest`, `RecommendDebugRequest`, `RecommendDebugResponse`, `NamespaceUpsertRequest`, `BatchRunsResponse` (per contracts/admin-api.md and data-model.md)
-- [x] T010 Create `cmd/admin/main.go`: load env config (`DATABASE_URL`, `RECOMMENDER_API_KEY`, `CODOHUE_API_URL`, `CODOHUE_ADMIN_PORT`), initialize pgxpool, initialize chi router, mount `//go:embed web/admin/dist` static file server, wire admin API routes, listen on `CODOHUE_ADMIN_PORT`
+- [x] T010 Create `cmd/admin/main.go`: load env config (`DATABASE_URL`, `CODOHUE_ADMIN_API_KEY`, `CODOHUE_API_URL`, `CODOHUE_ADMIN_PORT`), initialize pgxpool, initialize chi router, mount `//go:embed web/admin/dist` static file server, wire admin API routes, listen on `CODOHUE_ADMIN_PORT`
 - [x] T011 Add `internal/admin/middleware.go`: session JWT validation middleware using HMAC-SHA256 signed cookie (`codohue_admin_session`); apply to all `/api/admin/v1/*` routes
-- [x] T012 Add `POST /api/auth/login` and `DELETE /api/auth/logout` handlers in `internal/admin/handler.go`; login validates submitted `api_key` against `RECOMMENDER_API_KEY` env var, issues HTTP-only signed JWT cookie on success
+- [x] T012 Add `POST /api/auth/login` and `DELETE /api/auth/logout` handlers in `internal/admin/handler.go`; login validates submitted `api_key` against `CODOHUE_ADMIN_API_KEY` env var, issues HTTP-only signed JWT cookie on success
 - [x] T013 Create `internal/admin/handler_test.go` with test helpers: `fakeSvc` interface stub, `newTestHandler()` constructor, `assertJSON()` helper
 - [x] T014 Add handler tests for auth routes: `TestLoginSuccess`, `TestLoginWrongKey`, `TestLogout`, `TestProtectedRouteWithoutSession` in `internal/admin/handler_test.go`
 - [x] T015 Create `internal/admin/repository.go`: initialize `pgxpool.Pool` field, add `// Repository holds prepared queries against PostgreSQL.` struct doc

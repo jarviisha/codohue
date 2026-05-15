@@ -5,7 +5,7 @@
 
 ## Summary
 
-Add a standalone web admin dashboard (`cmd/admin`) that gives operators a browser-based control plane for the Codohue recommendation engine. The dashboard serves a React SPA embedded in a Go binary on port 2002. It covers five capability areas: system health, namespace config management, recommendation debugger, batch job history, and trending inspector. A new `batch_run_logs` PostgreSQL table is introduced so cron run history is queryable. All admin API calls to `cmd/api` use `RECOMMENDER_API_KEY` as the global fallback auth token.
+Add a standalone web admin dashboard (`cmd/admin`) that gives operators a browser-based control plane for the Codohue recommendation engine. The dashboard serves a React SPA embedded in a Go binary on port 2002. It covers five capability areas: system health, namespace config management, recommendation debugger, batch job history, and trending inspector. A new `batch_run_logs` PostgreSQL table is introduced so cron run history is queryable. All admin API calls to `cmd/api` use `CODOHUE_ADMIN_API_KEY` as the global fallback auth token.
 
 ## Technical Context
 
@@ -26,7 +26,7 @@ Add a standalone web admin dashboard (`cmd/admin`) that gives operators a browse
 |------|--------|-------|
 | **I. Code Quality** — domain in `internal/<domain>/`, `docs.go` present, import boundaries respected, English-only comments | ✅ | New `internal/admin/` domain; `docs.go` planned; no cross-domain imports |
 | **II. Testing Standards** — `_test.go` planned for every `service.go`, `repository.go`, `job.go`, `worker.go` | ✅ | `service_test.go`, `repository_test.go`, `handler_test.go` planned |
-| **III. API Consistency** — endpoints follow `/v1/<resource>`, two-tier auth, REST API table in CLAUDE.md updated | ✅ | Admin API uses `/api/admin/v1/` prefix (distinct control-plane path); auth via session cookie backed by `RECOMMENDER_API_KEY`; CLAUDE.md REST table will be updated |
+| **III. API Consistency** — endpoints follow `/v1/<resource>`, two-tier auth, REST API table in CLAUDE.md updated | ✅ | Admin API uses `/api/admin/v1/` prefix (distinct control-plane path); auth via session cookie backed by `CODOHUE_ADMIN_API_KEY`; CLAUDE.md REST table will be updated |
 | **IV. Performance** — Redis cache plan in place, batch phases non-blocking, cold-start fallback accounted for | ✅ | Admin is not on the recommendation hot path; no caching layer needed for admin reads |
 
 > Any ☒ violation requires a Complexity Tracking entry below.

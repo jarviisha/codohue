@@ -30,9 +30,9 @@ r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 
 ## R-002: Admin session authentication
 
-**Decision**: Browser submits `RECOMMENDER_API_KEY` once to `POST /api/auth/login`. The Go server validates it and issues a signed HTTP-only session cookie (HMAC-SHA256 JWT, signed with `RECOMMENDER_API_KEY` as secret, 8-hour expiry). Subsequent requests carry the cookie; middleware validates the JWT on every request.
+**Decision**: Browser submits `CODOHUE_ADMIN_API_KEY` once to `POST /api/auth/login`. The Go server validates it and issues a signed HTTP-only session cookie (HMAC-SHA256 JWT, signed with `CODOHUE_ADMIN_API_KEY` as secret, 8-hour expiry). Subsequent requests carry the cookie; middleware validates the JWT on every request.
 
-**Rationale**: Avoids storing server-side session state (no Redis/DB session table needed). The operator enters the key once; the browser auto-sends the cookie. HTTP-only prevents XSS token theft. Using `RECOMMENDER_API_KEY` as the HMAC secret means the session is automatically invalidated if the key rotates.
+**Rationale**: Avoids storing server-side session state (no Redis/DB session table needed). The operator enters the key once; the browser auto-sends the cookie. HTTP-only prevents XSS token theft. Using `CODOHUE_ADMIN_API_KEY` as the HMAC secret means the session is automatically invalidated if the key rotates.
 
 **Alternatives considered**:
 - HTTP Basic auth on every request — rejected: browser prompts are ugly; no logout capability.
@@ -43,7 +43,7 @@ r.Get("/*", func(w http.ResponseWriter, r *http.Request) {
 
 ## R-003: Reading namespace configs in cmd/admin
 
-**Decision**: `cmd/admin`'s repository layer reads `namespace_configs` directly from PostgreSQL using a read-only query. It does NOT call `cmd/api` for reads. For writes (create/update), it proxies to `cmd/api PUT /v1/config/namespaces/{ns}` using `RECOMMENDER_API_KEY` as the Bearer token.
+**Decision**: `cmd/admin`'s repository layer reads `namespace_configs` directly from PostgreSQL using a read-only query. It does NOT call `cmd/api` for reads. For writes (create/update), it proxies to `cmd/api PUT /v1/config/namespaces/{ns}` using `CODOHUE_ADMIN_API_KEY` as the Bearer token.
 
 **Rationale**: `cmd/api` currently has no `GET /v1/config/namespaces` or `GET /v1/config/namespaces/{ns}` endpoint. Adding these to `cmd/api` would bloat its admin surface. Reading directly from the shared PostgreSQL database is clean and already done by cron for the same data.
 
@@ -93,7 +93,7 @@ CREATE INDEX idx_batch_run_logs_ns_started
 
 ## R-005: Recommendation debugger — auth for proxied calls
 
-**Decision**: `cmd/admin` proxies recommendation debug requests to `cmd/api` using `RECOMMENDER_API_KEY` as `Authorization: Bearer <key>`. This works because the existing two-tier auth accepts the global key as a fallback for all namespace-scoped routes.
+**Decision**: `cmd/admin` proxies recommendation debug requests to `cmd/api` using `CODOHUE_ADMIN_API_KEY` as `Authorization: Bearer <key>`. This works because the existing two-tier auth accepts the global key as a fallback for all namespace-scoped routes.
 
 **Rationale**: The operator never needs to know or enter individual namespace API keys. The admin already holds the global key as its own auth credential.
 
@@ -102,7 +102,7 @@ CREATE INDEX idx_batch_run_logs_ns_started
 Browser → POST /api/admin/v1/recommend/debug (session cookie)
         → cmd/admin validates session
         → cmd/admin calls cmd/api GET /v1/namespaces/{ns}/recommendations?subject_id=...
-          with Authorization: Bearer $RECOMMENDER_API_KEY
+          with Authorization: Bearer $CODOHUE_ADMIN_API_KEY
         → returns result to browser
 ```
 

@@ -24,7 +24,7 @@ Create a new session by validating the global admin API key.
     ```json
     { "expires_at": "2026-05-08T10:30:00Z" }
     ```
-- **401 Unauthorized** — `api_key` does not match `RECOMMENDER_API_KEY`.
+- **401 Unauthorized** — `api_key` does not match `CODOHUE_ADMIN_API_KEY`.
 - **400 Bad Request** — body missing or malformed.
 
 > Replaces `POST /api/auth/login`.

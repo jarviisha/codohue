@@ -19,7 +19,7 @@ A small change is also made to the existing `cmd/api` BYOE write endpoint to enf
 
 Ingest a catalog item for a namespace.
 
-**Auth**: per-namespace bearer key (existing data-plane scheme; falls back to `RECOMMENDER_API_KEY` only when the namespace has no provisioned key, identical to the existing event-ingest semantics).
+**Auth**: per-namespace bearer key (existing data-plane scheme; falls back to `CODOHUE_ADMIN_API_KEY` only when the namespace has no provisioned key, identical to the existing event-ingest semantics).
 
 **Request body**:
 

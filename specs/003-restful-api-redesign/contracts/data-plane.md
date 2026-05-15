@@ -1,7 +1,7 @@
 # Data-Plane API Contract
 
 **Server**: `cmd/api`, port `2001`
-**Auth**: per-namespace Bearer token (bcrypt-hashed key from `namespace_configs.api_key_hash`); falls back to global `RECOMMENDER_API_KEY` if no namespace key is provisioned.
+**Auth**: per-namespace Bearer token (bcrypt-hashed key from `namespace_configs.api_key_hash`); falls back to global `CODOHUE_ADMIN_API_KEY` if no namespace key is provisioned.
 **Error envelope**: `{error: {code, message}}` (RFC 7807-lite, owned by `internal/core/httpapi`).
 
 > All routes in this contract are the **canonical** post-redesign surface. No legacy form is registered. Any path not listed here returns 404.

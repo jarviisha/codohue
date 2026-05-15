@@ -60,7 +60,7 @@ Not a DB table. A session is a signed JWT cookie:
 | `iat` | Unix timestamp of login |
 | `exp` | `iat + 28800` (8 hours) |
 
-**Signing**: HMAC-SHA256, key = `RECOMMENDER_API_KEY`. Session is automatically invalidated on key rotation.
+**Signing**: HMAC-SHA256, key = `CODOHUE_ADMIN_API_KEY`. Session is automatically invalidated on key rotation.
 
 ---
 
