@@ -64,7 +64,7 @@ An operator wants to know when the last batch recompute ran, how many subjects w
 
 **Why this priority**: Operational visibility into the cron pipeline is critical for knowing if recommendations are fresh. However, this is less urgent than health status and namespace management.
 
-**Independent Test**: The metrics panel shows `codohue_batch_job_lag_seconds`, `codohue_batch_subjects_processed`, and `codohue_redis_cache_requests_total` as readable numbers with labels. Can be tested independently of the recommendation debugger or namespace forms.
+**Independent Test**: The metrics panel shows `codohue_batch_job_lag_seconds`, `codohue_batch_entities_processed`, and `codohue_redis_cache_requests_total` as readable numbers with labels. Can be tested independently of the recommendation debugger or namespace forms.
 
 **Acceptance Scenarios**:
 
@@ -110,7 +110,7 @@ An operator can browse the current trending items for any namespace — showing 
 - **FR-007**: Operators MUST be able to query recommendations for any subject in any namespace and see item scores, ranks, and the source strategy.
 - **FR-008**: The dashboard MUST display key operational metrics: batch job lag, subjects processed per run, recommendation request rate, and Redis cache hit rate.
 - **FR-009**: Operators MUST be able to view the current trending items for a selected namespace, including each item's score.
-- **FR-010**: All write operations (namespace create/update) MUST be protected by the single admin credential (`RECOMMENDER_API_KEY`). There is no separate read-only tier — any authenticated operator can perform all actions.
+- **FR-010**: All write operations (namespace create/update) MUST be protected by the single admin credential (`CODOHUE_ADMIN_API_KEY`). There is no separate read-only tier — any authenticated operator can perform all actions.
 - **FR-011**: The dashboard MUST be accessible via a standard web browser with no additional client-side installation.
 - **FR-012**: All forms MUST validate inputs client-side before submission and surface server-side validation errors inline.
 
@@ -141,7 +141,7 @@ An operator can browse the current trending items for any namespace — showing 
 
 - The admin dashboard is operated by a small number of trusted operators (1–5 people); no multi-tenancy or row-level access control is needed for v1.
 - The dashboard is an internal tool; it does not need to be publicly accessible and can sit behind network-level access control (VPN, firewall) for an additional security layer.
-- Authentication uses the existing `RECOMMENDER_API_KEY` environment variable — no separate user/password database is needed.
+- Authentication uses the existing `CODOHUE_ADMIN_API_KEY` environment variable — no separate user/password database is needed.
 - The existing Codohue HTTP API (`cmd/api`) is the primary data source for recommendation and namespace operations; the admin service also reads `batch_run_logs` directly from PostgreSQL.
 - Mobile support is out of scope for v1; the dashboard targets desktop browsers only.
 - The dashboard does not need to trigger a manual batch recompute for v1 (operators can run `make run-cron` directly); this can be added in v2 if needed.

@@ -106,7 +106,7 @@ A developer adding a new domain or capability to Codohue should find a single co
 #### Authentication and authorization
 
 - **FR-018**: Authentication on the data-plane API MUST be enforced by middleware applied to the route group `/v1/namespaces/{ns}/*`. No data-plane handler MAY perform authentication in-handler. Specifically, the rank handler's deferred auth check MUST be removed because the namespace is now in the path.
-- **FR-019**: The two-tier auth model MUST be preserved: per-namespace bcrypt-hashed keys validate Bearer tokens on data-plane routes, with the global `RECOMMENDER_API_KEY` continuing to act as a fallback when a namespace has no key provisioned. Admin server routes MUST require a valid session cookie.
+- **FR-019**: The two-tier auth model MUST be preserved: per-namespace bcrypt-hashed keys validate Bearer tokens on data-plane routes, with the global `CODOHUE_ADMIN_API_KEY` continuing to act as a fallback when a namespace has no key provisioned. Admin server routes MUST require a valid session cookie.
 
 #### Versioning
 
@@ -138,7 +138,7 @@ This feature does not introduce new domain entities. It re-shapes the public API
 - DarkVoid is a demonstration client and will be updated outside the scope of this spec; no production traffic depends on the legacy paths, so they can be removed without a deprecation cycle.
 - Database schema is unaffected; no migration is required.
 - Domain logic in services, repositories, batch jobs, and ingest workers is unchanged. Only the HTTP transport layer (route registration, handler DTOs, middleware wiring) and the admin web UI's API client are modified.
-- Existing authentication primitives (bcrypt-hashed namespace keys, the global `RECOMMENDER_API_KEY` fallback, session cookies) remain in place; only their application to routes is re-examined.
+- Existing authentication primitives (bcrypt-hashed namespace keys, the global `CODOHUE_ADMIN_API_KEY` fallback, session cookies) remain in place; only their application to routes is re-examined.
 - The current `{error: {code, message}}` error envelope is acceptable and will be preserved for consistency.
 - The 90-day event retention window, time-decay multipliers, cold-start fallback rules, and recommendation cache TTL are unchanged by this redesign.
 - The pre-existing 500-item cap on ranking candidates is preserved.

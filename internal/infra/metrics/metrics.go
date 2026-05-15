@@ -30,10 +30,12 @@ var (
 		Help: "Total recommendation requests by source.",
 	}, []string{"namespace", "source"})
 
-	// BatchSubjectsProcessed tracks the number of subjects processed per batch run.
-	BatchSubjectsProcessed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "codohue_batch_subjects_processed",
-		Help: "Number of subjects processed in the last batch run.",
+	// BatchEntitiesProcessed tracks the number of entities processed per batch run.
+	// For CF runs this counts subjects; future re-embed runs would count items.
+	// Mirrors batch_run_logs.entities_processed column (migration 012).
+	BatchEntitiesProcessed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_batch_entities_processed",
+		Help: "Number of entities processed in the last batch run.",
 	}, []string{"namespace"})
 
 	// IDMappingErrors counts ID mapping lookup/create errors by entity type.
@@ -102,7 +104,7 @@ func Register() {
 		QdrantQueryDuration,
 		RedisCacheRequests,
 		RecommendRequests,
-		BatchSubjectsProcessed,
+		BatchEntitiesProcessed,
 		IDMappingErrors,
 		TrendingItemsTotal,
 		TrendingRequestsTotal,

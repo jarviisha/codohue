@@ -10,7 +10,7 @@ package compute
 // dense component for the duration of that interval. The sparse CF path is unaffected
 // because it queries Qdrant with vectors computed in the same batch.
 //
-// To reduce staleness: decrease BATCH_INTERVAL_MINUTES, or switch to BYOE and push
+// To reduce staleness: decrease CODOHUE_BATCH_INTERVAL_MINUTES, or switch to BYOE and push
 // updated subject embeddings via the canonical subject embedding endpoint immediately
 // after each interaction is recorded.
 func UserDenseVectors(events []*RawEvent, itemVecs map[string][]float32) map[string][]float32 {

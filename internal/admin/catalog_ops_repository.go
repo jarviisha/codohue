@@ -73,7 +73,7 @@ func (r *Repository) FindLatestReembedRun(ctx context.Context, namespace string)
 
 // ReembedTargetFromBatchRow returns the (strategy_id, strategy_version) the
 // re-embed run was kicked off against. Reads the dedicated columns added by
-// migration 013; rows from before that migration may have NULL values.
+// migration 012; rows from before that migration may have NULL values.
 func ReembedTargetFromBatchRow(row *BatchRunLog) (strategyID, strategyVersion string) {
 	if row == nil {
 		return "", ""
@@ -110,7 +110,7 @@ func (r *Repository) GetLastCatalogEmbeddedAt(ctx context.Context, namespace str
 // re-embed orchestration. The row is open (completed_at NULL); the watcher
 // goroutine in cmd/embedder closes it when the backlog drains. The target
 // (strategy_id, strategy_version) lives in dedicated columns added by
-// migration 013 — error_message stays NULL until/unless the run fails.
+// migration 012 — error_message stays NULL until/unless the run fails.
 func (r *Repository) InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
@@ -308,7 +308,7 @@ type OpenReembedRun struct {
 
 // ListOpenReembedRuns returns every namespace currently in the middle of a
 // re-embed batch run. Target strategy comes from the dedicated columns added
-// by migration 013.
+// by migration 012.
 func (r *Repository) ListOpenReembedRuns(ctx context.Context) ([]OpenReembedRun, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, namespace, started_at,

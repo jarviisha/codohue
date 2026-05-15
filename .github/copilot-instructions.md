@@ -36,7 +36,7 @@ Migrations are SQL files in `migrations/`; CI applies `001_initial.up.sql` throu
 Codohue is a behavior-based collaborative filtering system with two binaries:
 
 1. `cmd/api`: serves HTTP endpoints, exposes metrics/health, and runs a Redis Streams ingest worker (`codohue:events`) in-process.
-2. `cmd/cron`: runs a periodic batch job (`BATCH_INTERVAL_MINUTES`) to recompute vectors and upsert them to Qdrant.
+2. `cmd/cron`: runs a periodic batch job (`CODOHUE_BATCH_INTERVAL_MINUTES`) to recompute vectors and upsert them to Qdrant.
 
 Data flow:
 

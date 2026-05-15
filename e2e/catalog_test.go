@@ -44,11 +44,11 @@ func runEmbedderInBackground(t testing.TB) {
 		"REDIS_URL="+envOrDefault("REDIS_URL", "redis://localhost:6379"),
 		"QDRANT_HOST="+envOrDefault("QDRANT_HOST", "localhost"),
 		"QDRANT_PORT="+envOrDefault("QDRANT_PORT", "6334"),
-		"LOG_FORMAT=text",
-		"EMBEDDER_HEALTH_PORT="+embedderHealthPort,
-		"EMBEDDER_NAMESPACE_POLL_INTERVAL=200ms",
-		"EMBED_MAX_ATTEMPTS=5",
-		"CATALOG_MAX_CONTENT_BYTES=32768",
+		"CODOHUE_LOG_FORMAT=text",
+		"CODOHUE_EMBEDDER_HEALTH_PORT="+embedderHealthPort,
+		"CODOHUE_EMBEDDER_POLL_INTERVAL=200ms",
+		"CODOHUE_EMBED_MAX_ATTEMPTS=5",
+		"CODOHUE_CATALOG_MAX_CONTENT_BYTES=32768",
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
@@ -591,7 +591,43 @@ func newAdminServiceForTest(t testing.TB) *admin.Service {
 		&nsAdapterShim{svc: nsSvc},
 	)
 	svc.SetCatalogStrategyPicker(&strategyPickerShim{svc: nsSvc})
+	svc.SetCatalogConfigurator(&catalogConfigShim{svc: nsSvc})
 	return svc
+}
+
+// catalogConfigShim satisfies admin.nsCatalogConfigurator without the
+// production cmd/admin/catalog_adapter.go. GetCatalog projects nsconfig
+// state into the admin DTO; the other methods are stubs because the e2e
+// tests that use this shim only call GetCatalog (via GetCatalogConfig).
+type catalogConfigShim struct{ svc *nsconfig.Service }
+
+func (c *catalogConfigShim) GetCatalog(ctx context.Context, ns string) (*admin.NamespaceCatalogConfig, error) {
+	cfg, err := c.svc.Get(ctx, ns)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace: %w", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	return &admin.NamespaceCatalogConfig{
+		Namespace:       cfg.Namespace,
+		Enabled:         cfg.CatalogEnabled,
+		StrategyID:      cfg.CatalogStrategyID,
+		StrategyVersion: cfg.CatalogStrategyVersion,
+		Params:          cfg.CatalogStrategyParams,
+		EmbeddingDim:    cfg.EmbeddingDim,
+		MaxAttempts:     cfg.CatalogMaxAttempts,
+		MaxContentBytes: cfg.CatalogMaxContentBytes,
+		UpdatedAt:       cfg.UpdatedAt,
+	}, nil
+}
+
+func (c *catalogConfigShim) UpdateCatalog(_ context.Context, _ string, _ *admin.NamespaceCatalogUpdateRequest) (*admin.NamespaceCatalogConfig, error) {
+	return nil, fmt.Errorf("catalogConfigShim.UpdateCatalog not implemented for e2e")
+}
+
+func (c *catalogConfigShim) AvailableStrategies(_ int) []admin.CatalogStrategyDescriptor {
+	return nil
 }
 
 // nsAdapterShim satisfies admin.nsConfigUpserter without the production
@@ -741,6 +777,33 @@ func TestCatalogE2E_ReEmbed_DrainAndComplete(t *testing.T) {
 		).Scan(&done)
 		return done, err
 	})
+
+	// Phase 5: GetCatalogConfig surfaces last_embedded_at + last_re_embed.
+	// Exercises Repository.GetLastCatalogEmbeddedAt and FindLatestReembedRun
+	// end-to-end against a real DB row.
+	cfgResp, err := adminSvc.GetCatalogConfig(context.Background(), namespace)
+	if err != nil {
+		t.Fatalf("GetCatalogConfig: %v", err)
+	}
+	if cfgResp == nil {
+		t.Fatal("GetCatalogConfig returned nil for enabled namespace")
+	}
+	if cfgResp.LastEmbeddedAt == nil {
+		t.Error("LastEmbeddedAt is nil — embedded items should have populated it")
+	}
+	if cfgResp.LastReEmbed == nil {
+		t.Fatal("LastReEmbed is nil — re-embed row should have been picked up")
+	}
+	if cfgResp.LastReEmbed.BatchRunID != reembedResp.BatchRunID {
+		t.Errorf("LastReEmbed.BatchRunID: got %d, want %d",
+			cfgResp.LastReEmbed.BatchRunID, reembedResp.BatchRunID)
+	}
+	if cfgResp.LastReEmbed.Status != "success" {
+		t.Errorf("LastReEmbed.Status: got %q, want %q", cfgResp.LastReEmbed.Status, "success")
+	}
+	if cfgResp.LastReEmbed.StrategyID == "" {
+		t.Error("LastReEmbed.StrategyID is empty — target_strategy_id column not populated")
+	}
 }
 
 // TestCatalogE2E_BulkRedriveDeadletter exercises SC-008 — operator can clear

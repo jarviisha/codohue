@@ -16,7 +16,7 @@ func TestRegisterDoesNotPanic(t *testing.T) {
 		metrics.QdrantQueryDuration,
 		metrics.RedisCacheRequests,
 		metrics.RecommendRequests,
-		metrics.BatchSubjectsProcessed,
+		metrics.BatchEntitiesProcessed,
 		metrics.IDMappingErrors,
 	)
 }

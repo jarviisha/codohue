@@ -19,7 +19,7 @@ A small change is also made to the existing `cmd/api` BYOE write endpoint to enf
 
 Ingest a catalog item for a namespace.
 
-**Auth**: per-namespace bearer key (existing data-plane scheme; falls back to `RECOMMENDER_API_KEY` only when the namespace has no provisioned key, identical to the existing event-ingest semantics).
+**Auth**: per-namespace bearer key (existing data-plane scheme; falls back to `CODOHUE_ADMIN_API_KEY` only when the namespace has no provisioned key, identical to the existing event-ingest semantics).
 
 **Request body**:
 
@@ -128,8 +128,8 @@ Enable / update / disable a namespace's catalog configuration.
 | `enabled` | When `false`, all other fields ignored (existing values preserved); the master toggle is the only effect. |
 | `strategy_id`, `strategy_version` | Required when `enabled=true`. Must resolve via the registry (`embedstrategy.Registry.Build`) and produce a `Strategy` whose `Dim()` equals the namespace's existing `embedding_dim` (Q5). |
 | `params` | Strategy-specific extension slot (FR-007). V1 hashing strategy reads nothing here. |
-| `max_attempts` | Defaults to env `EMBED_MAX_ATTEMPTS` then 5. |
-| `max_content_bytes` | Defaults to env `CATALOG_MAX_CONTENT_BYTES` then 32768. |
+| `max_attempts` | Defaults to env `CODOHUE_EMBED_MAX_ATTEMPTS` then 5. |
+| `max_content_bytes` | Defaults to env `CODOHUE_CATALOG_MAX_CONTENT_BYTES` then 32768. |
 
 **Responses**:
 

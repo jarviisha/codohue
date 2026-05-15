@@ -1,7 +1,7 @@
 # Admin-Plane API Contract
 
 **Server**: `cmd/admin`, port `2002`
-**Auth**: session cookie `codohue_admin_session`, set by `POST /api/v1/auth/sessions` after validating the global `RECOMMENDER_API_KEY`.
+**Auth**: session cookie `codohue_admin_session`, set by `POST /api/v1/auth/sessions` after validating the global `CODOHUE_ADMIN_API_KEY`.
 **Error envelope**: `{error: {code, message}}`.
 
 > All routes are under the canonical `/api/admin/v1/...` prefix unless otherwise noted. Auth routes are under `/api/v1/auth/...` (see [auth-plane.md](./auth-plane.md)).

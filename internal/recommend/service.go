@@ -311,7 +311,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	// to one cron interval stale. New interactions since the last batch are not reflected
 	// in the dense component. The sparse CF component is unaffected — it queries Qdrant
 	// against vectors recomputed in the same batch. To reduce staleness, decrease
-	// BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
+	// CODOHUE_BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
 	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseStrategy != "" && cfg.DenseStrategy != "disabled" {
 		denseVec, err := s.fetchSubjectDenseVecFn(ctx, req.Namespace, subjectNumID)
 		if err == nil && denseVec != nil {

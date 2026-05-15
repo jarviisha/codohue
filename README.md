@@ -88,9 +88,9 @@ Common variables:
 - `REDIS_URL` default: `redis://localhost:6379`
 - `QDRANT_HOST` default: `localhost`
 - `QDRANT_PORT` default: `6334`
-- `API_PORT` default: `2001`
-- `BATCH_INTERVAL_MINUTES` default: `5`
-- `LOG_FORMAT` default: `text`
+- `CODOHUE_API_PORT` default: `2001`
+- `CODOHUE_BATCH_INTERVAL_MINUTES` default: `5`
+- `CODOHUE_LOG_FORMAT` default: `text`
 
 Example `.env`:
 
@@ -100,9 +100,9 @@ REDIS_URL=redis://localhost:6379
 QDRANT_HOST=localhost
 QDRANT_PORT=6334
 CODOHUE_ADMIN_API_KEY=dev-secret-key
-BATCH_INTERVAL_MINUTES=5
-LOG_FORMAT=text
-API_PORT=2001
+CODOHUE_BATCH_INTERVAL_MINUTES=5
+CODOHUE_LOG_FORMAT=text
+CODOHUE_API_PORT=2001
 ```
 
 ## Quick Start
@@ -199,9 +199,9 @@ REDIS_URL=redis://localhost:6379
 QDRANT_HOST=localhost
 QDRANT_PORT=6334
 CODOHUE_ADMIN_API_KEY=dev-secret-key
-BATCH_INTERVAL_MINUTES=5
-LOG_FORMAT=text
-API_PORT=2001
+CODOHUE_BATCH_INTERVAL_MINUTES=5
+CODOHUE_LOG_FORMAT=text
+CODOHUE_API_PORT=2001
 ```
 
 Start only `api` and `cron`:

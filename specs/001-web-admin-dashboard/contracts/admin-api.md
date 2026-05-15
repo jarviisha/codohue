@@ -10,7 +10,7 @@ All `/api/admin/v1/*` routes require a valid session cookie (`codohue_admin_sess
 
 ### POST /api/auth/login
 
-Creates a session by validating the submitted API key against `RECOMMENDER_API_KEY`.
+Creates a session by validating the submitted API key against `CODOHUE_ADMIN_API_KEY`.
 
 **Request**:
 ```json
@@ -116,7 +116,7 @@ Returns config for a single namespace.
 
 ### PUT /api/admin/v1/namespaces/{ns}
 
-Creates or updates a namespace. Proxies to `cmd/api PUT /v1/config/namespaces/{ns}` with `Authorization: Bearer $RECOMMENDER_API_KEY`.
+Creates or updates a namespace. Proxies to `cmd/api PUT /v1/config/namespaces/{ns}` with `Authorization: Bearer $CODOHUE_ADMIN_API_KEY`.
 
 **Request body** — all fields optional on update, required on create:
 ```json

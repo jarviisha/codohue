@@ -49,7 +49,7 @@ SELECT COUNT(*) FROM events WHERE namespace = $1 AND ($2 = '' OR subject_id = $2
 
 ## 3. Event Injection
 
-**Decision**: Admin service proxies `POST {apiURL}/v1/namespaces/{ns}/events` using the global `RECOMMENDER_API_KEY` as Bearer token. No new endpoint needed on `cmd/api`.
+**Decision**: Admin service proxies `POST {apiURL}/v1/namespaces/{ns}/events` using the global `CODOHUE_ADMIN_API_KEY` as Bearer token. No new endpoint needed on `cmd/api`.
 
 **Rationale**: The auth middleware in `cmd/api` falls back to the global key when a namespace has no per-namespace key provisioned. The admin service already uses this pattern for `UpsertNamespace` and `DebugRecommend`. No new auth surface needed.
 

@@ -33,8 +33,8 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 - [x] T001 Create new directories: `internal/catalog/`, `internal/embedder/`, `internal/core/embedstrategy/`, `cmd/embedder/`
 - [x] T002 [P] Add Makefile targets `build-embedder`, `dev-embedder`, `run-embedder`, `logs-embedder` mirroring the existing `build-cron` / `dev` / `run-cron` / `logs-cron` shapes in `Makefile`
-- [x] T003 [P] Add `embedder` service to `docker-compose.yml` and `docker-compose.app.yml` (image build + Redis/Postgres/Qdrant deps + `EMBEDDER_HEALTH_PORT=2003`)
-- [x] T004 [P] Add new env vars to `.env.example`: `CATALOG_MAX_CONTENT_BYTES=32768`, `EMBED_MAX_ATTEMPTS=5`, `EMBEDDER_HEALTH_PORT=2003`, `EMBEDDER_REPLICA_NAME=`, `EMBEDDER_NAMESPACE_POLL_INTERVAL=30s`
+- [x] T003 [P] Add `embedder` service to `docker-compose.yml` and `docker-compose.app.yml` (image build + Redis/Postgres/Qdrant deps + `CODOHUE_EMBEDDER_HEALTH_PORT=2003`)
+- [x] T004 [P] Add new env vars to `.env.example`: `CODOHUE_CATALOG_MAX_CONTENT_BYTES=32768`, `CODOHUE_EMBED_MAX_ATTEMPTS=5`, `CODOHUE_EMBEDDER_HEALTH_PORT=2003`, `CODOHUE_EMBEDDER_REPLICA_NAME=`, `CODOHUE_EMBEDDER_POLL_INTERVAL=30s`
 
 ---
 
@@ -63,7 +63,7 @@ description: "Task list for 004-catalog-embedder feature implementation"
 - [x] T013 Update `internal/nsconfig/repository_test.go` for the new columns (round-trip read/write, default values, JSONB params encoding)
 - [x] T014 Extend `internal/nsconfig/service.go` to validate `(CatalogStrategyID, CatalogStrategyVersion)` against `embedstrategy.DefaultRegistry()` AND to assert `Strategy.Dim() == namespace.embedding_dim` on enable; returns a typed error carrying both numbers (US2 #2 acceptance)
 - [x] T015 Update `internal/nsconfig/service_test.go` for the validation paths: unknown strategy → `ErrUnknownStrategy`, dim mismatch → typed error with both dims, valid enable round-trip
-- [x] T016 [P] Extend `internal/config` to load `CATALOG_MAX_CONTENT_BYTES`, `EMBED_MAX_ATTEMPTS`, `EMBEDDER_HEALTH_PORT`, `EMBEDDER_REPLICA_NAME`, `EMBEDDER_NAMESPACE_POLL_INTERVAL` (extend `LoadCron` + introduce `LoadEmbedder`); add unit tests in the existing config test file
+- [x] T016 [P] Extend `internal/config` to load `CODOHUE_CATALOG_MAX_CONTENT_BYTES`, `CODOHUE_EMBED_MAX_ATTEMPTS`, `CODOHUE_EMBEDDER_HEALTH_PORT`, `CODOHUE_EMBEDDER_REPLICA_NAME`, `CODOHUE_EMBEDDER_POLL_INTERVAL` (extend `LoadCron` + introduce `LoadEmbedder`); add unit tests in the existing config test file
 
 **Checkpoint**: Foundation ready — migrations applied, strategy abstraction compiled, namespace config knows about catalog.
 
@@ -100,7 +100,7 @@ description: "Task list for 004-catalog-embedder feature implementation"
 
 ### Embedder binary
 
-- [x] T031 [US1] Create `cmd/embedder/main.go` and `cmd/embedder/main_test.go` mirroring the shape of `cmd/cron/main.go`: load `LoadEmbedder` config, init pgxpool + redis + qdrant clients via `internal/infra/...`, expose `/healthz` and `/metrics` on `EMBEDDER_HEALTH_PORT`, run worker, handle SIGINT/SIGTERM for graceful shutdown; `main_test.go` is a smoke test asserting `run()` returns cleanly when context is cancelled
+- [x] T031 [US1] Create `cmd/embedder/main.go` and `cmd/embedder/main_test.go` mirroring the shape of `cmd/cron/main.go`: load `LoadEmbedder` config, init pgxpool + redis + qdrant clients via `internal/infra/...`, expose `/healthz` and `/metrics` on `CODOHUE_EMBEDDER_HEALTH_PORT`, run worker, handle SIGINT/SIGTERM for graceful shutdown; `main_test.go` is a smoke test asserting `run()` returns cleanly when context is cancelled
 
 ### Observability + e2e
 

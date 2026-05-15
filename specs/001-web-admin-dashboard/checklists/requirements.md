@@ -34,7 +34,7 @@
 
 | # | Question | Decision |
 |---|----------|----------|
-| Q1 | Admin auth scope | Single `RECOMMENDER_API_KEY` — no read/write tier split |
+| Q1 | Admin auth scope | Single `CODOHUE_ADMIN_API_KEY` — no read/write tier split |
 | Q2 | Batch job history | New `batch_run_logs` table written by `cmd/cron` |
 | T1 | Binary deployment | Separate `cmd/admin` binary on port 2002 |
 | T2 | Frontend stack | React SPA (Vite), embedded into Go binary via embed.FS |

@@ -8,7 +8,7 @@
 
 - `cmd/api` already running (admin proxies health/recommend/trending to it)
 - PostgreSQL running with migration 006 applied (`make migrate-up`)
-- `RECOMMENDER_API_KEY` env var set (same value as `cmd/api`)
+- `CODOHUE_ADMIN_API_KEY` env var set (same value as `cmd/api`)
 - Node.js 20+ and npm for building the React frontend
 
 ---
@@ -41,7 +41,7 @@ Admin dashboard available at `http://localhost:2002`.
 
 ### 3. Login
 
-Open `http://localhost:2002` → enter the value of `RECOMMENDER_API_KEY` → submit.
+Open `http://localhost:2002` → enter the value of `CODOHUE_ADMIN_API_KEY` → submit.
 
 ---
 
@@ -59,9 +59,9 @@ admin:
   environment:
     - DATABASE_URL=${DATABASE_URL}
     - REDIS_URL=${REDIS_URL}
-    - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY}
-    - API_URL=http://api:2001     # internal URL for proxying
-    - ADMIN_PORT=2002
+    - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY}
+    - CODOHUE_API_URL=http://api:2001     # internal URL for proxying
+    - CODOHUE_ADMIN_PORT=2002
   depends_on:
     - api
 ```
@@ -73,10 +73,10 @@ admin:
 | Variable | Required | Default | Notes |
 |----------|----------|---------|-------|
 | `DATABASE_URL` | Yes | — | Same as cmd/api |
-| `RECOMMENDER_API_KEY` | Yes | — | Used for session auth and proxy auth |
-| `API_URL` | Yes | `http://localhost:2001` | Internal URL of cmd/api |
-| `ADMIN_PORT` | No | `2002` | Port for cmd/admin HTTP server |
-| `LOG_FORMAT` | No | `text` | `text` or `json` |
+| `CODOHUE_ADMIN_API_KEY` | Yes | — | Used for session auth and proxy auth |
+| `CODOHUE_API_URL` | Yes | `http://localhost:2001` | Internal URL of cmd/api |
+| `CODOHUE_ADMIN_PORT` | No | `2002` | Port for cmd/admin HTTP server |
+| `CODOHUE_LOG_FORMAT` | No | `text` | `text` or `json` |
 
 ---
 

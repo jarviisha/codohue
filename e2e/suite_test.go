@@ -82,9 +82,9 @@ func TestMain(m *testing.M) {
 		"QDRANT_HOST="+qdrantHost,
 		"QDRANT_PORT="+qdrantPort,
 		"CODOHUE_ADMIN_API_KEY="+adminKey,
-		"API_PORT="+testPort,
-		"LOG_FORMAT=text",
-		"BATCH_INTERVAL_MINUTES=60",
+		"CODOHUE_API_PORT="+testPort,
+		"CODOHUE_LOG_FORMAT=text",
+		"CODOHUE_BATCH_INTERVAL_MINUTES=60",
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

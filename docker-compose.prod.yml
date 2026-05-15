@@ -10,8 +10,8 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
       - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
-      - LOG_FORMAT=json
-      - BATCH_INTERVAL_MINUTES=5
+      - CODOHUE_LOG_FORMAT=json
+      - CODOHUE_BATCH_INTERVAL_MINUTES=5
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -33,8 +33,8 @@ services:
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
-      - LOG_FORMAT=json
-      - BATCH_INTERVAL_MINUTES=5
+      - CODOHUE_LOG_FORMAT=json
+      - CODOHUE_BATCH_INTERVAL_MINUTES=5
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -54,9 +54,9 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
       - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
-      - API_URL=http://api:2001
-      - ADMIN_PORT=2002
-      - LOG_FORMAT=json
+      - CODOHUE_API_URL=http://api:2001
+      - CODOHUE_ADMIN_PORT=2002
+      - CODOHUE_LOG_FORMAT=json
     depends_on:
       api:
         condition: service_healthy

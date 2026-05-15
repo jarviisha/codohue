@@ -290,7 +290,7 @@ const item2vecLargeEventThreshold = 500_000
 // space, which would silently degrade recommendation quality. Full retrain from scratch
 // guarantees consistent vectors at the cost of higher per-run CPU.
 //
-// For corpora beyond ~500K events, consider: (a) increasing BATCH_INTERVAL_MINUTES so
+// For corpora beyond ~500K events, consider: (a) increasing CODOHUE_BATCH_INTERVAL_MINUTES so
 // fewer retrains happen per hour, (b) switching dense_strategy to "svd" (cheaper full
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
 func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items, subjectCount int, err error) {
@@ -325,7 +325,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	switch cfg.DenseStrategy {
 	case "item2vec":
 		if len(events) > item2vecLargeEventThreshold {
-			slog.Warn("phase 2 item2vec: large event corpus — full retrain may be slow; consider increasing BATCH_INTERVAL_MINUTES or switching to SVD",
+			slog.Warn("phase 2 item2vec: large event corpus — full retrain may be slow; consider increasing CODOHUE_BATCH_INTERVAL_MINUTES or switching to SVD",
 				"namespace", ns, "events", len(events), "threshold", item2vecLargeEventThreshold)
 			capture.Warn(fmt.Sprintf("large corpus (%d events) — item2vec retrain may be slow", len(events)))
 		}

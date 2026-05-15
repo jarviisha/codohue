@@ -108,8 +108,8 @@ ALTER TABLE namespace_configs
 | `catalog_enabled` | Master toggle. When `false`, catalog ingest endpoint returns 404 for this namespace (FR-008). |
 | `catalog_strategy_id`, `catalog_strategy_version` | Active strategy profile per FR-007. Both NOT NULL when `catalog_enabled=true`; enforced at admin write time, not at the schema level (kept nullable to allow disable→enable cycles). |
 | `catalog_strategy_params` | The FR-007 extension slot. V1 hashing strategy reads no params. Future external-LLM strategies read e.g. `{"api_key_secret_ref":"vault://...","model":"text-embedding-3-large"}`. |
-| `catalog_max_attempts` | Per-namespace override of the global `EMBED_MAX_ATTEMPTS` env default. After this many transient failures, item moves to `dead_letter`. |
-| `catalog_max_content_bytes` | Per-namespace override of the global `CATALOG_MAX_CONTENT_BYTES` env default. Items above this are rejected at ingest with 413. |
+| `catalog_max_attempts` | Per-namespace override of the global `CODOHUE_EMBED_MAX_ATTEMPTS` env default. After this many transient failures, item moves to `dead_letter`. |
+| `catalog_max_content_bytes` | Per-namespace override of the global `CODOHUE_CATALOG_MAX_CONTENT_BYTES` env default. Items above this are rejected at ingest with 413. |
 
 ### Validation rules (enforced in admin handler, not in schema)
 

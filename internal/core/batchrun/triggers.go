@@ -1,14 +1,15 @@
 package batchrun
 
 // TriggerSource enumerates every value the batch_run_logs.trigger_source
-// column is allowed to hold. The DB CHECK constraint (migration 012) mirrors
+// column is allowed to hold. The DB CHECK constraint (migration 012, pre-prod
+// hardening) mirrors
 // these literals — adding a value here must always come with a migration
 // that widens the constraint.
 type TriggerSource string
 
 const (
 	// TriggerCron is the scheduled batch run produced by cmd/cron every
-	// BATCH_INTERVAL_MINUTES tick.
+	// CODOHUE_BATCH_INTERVAL_MINUTES tick.
 	TriggerCron TriggerSource = "cron"
 
 	// TriggerManual is the synchronous CF batch produced when an operator
