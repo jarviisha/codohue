@@ -142,7 +142,7 @@ Retries apply only to GET. Mutations (POST/PUT/DELETE) are never auto-retried.
 Every namespace-scoped call sends `Authorization: Bearer <apiKey>`. Use the
 per-namespace API key issued by your admin when the namespace was provisioned;
 when a namespace has no per-namespace key, the global
-`RECOMMENDER_API_KEY` works as a fallback.
+`CODOHUE_ADMIN_API_KEY` works as a fallback.
 
 ## Development
 

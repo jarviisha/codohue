@@ -60,10 +60,41 @@ type CatalogBacklog struct {
 // NamespaceCatalogResponse is the body of GET /api/admin/v1/namespaces/{ns}/catalog.
 // available_strategies is filtered to descriptors whose Dim matches the
 // namespace's embedding_dim so the operator UI only shows admissible options.
+//
+// last_embedded_at and last_re_embed are best-effort signals for the Status
+// tab; backend read failures surface as nil so the panel still renders.
 type NamespaceCatalogResponse struct {
 	Catalog             NamespaceCatalogConfig      `json:"catalog"`
 	AvailableStrategies []CatalogStrategyDescriptor `json:"available_strategies"`
 	Backlog             CatalogBacklog              `json:"backlog"`
+	LastEmbeddedAt      *time.Time                  `json:"last_embedded_at,omitempty"`
+	LastReEmbed         *CatalogReEmbedSummary      `json:"last_re_embed,omitempty"`
+}
+
+// CatalogReEmbedSummary is a compact view of the most recent admin-triggered
+// re-embed batch run for a namespace, surfaced on the catalog Status tab so
+// operators can confirm their action landed without leaving the page.
+//
+// Status derivation rules:
+//   - completed_at IS NULL                  → "running"
+//   - completed_at IS NOT NULL, success=true  → "success"
+//   - completed_at IS NOT NULL, success=false → "failed"
+//
+// strategy_id / strategy_version are decoded from the batch_run_logs row's
+// error_message column while the run is open (re-embed encodes the target
+// strategy there per InsertReembedRun). After completion the column is
+// cleared or repurposed for the failure message; the summary preserves the
+// last-known target so the UI still has context.
+type CatalogReEmbedSummary struct {
+	BatchRunID      int64      `json:"batch_run_id"`
+	Status          string     `json:"status"`
+	StrategyID      string     `json:"strategy_id,omitempty"`
+	StrategyVersion string     `json:"strategy_version,omitempty"`
+	StartedAt       time.Time  `json:"started_at"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	DurationMs      int        `json:"duration_ms,omitempty"`
+	ProcessedItems  int        `json:"processed_items"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
 }
 
 // NamespaceCatalogUpdateRequest is the body of PUT /api/admin/v1/namespaces/{ns}/catalog.
@@ -91,6 +122,21 @@ func (e *CatalogDimensionMismatch) Error() string {
 	return "catalog strategy dimension mismatch"
 }
 
+// CatalogStrategyConflict is the typed error the service returns when the
+// requested combination of dense_strategy and catalog_enabled would have two
+// pipelines write to {ns}_objects_dense (cron Phase 2 dense training AND the
+// catalog embedder). The handler maps it to 400 with both fields in the body.
+//
+// dense_strategy ∈ {byoe, disabled} is the only safe pair with catalog_enabled.
+type CatalogStrategyConflict struct {
+	DenseStrategy  string
+	CatalogEnabled bool
+}
+
+func (e *CatalogStrategyConflict) Error() string {
+	return "dense_strategy conflicts with catalog_enabled"
+}
+
 // CatalogReEmbedResponse is the body returned by POST .../catalog/re-embed.
 // 202 Accepted; the operator can poll batch_run_logs by ID for progress.
 type CatalogReEmbedResponse struct {
@@ -103,11 +149,12 @@ type CatalogReEmbedResponse struct {
 }
 
 // CatalogItemSummary is the projection returned in the items list endpoint.
-// Excludes content/metadata (large) — operators fetch the full record via
-// GET .../catalog/items/{id} for drill-down.
+// Includes a bounded content preview for table scanning. Operators fetch the
+// full record via GET .../catalog/items/{id} for full content and metadata.
 type CatalogItemSummary struct {
 	ID              int64      `json:"id"`
 	ObjectID        string     `json:"object_id"`
+	ContentPreview  string     `json:"content_preview,omitempty"`
 	State           string     `json:"state"`
 	StrategyID      string     `json:"strategy_id,omitempty"`
 	StrategyVersion string     `json:"strategy_version,omitempty"`
@@ -123,7 +170,16 @@ type CatalogItemDetail struct {
 	Namespace string         `json:"namespace"`
 	Content   string         `json:"content"`
 	Metadata  map[string]any `json:"metadata,omitempty"`
+	Vector    *CatalogVector `json:"vector,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+// CatalogVector is the dense object vector stored in Qdrant for a catalog item.
+type CatalogVector struct {
+	Collection string    `json:"collection"`
+	NumericID  uint64    `json:"numeric_id"`
+	Dim        int       `json:"dim"`
+	Values     []float32 `json:"values"`
 }
 
 // CatalogItemsListResponse paginates a list of catalog items.
@@ -161,7 +217,7 @@ type BatchRunLog struct {
 	StartedAt         time.Time  `json:"started_at"`
 	CompletedAt       *time.Time `json:"completed_at"`
 	DurationMs        *int       `json:"duration_ms"`
-	SubjectsProcessed int        `json:"subjects_processed"`
+	EntitiesProcessed int        `json:"entities_processed"`
 	Success           bool       `json:"success"`
 	ErrorMessage      *string    `json:"error_message"`
 	TriggerSource     string     `json:"trigger_source"`
@@ -184,6 +240,11 @@ type BatchRunLog struct {
 	Phase3DurMs *int    `json:"phase3_duration_ms"`
 	Phase3Items *int    `json:"phase3_items"`
 	Phase3Error *string `json:"phase3_error"`
+
+	// Re-embed runs only — the target (strategy_id, strategy_version) the
+	// run was kicked off against. NULL for cron/manual rows.
+	TargetStrategyID      *string `json:"target_strategy_id,omitempty"`
+	TargetStrategyVersion *string `json:"target_strategy_version,omitempty"`
 }
 
 // TrendingAdminEntry extends a trending item with Redis cache TTL info.

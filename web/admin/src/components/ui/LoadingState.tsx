@@ -1,12 +1,20 @@
 interface LoadingStateProps {
-  label?: string
-  className?: string
+  rows?: number // shimmer row count
+  label?: string // mono header above the rows
 }
 
-export default function LoadingState({ label = 'Loading...', className = '' }: LoadingStateProps) {
+// Shimmer skeleton placeholder. Use this instead of full-page spinners.
+export default function LoadingState({ rows = 3, label = 'loading' }: LoadingStateProps) {
   return (
-    <div className={`text-sm text-muted ${className}`} role="status" aria-live="polite">
-      {label}
+    <div className="flex flex-col gap-2" aria-busy="true" aria-live="polite">
+      <p className="font-mono text-xs uppercase tracking-[0.04em] text-secondary">{label}</p>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="h-4 bg-surface-raised rounded-sm animate-pulse"
+          style={{ width: `${80 - i * 10}%` }}
+        />
+      ))}
     </div>
   )
 }

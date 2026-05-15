@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
 type rowsIterator interface {
@@ -181,10 +183,10 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 }
 
 // InsertBatchRunLog inserts a new in-progress batch run log row and returns its ID.
-func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource string) (int64, error) {
+func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource batchrun.TriggerSource) (int64, error) {
 	var id int64
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO batch_run_logs (namespace, started_at, subjects_processed, success, trigger_source)
+		INSERT INTO batch_run_logs (namespace, started_at, entities_processed, success, trigger_source)
 		VALUES ($1, $2, 0, FALSE, $3)
 		RETURNING id
 	`, namespace, startedAt, triggerSource).Scan(&id)
@@ -206,7 +208,7 @@ func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedA
 	}
 	_, err = r.db.Exec(ctx, `
 		UPDATE batch_run_logs
-		SET completed_at = $2, duration_ms = $3, subjects_processed = $4, success = $5, error_message = $6, log_lines = $7
+		SET completed_at = $2, duration_ms = $3, entities_processed = $4, success = $5, error_message = $6, log_lines = $7
 		WHERE id = $1
 	`, id, completedAt, durationMs, subjectsProcessed, success, errMsgPtr, logJSON)
 	if err != nil {

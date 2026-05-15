@@ -1,53 +1,58 @@
 import type { ReactNode } from 'react'
-import Icon from '../Icon'
-import Button from './Button'
+import StatusToken, { type StatusState } from './StatusToken'
 
-type NoticeTone = 'accent' | 'success' | 'warning' | 'danger'
+type NoticeTone = 'ok' | 'warn' | 'fail' | 'info'
 
 interface NoticeProps {
-  children: ReactNode
   tone?: NoticeTone
-  role?: 'alert' | 'status'
+  title?: ReactNode
   onDismiss?: () => void
-  className?: string
+  children: ReactNode
 }
 
-const toneClasses: Record<NoticeTone, string> = {
-  accent: 'border-accent/20 bg-accent-subtle text-accent',
-  success: 'border-success/30 bg-success-bg text-success',
-  warning: 'border-warning/30 bg-warning-bg text-warning',
-  danger: 'border-danger/25 bg-danger-bg text-danger',
+const BORDER: Record<NoticeTone, string> = {
+  ok:   'border-l-success',
+  warn: 'border-l-warning',
+  fail: 'border-l-danger',
+  info: 'border-l-accent',
 }
 
-export default function Notice({
-  children,
-  tone = 'accent',
-  role,
-  onDismiss,
-  className = '',
-}: NoticeProps) {
+const TOKEN_STATE: Record<NoticeTone, StatusState | null> = {
+  ok:   'ok',
+  warn: 'warn',
+  fail: 'fail',
+  info: null,  // info notice skips the status-token prefix
+}
+
+// 4px left border + status text + no bg fill. Terminal/Unix-DNA pattern from
+// DESIGN.md §6.1. Body text uses text-primary; the tone signal lives in the
+// border + the optional StatusToken prefix.
+export default function Notice({ tone = 'info', title, onDismiss, children }: NoticeProps) {
+  const tokenState = TOKEN_STATE[tone]
   return (
-    <div
-      role={role}
-      className={[
-        'flex items-center justify-between rounded border px-4 py-3 text-sm font-medium',
-        toneClasses[tone],
-        className,
-      ].filter(Boolean).join(' ')}
+    <aside
+      role={tone === 'fail' ? 'alert' : 'status'}
+      className={`border-l-4 ${BORDER[tone]} bg-transparent pl-4 pr-3 py-3 flex items-start gap-3`}
     >
-      <div>{children}</div>
-      {onDismiss && (
-        <Button
+      <div className="flex-1 min-w-0">
+        {(tokenState || title) && (
+          <div className="flex items-center gap-2 mb-1">
+            {tokenState ? <StatusToken state={tokenState} /> : null}
+            {title ? <span className="text-sm font-semibold text-primary">{title}</span> : null}
+          </div>
+        )}
+        <div className="text-sm text-primary">{children}</div>
+      </div>
+      {onDismiss ? (
+        <button
           type="button"
-          variant="ghost"
-          size="icon"
           onClick={onDismiss}
+          className="text-muted hover:text-primary h-6 px-2 flex items-center justify-center rounded-sm font-mono text-xs uppercase tracking-[0.06em]"
           aria-label="Dismiss notice"
-          className="ml-4"
         >
-          <Icon name="x" size={14} />
-        </Button>
-      )}
-    </div>
+          dismiss
+        </button>
+      ) : null}
+    </aside>
   )
 }

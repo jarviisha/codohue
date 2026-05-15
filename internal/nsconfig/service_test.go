@@ -205,7 +205,7 @@ func TestServiceUpdateCatalogConfig_GetError(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_EnableRequiresStrategy(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"}}
 	svc, _ := newServiceWithRegistry(repo)
 
 	_, err := svc.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{Enabled: true})
@@ -215,7 +215,7 @@ func TestServiceUpdateCatalogConfig_EnableRequiresStrategy(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_UnknownStrategy(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"}}
 	svc, _ := newServiceWithRegistry(repo)
 
 	_, err := svc.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{
@@ -227,7 +227,7 @@ func TestServiceUpdateCatalogConfig_UnknownStrategy(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_DimensionMismatch(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"}}
 	svc, reg := newServiceWithRegistry(repo)
 	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
 		return &stubStrategyT{id: "hash", version: "v1", dim: 64}, nil
@@ -251,7 +251,7 @@ func TestServiceUpdateCatalogConfig_DimensionMismatch(t *testing.T) {
 func TestServiceUpdateCatalogConfig_EnableSuccess(t *testing.T) {
 	want := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, CatalogEnabled: true, CatalogStrategyID: "hash", CatalogStrategyVersion: "v1"}
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"},
 		upsertCatalogCfg: want,
 	}
 	svc, reg := newServiceWithRegistry(repo)
@@ -293,7 +293,7 @@ func TestServiceUpdateCatalogConfig_DisableSkipsValidation(t *testing.T) {
 
 func TestServiceUpdateCatalogConfig_RepoUpsertError(t *testing.T) {
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"},
 		upsertCatalogErr: errors.New("db error"),
 	}
 	svc, reg := newServiceWithRegistry(repo)
@@ -311,7 +311,7 @@ func TestServiceUpdateCatalogConfig_RepoUpsertError(t *testing.T) {
 
 func TestServiceUpdateCatalogConfig_RepoUpsertReturnsNil(t *testing.T) {
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"},
 		upsertCatalogCfg: nil, // simulates no rows updated despite Get success
 	}
 	svc, reg := newServiceWithRegistry(repo)
@@ -324,6 +324,58 @@ func TestServiceUpdateCatalogConfig_RepoUpsertReturnsNil(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNamespaceNotFound) {
 		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
+	}
+}
+
+func TestServiceUpdateCatalogConfig_DenseStrategyConflict(t *testing.T) {
+	// Trying to enable catalog while dense_strategy is item2vec/svd must be
+	// rejected — both pipelines would write to {ns}_objects_dense.
+	cases := []string{"item2vec", "svd", "", "unknown_value"}
+	for _, ds := range cases {
+		t.Run(ds, func(t *testing.T) {
+			repo := &fakeRepo{getCfg: &namespace.Config{
+				Namespace:     "ns",
+				EmbeddingDim:  128,
+				DenseStrategy: ds,
+			}}
+			svc, _ := newServiceWithRegistry(repo)
+			_, err := svc.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{
+				Enabled: true, StrategyID: "hash", StrategyVersion: "v1",
+			})
+			var conflictErr *DenseStrategyConflictError
+			if !errors.As(err, &conflictErr) {
+				t.Fatalf("expected *DenseStrategyConflictError, got %v", err)
+			}
+			if conflictErr.DenseStrategy != ds {
+				t.Errorf("DenseStrategy = %q, want %q", conflictErr.DenseStrategy, ds)
+			}
+			if repo.upsertCatalogCalledWith != nil {
+				t.Error("expected UpsertCatalogConfig NOT to be called on conflict")
+			}
+		})
+	}
+}
+
+func TestServiceUpsert_BlocksWhenCatalogEnabledAndStrategyIsCronTrained(t *testing.T) {
+	// Once catalog is on, the operator cannot flip dense_strategy back to a
+	// value that has cron train Phase 2 — the embedder would lose to cron's
+	// next tick.
+	repo := &fakeRepo{getCfg: &namespace.Config{
+		Namespace:      "ns",
+		EmbeddingDim:   128,
+		DenseStrategy:  "byoe",
+		CatalogEnabled: true,
+	}}
+	svc, _ := newServiceWithRegistry(repo)
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseStrategy: "item2vec",
+	})
+	var conflictErr *DenseStrategyConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("expected *DenseStrategyConflictError, got %v", err)
+	}
+	if !conflictErr.CatalogEnabled {
+		t.Error("expected CatalogEnabled=true on the error")
 	}
 }
 

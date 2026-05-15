@@ -1,40 +1,61 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
-type ButtonSize = 'sm' | 'md' | 'icon'
+type ButtonSize = 'sm' | 'md' | 'lg' | 'xs'
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
-  children?: ReactNode
+  loading?: boolean
+  leadingIcon?: ReactNode
 }
 
-const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-accent hover:bg-accent-hover active:bg-accent-active text-accent-text border border-transparent',
-  secondary: 'bg-transparent border border-default hover:border-strong hover:bg-surface-raised text-primary',
-  ghost: 'bg-transparent border border-transparent text-secondary hover:bg-surface-raised hover:text-primary',
-  danger: 'bg-danger-bg border border-danger/25 text-danger hover:bg-danger-bg hover:border-danger/40',
+const VARIANT: Record<ButtonVariant, string> = {
+  // Primary uses accent-emphasis (the darker accent variant) so white text
+  // hits WCAG AA-normal on dark mode (4.63:1) — `bg-accent` itself is the
+  // text-only variant and would fail contrast as a button background.
+  primary:
+    'bg-accent-emphasis text-accent-text hover:opacity-90 border border-transparent disabled:opacity-50',
+  secondary:
+    'bg-surface text-primary border border-default hover:border-strong hover:bg-surface-raised disabled:opacity-50',
+  ghost:
+    'bg-transparent text-secondary border border-transparent hover:bg-surface-raised hover:text-primary disabled:opacity-50',
+  danger:
+    'bg-danger text-white hover:opacity-90 border border-transparent disabled:opacity-50',
 }
 
-const sizeClasses: Record<ButtonSize, string> = {
-  sm: 'h-7 px-2 py-0 text-xs leading-5',
-  md: 'h-8 px-3 py-0 text-sm leading-5',
-  icon: 'size-7 p-0 inline-flex items-center justify-center',
+const SIZE: Record<ButtonSize, string> = {
+  xs: 'h-6 px-2 text-xs',
+  sm: 'h-8 px-2.5 text-sm',
+  md: 'h-9 px-3.5 text-sm',
+  lg: 'h-10 px-4 text-sm',
 }
 
-export default function Button({
-  variant = 'secondary',
-  size = 'md',
-  className = '',
-  children,
-  ...props
-}: ButtonProps) {
+const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = 'secondary', size = 'sm', loading, leadingIcon, children, className = '', disabled, type = 'button', ...rest },
+  ref,
+) {
   return (
     <button
-      className={`${variantClasses[variant]} ${sizeClasses[size]} inline-flex items-center justify-center font-medium rounded cursor-pointer transition-colors duration-150 disabled:opacity-60 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:shadow-focus ${className}`}
-      {...props}
+      ref={ref}
+      type={type}
+      disabled={disabled || loading}
+      className={[
+        'inline-flex items-center justify-center gap-1.5 rounded-sm font-sans transition-colors duration-100 focus:outline-none focus:shadow-focus',
+        VARIANT[variant],
+        SIZE[size],
+        className,
+      ].join(' ')}
+      {...rest}
     >
-      {children}
+      {loading ? (
+        <span className="inline-block h-3 w-3 border-2 border-current border-t-transparent rounded-full animate-spin" aria-hidden />
+      ) : leadingIcon ? (
+        <span className="inline-flex" aria-hidden>{leadingIcon}</span>
+      ) : null}
+      <span>{children}</span>
     </button>
   )
-}
+})
+
+export default Button

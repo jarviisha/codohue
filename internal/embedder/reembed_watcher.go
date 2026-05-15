@@ -10,15 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-// reembedTriggerSource is the trigger_source value the admin orchestrator
-// writes for re-embed runs. The watcher scopes its scans by this value so it
-// only closes runs that it actually owns.
-//
-// Mirrored from internal/admin (cross-domain import forbidden) — the value
-// is a stable contract on the batch_run_logs table.
-const reembedTriggerSource = "admin_reembed"
+	"github.com/jarviisha/codohue/internal/core/batchrun"
+)
 
 // ReembedRun is the watcher's view of one open re-embed batch_run_logs row.
 type ReembedRun struct {
@@ -152,7 +146,7 @@ func (r *pgReembedRepo) ListOpenReembedRuns(ctx context.Context) ([]ReembedRun, 
 		FROM batch_run_logs
 		WHERE trigger_source = $1
 		  AND completed_at IS NULL`,
-		reembedTriggerSource,
+		batchrun.TriggerReembed,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list open reembed runs: %w", err)
@@ -205,7 +199,7 @@ func (r *pgReembedRepo) CountStaleCatalogItems(ctx context.Context, namespace st
 
 // CountEmbeddedCatalogItems returns the number of catalog_items currently in
 // 'embedded' state at the namespace's active strategy version. Used as the
-// "subjects_processed" tally written to batch_run_logs on completion.
+// "entities_processed" tally written to batch_run_logs on completion.
 func (r *pgReembedRepo) CountEmbeddedCatalogItems(ctx context.Context, namespace string) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `
@@ -239,13 +233,13 @@ func (r *pgReembedRepo) CompleteReembedRun(ctx context.Context, id int64, proces
 		UPDATE batch_run_logs
 		SET completed_at       = $2,
 		    duration_ms        = $3,
-		    subjects_processed = $4,
+		    entities_processed = $4,
 		    success            = $5,
 		    error_message      = $6
 		WHERE id = $1
 		  AND trigger_source = $7
 		  AND completed_at IS NULL`,
-		id, completedAt, durationMs, processed, success, errPtr, reembedTriggerSource,
+		id, completedAt, durationMs, processed, success, errPtr, batchrun.TriggerReembed,
 	)
 	if err != nil {
 		return fmt.Errorf("complete reembed run: %w", err)

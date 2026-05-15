@@ -1,74 +1,35 @@
-import type { InputHTMLAttributes, ReactNode } from 'react'
-import { fieldBaseClass, fieldInvalidClass } from './formClasses'
+import { forwardRef, type InputHTMLAttributes } from 'react'
 
-type InputSize = 'sm' | 'md' | 'compact'
+type InputSize = 'sm' | 'md'
 
-export interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  error?: ReactNode
-  helperText?: ReactNode
+interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
   inputSize?: InputSize
+  invalid?: boolean
 }
 
-const sizeClasses: Record<InputSize, string> = {
-  sm: 'h-7 px-2 text-xs',
-  md: '',
-  compact: 'w-20 tabular-nums',
+const SIZE: Record<InputSize, string> = {
+  sm: 'h-8 px-2.5 text-sm',
+  md: 'h-9 px-3 text-sm',
 }
 
-function fieldClassName({
-  className = '',
-  hasError,
-  inputSize,
-}: {
-  className?: string
-  hasError: boolean
-  inputSize: InputSize
-}) {
-  return [
-    fieldBaseClass,
-    sizeClasses[inputSize],
-    hasError ? fieldInvalidClass : '',
-    className,
-  ].filter(Boolean).join(' ')
-}
-
-export default function Input({
-  className = '',
-  error,
-  helperText,
-  inputSize = 'md',
-  'aria-invalid': ariaInvalid,
-  'aria-describedby': ariaDescribedBy,
-  id,
-  ...props
-}: InputProps) {
-  const helperId = helperText && id ? `${id}-helper` : undefined
-  const errorId = error && id ? `${id}-error` : undefined
-  const describedBy = [
-    ariaDescribedBy,
-    helperId,
-    errorId,
-  ].filter(Boolean).join(' ') || undefined
-
+const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
+  { inputSize = 'md', invalid, className = '', type = 'text', ...rest },
+  ref,
+) {
   return (
-    <div className="flex flex-col gap-1">
-      <input
-        id={id}
-        className={fieldClassName({ className, hasError: Boolean(error), inputSize })}
-        aria-invalid={ariaInvalid ?? (error ? true : undefined)}
-        aria-describedby={describedBy}
-        {...props}
-      />
-      {helperText && (
-        <p id={helperId} className="m-0 text-xs text-muted">
-          {helperText}
-        </p>
-      )}
-      {error && (
-        <p id={errorId} className="m-0 text-xs font-medium text-danger">
-          {error}
-        </p>
-      )}
-    </div>
+    <input
+      ref={ref}
+      type={type}
+      className={[
+        'rounded-sm border bg-surface text-primary placeholder:text-muted',
+        'focus:outline-none focus:shadow-focus',
+        invalid ? 'border-danger' : 'border-default hover:border-strong focus:border-accent',
+        SIZE[inputSize],
+        className,
+      ].join(' ')}
+      {...rest}
+    />
   )
-}
+})
+
+export default Input

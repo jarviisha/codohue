@@ -44,6 +44,12 @@ type fakeRepo struct {
 	runningReembed    *BatchRunLog
 	runningReembedErr error
 
+	latestReembed    *BatchRunLog
+	latestReembedErr error
+
+	lastEmbeddedAt    *time.Time
+	lastEmbeddedAtErr error
+
 	insertReembedID  int64
 	insertReembedErr error
 	insertedReembed  struct {
@@ -92,7 +98,7 @@ func (f *fakeRepo) GetNamespace(_ context.Context, _ string) (*NamespaceConfig, 
 	return f.namespace, f.nsGetErr
 }
 
-func (f *fakeRepo) GetBatchRunLogs(_ context.Context, _, _ string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
+func (f *fakeRepo) GetBatchRunLogs(_ context.Context, _, _, _ string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
 	return f.batchRuns, len(f.batchRuns), BatchRunStats{Total: len(f.batchRuns)}, f.batchRunsErr
 }
 
@@ -133,6 +139,14 @@ func (f *fakeRepo) SeedDemoCatalogItems(_ context.Context, namespace string, ite
 func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {
 	f.clearNamespace = namespace
 	return f.clearDeleted, f.clearErr
+}
+
+func (f *fakeRepo) FindLatestReembedRun(_ context.Context, _ string) (*BatchRunLog, error) {
+	return f.latestReembed, f.latestReembedErr
+}
+
+func (f *fakeRepo) GetLastCatalogEmbeddedAt(_ context.Context, _ string) (*time.Time, error) {
+	return f.lastEmbeddedAt, f.lastEmbeddedAtErr
 }
 
 func (f *fakeRepo) FindRunningReembedRun(_ context.Context, _ string) (*BatchRunLog, error) {
@@ -252,6 +266,36 @@ func (f *fakeNSConfig) Upsert(_ context.Context, namespace string, req *Namespac
 	return &NamespaceUpsertResponse{Namespace: namespace, UpdatedAt: time.Now()}, f.err
 }
 
+// ─── fake catalog configurator ───────────────────────────────────────────────
+
+type fakeCatalogConfig struct {
+	updateReq *NamespaceCatalogUpdateRequest
+	err       error
+	getResp   *NamespaceCatalogConfig
+}
+
+func (f *fakeCatalogConfig) GetCatalog(_ context.Context, _ string) (*NamespaceCatalogConfig, error) {
+	return f.getResp, nil
+}
+
+func (f *fakeCatalogConfig) UpdateCatalog(_ context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error) {
+	f.updateReq = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &NamespaceCatalogConfig{
+		Namespace:       namespace,
+		Enabled:         req.Enabled,
+		StrategyID:      *req.StrategyID,
+		StrategyVersion: *req.StrategyVersion,
+		EmbeddingDim:    demoCatalogStrategyDim,
+	}, nil
+}
+
+func (f *fakeCatalogConfig) AvailableStrategies(_ int) []CatalogStrategyDescriptor {
+	return nil
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 func newTestService(repo adminRepo, apiURL, apiKey string) *Service {
@@ -263,6 +307,46 @@ func newTestServiceWithNS(repo adminRepo, apiURL, apiKey string, ns nsConfigUpse
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
+
+func TestCreateDemoData_PublishesCatalogItemsWithIDs(t *testing.T) {
+	repo := &fakeRepo{
+		listItemsResp: []CatalogItemSummary{
+			{ID: 54, ObjectID: "item_wireless_keyboard"},
+			{ID: 55, ObjectID: "item_usb_c_hub"},
+		},
+		listItemsTotal: 2,
+	}
+	pub := &fakeStreamPublisher{}
+	svc := newTestService(repo, "", "")
+	svc.SetCatalogConfigurator(&fakeCatalogConfig{})
+	svc.SetStreamPublisher(pub)
+
+	resp, err := svc.CreateDemoData(context.Background())
+	if err != nil {
+		t.Fatalf("CreateDemoData returned error: %v", err)
+	}
+	if resp.CatalogItemsCreated != len(demoCatalogDataset) {
+		t.Fatalf("CatalogItemsCreated=%d, want %d", resp.CatalogItemsCreated, len(demoCatalogDataset))
+	}
+	if repo.listItemsCalled.namespace != demoNamespace {
+		t.Fatalf("ListCatalogItems namespace=%q, want %q", repo.listItemsCalled.namespace, demoNamespace)
+	}
+	if repo.listItemsCalled.state != "pending" {
+		t.Fatalf("ListCatalogItems state=%q, want pending", repo.listItemsCalled.state)
+	}
+	if len(pub.calls) != 2 {
+		t.Fatalf("XAdd calls=%d, want 2", len(pub.calls))
+	}
+	for i, call := range pub.calls {
+		values := call.Values.(map[string]any)
+		if values["catalog_item_id"] == nil {
+			t.Fatalf("call %d missing catalog_item_id: %#v", i, values)
+		}
+		if values["namespace"] != demoNamespace {
+			t.Fatalf("call %d namespace=%v, want %s", i, values["namespace"], demoNamespace)
+		}
+	}
+}
 
 func TestListNamespaces_Service(t *testing.T) {
 	repo := &fakeRepo{namespaces: []NamespaceConfig{{Namespace: "ns1"}, {Namespace: "ns2"}}}

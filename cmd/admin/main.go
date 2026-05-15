@@ -79,7 +79,7 @@ func run() error {
 
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
-	svc := admin.NewService(repo, cfg.APIURL, cfg.RecommenderAPIKey, redisClient, qdrantClient, job, nsAdapter)
+	svc := admin.NewService(repo, cfg.APIURL, cfg.AdminAPIKey, redisClient, qdrantClient, job, nsAdapter)
 
 	// Catalog auto-embedding admin endpoints (US2). The adapter bridges
 	// admin.Service → nsconfig.Service + embedstrategy.DefaultRegistry
@@ -89,9 +89,9 @@ func run() error {
 	svc.SetCatalogStrategyPicker(catalogAdapter)
 	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
 
-	h := admin.NewHandler(svc, cfg.RecommenderAPIKey)
+	h := admin.NewHandler(svc, cfg.AdminAPIKey)
 
-	r := newAdminRouter(h, cfg.RecommenderAPIKey)
+	r := newAdminRouter(h, cfg.AdminAPIKey)
 
 	// Static file serving — React SPA embedded in the binary
 	distFS, err := fs.Sub(adminui.Files, "dist")

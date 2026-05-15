@@ -9,7 +9,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
-      - RECOMMENDER_API_KEY=${CODOHUE_RECOMMENDER_API_KEY:?set CODOHUE_RECOMMENDER_API_KEY to the production admin API key}
+      - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
       - LOG_FORMAT=json
       - BATCH_INTERVAL_MINUTES=5
     depends_on:
@@ -53,7 +53,7 @@ services:
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
-      - RECOMMENDER_API_KEY=${CODOHUE_RECOMMENDER_API_KEY:?set CODOHUE_RECOMMENDER_API_KEY to the production admin API key}
+      - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
       - API_URL=http://api:2001
       - ADMIN_PORT=2002
       - LOG_FORMAT=json

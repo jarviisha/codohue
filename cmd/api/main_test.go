@@ -63,7 +63,7 @@ func TestRun_LoadConfigError(t *testing.T) {
 func TestRun_NewPoolError(t *testing.T) {
 	withAPITestHooks(t)
 	loadConfigFn = func() (*config.AppConfig, error) {
-		return &config.AppConfig{DatabaseURL: "postgres://db", RedisURL: "redis://localhost:6379", QdrantHost: "localhost", QdrantPort: 6334, RecommenderAPIKey: "admin", APIPort: "2001"}, nil
+		return &config.AppConfig{DatabaseURL: "postgres://db", RedisURL: "redis://localhost:6379", QdrantHost: "localhost", QdrantPort: 6334, AdminAPIKey: "admin", APIPort: "2001"}, nil
 	}
 	newPoolFn = func(_ context.Context, _ string) (*pgxpool.Pool, error) {
 		return nil, errors.New("db failed")
@@ -77,7 +77,7 @@ func TestRun_NewPoolError(t *testing.T) {
 func TestRun_NewRedisError(t *testing.T) {
 	withAPITestHooks(t)
 	loadConfigFn = func() (*config.AppConfig, error) {
-		return &config.AppConfig{DatabaseURL: "postgres://db", RedisURL: "redis://localhost:6379", QdrantHost: "localhost", QdrantPort: 6334, RecommenderAPIKey: "admin", APIPort: "2001"}, nil
+		return &config.AppConfig{DatabaseURL: "postgres://db", RedisURL: "redis://localhost:6379", QdrantHost: "localhost", QdrantPort: 6334, AdminAPIKey: "admin", APIPort: "2001"}, nil
 	}
 	newPoolFn = func(_ context.Context, _ string) (*pgxpool.Pool, error) {
 		return &pgxpool.Pool{}, nil
@@ -94,7 +94,7 @@ func TestRun_NewRedisError(t *testing.T) {
 func TestRun_NewQdrantError(t *testing.T) {
 	withAPITestHooks(t)
 	loadConfigFn = func() (*config.AppConfig, error) {
-		return &config.AppConfig{DatabaseURL: "postgres://db", RedisURL: "redis://localhost:6379", QdrantHost: "localhost", QdrantPort: 6334, RecommenderAPIKey: "admin", APIPort: "2001"}, nil
+		return &config.AppConfig{DatabaseURL: "postgres://db", RedisURL: "redis://localhost:6379", QdrantHost: "localhost", QdrantPort: 6334, AdminAPIKey: "admin", APIPort: "2001"}, nil
 	}
 	newPoolFn = func(_ context.Context, _ string) (*pgxpool.Pool, error) {
 		return &pgxpool.Pool{}, nil

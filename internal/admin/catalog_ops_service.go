@@ -208,7 +208,57 @@ func (s *Service) GetCatalogItem(ctx context.Context, namespace string, id int64
 	if err != nil {
 		return nil, fmt.Errorf("get catalog item: %w", err)
 	}
+	if item != nil {
+		s.attachCatalogVector(ctx, item)
+	}
 	return item, nil
+}
+
+func (s *Service) attachCatalogVector(ctx context.Context, item *CatalogItemDetail) {
+	if s.qdrantClient == nil {
+		return
+	}
+	numericID, ok, err := s.repo.LookupNumericObjectID(ctx, item.Namespace, item.ObjectID)
+	if err != nil || !ok {
+		if err != nil {
+			slog.WarnContext(ctx, "catalog item vector lookup failed",
+				slog.String("namespace", item.Namespace),
+				slog.String("object_id", item.ObjectID),
+				slog.String("error", err.Error()),
+			)
+		}
+		return
+	}
+
+	collection := item.Namespace + "_objects_dense"
+	results, err := s.qdrantClient.Get(ctx, &qdrant.GetPoints{
+		CollectionName: collection,
+		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
+		WithVectors:    qdrant.NewWithVectorsInclude("dense_interactions"),
+	})
+	if err != nil || len(results) == 0 {
+		if err != nil {
+			slog.WarnContext(ctx, "catalog item vector fetch failed",
+				slog.String("namespace", item.Namespace),
+				slog.String("object_id", item.ObjectID),
+				slog.String("collection", collection),
+				slog.String("error", err.Error()),
+			)
+		}
+		return
+	}
+
+	vec := results[0].GetVectors().GetVectors().GetVectors()["dense_interactions"]
+	if vec == nil || vec.GetDense() == nil {
+		return
+	}
+	values := vec.GetDense().GetData()
+	item.Vector = &CatalogVector{
+		Collection: collection,
+		NumericID:  numericID,
+		Dim:        len(values),
+		Values:     values,
+	}
 }
 
 // RedriveCatalogItem resets a single failed/dead-letter row to 'pending' and

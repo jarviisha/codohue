@@ -51,7 +51,21 @@ func NewService(repo *Repository) *Service {
 // On first creation, a namespace-scoped API key is generated and returned as
 // plaintext in UpsertResponse.APIKey. The plaintext key is shown once only —
 // subsequent updates will not return the key.
+//
+// When the namespace already has catalog auto-embedding enabled, dense_strategy
+// values that train object vectors (item2vec, svd) are rejected because they
+// would race the embedder over {ns}_objects_dense. Operators must disable
+// catalog first OR pick byoe/disabled.
 func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*UpsertResponse, error) {
+	if cfg, err := s.repo.Get(ctx, ns); err != nil {
+		return nil, fmt.Errorf("load namespace config for validation: %w", err)
+	} else if cfg != nil && cfg.CatalogEnabled && conflictsWithCatalog(req.DenseStrategy) {
+		return nil, &DenseStrategyConflictError{
+			DenseStrategy:  req.DenseStrategy,
+			CatalogEnabled: true,
+		}
+	}
+
 	cfg, err := s.repo.Upsert(ctx, ns, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert namespace config: %w", err)
@@ -116,6 +130,12 @@ func (s *Service) UpdateCatalogConfig(ctx context.Context, ns string, req *Updat
 	}
 
 	if req.Enabled {
+		if conflictsWithCatalog(cfg.DenseStrategy) {
+			return nil, &DenseStrategyConflictError{
+				DenseStrategy:  cfg.DenseStrategy,
+				CatalogEnabled: true,
+			}
+		}
 		if req.StrategyID == "" || req.StrategyVersion == "" {
 			return nil, fmt.Errorf("strategy_id and strategy_version are required when enabling catalog")
 		}
@@ -142,6 +162,19 @@ func (s *Service) UpdateCatalogConfig(ctx context.Context, ns string, req *Updat
 		return nil, ErrNamespaceNotFound
 	}
 	return updated, nil
+}
+
+// conflictsWithCatalog reports whether dense_strategy produces object vectors
+// that would compete with catalog auto-embedding for {ns}_objects_dense.
+// "byoe" and "disabled" are safe (no cron-side writes); everything else
+// races the embedder.
+func conflictsWithCatalog(denseStrategy string) bool {
+	switch denseStrategy {
+	case "byoe", "disabled":
+		return false
+	default:
+		return true
+	}
 }
 
 // generateAPIKey creates a cryptographically random 32-byte key and returns

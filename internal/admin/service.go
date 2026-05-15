@@ -15,13 +15,15 @@ import (
 
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
 // adminRepo is the repository interface used by Service.
 type adminRepo interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
-	GetBatchRunLogs(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
+	GetBatchRunLogs(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
@@ -32,8 +34,12 @@ type adminRepo interface {
 
 	// Catalog re-embed orchestration (US3).
 	FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
+	FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
 	InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error)
 	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) ([]CatalogReembedTarget, error)
+
+	// Catalog liveness signal for the admin Status tab.
+	GetLastCatalogEmbeddedAt(ctx context.Context, namespace string) (*time.Time, error)
 
 	// Catalog item operator endpoints (US3).
 	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) ([]CatalogItemSummary, int, error)
@@ -78,7 +84,7 @@ type catalogBacklogReader interface {
 }
 
 type batchRunner interface {
-	RunNamespace(ctx context.Context, namespace, triggerSource string)
+	RunNamespace(ctx context.Context, namespace string, triggerSource batchrun.TriggerSource)
 }
 
 // streamPublisher abstracts the Redis Streams write used by the catalog
@@ -227,6 +233,10 @@ func (s *Service) GetNamespace(ctx context.Context, namespace string) (*Namespac
 func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error) {
 	resp, err := s.nsConfigSvc.Upsert(ctx, namespace, req)
 	if err != nil {
+		var conflictErr *CatalogStrategyConflict
+		if errors.As(err, &conflictErr) {
+			return nil, http.StatusBadRequest, err
+		}
 		return nil, http.StatusInternalServerError, fmt.Errorf("upsert namespace: %w", err)
 	}
 	status := http.StatusOK
@@ -269,7 +279,49 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 			resp.Backlog = backlog
 		}
 	}
+	// Liveness signals — best-effort, both rows surface as nil when read fails.
+	if t, err := s.repo.GetLastCatalogEmbeddedAt(ctx, namespace); err == nil {
+		resp.LastEmbeddedAt = t
+	}
+	if run, err := s.repo.FindLatestReembedRun(ctx, namespace); err == nil && run != nil {
+		resp.LastReEmbed = summarizeReembedRun(run)
+	}
 	return resp, nil
+}
+
+// summarizeReembedRun derives the CatalogReEmbedSummary projection from a
+// batch_run_logs row that was created with trigger_source='admin_reembed'.
+// Reads target strategy from the dedicated columns added by migration 013;
+// status comes from completed_at + success.
+func summarizeReembedRun(row *BatchRunLog) *CatalogReEmbedSummary {
+	if row == nil {
+		return nil
+	}
+	strategyID, strategyVersion := ReembedTargetFromBatchRow(row)
+
+	out := &CatalogReEmbedSummary{
+		BatchRunID:      row.ID,
+		StartedAt:       row.StartedAt,
+		CompletedAt:     row.CompletedAt,
+		ProcessedItems:  row.EntitiesProcessed,
+		StrategyID:      strategyID,
+		StrategyVersion: strategyVersion,
+	}
+	if row.DurationMs != nil {
+		out.DurationMs = *row.DurationMs
+	}
+	switch {
+	case row.CompletedAt == nil:
+		out.Status = "running"
+	case row.Success:
+		out.Status = "success"
+	default:
+		out.Status = "failed"
+		if row.ErrorMessage != nil {
+			out.ErrorMessage = *row.ErrorMessage
+		}
+	}
+	return out
 }
 
 // UpdateCatalogConfig applies the catalog auto-embedding config change
@@ -290,9 +342,11 @@ func (s *Service) UpdateCatalogConfig(ctx context.Context, namespace string, req
 	return cfg, nil
 }
 
-// GetBatchRuns returns paginated batch run logs, filtered total, and aggregate stats.
-func (s *Service) GetBatchRuns(ctx context.Context, namespace, status string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
-	return s.repo.GetBatchRunLogs(ctx, namespace, status, limit, offset)
+// GetBatchRuns returns paginated batch run logs, filtered total, and aggregate
+// stats. kind selects between CF runs (cron + admin "Run batch now") and
+// catalog re-embed orchestration runs; an empty kind returns all kinds.
+func (s *Service) GetBatchRuns(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error) {
+	return s.repo.GetBatchRunLogs(ctx, namespace, status, kind, limit, offset)
 }
 
 // GetNamespacesOverview returns all namespaces with computed health status.
@@ -605,9 +659,9 @@ func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreat
 	defer cancel()
 
 	start := time.Now()
-	s.job.RunNamespace(batchCtx, ns, "manual")
+	s.job.RunNamespace(batchCtx, ns, batchrun.TriggerManual)
 
-	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", 1, 0)
+	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", "", 1, 0)
 	if err != nil || len(logs) == 0 {
 		return &BatchRunCreateResponse{
 			Namespace: ns,
@@ -737,18 +791,15 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 		// ingest would. Publish failures are non-fatal — rows remain in
 		// state='pending' and can be picked up later (e.g. via re-embed).
 		if s.streamPublisher != nil {
-			for _, it := range demoCatalogDataset {
-				args := &goredis.XAddArgs{
-					Stream: "catalog:embed:" + demoNamespace,
-					Values: map[string]any{
-						"namespace":        demoNamespace,
-						"object_id":        it.ObjectID,
-						"strategy_id":      strategyID,
-						"strategy_version": strategyVersion,
-						"enqueued_at":      now.Format(time.RFC3339Nano),
-					},
-				}
-				if err := s.streamPublisher.XAdd(ctx, args).Err(); err != nil {
+			items, _, err := s.repo.ListCatalogItems(ctx, demoNamespace, "pending", len(demoCatalogDataset), 0, "")
+			if err != nil {
+				return nil, fmt.Errorf("list seeded demo catalog items: %w", err)
+			}
+			for _, it := range items {
+				if err := s.publishCatalogEnqueue(ctx, demoNamespace, CatalogReembedTarget{
+					ID:       it.ID,
+					ObjectID: it.ObjectID,
+				}, strategyID, strategyVersion); err != nil {
 					slog.Warn("demo catalog xadd failed",
 						"object_id", it.ObjectID, "error", err)
 				}

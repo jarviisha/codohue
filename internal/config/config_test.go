@@ -4,8 +4,8 @@ import "testing"
 
 func TestLoadAPI_RequiresDatabaseURL(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "",
-		"RECOMMENDER_API_KEY": "admin",
+		"DATABASE_URL":          "",
+		"CODOHUE_ADMIN_API_KEY": "admin",
 	}, func() {
 		_, err := LoadAPI()
 		if err == nil {
@@ -14,10 +14,10 @@ func TestLoadAPI_RequiresDatabaseURL(t *testing.T) {
 	})
 }
 
-func TestLoadAPI_RequiresRecommenderAPIKey(t *testing.T) {
+func TestLoadAPI_RequiresAdminAPIKey(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "postgres://db",
-		"RECOMMENDER_API_KEY": "",
+		"DATABASE_URL":          "postgres://db",
+		"CODOHUE_ADMIN_API_KEY": "",
 	}, func() {
 		_, err := LoadAPI()
 		if err == nil {
@@ -28,9 +28,9 @@ func TestLoadAPI_RequiresRecommenderAPIKey(t *testing.T) {
 
 func TestLoadAPI_InvalidQdrantPort(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "postgres://db",
-		"RECOMMENDER_API_KEY": "admin",
-		"QDRANT_PORT":         "not-a-number",
+		"DATABASE_URL":          "postgres://db",
+		"CODOHUE_ADMIN_API_KEY": "admin",
+		"QDRANT_PORT":           "not-a-number",
 	}, func() {
 		_, err := LoadAPI()
 		if err == nil {
@@ -42,7 +42,7 @@ func TestLoadAPI_InvalidQdrantPort(t *testing.T) {
 func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":           "postgres://db",
-		"RECOMMENDER_API_KEY":    "admin",
+		"CODOHUE_ADMIN_API_KEY":  "admin",
 		"BATCH_INTERVAL_MINUTES": "not-a-number",
 	}, func() {
 		_, err := LoadAPI()
@@ -55,7 +55,7 @@ func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 func TestLoadAPI_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":           "postgres://db",
-		"RECOMMENDER_API_KEY":    "admin",
+		"CODOHUE_ADMIN_API_KEY":  "admin",
 		"REDIS_URL":              "",
 		"QDRANT_HOST":            "",
 		"QDRANT_PORT":            "",
@@ -91,7 +91,7 @@ func TestLoadAPI_UsesDefaults(t *testing.T) {
 func TestLoadAPI_UsesEnvironmentOverrides(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":           "postgres://custom-db",
-		"RECOMMENDER_API_KEY":    "custom-admin",
+		"CODOHUE_ADMIN_API_KEY":  "custom-admin",
 		"REDIS_URL":              "redis://custom:6379",
 		"QDRANT_HOST":            "qdrant.internal",
 		"QDRANT_PORT":            "7000",
@@ -106,8 +106,8 @@ func TestLoadAPI_UsesEnvironmentOverrides(t *testing.T) {
 		if cfg.DatabaseURL != "postgres://custom-db" {
 			t.Fatalf("DatabaseURL: got %q", cfg.DatabaseURL)
 		}
-		if cfg.RecommenderAPIKey != "custom-admin" {
-			t.Fatalf("RecommenderAPIKey: got %q", cfg.RecommenderAPIKey)
+		if cfg.AdminAPIKey != "custom-admin" {
+			t.Fatalf("AdminAPIKey: got %q", cfg.AdminAPIKey)
 		}
 		if cfg.RedisURL != "redis://custom:6379" {
 			t.Fatalf("RedisURL: got %q", cfg.RedisURL)
@@ -141,10 +141,10 @@ func TestLoadCron_RequiresDatabaseURL(t *testing.T) {
 	})
 }
 
-func TestLoadCron_DoesNotRequireRecommenderAPIKey(t *testing.T) {
+func TestLoadCron_DoesNotRequireAdminAPIKey(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "postgres://db",
-		"RECOMMENDER_API_KEY": "",
+		"DATABASE_URL":          "postgres://db",
+		"CODOHUE_ADMIN_API_KEY": "",
 	}, func() {
 		_, err := LoadCron()
 		if err != nil {
@@ -205,8 +205,8 @@ func TestLoadCron_UsesDefaults(t *testing.T) {
 		if cfg.LogFormat != "text" {
 			t.Fatalf("LogFormat: got %q", cfg.LogFormat)
 		}
-		if cfg.RecommenderAPIKey != "" {
-			t.Fatalf("RecommenderAPIKey should be empty, got %q", cfg.RecommenderAPIKey)
+		if cfg.AdminAPIKey != "" {
+			t.Fatalf("AdminAPIKey should be empty, got %q", cfg.AdminAPIKey)
 		}
 		if cfg.APIPort != "" {
 			t.Fatalf("APIPort should be empty, got %q", cfg.APIPort)

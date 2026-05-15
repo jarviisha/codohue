@@ -1,33 +1,12 @@
-export const queryKeys = {
-  health: () => ['health'] as const,
-
-  namespaces: {
-    list: () => ['namespaces'] as const,
-    detail: (namespace: string) => ['namespaces', namespace] as const,
-    overview: () => ['namespaces-overview'] as const,
-    qdrantStats: (namespace: string) => ['qdrant-stats', namespace] as const,
-  },
-
-  batchRuns: {
-    list: (namespace?: string, offset = 0, status = '') => ['batch-runs', namespace ?? '', offset, status] as const,
-  },
-
-  events: {
-    list: (namespace: string, limit: number, offset: number, subjectID: string) =>
-      ['events', namespace, limit, offset, subjectID] as const,
-    namespace: (namespace: string) => ['events', namespace] as const,
-  },
-
-  trending: {
-    list: (namespace: string, limit: number, offset: number, windowHours: number) =>
-      ['trending', namespace, limit, offset, windowHours] as const,
-  },
-
-  catalog: {
-    config: (namespace: string) => ['catalog-config', namespace] as const,
-    items: (namespace: string, state: string, limit: number, offset: number, objectID: string) =>
-      ['catalog-items', namespace, state, limit, offset, objectID] as const,
-    item: (namespace: string, id: number) => ['catalog-item', namespace, id] as const,
-    namespace: (namespace: string) => ['catalog', namespace] as const,
-  },
-}
+// Re-export barrel for every domain's TanStack Query key factory.
+// Convention: keys are hierarchical tuples `[domain, ns?, ...params]` so
+// invalidation patterns stay obvious (e.g. invalidate all namespace data
+// with `['ns', name]`).
+//
+// Each domain service file owns its keys; this file is the single import
+// surface for consumers that need to invalidate cross-domain.
+export { authKeys } from './auth'
+export { batchRunKeys } from './batchRuns'
+export { catalogKeys } from './catalog'
+export { healthKeys } from './health'
+export { namespaceKeys } from './namespaces'

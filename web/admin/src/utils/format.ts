@@ -1,53 +1,65 @@
-export function formatCount(value: number | null | undefined): string {
-  if (value == null) return '—'
-  return value.toLocaleString()
+// Shared display formatters. Pure functions — UI files import what they
+// need rather than redefining them.
+//
+// Conventions:
+// - "—" (em dash) is the universal "no value" placeholder for missing data.
+// - Locale defaults to en-US so operators worldwide see the same thousands
+//   separators (and our mono tabular-nums alignment stays stable).
+// - All time helpers accept ISO-8601 strings; falsy input returns "—".
+
+const PLACEHOLDER = '—'
+const LOCALE = 'en-US'
+
+/**
+ * Human-readable "Xs ago" / "Xm ago" / "Xh ago" / "Xd ago" relative time.
+ * Returns "just now" for any timestamp at or in the very-near future.
+ * Returns "—" for falsy or unparseable input.
+ */
+export function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return PLACEHOLDER
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return PLACEHOLDER
+  const delta = Date.now() - t
+  if (delta < 0) return 'just now'
+  const s = Math.floor(delta / 1000)
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h ago`
+  const d = Math.floor(h / 24)
+  return `${d}d ago`
 }
 
-export function formatDateTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleString()
-  } catch {
-    return iso
-  }
+/**
+ * Human-readable duration from a count of milliseconds. Sub-second values
+ * stay in ms ("812ms"); anything 1s or longer becomes seconds with three
+ * decimal places ("4.812s"). Returns "—" for null / undefined.
+ */
+export function formatDurationMs(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return PLACEHOLDER
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(3)}s`
 }
 
-export function formatDateTimeWithZone(iso: string): string {
+/**
+ * Engineer-facing absolute timestamp. ISO-8601 with the `T` replaced by a
+ * space and `Z` replaced by " UTC" so it reads as
+ * `2026-05-13 14:02:38.412 UTC`. Falls back to the raw input if unparseable,
+ * "—" if falsy.
+ */
+export function formatTimestamp(iso: string | null | undefined): string {
+  if (!iso) return PLACEHOLDER
   const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone
-  const offset = -d.getTimezoneOffset()
-  const tzLabel = offset === 0 ? 'UTC' : `UTC${offset > 0 ? '+' : ''}${offset / 60}`
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} (${tz || tzLabel})`
+  if (Number.isNaN(d.getTime())) return iso
+  return d.toISOString().replace('T', ' ').replace('Z', ' UTC')
 }
 
-export function formatDateTimeShort(iso: string): string {
-  const d = new Date(iso)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
-}
-
-export function formatTimeOfDay(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString()
-}
-
-export function formatDurationMs(value: number | null | undefined): string {
-  return value != null ? `${value} ms` : '—'
-}
-
-export function formatRelativeTime(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime()
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
-  const hrs = Math.floor(mins / 60)
-  if (hrs < 24) return `${hrs}h ago`
-  return `${Math.floor(hrs / 24)}d ago`
-}
-
-export function formatTTL(ttlSec: number): string {
-  if (ttlSec === -2) return 'no cache'
-  if (ttlSec === -1) return 'no expiry'
-  const m = Math.floor(ttlSec / 60)
-  const s = ttlSec % 60
-  return m > 0 ? `${m}m ${s}s` : `${s}s`
+/**
+ * Locale-formatted integer or float ("12,418"). Returns "—" for null /
+ * undefined / NaN.
+ */
+export function formatNumber(n: number | null | undefined): string {
+  if (n === null || n === undefined || Number.isNaN(n)) return PLACEHOLDER
+  return n.toLocaleString(LOCALE)
 }

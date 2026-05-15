@@ -1,86 +1,84 @@
-import type { ReactNode, SelectHTMLAttributes } from 'react'
-import { fieldBaseClass, fieldInvalidClass } from './formClasses'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 
-export interface DropdownOption {
-  label: ReactNode
-  value: string | number
-  disabled?: boolean
+interface DropdownProps {
+  trigger: ReactNode
+  align?: 'left' | 'right'
+  children: ReactNode | ((close: () => void) => ReactNode)
 }
 
-export interface DropdownProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  controlSize?: 'sm' | 'md'
-  error?: ReactNode
-  helperText?: ReactNode
-  options?: DropdownOption[]
-  placeholder?: string
-}
+// Small popover menu, opens on click. Closes on outside click, Escape, or
+// when the children render-prop calls the supplied close().
+export default function Dropdown({ trigger, align = 'left', children }: DropdownProps) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
 
-const sizeClasses: Record<NonNullable<DropdownProps['controlSize']>, string> = {
-  sm: 'h-7 px-2 pr-7 text-xs',
-  md: '',
-}
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
 
-export default function Dropdown({
-  className = '',
-  children,
-  controlSize = 'md',
-  error,
-  helperText,
-  options,
-  placeholder,
-  style,
-  'aria-invalid': ariaInvalid,
-  'aria-describedby': ariaDescribedBy,
-  id,
-  ...props
-}: DropdownProps) {
-  const helperId = helperText && id ? `${id}-helper` : undefined
-  const errorId = error && id ? `${id}-error` : undefined
-  const describedBy = [
-    ariaDescribedBy,
-    helperId,
-    errorId,
-  ].filter(Boolean).join(' ') || undefined
+  const close = () => setOpen(false)
 
   return (
-    <div className="flex flex-col gap-1">
-      <select
-        id={id}
-        className={[
-          fieldBaseClass,
-          'appearance-none bg-no-repeat pr-8',
-          sizeClasses[controlSize],
-          error ? fieldInvalidClass : '',
-          className,
-        ].filter(Boolean).join(' ')}
-        style={{
-          backgroundImage: 'linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%)',
-          backgroundPosition: 'calc(100% - 14px) 50%, calc(100% - 10px) 50%',
-          backgroundSize: '4px 4px, 4px 4px',
-          ...style,
-        }}
-        aria-invalid={ariaInvalid ?? (error ? true : undefined)}
-        aria-describedby={describedBy}
-        {...props}
+    <div ref={rootRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex"
+        aria-haspopup="menu"
+        aria-expanded={open}
       >
-        {placeholder && <option value="">{placeholder}</option>}
-        {options?.map(option => (
-          <option key={String(option.value)} value={option.value} disabled={option.disabled}>
-            {option.label}
-          </option>
-        ))}
-        {children}
-      </select>
-      {helperText && (
-        <p id={helperId} className="m-0 text-xs text-muted">
-          {helperText}
-        </p>
-      )}
-      {error && (
-        <p id={errorId} className="m-0 text-xs font-medium text-danger">
-          {error}
-        </p>
-      )}
+        {trigger}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className={[
+            'absolute top-full mt-1 min-w-40 rounded border border-default bg-surface shadow-overlay py-1 z-50',
+            align === 'right' ? 'right-0' : 'left-0',
+          ].join(' ')}
+        >
+          {typeof children === 'function' ? children(close) : children}
+        </div>
+      ) : null}
     </div>
+  )
+}
+
+// Helper component for menu items inside a Dropdown.
+export function DropdownItem({
+  onSelect,
+  children,
+  destructive = false,
+}: {
+  onSelect: () => void
+  children: ReactNode
+  destructive?: boolean
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onSelect}
+      className={[
+        'w-full text-left px-3 py-1.5 text-sm hover:bg-surface-raised',
+        destructive ? 'text-danger' : 'text-primary',
+      ].join(' ')}
+    >
+      {children}
+    </button>
   )
 }

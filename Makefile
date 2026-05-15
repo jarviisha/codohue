@@ -24,7 +24,7 @@ LINT_ENV     := $(GO_CACHE_ENV) GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=o
 COMPOSE          := DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose
 COMPOSE_APP      := $(COMPOSE) -f docker-compose.app.yml
 COMPOSE_PROD     := $(COMPOSE) -f docker-compose.prod.yml
-COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_RECOMMENDER_API_KEY=dummy
+COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_ADMIN_API_KEY=dummy
 
 MIN_TOTAL          ?= 60
 MIN_RECOMMEND      ?= 85

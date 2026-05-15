@@ -1,55 +1,54 @@
 import type { ReactNode } from 'react'
-import Button from './Button'
 import Modal from './Modal'
+import Button from './Button'
 
 interface ConfirmDialogProps {
   open: boolean
   title: ReactNode
-  children: ReactNode
-  confirmLabel: string
+  description?: ReactNode
+  confirmLabel?: string
   cancelLabel?: string
-  tone?: 'primary' | 'danger'
-  isPending?: boolean
-  onCancel: () => void
+  destructive?: boolean
+  loading?: boolean
   onConfirm: () => void
+  onCancel: () => void
 }
 
+// Destructive actions (delete, drop, force-clear) must route through this
+// dialog. The destructive prop swaps the confirm button to the danger variant.
 export default function ConfirmDialog({
   open,
   title,
-  children,
-  confirmLabel,
+  description,
+  confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
-  tone = 'primary',
-  isPending = false,
-  onCancel,
+  destructive = false,
+  loading = false,
   onConfirm,
+  onCancel,
 }: ConfirmDialogProps) {
   return (
-    <Modal open={open} onClose={isPending ? () => null : onCancel} title={title}>
-      <div className="flex flex-col gap-4">
-        <div className="text-sm leading-6 text-secondary">
-          {children}
-        </div>
-        <div className="flex justify-end gap-2 border-t border-default pt-4">
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={isPending}
-            onClick={onCancel}
-          >
+    <Modal
+      open={open}
+      onClose={onCancel}
+      title={title}
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onCancel} disabled={loading}>
             {cancelLabel}
           </Button>
           <Button
-            type="button"
-            variant={tone === 'danger' ? 'danger' : 'primary'}
-            disabled={isPending}
+            variant={destructive ? 'danger' : 'primary'}
             onClick={onConfirm}
+            loading={loading}
           >
-            {isPending ? 'Working...' : confirmLabel}
+            {confirmLabel}
           </Button>
-        </div>
-      </div>
+        </>
+      }
+    >
+      {description ? <p className="text-sm text-secondary">{description}</p> : null}
     </Modal>
   )
 }

@@ -43,7 +43,7 @@ func TestMain(m *testing.M) {
 	// Load .env from project root. The e2e package runs with e2e/ as working dir.
 	_ = godotenv.Load("../.env")
 
-	adminKey = envOrDefault("RECOMMENDER_API_KEY", "dev-secret-key")
+	adminKey = envOrDefault("CODOHUE_ADMIN_API_KEY", "dev-secret-key")
 	dbURL := envOrDefault("DATABASE_URL", "postgres://codohue:secret@localhost:5432/codohue?sslmode=disable")
 	redisURL := envOrDefault("REDIS_URL", "redis://localhost:6379")
 	qdrantHost := envOrDefault("QDRANT_HOST", "localhost")
@@ -81,7 +81,7 @@ func TestMain(m *testing.M) {
 		"REDIS_URL="+redisURL,
 		"QDRANT_HOST="+qdrantHost,
 		"QDRANT_PORT="+qdrantPort,
-		"RECOMMENDER_API_KEY="+adminKey,
+		"CODOHUE_ADMIN_API_KEY="+adminKey,
 		"API_PORT="+testPort,
 		"LOG_FORMAT=text",
 		"BATCH_INTERVAL_MINUTES=60",

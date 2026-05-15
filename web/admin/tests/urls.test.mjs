@@ -1,46 +1,115 @@
-import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 
-const adminApi = readFileSync(new URL('../src/services/adminApi.ts', import.meta.url), 'utf8')
-const api = readFileSync(new URL('../src/services/api.ts', import.meta.url), 'utf8')
-const sources = `${adminApi}\n${api}`
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
-test('admin SPA uses only canonical spec 003 URLs', () => {
-  const required = [
-    '/api/v1/auth/sessions',
-    '/api/v1/auth/sessions/current',
-    '/api/admin/v1/namespaces?include=overview',
-    '/api/admin/v1/demo-data',
-    '/api/admin/v1/batch-runs',
-    '/qdrant',
-    '/recommendations?${params}',
-  ]
+function read(rel) {
+  return readFileSync(resolve(__dirname, '..', rel), 'utf8')
+}
 
-  for (const url of required) {
-    assert.match(sources, new RegExp(escapeRegExp(url)))
+function walk(relDir) {
+  const absDir = resolve(__dirname, '..', relDir)
+  const out = []
+  for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+    const rel = `${relDir}/${entry.name}`
+    if (entry.isDirectory()) {
+      out.push(...walk(rel))
+    } else if (/\.(ts|tsx)$/.test(entry.name)) {
+      out.push(rel)
+    }
   }
+  return out
+}
 
-  const removed = [
-    /\/api\/auth\/login/,
-    /\/api\/auth\/logout/,
-    /\/api\/admin\/v1\/namespaces\/overview/,
-    /\/api\/admin\/v1\/recommend\/debug/,
-    /\/api\/admin\/v1\/trending\//,
-    /\/api\/admin\/v1\/subjects\//,
-    /\/qdrant-stats/,
-    /\/batch-runs\/trigger/,
-    /\/api\/admin\/v1\/demo(?!-data)/,
-    /\/v1\/recommendations/,
-    /\/v1\/rank(?!ings)/,
-    /\/v1\/trending\//,
-  ]
+const routesSrc = read('src/routes/index.tsx')
+const pathSrc = read('src/routes/path.ts')
 
-  for (const pattern of removed) {
-    assert.doesNotMatch(sources, pattern)
+// Each entry is the literal Route declaration string expected in routes/index.tsx.
+// Updated alongside any route change so the URL contract stays grep-verifiable.
+const ROUTE_PATHS = [
+  'path="/login"',
+  'path="namespaces"',
+  'path="namespaces/new"',
+  'path="ns/:name"',
+  'path="config"',
+  'path="catalog"',
+  'path="catalog/items"',
+  'path=":id"',
+  'path="events"',
+  'path="trending"',
+  'path="batch-runs"',
+  'path="debug"',
+  'path="demo-data"',
+]
+
+test('routes/index.tsx declares every BUILD_PLAN route', () => {
+  for (const route of ROUTE_PATHS) {
+    assert.ok(
+      routesSrc.includes(route),
+      `routes/index.tsx is missing ${route}`,
+    )
   }
 })
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+const EXPECTED_BUILDERS = [
+  "login: '/login'",
+  "health: '/'",
+  "namespaces: '/namespaces'",
+  "namespaceCreate: '/namespaces/new'",
+  '`/ns/${name}`',
+  '`/ns/${name}/config`',
+  '`/ns/${name}/catalog`',
+  '`/ns/${name}/catalog/items`',
+  '`/ns/${name}/catalog/items/${id}`',
+  '`/ns/${name}/events`',
+  '`/ns/${name}/trending`',
+  '`/ns/${name}/batch-runs`',
+  '`/ns/${name}/debug`',
+  '`/ns/${name}/demo-data`',
+]
+
+test('path.ts exposes every URL builder', () => {
+  for (const b of EXPECTED_BUILDERS) {
+    assert.ok(pathSrc.includes(b), `path.ts is missing builder: ${b}`)
+  }
+})
+
+test('HTTP calls go through services/http.ts (no raw fetch in pages or services)', () => {
+  const sources = [
+    ...walk('src/services').filter((rel) => rel !== 'src/services/http.ts'),
+    ...walk('src/pages'),
+  ]
+  for (const rel of sources) {
+    const src = read(rel)
+    // Allow the word "fetch" inside comments / strings but flag actual call sites.
+    const rawFetch = /(?<![A-Za-z_])fetch\s*\(/.test(src)
+    assert.ok(
+      !rawFetch,
+      `${rel} contains a raw fetch() call — route HTTP through services/http.ts instead`,
+    )
+  }
+})
+
+const COMMAND_PAGE_MODULES = [
+  'src/pages/health/HealthPage.tsx',
+  'src/pages/namespaces/ListPage.tsx',
+  'src/pages/namespaces/CreatePage.tsx',
+  'src/pages/ns/OverviewPage.tsx',
+  'src/pages/ns/ConfigPage.tsx',
+  'src/pages/ns/catalog/ConfigPage.tsx',
+  'src/pages/ns/catalog/items/ListPage.tsx',
+  'src/pages/ns/catalog/items/DetailModal.tsx',
+]
+
+test('implemented shell pages register at least one command', () => {
+  for (const rel of COMMAND_PAGE_MODULES) {
+    const src = read(rel)
+    assert.ok(
+      src.includes('useRegisterCommand('),
+      `${rel} does not register a command palette entry`,
+    )
+  }
+})
