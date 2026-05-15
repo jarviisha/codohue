@@ -222,7 +222,7 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status, kin
 	args = append(args, limit, offset)
 	const sel = `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       subjects_processed, success, error_message, trigger_source, log_lines,
+		       entities_processed, success, error_message, trigger_source, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
@@ -257,7 +257,7 @@ func scanBatchRunLog(scan func(...any) error) (BatchRunLog, error) {
 	var rawLog json.RawMessage
 	err := scan(
 		&b.ID, &b.Namespace, &b.StartedAt, &b.CompletedAt,
-		&b.DurationMs, &b.SubjectsProcessed, &b.Success, &b.ErrorMessage, &b.TriggerSource, &rawLog,
+		&b.DurationMs, &b.EntitiesProcessed, &b.Success, &b.ErrorMessage, &b.TriggerSource, &rawLog,
 		&b.Phase1OK, &b.Phase1DurMs, &b.Phase1Subjects, &b.Phase1Objects, &b.Phase1Error,
 		&b.Phase2OK, &b.Phase2DurMs, &b.Phase2Items, &b.Phase2Subjects, &b.Phase2Error,
 		&b.Phase3OK, &b.Phase3DurMs, &b.Phase3Items, &b.Phase3Error,
@@ -286,7 +286,7 @@ func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[strin
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT ON (namespace)
 		    id, namespace, started_at, completed_at, duration_ms,
-		    subjects_processed, success, error_message, trigger_source, log_lines,
+		    entities_processed, success, error_message, trigger_source, log_lines,
 		    phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		    phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		    phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,

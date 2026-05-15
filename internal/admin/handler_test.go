@@ -467,7 +467,7 @@ func TestGetBatchRuns_All(t *testing.T) {
 	now := time.Now()
 	h := newTestHandler(&fakeSvc{
 		batchRuns: []BatchRunLog{
-			{ID: 1, Namespace: "ns1", StartedAt: now, Success: true, SubjectsProcessed: 100},
+			{ID: 1, Namespace: "ns1", StartedAt: now, Success: true, EntitiesProcessed: 100},
 		},
 	})
 	rec := httptest.NewRecorder()
@@ -487,7 +487,7 @@ func TestGetBatchRuns_FilteredByNamespace(t *testing.T) {
 	now := time.Now()
 	h := newTestHandler(&fakeSvc{
 		batchRuns: []BatchRunLog{
-			{ID: 2, Namespace: "filtered_ns", StartedAt: now, Success: true, SubjectsProcessed: 50},
+			{ID: 2, Namespace: "filtered_ns", StartedAt: now, Success: true, EntitiesProcessed: 50},
 		},
 	})
 	rec := httptest.NewRecorder()

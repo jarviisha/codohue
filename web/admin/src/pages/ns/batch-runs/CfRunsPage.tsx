@@ -154,7 +154,7 @@ export default function CfRunsPage() {
                   <Th>trigger</Th>
                   <Th>started</Th>
                   <Th align="right">duration</Th>
-                  <Th align="right">subjects</Th>
+                  <Th align="right">entities</Th>
                   <Th>phase 1</Th>
                   <Th>phase 2</Th>
                   <Th>phase 3</Th>
@@ -174,7 +174,7 @@ export default function CfRunsPage() {
                     <Td mono>{row.trigger_source}</Td>
                     <Td mono>{formatRelative(row.started_at)}</Td>
                     <Td mono align="right">{formatPhaseDuration(row.duration_ms)}</Td>
-                    <Td mono align="right">{formatNumber(row.subjects_processed)}</Td>
+                    <Td mono align="right">{formatNumber(row.entities_processed)}</Td>
                     <Td>
                       <StatusToken
                         state={phaseToken(row.phase1_ok)}

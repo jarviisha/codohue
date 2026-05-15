@@ -199,7 +199,7 @@ func (r *pgReembedRepo) CountStaleCatalogItems(ctx context.Context, namespace st
 
 // CountEmbeddedCatalogItems returns the number of catalog_items currently in
 // 'embedded' state at the namespace's active strategy version. Used as the
-// "subjects_processed" tally written to batch_run_logs on completion.
+// "entities_processed" tally written to batch_run_logs on completion.
 func (r *pgReembedRepo) CountEmbeddedCatalogItems(ctx context.Context, namespace string) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `
@@ -233,7 +233,7 @@ func (r *pgReembedRepo) CompleteReembedRun(ctx context.Context, id int64, proces
 		UPDATE batch_run_logs
 		SET completed_at       = $2,
 		    duration_ms        = $3,
-		    subjects_processed = $4,
+		    entities_processed = $4,
 		    success            = $5,
 		    error_message      = $6
 		WHERE id = $1

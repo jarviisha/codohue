@@ -217,7 +217,7 @@ type BatchRunLog struct {
 	StartedAt         time.Time  `json:"started_at"`
 	CompletedAt       *time.Time `json:"completed_at"`
 	DurationMs        *int       `json:"duration_ms"`
-	SubjectsProcessed int        `json:"subjects_processed"`
+	EntitiesProcessed int        `json:"entities_processed"`
 	Success           bool       `json:"success"`
 	ErrorMessage      *string    `json:"error_message"`
 	TriggerSource     string     `json:"trigger_source"`

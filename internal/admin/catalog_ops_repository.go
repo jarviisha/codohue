@@ -19,7 +19,7 @@ import (
 func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       subjects_processed, success, error_message, trigger_source, log_lines,
+		       entities_processed, success, error_message, trigger_source, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
@@ -49,7 +49,7 @@ func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string
 func (r *Repository) FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       subjects_processed, success, error_message, trigger_source, log_lines,
+		       entities_processed, success, error_message, trigger_source, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
@@ -115,7 +115,7 @@ func (r *Repository) InsertReembedRun(ctx context.Context, namespace, strategyID
 	var id int64
 	err := r.db.QueryRow(ctx, `
 		INSERT INTO batch_run_logs (
-			namespace, started_at, subjects_processed, success,
+			namespace, started_at, entities_processed, success,
 			trigger_source, log_lines,
 			target_strategy_id, target_strategy_version
 		)
@@ -141,7 +141,7 @@ func (r *Repository) CompleteReembedRun(ctx context.Context, id int64, processed
 		UPDATE batch_run_logs
 		SET completed_at       = $2,
 		    duration_ms        = $3,
-		    subjects_processed = $4,
+		    entities_processed = $4,
 		    success            = $5,
 		    error_message      = $6
 		WHERE id = $1`,

@@ -166,8 +166,8 @@ export default function NamespaceOverviewPage() {
                 { label: 'started', value: formatTimestamp(lastRun.started_at) },
                 { label: 'duration', value: formatDurationMs(lastRun.duration_ms) },
                 {
-                  label: 'subjects',
-                  value: formatNumber(lastRun.subjects_processed),
+                  label: 'entities',
+                  value: formatNumber(lastRun.entities_processed),
                 },
                 { label: 'trigger', value: lastRun.trigger_source },
                 {

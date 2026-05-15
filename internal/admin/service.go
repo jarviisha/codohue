@@ -303,7 +303,7 @@ func summarizeReembedRun(row *BatchRunLog) *CatalogReEmbedSummary {
 		BatchRunID:      row.ID,
 		StartedAt:       row.StartedAt,
 		CompletedAt:     row.CompletedAt,
-		ProcessedItems:  row.SubjectsProcessed,
+		ProcessedItems:  row.EntitiesProcessed,
 		StrategyID:      strategyID,
 		StrategyVersion: strategyVersion,
 	}

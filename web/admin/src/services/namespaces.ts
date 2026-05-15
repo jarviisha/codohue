@@ -40,7 +40,7 @@ export interface BatchRunSummary {
   started_at: string
   completed_at: string | null
   duration_ms: number | null
-  subjects_processed: number
+  entities_processed: number
   success: boolean
   error_message: string | null
   trigger_source: string

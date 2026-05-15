@@ -150,7 +150,7 @@ export default function ReEmbedsPage() {
                         {row.completed_at ? formatRelative(row.completed_at) : '—'}
                       </Td>
                       <Td mono align="right">{formatPhaseDuration(row.duration_ms)}</Td>
-                      <Td mono align="right">{formatNumber(row.subjects_processed)}</Td>
+                      <Td mono align="right">{formatNumber(row.entities_processed)}</Td>
                       <Td className="max-w-xl truncate" title={closedFailure}>
                         {closedFailure || '—'}
                       </Td>
