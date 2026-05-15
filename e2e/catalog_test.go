@@ -591,7 +591,43 @@ func newAdminServiceForTest(t testing.TB) *admin.Service {
 		&nsAdapterShim{svc: nsSvc},
 	)
 	svc.SetCatalogStrategyPicker(&strategyPickerShim{svc: nsSvc})
+	svc.SetCatalogConfigurator(&catalogConfigShim{svc: nsSvc})
 	return svc
+}
+
+// catalogConfigShim satisfies admin.nsCatalogConfigurator without the
+// production cmd/admin/catalog_adapter.go. GetCatalog projects nsconfig
+// state into the admin DTO; the other methods are stubs because the e2e
+// tests that use this shim only call GetCatalog (via GetCatalogConfig).
+type catalogConfigShim struct{ svc *nsconfig.Service }
+
+func (c *catalogConfigShim) GetCatalog(ctx context.Context, ns string) (*admin.NamespaceCatalogConfig, error) {
+	cfg, err := c.svc.Get(ctx, ns)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace: %w", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	return &admin.NamespaceCatalogConfig{
+		Namespace:       cfg.Namespace,
+		Enabled:         cfg.CatalogEnabled,
+		StrategyID:      cfg.CatalogStrategyID,
+		StrategyVersion: cfg.CatalogStrategyVersion,
+		Params:          cfg.CatalogStrategyParams,
+		EmbeddingDim:    cfg.EmbeddingDim,
+		MaxAttempts:     cfg.CatalogMaxAttempts,
+		MaxContentBytes: cfg.CatalogMaxContentBytes,
+		UpdatedAt:       cfg.UpdatedAt,
+	}, nil
+}
+
+func (c *catalogConfigShim) UpdateCatalog(_ context.Context, _ string, _ *admin.NamespaceCatalogUpdateRequest) (*admin.NamespaceCatalogConfig, error) {
+	return nil, fmt.Errorf("catalogConfigShim.UpdateCatalog not implemented for e2e")
+}
+
+func (c *catalogConfigShim) AvailableStrategies(_ int) []admin.CatalogStrategyDescriptor {
+	return nil
 }
 
 // nsAdapterShim satisfies admin.nsConfigUpserter without the production
