@@ -101,7 +101,7 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 		slog.Error("upsert object vectors failed", "namespace", namespace, "error", err)
 	}
 
-	metrics.BatchSubjectsProcessed.WithLabelValues(namespace).Set(float64(len(subjects)))
+	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(len(subjects)))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", len(subjects), "objects", len(objectAccum))
 	return len(subjects), len(objectAccum), nil
 }

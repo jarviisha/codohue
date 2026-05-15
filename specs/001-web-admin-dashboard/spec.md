@@ -64,7 +64,7 @@ An operator wants to know when the last batch recompute ran, how many subjects w
 
 **Why this priority**: Operational visibility into the cron pipeline is critical for knowing if recommendations are fresh. However, this is less urgent than health status and namespace management.
 
-**Independent Test**: The metrics panel shows `codohue_batch_job_lag_seconds`, `codohue_batch_subjects_processed`, and `codohue_redis_cache_requests_total` as readable numbers with labels. Can be tested independently of the recommendation debugger or namespace forms.
+**Independent Test**: The metrics panel shows `codohue_batch_job_lag_seconds`, `codohue_batch_entities_processed`, and `codohue_redis_cache_requests_total` as readable numbers with labels. Can be tested independently of the recommendation debugger or namespace forms.
 
 **Acceptance Scenarios**:
 
