@@ -27,7 +27,7 @@ type AppConfig struct {
 	RedisURL             string
 	QdrantHost           string
 	QdrantPort           int
-	AdminAPIKey    string
+	AdminAPIKey          string
 	BatchIntervalMinutes int
 	LogFormat            string // "json" | "text" (default: "text")
 	APIPort              string // HTTP listen port (default: "2001")
@@ -88,14 +88,14 @@ func loadBase() (*AppConfig, error) {
 
 // AdminConfig holds configuration for the admin dashboard binary.
 type AdminConfig struct {
-	DatabaseURL       string
-	RedisURL          string
+	DatabaseURL string
+	RedisURL    string
 	AdminAPIKey string
-	APIURL            string // internal URL of cmd/api for proxying
-	AdminPort         string // HTTP listen port (default: "2002")
-	LogFormat         string // "json" | "text" (default: "text")
-	QdrantHost        string
-	QdrantPort        int
+	APIURL      string // internal URL of cmd/api for proxying
+	AdminPort   string // HTTP listen port (default: "2002")
+	LogFormat   string // "json" | "text" (default: "text")
+	QdrantHost  string
+	QdrantPort  int
 }
 
 // LoadAdmin reads and validates configuration for the admin binary.
@@ -103,13 +103,13 @@ func LoadAdmin() (*AdminConfig, error) {
 	loadDotenv()
 
 	cfg := &AdminConfig{
-		DatabaseURL:       getEnv("DATABASE_URL", ""),
-		RedisURL:          getEnv("REDIS_URL", "redis://localhost:6379"),
+		DatabaseURL: getEnv("DATABASE_URL", ""),
+		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
 		AdminAPIKey: getEnv("CODOHUE_ADMIN_API_KEY", ""),
-		APIURL:            getEnv("API_URL", "http://localhost:2001"),
-		AdminPort:         getEnv("ADMIN_PORT", "2002"),
-		LogFormat:         getEnv("LOG_FORMAT", "text"),
-		QdrantHost:        getEnv("QDRANT_HOST", "localhost"),
+		APIURL:      getEnv("API_URL", "http://localhost:2001"),
+		AdminPort:   getEnv("ADMIN_PORT", "2002"),
+		LogFormat:   getEnv("LOG_FORMAT", "text"),
+		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
 	}
 
 	if cfg.DatabaseURL == "" {

@@ -35,8 +35,8 @@ func newCatalogConfigAdapter(nsSvc nsCatalogConfigSvc, registry *embedstrategy.R
 
 // GetCatalog returns the current catalog config for a namespace. nil result
 // when the namespace does not exist; lets the admin handler return 404.
-func (a *catalogConfigAdapter) GetCatalog(ctx context.Context, namespace string) (*admin.NamespaceCatalogConfig, error) {
-	cfg, err := a.nsSvc.Get(ctx, namespace)
+func (a *catalogConfigAdapter) GetCatalog(ctx context.Context, ns string) (*admin.NamespaceCatalogConfig, error) {
+	cfg, err := a.nsSvc.Get(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("get namespace: %w", err)
 	}
@@ -62,7 +62,7 @@ func (a *catalogConfigAdapter) GetCatalog(ctx context.Context, namespace string)
 //   - nsconfig.ErrNamespaceNotFound   → nil result + nil error
 //   - embedstrategy.ErrUnknownStrategy → returned as-is so the handler maps
 //     it to 400 via its default branch
-func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, namespace string, req *admin.NamespaceCatalogUpdateRequest) (*admin.NamespaceCatalogConfig, error) {
+func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req *admin.NamespaceCatalogUpdateRequest) (*admin.NamespaceCatalogConfig, error) {
 	nsReq := &nsconfig.UpdateCatalogRequest{
 		Enabled: req.Enabled,
 		Params:  req.Params,
@@ -80,7 +80,7 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, namespace stri
 		nsReq.MaxContentBytes = *req.MaxContentBytes
 	}
 
-	cfg, err := a.nsSvc.UpdateCatalogConfig(ctx, namespace, nsReq)
+	cfg, err := a.nsSvc.UpdateCatalogConfig(ctx, ns, nsReq)
 	if err != nil {
 		var dimErr *nsconfig.DimensionMismatchError
 		var conflictErr *nsconfig.DenseStrategyConflictError
@@ -119,8 +119,8 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, namespace stri
 // namespace's active (strategy_id, strategy_version) pair via nsconfig.Service.
 // enabled=false is returned for both "namespace missing" and "catalog disabled"
 // so the caller can map to a single 404 (FR-008).
-func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, namespace string) (strategyID, strategyVersion string, enabled bool, err error) {
-	cfg, err := a.nsSvc.Get(ctx, namespace)
+func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, ns string) (strategyID, strategyVersion string, enabled bool, err error) {
+	cfg, err := a.nsSvc.Get(ctx, ns)
 	if err != nil {
 		return "", "", false, fmt.Errorf("get namespace: %w", err)
 	}

@@ -69,7 +69,7 @@ func (e *DimensionMismatchError) Error() string {
 // The handler maps this to 400 Bad Request with both values in the body so
 // the admin UI can render an actionable message.
 type DenseStrategyConflictError struct {
-	DenseStrategy string
+	DenseStrategy  string
 	CatalogEnabled bool
 }
 

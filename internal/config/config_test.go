@@ -4,7 +4,7 @@ import "testing"
 
 func TestLoadAPI_RequiresDatabaseURL(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "",
+		"DATABASE_URL":          "",
 		"CODOHUE_ADMIN_API_KEY": "admin",
 	}, func() {
 		_, err := LoadAPI()
@@ -16,7 +16,7 @@ func TestLoadAPI_RequiresDatabaseURL(t *testing.T) {
 
 func TestLoadAPI_RequiresAdminAPIKey(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "postgres://db",
+		"DATABASE_URL":          "postgres://db",
 		"CODOHUE_ADMIN_API_KEY": "",
 	}, func() {
 		_, err := LoadAPI()
@@ -28,9 +28,9 @@ func TestLoadAPI_RequiresAdminAPIKey(t *testing.T) {
 
 func TestLoadAPI_InvalidQdrantPort(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "postgres://db",
+		"DATABASE_URL":          "postgres://db",
 		"CODOHUE_ADMIN_API_KEY": "admin",
-		"QDRANT_PORT":         "not-a-number",
+		"QDRANT_PORT":           "not-a-number",
 	}, func() {
 		_, err := LoadAPI()
 		if err == nil {
@@ -42,7 +42,7 @@ func TestLoadAPI_InvalidQdrantPort(t *testing.T) {
 func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":           "postgres://db",
-		"CODOHUE_ADMIN_API_KEY":    "admin",
+		"CODOHUE_ADMIN_API_KEY":  "admin",
 		"BATCH_INTERVAL_MINUTES": "not-a-number",
 	}, func() {
 		_, err := LoadAPI()
@@ -55,7 +55,7 @@ func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 func TestLoadAPI_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":           "postgres://db",
-		"CODOHUE_ADMIN_API_KEY":    "admin",
+		"CODOHUE_ADMIN_API_KEY":  "admin",
 		"REDIS_URL":              "",
 		"QDRANT_HOST":            "",
 		"QDRANT_PORT":            "",
@@ -91,7 +91,7 @@ func TestLoadAPI_UsesDefaults(t *testing.T) {
 func TestLoadAPI_UsesEnvironmentOverrides(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":           "postgres://custom-db",
-		"CODOHUE_ADMIN_API_KEY":    "custom-admin",
+		"CODOHUE_ADMIN_API_KEY":  "custom-admin",
 		"REDIS_URL":              "redis://custom:6379",
 		"QDRANT_HOST":            "qdrant.internal",
 		"QDRANT_PORT":            "7000",
@@ -143,7 +143,7 @@ func TestLoadCron_RequiresDatabaseURL(t *testing.T) {
 
 func TestLoadCron_DoesNotRequireAdminAPIKey(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":        "postgres://db",
+		"DATABASE_URL":          "postgres://db",
 		"CODOHUE_ADMIN_API_KEY": "",
 	}, func() {
 		_, err := LoadCron()
