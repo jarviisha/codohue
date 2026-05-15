@@ -9,26 +9,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-make build          # build all three binaries (./tmp/api, ./tmp/cron, ./tmp/admin)
+make build          # build all four binaries (./tmp/api, ./tmp/cron, ./tmp/admin, ./tmp/embedder)
 make build-api      # build API only
 make build-cron     # build cron job only
 make build-admin    # build admin server only
+make build-embedder # build catalog embedder worker only
 
 make up             # start full stack (docker compose up, foreground)
 make up-d           # start full stack (docker compose up, detached)
 make up-infra       # start only postgres + redis + qdrant
-make up-app         # start only api + cron + admin (uses docker-compose.app.yml)
+make up-app         # start only api + cron + admin + embedder (uses docker-compose.app.yml)
 make down           # stop stack
 make logs           # tail api container logs
 make logs-cron      # tail cron container logs
 make logs-admin     # tail admin container logs
+make logs-embedder  # tail embedder container logs
 
 make dev            # live-reload API using air
 make dev-admin      # run web/admin frontend (Vite dev server)
+make dev-embedder   # run embedder worker directly (requires infra already up)
 make dev-all        # run api (air) + admin server + web/admin frontend together
 make run            # run API directly (requires infra already up)
 make run-cron       # run cron job once (requires infra already up)
 make run-admin      # run admin server directly (requires infra already up)
+make run-embedder   # run embedder worker directly (requires infra already up)
 
 make test                                  # run all tests across go.work modules
 make test-pkg PKG=./internal/ingest/...    # test a specific package
@@ -228,6 +232,9 @@ Key columns added by later migrations:
 - **007** — phase breakdown columns on `batch_run_logs` (`phase{1,2,3}_ok` / `_duration_ms` / `_subjects` / `_objects` / `_error`)
 - **008** — `trigger_source` on `batch_run_logs` (e.g. `cron`, `admin`)
 - **009** — `log_lines` JSONB on `batch_run_logs` (captured slog output for run inspection)
+- **010** — `catalog_items` table (raw content store consumed by `cmd/embedder`)
+- **011** — `catalog_enabled`, `catalog_strategy_id`, `catalog_strategy_version`, `catalog_strategy_params` on `namespace_configs`
+- **012** — pre-prod hardening of `batch_run_logs`: `trigger_source` CHECK-constrained to `('cron', 'manual', 'admin_reembed')`; adds `target_strategy_id` / `target_strategy_version` for catalog re-embed runs; renames `subjects_processed` → `entities_processed` (column now carries CF subject counts during cron runs and catalog item counts during re-embed runs)
 
 ## Environment Variables
 
