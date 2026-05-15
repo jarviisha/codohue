@@ -291,8 +291,8 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 
 // summarizeReembedRun derives the CatalogReEmbedSummary projection from a
 // batch_run_logs row that was created with trigger_source='admin_reembed'.
-// Encapsulates the row's quirky error_message encoding so callers (or future
-// JSON consumers) never see "reembed:<id>/<version>" leaking out.
+// Reads target strategy from the dedicated columns added by migration 013;
+// status comes from completed_at + success.
 func summarizeReembedRun(row *BatchRunLog) *CatalogReEmbedSummary {
 	if row == nil {
 		return nil

@@ -10,15 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-)
 
-// reembedTriggerSource is the trigger_source value the admin orchestrator
-// writes for re-embed runs. The watcher scopes its scans by this value so it
-// only closes runs that it actually owns.
-//
-// Mirrored from internal/admin (cross-domain import forbidden) — the value
-// is a stable contract on the batch_run_logs table.
-const reembedTriggerSource = "admin_reembed"
+	"github.com/jarviisha/codohue/internal/core/batchrun"
+)
 
 // ReembedRun is the watcher's view of one open re-embed batch_run_logs row.
 type ReembedRun struct {
@@ -152,7 +146,7 @@ func (r *pgReembedRepo) ListOpenReembedRuns(ctx context.Context) ([]ReembedRun, 
 		FROM batch_run_logs
 		WHERE trigger_source = $1
 		  AND completed_at IS NULL`,
-		reembedTriggerSource,
+		batchrun.TriggerReembed,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list open reembed runs: %w", err)
@@ -245,7 +239,7 @@ func (r *pgReembedRepo) CompleteReembedRun(ctx context.Context, id int64, proces
 		WHERE id = $1
 		  AND trigger_source = $7
 		  AND completed_at IS NULL`,
-		id, completedAt, durationMs, processed, success, errPtr, reembedTriggerSource,
+		id, completedAt, durationMs, processed, success, errPtr, batchrun.TriggerReembed,
 	)
 	if err != nil {
 		return fmt.Errorf("complete reembed run: %w", err)
