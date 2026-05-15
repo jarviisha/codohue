@@ -8,12 +8,19 @@ import (
 	"github.com/jarviisha/codohue/internal/nsconfig"
 )
 
+// nsConfigUpsertSvc is the slice of nsconfig.Service the adapter actually
+// uses. Declared as an interface here (not the concrete *nsconfig.Service)
+// so the adapter is unit-testable without standing up the real service.
+type nsConfigUpsertSvc interface {
+	Upsert(ctx context.Context, ns string, req *nsconfig.UpsertRequest) (*nsconfig.UpsertResponse, error)
+}
+
 // nsConfigAdapter bridges admin.Service (which must not import nsconfig per the
 // constitution) and nsconfig.Service. It maps the admin pointer-field DTOs to
 // nsconfig's value-field DTOs, treating nil pointers as Go zero values to match
 // the prior JSON round-trip behavior.
 type nsConfigAdapter struct {
-	svc *nsconfig.Service
+	svc nsConfigUpsertSvc
 }
 
 func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *admin.NamespaceUpsertRequest) (*admin.NamespaceUpsertResponse, error) {

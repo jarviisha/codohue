@@ -7,8 +7,17 @@ import (
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/nsconfig"
 )
+
+// nsCatalogConfigSvc is the slice of nsconfig.Service this adapter calls.
+// Declared as an interface so the cmd/admin tests can drive error mapping
+// without constructing the real service.
+type nsCatalogConfigSvc interface {
+	Get(ctx context.Context, ns string) (*namespace.Config, error)
+	UpdateCatalogConfig(ctx context.Context, ns string, req *nsconfig.UpdateCatalogRequest) (*namespace.Config, error)
+}
 
 // catalogConfigAdapter bridges admin.Service to nsconfig.Service +
 // embedstrategy.DefaultRegistry for the US2 catalog config endpoints.
@@ -16,11 +25,11 @@ import (
 // the admin domain need not import nsconfig or embedstrategy directly —
 // both would be cross-domain imports forbidden by the constitution.
 type catalogConfigAdapter struct {
-	nsSvc    *nsconfig.Service
+	nsSvc    nsCatalogConfigSvc
 	registry *embedstrategy.Registry
 }
 
-func newCatalogConfigAdapter(nsSvc *nsconfig.Service, registry *embedstrategy.Registry) *catalogConfigAdapter {
+func newCatalogConfigAdapter(nsSvc nsCatalogConfigSvc, registry *embedstrategy.Registry) *catalogConfigAdapter {
 	return &catalogConfigAdapter{nsSvc: nsSvc, registry: registry}
 }
 

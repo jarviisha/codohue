@@ -157,6 +157,21 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 
 	result, statusCode, err := h.svc.UpsertNamespace(r.Context(), ns, &req)
 	if err != nil {
+		var conflictErr *CatalogStrategyConflict
+		if errors.As(err, &conflictErr) {
+			httpapi.WriteJSON(w, http.StatusBadRequest, struct {
+				Error          string `json:"error"`
+				Code           string `json:"code"`
+				DenseStrategy  string `json:"dense_strategy"`
+				CatalogEnabled bool   `json:"catalog_enabled"`
+			}{
+				Error:          "dense_strategy must be byoe or disabled when catalog_enabled=true",
+				Code:           "dense_strategy_conflict",
+				DenseStrategy:  conflictErr.DenseStrategy,
+				CatalogEnabled: conflictErr.CatalogEnabled,
+			})
+			return
+		}
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not upsert namespace")
 		return
 	}
