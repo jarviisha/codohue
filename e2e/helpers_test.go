@@ -186,12 +186,6 @@ func createNamespaceRequest(namespace string, payload map[string]any) (string, t
 	return resp.APIKey, resp.UpdatedAt, nil
 }
 
-func cleanupNamespace(t testing.TB, namespace string) {
-	t.Helper()
-	cleanupNamespaceData(namespace)
-	cleanupQdrantNamespace(t, namespace)
-}
-
 // createIsolatedNamespace provisions a namespace dedicated to a single test and
 // schedules cleanup automatically.
 func createIsolatedNamespace(t testing.TB, prefix string, payload map[string]any) (string, string) {
@@ -468,64 +462,6 @@ func numericIDFor(t testing.TB, stringID, namespace, entityType string) uint64 {
 	return id
 }
 
-func qdrantGetSparseVector(t testing.TB, collection string, numericID uint64) *qdrant.SparseVector {
-	t.Helper()
-
-	client := newQdrantTestClient(t)
-	points, err := client.Get(context.Background(), &qdrant.GetPoints{
-		CollectionName: collection,
-		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
-		WithVectors:    qdrant.NewWithVectorsEnable(true),
-	})
-	if err != nil {
-		t.Fatalf("qdrant get %q/%d: %v", collection, numericID, err)
-	}
-	if len(points) == 0 {
-		return nil
-	}
-	vectors := points[0].GetVectors().GetVectors().GetVectors()
-	if vectors == nil {
-		return nil
-	}
-	if vec := vectors["sparse_interactions"]; vec != nil {
-		return vec.GetSparse()
-	}
-	return nil
-}
-
-func qdrantQuerySparse(t testing.TB, collection string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, limit uint64) []*qdrant.ScoredPoint {
-	t.Helper()
-
-	client := newQdrantTestClient(t)
-	resp, err := client.GetPointsClient().Search(context.Background(), &qdrant.SearchPoints{
-		CollectionName: collection,
-		Vector:         queryVec.Values,
-		SparseIndices:  &qdrant.SparseIndices{Data: queryVec.Indices},
-		VectorName:     qdrant.PtrOf("sparse_interactions"),
-		Filter:         filter,
-		Limit:          limit,
-		WithPayload:    qdrant.NewWithPayload(true),
-	})
-	if err != nil {
-		t.Fatalf("qdrant sparse query %q: %v", collection, err)
-	}
-	return resp.GetResult()
-}
-
-func sparseVecLen(vec *qdrant.SparseVector) int {
-	if vec == nil {
-		return 0
-	}
-	return len(vec.Indices)
-}
-
-func sparseIndices(vec *qdrant.SparseVector) []uint32 {
-	if vec == nil {
-		return nil
-	}
-	return vec.Indices
-}
-
 func trendingKeyState(t testing.TB, namespace string) (int64, time.Duration) {
 	t.Helper()
 
@@ -540,53 +476,6 @@ func trendingKeyState(t testing.TB, namespace string) (int64, time.Duration) {
 		t.Fatalf("redis ttl %q: %v", key, err)
 	}
 	return card, ttl
-}
-
-func scanRedisKeys(t testing.TB, pattern string) []string {
-	t.Helper()
-
-	var (
-		cursor uint64
-		keys   []string
-	)
-	for {
-		batch, next, err := testRedis.Scan(context.Background(), cursor, pattern, 100).Result()
-		if err != nil {
-			t.Fatalf("scan redis keys %q: %v", pattern, err)
-		}
-		keys = append(keys, batch...)
-		cursor = next
-		if cursor == 0 {
-			return keys
-		}
-	}
-}
-
-func assertJSONStatus(t testing.TB, resp *http.Response, want int) {
-	t.Helper()
-	defer resp.Body.Close()
-
-	if resp.StatusCode != want {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("expected HTTP %d, got %d: %s", want, resp.StatusCode, bytes.TrimSpace(body))
-	}
-
-	if ct := resp.Header.Get("Content-Type"); ct != "" && !strings.Contains(ct, "application/json") {
-		t.Fatalf("content-type = %q, want application/json", ct)
-	}
-}
-
-func waitForNamespaceCacheKeys(t testing.TB, namespace string, min int) []string {
-	t.Helper()
-
-	var keys []string
-	waitForCondition(t, 5*time.Second, func() (bool, error) {
-		keys = scanRedisKeys(t, "rec:"+namespace+":*")
-		trending := scanRedisKeys(t, "trending:"+namespace)
-		keys = append(keys, trending...)
-		return len(keys) >= min, nil
-	})
-	return keys
 }
 
 func mustAtoi(t testing.TB, value string) int {
