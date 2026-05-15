@@ -80,11 +80,9 @@ type NamespaceCatalogResponse struct {
 //   - completed_at IS NOT NULL, success=true  → "success"
 //   - completed_at IS NOT NULL, success=false → "failed"
 //
-// strategy_id / strategy_version are decoded from the batch_run_logs row's
-// error_message column while the run is open (re-embed encodes the target
-// strategy there per InsertReembedRun). After completion the column is
-// cleared or repurposed for the failure message; the summary preserves the
-// last-known target so the UI still has context.
+// strategy_id / strategy_version come from the dedicated target_strategy_*
+// columns on batch_run_logs (migration 013). error_message holds only the
+// failure reason when success=false.
 type CatalogReEmbedSummary struct {
 	BatchRunID      int64      `json:"batch_run_id"`
 	Status          string     `json:"status"`

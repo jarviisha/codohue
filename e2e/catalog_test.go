@@ -741,6 +741,33 @@ func TestCatalogE2E_ReEmbed_DrainAndComplete(t *testing.T) {
 		).Scan(&done)
 		return done, err
 	})
+
+	// Phase 5: GetCatalogConfig surfaces last_embedded_at + last_re_embed.
+	// Exercises Repository.GetLastCatalogEmbeddedAt and FindLatestReembedRun
+	// end-to-end against a real DB row.
+	cfgResp, err := adminSvc.GetCatalogConfig(context.Background(), namespace)
+	if err != nil {
+		t.Fatalf("GetCatalogConfig: %v", err)
+	}
+	if cfgResp == nil {
+		t.Fatal("GetCatalogConfig returned nil for enabled namespace")
+	}
+	if cfgResp.LastEmbeddedAt == nil {
+		t.Error("LastEmbeddedAt is nil — embedded items should have populated it")
+	}
+	if cfgResp.LastReEmbed == nil {
+		t.Fatal("LastReEmbed is nil — re-embed row should have been picked up")
+	}
+	if cfgResp.LastReEmbed.BatchRunID != reembedResp.BatchRunID {
+		t.Errorf("LastReEmbed.BatchRunID: got %d, want %d",
+			cfgResp.LastReEmbed.BatchRunID, reembedResp.BatchRunID)
+	}
+	if cfgResp.LastReEmbed.Status != "success" {
+		t.Errorf("LastReEmbed.Status: got %q, want %q", cfgResp.LastReEmbed.Status, "success")
+	}
+	if cfgResp.LastReEmbed.StrategyID == "" {
+		t.Error("LastReEmbed.StrategyID is empty — target_strategy_id column not populated")
+	}
 }
 
 // TestCatalogE2E_BulkRedriveDeadletter exercises SC-008 — operator can clear
