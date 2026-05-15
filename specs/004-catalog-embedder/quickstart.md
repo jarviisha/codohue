@@ -37,12 +37,12 @@ Default config is read from environment (`.env`):
 
 | Variable | Default | Notes |
 |---|---|---|
-| `EMBEDDER_PORT` | unused | `cmd/embedder` does not expose HTTP except `/healthz` and `/metrics`; see `EMBEDDER_HEALTH_PORT`. |
-| `EMBEDDER_HEALTH_PORT` | `2003` | Liveness + Prometheus metrics endpoint. |
-| `CATALOG_MAX_CONTENT_BYTES` | `32768` | Global default; overridable per-namespace. |
-| `EMBED_MAX_ATTEMPTS` | `5` | Global default for transient retries. |
-| `EMBEDDER_REPLICA_NAME` | `${HOSTNAME}` | Used as the consumer name in the Redis Streams group. |
-| `EMBEDDER_NAMESPACE_POLL_INTERVAL` | `30s` | How often `cmd/embedder` polls `namespace_configs` for newly-enabled namespaces. |
+| `EMBEDDER_PORT` | unused | `cmd/embedder` does not expose HTTP except `/healthz` and `/metrics`; see `CODOHUE_EMBEDDER_HEALTH_PORT`. |
+| `CODOHUE_EMBEDDER_HEALTH_PORT` | `2003` | Liveness + Prometheus metrics endpoint. |
+| `CODOHUE_CATALOG_MAX_CONTENT_BYTES` | `32768` | Global default; overridable per-namespace. |
+| `CODOHUE_EMBED_MAX_ATTEMPTS` | `5` | Global default for transient retries. |
+| `CODOHUE_EMBEDDER_REPLICA_NAME` | `${HOSTNAME}` | Used as the consumer name in the Redis Streams group. |
+| `CODOHUE_EMBEDDER_POLL_INTERVAL` | `30s` | How often `cmd/embedder` polls `namespace_configs` for newly-enabled namespaces. |
 
 ---
 

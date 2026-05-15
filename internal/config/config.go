@@ -46,7 +46,7 @@ func LoadAPI() (*AppConfig, error) {
 		return nil, fmt.Errorf("CODOHUE_ADMIN_API_KEY is required")
 	}
 
-	cfg.APIPort = getEnv("API_PORT", "2001")
+	cfg.APIPort = getEnv("CODOHUE_API_PORT", "2001")
 	return cfg, nil
 }
 
@@ -64,7 +64,7 @@ func loadBase() (*AppConfig, error) {
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
 		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
-		LogFormat:   getEnv("LOG_FORMAT", "text"),
+		LogFormat:   getEnv("CODOHUE_LOG_FORMAT", "text"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -77,9 +77,9 @@ func loadBase() (*AppConfig, error) {
 	}
 	cfg.QdrantPort = port
 
-	batchInterval, err := strconv.Atoi(getEnv("BATCH_INTERVAL_MINUTES", "5"))
+	batchInterval, err := strconv.Atoi(getEnv("CODOHUE_BATCH_INTERVAL_MINUTES", "5"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid BATCH_INTERVAL_MINUTES: %w", err)
+		return nil, fmt.Errorf("invalid CODOHUE_BATCH_INTERVAL_MINUTES: %w", err)
 	}
 	cfg.BatchIntervalMinutes = batchInterval
 
@@ -106,9 +106,9 @@ func LoadAdmin() (*AdminConfig, error) {
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
 		AdminAPIKey: getEnv("CODOHUE_ADMIN_API_KEY", ""),
-		APIURL:      getEnv("API_URL", "http://localhost:2001"),
-		AdminPort:   getEnv("ADMIN_PORT", "2002"),
-		LogFormat:   getEnv("LOG_FORMAT", "text"),
+		APIURL:      getEnv("CODOHUE_API_URL", "http://localhost:2001"),
+		AdminPort:   getEnv("CODOHUE_ADMIN_PORT", "2002"),
+		LogFormat:   getEnv("CODOHUE_LOG_FORMAT", "text"),
 		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
 	}
 
@@ -176,9 +176,9 @@ func LoadEmbedder() (*EmbedderConfig, error) {
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
 		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
-		LogFormat:   getEnv("LOG_FORMAT", "text"),
-		HealthPort:  getEnv("EMBEDDER_HEALTH_PORT", "2003"),
-		ReplicaName: getEnv("EMBEDDER_REPLICA_NAME", ""),
+		LogFormat:   getEnv("CODOHUE_LOG_FORMAT", "text"),
+		HealthPort:  getEnv("CODOHUE_EMBEDDER_HEALTH_PORT", "2003"),
+		ReplicaName: getEnv("CODOHUE_EMBEDDER_REPLICA_NAME", ""),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -191,30 +191,30 @@ func LoadEmbedder() (*EmbedderConfig, error) {
 	}
 	cfg.QdrantPort = qdrantPort
 
-	maxBytes, err := strconv.Atoi(getEnv("CATALOG_MAX_CONTENT_BYTES", "32768"))
+	maxBytes, err := strconv.Atoi(getEnv("CODOHUE_CATALOG_MAX_CONTENT_BYTES", "32768"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid CATALOG_MAX_CONTENT_BYTES: %w", err)
+		return nil, fmt.Errorf("invalid CODOHUE_CATALOG_MAX_CONTENT_BYTES: %w", err)
 	}
 	if maxBytes <= 0 {
-		return nil, fmt.Errorf("CATALOG_MAX_CONTENT_BYTES must be positive, got %d", maxBytes)
+		return nil, fmt.Errorf("CODOHUE_CATALOG_MAX_CONTENT_BYTES must be positive, got %d", maxBytes)
 	}
 	cfg.CatalogMaxContentBytes = maxBytes
 
-	maxAttempts, err := strconv.Atoi(getEnv("EMBED_MAX_ATTEMPTS", "5"))
+	maxAttempts, err := strconv.Atoi(getEnv("CODOHUE_EMBED_MAX_ATTEMPTS", "5"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid EMBED_MAX_ATTEMPTS: %w", err)
+		return nil, fmt.Errorf("invalid CODOHUE_EMBED_MAX_ATTEMPTS: %w", err)
 	}
 	if maxAttempts <= 0 {
-		return nil, fmt.Errorf("EMBED_MAX_ATTEMPTS must be positive, got %d", maxAttempts)
+		return nil, fmt.Errorf("CODOHUE_EMBED_MAX_ATTEMPTS must be positive, got %d", maxAttempts)
 	}
 	cfg.EmbedMaxAttempts = maxAttempts
 
-	pollInterval, err := time.ParseDuration(getEnv("EMBEDDER_NAMESPACE_POLL_INTERVAL", "30s"))
+	pollInterval, err := time.ParseDuration(getEnv("CODOHUE_EMBEDDER_POLL_INTERVAL", "30s"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid EMBEDDER_NAMESPACE_POLL_INTERVAL: %w", err)
+		return nil, fmt.Errorf("invalid CODOHUE_EMBEDDER_POLL_INTERVAL: %w", err)
 	}
 	if pollInterval <= 0 {
-		return nil, fmt.Errorf("EMBEDDER_NAMESPACE_POLL_INTERVAL must be positive, got %s", pollInterval)
+		return nil, fmt.Errorf("CODOHUE_EMBEDDER_POLL_INTERVAL must be positive, got %s", pollInterval)
 	}
 	cfg.NamespacePollInterval = pollInterval
 

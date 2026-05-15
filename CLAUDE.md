@@ -239,18 +239,18 @@ REDIS_URL=redis://localhost:6379
 QDRANT_HOST=localhost
 QDRANT_PORT=6334
 CODOHUE_ADMIN_API_KEY=dev-secret-key
-BATCH_INTERVAL_MINUTES=5
-LOG_FORMAT=text   # "text" (default) | "json"
-API_PORT=2001     # cmd/api listen port
-ADMIN_PORT=2002   # cmd/admin listen port
-API_URL=http://localhost:2001  # used by cmd/admin to proxy /healthz and inject test events
+CODOHUE_BATCH_INTERVAL_MINUTES=5
+CODOHUE_LOG_FORMAT=text   # "text" (default) | "json"
+CODOHUE_API_PORT=2001     # cmd/api listen port
+CODOHUE_ADMIN_PORT=2002   # cmd/admin listen port
+CODOHUE_API_URL=http://localhost:2001  # used by cmd/admin to proxy /healthz and inject test events
 
 # Catalog auto-embedding (cmd/embedder) — feature 004
-CATALOG_MAX_CONTENT_BYTES=32768       # default per-namespace cap; can be overridden per-ns via admin API
-EMBED_MAX_ATTEMPTS=5                  # transient retries before dead-lettering
-EMBEDDER_HEALTH_PORT=2003             # /healthz + /metrics
-EMBEDDER_REPLICA_NAME=                # consumer name for XREADGROUP; defaults to hostname
-EMBEDDER_NAMESPACE_POLL_INTERVAL=30s  # how often the worker rescans for newly-enabled namespaces
+CODOHUE_CATALOG_MAX_CONTENT_BYTES=32768  # default per-namespace cap; can be overridden per-ns via admin API
+CODOHUE_EMBED_MAX_ATTEMPTS=5             # transient retries before dead-lettering
+CODOHUE_EMBEDDER_HEALTH_PORT=2003        # /healthz + /metrics
+CODOHUE_EMBEDDER_REPLICA_NAME=           # consumer name for XREADGROUP; defaults to hostname
+CODOHUE_EMBEDDER_POLL_INTERVAL=30s       # how often the worker rescans for newly-enabled namespaces
 ```
 
 ## Conventions

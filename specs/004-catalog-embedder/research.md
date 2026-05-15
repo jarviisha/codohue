@@ -187,12 +187,12 @@ Re-embed completion is detected by `SELECT count(*) FROM catalog_items WHERE nam
 
 ## R9. Oversized content policy (FR-020)
 
-**Decision**: Reject at ingest with **413 Payload Too Large** when `len(content) > MAX_CONTENT_BYTES`. Default `MAX_CONTENT_BYTES = 32768` (32 KiB), env-configurable via `CATALOG_MAX_CONTENT_BYTES`. No truncation in V1.
+**Decision**: Reject at ingest with **413 Payload Too Large** when `len(content) > MAX_CONTENT_BYTES`. Default `MAX_CONTENT_BYTES = 32768` (32 KiB), env-configurable via `CODOHUE_CATALOG_MAX_CONTENT_BYTES`. No truncation in V1.
 
 **Rationale**:
 - The V1 strategy is fast on long content (linear in tokens), but the spec mandates an explicit policy and "reject" is operationally clearer than "truncate then maybe surprise the operator with which prefix won".
 - 32 KiB covers all realistic social-media posts, articles, captions; flags accidental binary uploads.
-- Future external-LLM strategies will have provider-specific length limits — the strategy interface exposes `MaxInputBytes()` so per-strategy limits can be enforced at ingest time without changing the catalog API. V1 sets `MaxInputBytes()` to whatever `CATALOG_MAX_CONTENT_BYTES` is configured to, falling back to 32 KiB.
+- Future external-LLM strategies will have provider-specific length limits — the strategy interface exposes `MaxInputBytes()` so per-strategy limits can be enforced at ingest time without changing the catalog API. V1 sets `MaxInputBytes()` to whatever `CODOHUE_CATALOG_MAX_CONTENT_BYTES` is configured to, falling back to 32 KiB.
 
 **Alternatives considered**:
 - *Truncate to limit*: rejected for V1 — leaves the operator wondering which prefix was kept; trivially added later as a per-strategy policy.

@@ -44,11 +44,11 @@ func runEmbedderInBackground(t testing.TB) {
 		"REDIS_URL="+envOrDefault("REDIS_URL", "redis://localhost:6379"),
 		"QDRANT_HOST="+envOrDefault("QDRANT_HOST", "localhost"),
 		"QDRANT_PORT="+envOrDefault("QDRANT_PORT", "6334"),
-		"LOG_FORMAT=text",
-		"EMBEDDER_HEALTH_PORT="+embedderHealthPort,
-		"EMBEDDER_NAMESPACE_POLL_INTERVAL=200ms",
-		"EMBED_MAX_ATTEMPTS=5",
-		"CATALOG_MAX_CONTENT_BYTES=32768",
+		"CODOHUE_LOG_FORMAT=text",
+		"CODOHUE_EMBEDDER_HEALTH_PORT="+embedderHealthPort,
+		"CODOHUE_EMBEDDER_POLL_INTERVAL=200ms",
+		"CODOHUE_EMBED_MAX_ATTEMPTS=5",
+		"CODOHUE_CATALOG_MAX_CONTENT_BYTES=32768",
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

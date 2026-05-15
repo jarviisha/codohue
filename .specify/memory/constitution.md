@@ -80,7 +80,7 @@ cached for 5 minutes per `(namespace, subject_id, limit)` key. Cache MUST be
 invalidated or bypassed only on explicit config changes, never on every request.
 
 The cron batch job MUST complete its full recompute cycle within the configured
-`BATCH_INTERVAL_MINUTES`. If a phase (sparse, dense, trending) cannot complete
+`CODOHUE_BATCH_INTERVAL_MINUTES`. If a phase (sparse, dense, trending) cannot complete
 within that budget, it MUST log a warning and continue rather than blocking
 subsequent phases.
 

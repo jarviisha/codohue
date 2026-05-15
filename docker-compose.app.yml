@@ -13,7 +13,7 @@ services:
       - path: .env.app
         required: false
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:$${API_PORT:-2001}/healthz"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${CODOHUE_API_PORT:-2001}/healthz"]
       interval: 5s
       timeout: 3s
       retries: 12

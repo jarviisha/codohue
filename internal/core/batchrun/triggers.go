@@ -8,7 +8,7 @@ type TriggerSource string
 
 const (
 	// TriggerCron is the scheduled batch run produced by cmd/cron every
-	// BATCH_INTERVAL_MINUTES tick.
+	// CODOHUE_BATCH_INTERVAL_MINUTES tick.
 	TriggerCron TriggerSource = "cron"
 
 	// TriggerManual is the synchronous CF batch produced when an operator

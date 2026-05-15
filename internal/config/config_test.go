@@ -41,9 +41,9 @@ func TestLoadAPI_InvalidQdrantPort(t *testing.T) {
 
 func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":           "postgres://db",
-		"CODOHUE_ADMIN_API_KEY":  "admin",
-		"BATCH_INTERVAL_MINUTES": "not-a-number",
+		"DATABASE_URL":                   "postgres://db",
+		"CODOHUE_ADMIN_API_KEY":          "admin",
+		"CODOHUE_BATCH_INTERVAL_MINUTES": "not-a-number",
 	}, func() {
 		_, err := LoadAPI()
 		if err == nil {
@@ -54,14 +54,14 @@ func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 
 func TestLoadAPI_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":           "postgres://db",
-		"CODOHUE_ADMIN_API_KEY":  "admin",
-		"REDIS_URL":              "",
-		"QDRANT_HOST":            "",
-		"QDRANT_PORT":            "",
-		"BATCH_INTERVAL_MINUTES": "",
-		"LOG_FORMAT":             "",
-		"API_PORT":               "",
+		"DATABASE_URL":                   "postgres://db",
+		"CODOHUE_ADMIN_API_KEY":          "admin",
+		"REDIS_URL":                      "",
+		"QDRANT_HOST":                    "",
+		"QDRANT_PORT":                    "",
+		"CODOHUE_BATCH_INTERVAL_MINUTES": "",
+		"CODOHUE_LOG_FORMAT":             "",
+		"CODOHUE_API_PORT":               "",
 	}, func() {
 		cfg, err := LoadAPI()
 		if err != nil {
@@ -90,14 +90,14 @@ func TestLoadAPI_UsesDefaults(t *testing.T) {
 
 func TestLoadAPI_UsesEnvironmentOverrides(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":           "postgres://custom-db",
-		"CODOHUE_ADMIN_API_KEY":  "custom-admin",
-		"REDIS_URL":              "redis://custom:6379",
-		"QDRANT_HOST":            "qdrant.internal",
-		"QDRANT_PORT":            "7000",
-		"BATCH_INTERVAL_MINUTES": "15",
-		"LOG_FORMAT":             "json",
-		"API_PORT":               "8080",
+		"DATABASE_URL":                   "postgres://custom-db",
+		"CODOHUE_ADMIN_API_KEY":          "custom-admin",
+		"REDIS_URL":                      "redis://custom:6379",
+		"QDRANT_HOST":                    "qdrant.internal",
+		"QDRANT_PORT":                    "7000",
+		"CODOHUE_BATCH_INTERVAL_MINUTES": "15",
+		"CODOHUE_LOG_FORMAT":             "json",
+		"CODOHUE_API_PORT":               "8080",
 	}, func() {
 		cfg, err := LoadAPI()
 		if err != nil {
@@ -167,8 +167,8 @@ func TestLoadCron_InvalidQdrantPort(t *testing.T) {
 
 func TestLoadCron_InvalidBatchInterval(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":           "postgres://db",
-		"BATCH_INTERVAL_MINUTES": "not-a-number",
+		"DATABASE_URL":                   "postgres://db",
+		"CODOHUE_BATCH_INTERVAL_MINUTES": "not-a-number",
 	}, func() {
 		_, err := LoadCron()
 		if err == nil {
@@ -179,12 +179,12 @@ func TestLoadCron_InvalidBatchInterval(t *testing.T) {
 
 func TestLoadCron_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":           "postgres://db",
-		"REDIS_URL":              "",
-		"QDRANT_HOST":            "",
-		"QDRANT_PORT":            "",
-		"BATCH_INTERVAL_MINUTES": "",
-		"LOG_FORMAT":             "",
+		"DATABASE_URL":                   "postgres://db",
+		"REDIS_URL":                      "",
+		"QDRANT_HOST":                    "",
+		"QDRANT_PORT":                    "",
+		"CODOHUE_BATCH_INTERVAL_MINUTES": "",
+		"CODOHUE_LOG_FORMAT":             "",
 	}, func() {
 		cfg, err := LoadCron()
 		if err != nil {
@@ -241,16 +241,16 @@ func TestLoadEmbedder_RequiresDatabaseURL(t *testing.T) {
 
 func TestLoadEmbedder_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":                     "postgres://db",
-		"REDIS_URL":                        "",
-		"QDRANT_HOST":                      "",
-		"QDRANT_PORT":                      "",
-		"LOG_FORMAT":                       "",
-		"CATALOG_MAX_CONTENT_BYTES":        "",
-		"EMBED_MAX_ATTEMPTS":               "",
-		"EMBEDDER_HEALTH_PORT":             "",
-		"EMBEDDER_REPLICA_NAME":            "",
-		"EMBEDDER_NAMESPACE_POLL_INTERVAL": "",
+		"DATABASE_URL":                      "postgres://db",
+		"REDIS_URL":                         "",
+		"QDRANT_HOST":                       "",
+		"QDRANT_PORT":                       "",
+		"CODOHUE_LOG_FORMAT":                "",
+		"CODOHUE_CATALOG_MAX_CONTENT_BYTES": "",
+		"CODOHUE_EMBED_MAX_ATTEMPTS":        "",
+		"CODOHUE_EMBEDDER_HEALTH_PORT":      "",
+		"CODOHUE_EMBEDDER_REPLICA_NAME":     "",
+		"CODOHUE_EMBEDDER_POLL_INTERVAL":    "",
 	}, func() {
 		cfg, err := LoadEmbedder()
 		if err != nil {
@@ -285,16 +285,16 @@ func TestLoadEmbedder_UsesDefaults(t *testing.T) {
 
 func TestLoadEmbedder_UsesEnvironmentOverrides(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":                     "postgres://custom-db",
-		"REDIS_URL":                        "redis://custom:6379",
-		"QDRANT_HOST":                      "qdrant.internal",
-		"QDRANT_PORT":                      "7000",
-		"LOG_FORMAT":                       "json",
-		"CATALOG_MAX_CONTENT_BYTES":        "65536",
-		"EMBED_MAX_ATTEMPTS":               "10",
-		"EMBEDDER_HEALTH_PORT":             "9003",
-		"EMBEDDER_REPLICA_NAME":            "embedder-1",
-		"EMBEDDER_NAMESPACE_POLL_INTERVAL": "1m",
+		"DATABASE_URL":                      "postgres://custom-db",
+		"REDIS_URL":                         "redis://custom:6379",
+		"QDRANT_HOST":                       "qdrant.internal",
+		"QDRANT_PORT":                       "7000",
+		"CODOHUE_LOG_FORMAT":                "json",
+		"CODOHUE_CATALOG_MAX_CONTENT_BYTES": "65536",
+		"CODOHUE_EMBED_MAX_ATTEMPTS":        "10",
+		"CODOHUE_EMBEDDER_HEALTH_PORT":      "9003",
+		"CODOHUE_EMBEDDER_REPLICA_NAME":     "embedder-1",
+		"CODOHUE_EMBEDDER_POLL_INTERVAL":    "1m",
 	}, func() {
 		cfg, err := LoadEmbedder()
 		if err != nil {
@@ -339,8 +339,8 @@ func TestLoadEmbedder_InvalidMaxContentBytes(t *testing.T) {
 		v := v
 		t.Run(v, func(t *testing.T) {
 			withEnv(t, map[string]string{
-				"DATABASE_URL":              "postgres://db",
-				"CATALOG_MAX_CONTENT_BYTES": v,
+				"DATABASE_URL":                      "postgres://db",
+				"CODOHUE_CATALOG_MAX_CONTENT_BYTES": v,
 			}, func() {
 				_, err := LoadEmbedder()
 				if err == nil {
@@ -357,8 +357,8 @@ func TestLoadEmbedder_InvalidMaxAttempts(t *testing.T) {
 		v := v
 		t.Run(v, func(t *testing.T) {
 			withEnv(t, map[string]string{
-				"DATABASE_URL":       "postgres://db",
-				"EMBED_MAX_ATTEMPTS": v,
+				"DATABASE_URL":               "postgres://db",
+				"CODOHUE_EMBED_MAX_ATTEMPTS": v,
 			}, func() {
 				_, err := LoadEmbedder()
 				if err == nil {
@@ -375,8 +375,8 @@ func TestLoadEmbedder_InvalidPollInterval(t *testing.T) {
 		v := v
 		t.Run(v, func(t *testing.T) {
 			withEnv(t, map[string]string{
-				"DATABASE_URL":                     "postgres://db",
-				"EMBEDDER_NAMESPACE_POLL_INTERVAL": v,
+				"DATABASE_URL":                   "postgres://db",
+				"CODOHUE_EMBEDDER_POLL_INTERVAL": v,
 			}, func() {
 				_, err := LoadEmbedder()
 				if err == nil {

@@ -337,8 +337,8 @@ func runCronOnceUntil(t testing.TB, timeout time.Duration, condition func() (boo
 		"QDRANT_HOST="+envOrDefault("QDRANT_HOST", "localhost"),
 		"QDRANT_PORT="+envOrDefault("QDRANT_PORT", "6334"),
 		"CODOHUE_ADMIN_API_KEY="+adminKey,
-		"LOG_FORMAT=text",
-		"BATCH_INTERVAL_MINUTES=60",
+		"CODOHUE_LOG_FORMAT=text",
+		"CODOHUE_BATCH_INTERVAL_MINUTES=60",
 	)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile

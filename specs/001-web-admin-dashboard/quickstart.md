@@ -60,8 +60,8 @@ admin:
     - DATABASE_URL=${DATABASE_URL}
     - REDIS_URL=${REDIS_URL}
     - RECOMMENDER_API_KEY=${RECOMMENDER_API_KEY}
-    - API_URL=http://api:2001     # internal URL for proxying
-    - ADMIN_PORT=2002
+    - CODOHUE_API_URL=http://api:2001     # internal URL for proxying
+    - CODOHUE_ADMIN_PORT=2002
   depends_on:
     - api
 ```
@@ -74,9 +74,9 @@ admin:
 |----------|----------|---------|-------|
 | `DATABASE_URL` | Yes | — | Same as cmd/api |
 | `RECOMMENDER_API_KEY` | Yes | — | Used for session auth and proxy auth |
-| `API_URL` | Yes | `http://localhost:2001` | Internal URL of cmd/api |
-| `ADMIN_PORT` | No | `2002` | Port for cmd/admin HTTP server |
-| `LOG_FORMAT` | No | `text` | `text` or `json` |
+| `CODOHUE_API_URL` | Yes | `http://localhost:2001` | Internal URL of cmd/api |
+| `CODOHUE_ADMIN_PORT` | No | `2002` | Port for cmd/admin HTTP server |
+| `CODOHUE_LOG_FORMAT` | No | `text` | `text` or `json` |
 
 ---
 
