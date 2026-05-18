@@ -19,9 +19,13 @@
   --accent-emphasis: #0866ff;
   --accent-subtle: #dbeafe;
   --accent-text: #ffffff;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
+  /* Status colors are darkened from the Tailwind 500-tier defaults so the
+     same `text-<role>` utility used as canvas text AND inside StatusToken
+     (text on a 20% tint of itself) clears WCAG AA in light mode. Dark mode
+     keeps brighter values in its own block below. */
+  --success: #0e6c2d;
+  --warning: #7a4d00;
+  --danger: #b91c1c;
 }
 
 /* ─── Semantic color tokens (dark) — GitHub Primer-aligned ─── */
