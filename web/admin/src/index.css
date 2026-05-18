@@ -9,8 +9,11 @@
   --bg-subtle: #f1f5f9;
   --bg-surface: #ffffff;
   --bg-surface-raised: #e2e8f0;
-  --border-default: #cbd5e1;
-  --border-strong: #94a3b8;
+  /* Border tokens darkened so they clear WCAG 1.4.11 (non-text UI boundary
+     contrast) — Input/Select/Button rely on border-default to identify the
+     control edge against the near-white bg-surface. */
+  --border-default: #7c8a9e;
+  --border-strong: #5b6877;
   --text-primary: #0f172a;
   --text-secondary: #334155;
   --text-muted: #475569;
@@ -19,6 +22,11 @@
   --accent-emphasis: #0866ff;
   --accent-subtle: #dbeafe;
   --accent-text: #ffffff;
+  /* --danger-emphasis: solid bg for the danger button with white text. In
+     light mode the text-color value already clears 4.5:1 for white-on, so
+     we reuse it; dark mode needs a darker shade than text-danger, see the
+     dark block below. */
+  --danger-emphasis: #b91c1c;
   /* Status colors are darkened from the Tailwind 500-tier defaults so the
      same `text-<role>` utility used as canvas text AND inside StatusToken
      (text on a 20% tint of itself) clears WCAG AA in light mode. Dark mode
@@ -36,8 +44,10 @@
   --bg-subtle: #151b23;
   --bg-surface: #161b22;
   --bg-surface-raised: #21262d;
-  --border-default: #3d444d;
-  --border-strong: #6e7681;
+  /* Same WCAG 1.4.11 rationale as the light block above; bumped so
+     bg-surface and bg-base both clear 3:1 against border-default. */
+  --border-default: #6e7681;
+  --border-strong: #8b929c;
   --text-primary: #f0f6fc;
   --text-secondary: #d1d7e0;
   --text-muted: #aeb6c2;
@@ -46,6 +56,10 @@
   --accent-emphasis: #1f6feb; /* solid bg with white text (Button primary) */
   --accent-subtle: #1b2f4a;
   --accent-text: #ffffff;
+  /* Dark text-danger #f85149 is too light for white-on contrast (3.35:1),
+     so the solid-bg danger button gets its own darker shade — matches the
+     accent / accent-emphasis split. */
+  --danger-emphasis: #cf222e;
   --success: #3fb950;
   --warning: #d29922;
   --danger: #f85149;
@@ -103,6 +117,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-danger-emphasis: var(--danger-emphasis);
 }
 
 /* ─── Base styles ─── */

@@ -21,7 +21,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   ghost:
     'bg-transparent text-secondary border border-transparent hover:bg-surface-raised hover:text-primary disabled:opacity-50',
   danger:
-    'bg-danger text-white hover:opacity-90 border border-transparent disabled:opacity-50',
+    'bg-danger-emphasis text-white hover:opacity-90 border border-transparent disabled:opacity-50',
 }
 
 const SIZE: Record<ButtonSize, string> = {
