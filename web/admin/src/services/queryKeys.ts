@@ -8,5 +8,6 @@
 export { authKeys } from './auth'
 export { batchRunKeys } from './batchRuns'
 export { catalogKeys } from './catalog'
+export { eventKeys } from './events'
 export { healthKeys } from './health'
 export { namespaceKeys } from './namespaces'

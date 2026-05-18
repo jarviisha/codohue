@@ -36,11 +36,12 @@ const ROUTE_PATHS = [
   'path="ns/:name"',
   'path="config"',
   'path="catalog"',
-  'path="catalog/items"',
+  'path="items"',
   'path=":id"',
   'path="events"',
   'path="trending"',
   'path="batch-runs"',
+  'path="re-embeds"',
   'path="debug"',
   'path="demo-data"',
 ]
@@ -100,8 +101,9 @@ const COMMAND_PAGE_MODULES = [
   'src/pages/ns/OverviewPage.tsx',
   'src/pages/ns/ConfigPage.tsx',
   'src/pages/ns/catalog/ConfigPage.tsx',
-  'src/pages/ns/catalog/items/ListPage.tsx',
+  'src/pages/ns/catalog/items/ItemsPage.tsx',
   'src/pages/ns/catalog/items/DetailModal.tsx',
+  'src/pages/ns/events/ListPage.tsx',
 ]
 
 test('implemented shell pages register at least one command', () => {
