@@ -25,14 +25,17 @@ export default function Pagination({
   const showing = total === undefined ? showingPrefix : `${showingPrefix} of ${total}`
 
   return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="font-mono tabular-nums text-muted">{showing}</span>
+    <nav aria-label="Pagination" className="flex items-center justify-between text-sm">
+      <span className="font-mono tabular-nums text-muted" aria-live="polite">
+        {showing}
+      </span>
       <div className="flex items-center gap-1">
         <Button
           variant="ghost"
           size="sm"
           disabled={!hasPrev}
           onClick={() => onOffsetChange(Math.max(0, offset - limit))}
+          aria-label="Previous page"
         >
           prev
         </Button>
@@ -41,10 +44,11 @@ export default function Pagination({
           size="sm"
           disabled={!hasNext}
           onClick={() => onOffsetChange(offset + limit)}
+          aria-label="Next page"
         >
           next
         </Button>
       </div>
-    </div>
+    </nav>
   )
 }

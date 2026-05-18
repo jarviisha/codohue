@@ -208,10 +208,18 @@ interface LiveTailStripProps {
 
 // Bottom strip mirroring the BUILD_PLAN §7.3 mockup: [RUN]/[IDLE] token,
 // latest event timestamp, and a pause/resume affordance.
+//
+// aria-live="polite" on the status group so screen readers announce the
+// streaming/paused transition + the last-event timestamp as they update,
+// without preempting whatever the operator is reading.
 function LiveTailStrip({ live, lastEvent, onToggle }: LiveTailStripProps) {
   return (
-    <div className="flex items-center justify-between border-t border-default pt-3 text-sm">
-      <div className="flex items-center gap-3">
+    <div
+      role="region"
+      aria-label="Live tail status"
+      className="flex items-center justify-between border-t border-default pt-3 text-sm"
+    >
+      <div className="flex items-center gap-3" aria-live="polite" aria-atomic="true">
         <StatusToken state={live ? 'run' : 'idle'} />
         <span className="font-mono text-xs text-secondary">
           {live ? 'streaming' : 'paused'}

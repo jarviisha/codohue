@@ -32,6 +32,8 @@ export default function Notice({ tone = 'info', title, onDismiss, children }: No
   return (
     <aside
       role={tone === 'fail' ? 'alert' : 'status'}
+      aria-live={tone === 'fail' ? 'assertive' : 'polite'}
+      aria-atomic="true"
       className={`border-l-4 ${BORDER[tone]} bg-transparent pl-4 pr-3 py-3 flex items-start gap-3`}
     >
       <div className="flex-1 min-w-0">
