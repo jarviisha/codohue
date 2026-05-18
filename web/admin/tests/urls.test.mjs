@@ -105,6 +105,7 @@ const COMMAND_PAGE_MODULES = [
   'src/pages/ns/catalog/items/DetailModal.tsx',
   'src/pages/ns/events/ListPage.tsx',
   'src/pages/ns/trending/Page.tsx',
+  'src/pages/ns/debug/Page.tsx',
 ]
 
 test('implemented shell pages register at least one command', () => {
