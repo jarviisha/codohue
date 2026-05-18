@@ -109,7 +109,7 @@ export default function Modal({ open, onClose, title, size = 'md', children, foo
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 p-4 transition-opacity duration-[80ms]"
+      className="fixed inset-0 z-9999 flex items-center justify-center bg-black/60 p-4 transition-opacity duration-80"
       onClick={onClose}
       role="presentation"
     >
