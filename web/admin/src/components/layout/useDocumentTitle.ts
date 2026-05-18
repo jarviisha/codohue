@@ -16,12 +16,16 @@ interface TitleRoute {
 }
 
 // Order matters: the first pattern that matches wins. Put the more specific
-// routes first when prefixes overlap.
+// routes first when prefixes overlap. The kitchen-sink entry is dev-only so
+// it does not leak into production bundles together with the route gating
+// in [routes/index.tsx].
 const TITLE_ROUTES: TitleRoute[] = [
   { pattern: '/login', title: 'Login' },
   { pattern: '/namespaces/new', title: 'Create namespace' },
   { pattern: '/namespaces', title: 'Namespaces' },
-  { pattern: '/_kitchen-sink', title: 'Kitchen sink' },
+  ...(import.meta.env.DEV
+    ? [{ pattern: '/_kitchen-sink', title: 'Kitchen sink' } as TitleRoute]
+    : []),
   { pattern: '/ns/:name/catalog/items/:id', title: ({ name }) => withNs('Catalog item', name) },
   { pattern: '/ns/:name/catalog/items', title: ({ name }) => withNs('Catalog items', name) },
   { pattern: '/ns/:name/catalog/config', title: ({ name }) => withNs('Catalog config', name) },

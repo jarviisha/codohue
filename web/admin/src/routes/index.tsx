@@ -1,5 +1,7 @@
+import { lazy, Suspense } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import AppShell from '@/components/layout/AppShell'
+import { LoadingState } from '@/components/ui'
 import LoginPage from '@/pages/login/LoginPage'
 import HealthPage from '@/pages/health/HealthPage'
 import NamespacesListPage from '@/pages/namespaces/ListPage'
@@ -19,8 +21,17 @@ import CfRunsPage from '@/pages/ns/batch-runs/CfRunsPage'
 import ReEmbedsPage from '@/pages/ns/batch-runs/ReEmbedsPage'
 import DebugPage from '@/pages/ns/debug/Page'
 import DemoDataPage from '@/pages/ns/demo-data/Page'
-import KitchenSinkPage from '@/pages/_kitchen-sink/Page'
 import NotFoundPage from '@/pages/not-found/Page'
+
+// Kitchen sink is a dev-only design surface. The ternary keeps the dynamic
+// `import()` inside a dead branch in production: Vite folds
+// `import.meta.env.DEV` to a literal `false` at build time, and Rollup then
+// tree-shakes both the lazy() call and the kitchen-sink chunk out of the
+// bundle entirely. Verified with `grep -ri kitchen dist/` producing no
+// matches in a production build.
+const KitchenSinkPage = import.meta.env.DEV
+  ? lazy(() => import('@/pages/_kitchen-sink/Page'))
+  : null
 
 // Route declarations. The `/login` route renders outside AppShell; every other
 // route shares the shell (Sidebar + TopBar + content slot).
@@ -33,7 +44,16 @@ export default function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route element={<AppShell />}>
         <Route index element={<HealthPage />} />
-        <Route path="_kitchen-sink" element={<KitchenSinkPage />} />
+        {import.meta.env.DEV && KitchenSinkPage ? (
+          <Route
+            path="_kitchen-sink"
+            element={
+              <Suspense fallback={<LoadingState rows={6} label="loading kitchen sink" />}>
+                <KitchenSinkPage />
+              </Suspense>
+            }
+          />
+        ) : null}
         <Route path="namespaces" element={<NamespacesListPage />} />
         <Route path="namespaces/new" element={<NamespaceCreatePage />} />
         <Route path="ns/:name" element={<NamespaceLayout />}>
