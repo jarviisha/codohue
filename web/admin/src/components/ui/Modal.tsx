@@ -16,27 +16,48 @@ const SIZE: Record<NonNullable<ModalProps['size']>, string> = {
   lg: 'max-w-3xl',
 }
 
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
+function getFocusable(panel: HTMLElement): HTMLElement[] {
+  return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+    (el) => !el.hasAttribute('disabled') && !el.getAttribute('aria-hidden'),
+  )
+}
+
 // 80ms opacity snap (no translate) per DESIGN.md §11. Esc closes; backdrop
-// click closes; focus is NOT yet trapped — Phase 3 polishes a11y.
+// click closes. Tab/Shift-Tab cycle within the panel; on open the first
+// content-focusable receives focus (skipping the header close button); on
+// close, focus is restored to the element that opened the modal.
 export default function Modal({ open, onClose, title, size = 'md', children, footer }: ModalProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // Hold the latest onClose in a ref so the effect below only depends on
+  // `open` — most callers pass inline arrows, which would otherwise re-fire
+  // the effect on every parent render and thrash focus restoration.
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
   useEffect(() => {
     if (!open) return
+
+    // Capture the element that triggered the modal so we can restore focus
+    // on close. activeElement is null at most ~never; the cast keeps the
+    // restore branch terse.
+    const trigger = document.activeElement as HTMLElement | null
+
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        onClose()
+        onCloseRef.current()
         return
       }
 
       if (e.key !== 'Tab') return
       const panel = panelRef.current
       if (!panel) return
-      const focusable = Array.from(
-        panel.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
-        ),
-      ).filter((el) => !el.hasAttribute('disabled') && !el.getAttribute('aria-hidden'))
+      const focusable = getFocusable(panel)
       if (focusable.length === 0) {
         e.preventDefault()
         panel.focus()
@@ -56,13 +77,33 @@ export default function Modal({ open, onClose, title, size = 'md', children, foo
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', onKey)
-    window.setTimeout(() => panelRef.current?.focus(), 0)
+
+    // First-focus: defer to the next tick so React's autoFocus on body
+    // inputs has already fired. If anything inside the panel already has
+    // focus (e.g. an autoFocus input), leave it alone; otherwise pick the
+    // first content focusable, skipping the header Close button so the
+    // operator does not land on "dismiss" by default.
+    window.setTimeout(() => {
+      const panel = panelRef.current
+      if (!panel) return
+      if (panel.contains(document.activeElement)) return
+      const focusable = getFocusable(panel)
+      const target = focusable.find((el) => el.getAttribute('aria-label') !== 'Close')
+      ;(target ?? panel).focus()
+    }, 0)
 
     return () => {
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = previousOverflow
+      // Restore focus to the trigger if it is still mounted and focusable.
+      // Skipping the restore when the trigger has been unmounted (e.g. a
+      // row-level button that disappeared after the action) lets the browser
+      // fall back to body, which is the standard no-op behaviour.
+      if (trigger && document.body.contains(trigger) && typeof trigger.focus === 'function') {
+        trigger.focus()
+      }
     }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 
