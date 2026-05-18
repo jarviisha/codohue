@@ -118,7 +118,7 @@ export default function HealthPage() {
 
       {isLoading ? (
         <Panel title="health probes">
-          <LoadingState rows={4} />
+          <LoadingState rows={4} label="loading health probes" />
         </Panel>
       ) : data ? (
         <>

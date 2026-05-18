@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Button,
   EmptyState,
@@ -10,17 +10,25 @@ import {
   PageShell,
   Panel,
   StatusToken,
+  Table,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tr,
   useRegisterCommand,
 } from '@/components/ui'
 import type { StatusState } from '@/components/ui'
 import { probeState, useHealth } from '@/services/health'
 import { useTriggerBatchRun } from '@/services/batchRuns'
+import { useCatalogConfig } from '@/services/catalog'
 import {
   lastRunToken,
   namespaceStatusToken,
   useNamespace,
   useNamespacesOverview,
 } from '@/services/namespaces'
+import { useTrending } from '@/services/trending'
 import { paths } from '@/routes/path'
 import {
   formatDurationMs,
@@ -40,6 +48,8 @@ export default function NamespaceOverviewPage() {
   const health = useHealth()
   const overview = useNamespacesOverview()
   const config = useNamespace(name)
+  const catalog = useCatalogConfig(name)
+  const trending = useTrending({ namespace: name, limit: 5 })
   const triggerBatch = useTriggerBatchRun()
 
   useRegisterCommand(
@@ -117,9 +127,9 @@ export default function NamespaceOverviewPage() {
         {/* ─── HEALTH ─── */}
         <Panel title="health">
           {health.isLoading ? (
-            <LoadingState rows={3} />
+            <LoadingState rows={3} label="loading health" />
           ) : health.isError ? (
-            <Notice tone="fail">
+            <Notice tone="fail" title="Failed to load health">
               {(health.error as Error)?.message ?? 'Health probe failed.'}
             </Notice>
           ) : healthData ? (
@@ -145,7 +155,7 @@ export default function NamespaceOverviewPage() {
         {/* ─── LAST BATCH RUN ─── */}
         <Panel title="last batch run">
           {overview.isLoading ? (
-            <LoadingState rows={5} />
+            <LoadingState rows={5} label="loading last batch run" />
           ) : lastRun ? (
             <KeyValueList
               rows={[
@@ -209,8 +219,8 @@ export default function NamespaceOverviewPage() {
 
         {/* ─── VOLUME (24h) ─── */}
         <Panel title="volume (24h)">
-          {overview.isLoading ? (
-            <LoadingState rows={2} />
+          {overview.isLoading || catalog.isLoading ? (
+            <LoadingState rows={2} label="loading volume" />
           ) : (
             <div className="grid grid-cols-2 gap-3">
               <MetricTile
@@ -220,8 +230,8 @@ export default function NamespaceOverviewPage() {
               />
               <MetricTile
                 label="dead-letter"
-                value="—"
-                hint="wires in Phase 2.B catalog"
+                value={formatNumber(catalog.data?.backlog.dead_letter ?? 0)}
+                hint="catalog embed queue"
               />
             </div>
           )}
@@ -230,11 +240,11 @@ export default function NamespaceOverviewPage() {
         {/* ─── EMBEDDING ─── */}
         <Panel title="embedding">
           {config.isLoading ? (
-            <LoadingState rows={4} />
+            <LoadingState rows={4} label="loading embedding config" />
           ) : config.isError || !config.data ? (
-            <Notice tone="fail">
+            <Notice tone="fail" title="Failed to load embedding config">
               {(config.error as Error)?.message ??
-                'Failed to load namespace config.'}
+                'Unable to read namespace config.'}
             </Notice>
           ) : (
             <KeyValueList
@@ -245,11 +255,20 @@ export default function NamespaceOverviewPage() {
                 { label: 'alpha', value: config.data.alpha.toFixed(2) },
                 {
                   label: 'catalog auto-embed',
-                  value: <StatusToken state="pend" label="wires in 2.B" />,
+                  value: catalog.data ? (
+                    <StatusToken
+                      state={catalog.data.catalog.enabled ? 'ok' : 'idle'}
+                      label={catalog.data.catalog.enabled ? 'enabled' : 'disabled'}
+                    />
+                  ) : (
+                    '—'
+                  ),
                 },
                 {
                   label: 'catalog backlog',
-                  value: <StatusToken state="pend" label="wires in 2.B" />,
+                  value: catalog.data
+                    ? formatNumber(catalog.data.backlog.pending + catalog.data.backlog.in_flight)
+                    : '—',
                 },
               ]}
             />
@@ -257,7 +276,7 @@ export default function NamespaceOverviewPage() {
         </Panel>
       </div>
 
-      {/* ─── TRENDING TOP 5 (placeholder until Phase 2.E.2) ─── */}
+      {/* ─── TRENDING TOP 5 ─── */}
       <Panel
         title="trending top 5"
         actions={
@@ -270,10 +289,41 @@ export default function NamespaceOverviewPage() {
           </Button>
         }
       >
-        <EmptyState
-          title="Trending wiring lands in Phase 2.E"
-          description="Once services/trending.ts and the trending page ship, this panel will render the top-5 items here."
-        />
+        {trending.isLoading ? (
+          <LoadingState rows={5} label="loading trending" />
+        ) : trending.isError ? (
+          <Notice tone="fail" title="Failed to load trending">
+            {(trending.error as Error)?.message ?? 'Unable to load trending items.'}
+          </Notice>
+        ) : !trending.data || trending.data.items.length === 0 ? (
+          <EmptyState
+            title="No trending items yet"
+            description="Ingest events and let the cron job populate the trending ZSET; this panel updates on the next refresh."
+          />
+        ) : (
+          <Table>
+            <Thead>
+              <Tr>
+                <Th align="right">rank</Th>
+                <Th>object_id</Th>
+                <Th align="right">score</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {trending.data.items.map((item, idx) => (
+                <Tr key={item.object_id}>
+                  <Td mono align="right">{idx + 1}</Td>
+                  <Td mono>
+                    <Link to={paths.nsTrending(name)} className="hover:text-accent">
+                      {item.object_id}
+                    </Link>
+                  </Td>
+                  <Td mono align="right">{item.score.toFixed(1)}</Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        )}
       </Panel>
     </PageShell>
   )

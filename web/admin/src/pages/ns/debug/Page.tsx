@@ -143,13 +143,13 @@ export default function DebugPage() {
       </Panel>
 
       {recommend.isError ? (
-        <Notice tone="fail" title="Failed to fetch recommendations">
-          {(recommend.error as Error)?.message ?? 'Unable to fetch recommendations.'}
+        <Notice tone="fail" title="Failed to load recommendations">
+          {(recommend.error as Error)?.message ?? 'Unable to load recommendations.'}
         </Notice>
       ) : null}
       {profile.isError ? (
-        <Notice tone="fail" title="Failed to fetch subject profile">
-          {(profile.error as Error)?.message ?? 'Unable to fetch subject profile.'}
+        <Notice tone="fail" title="Failed to load subject profile">
+          {(profile.error as Error)?.message ?? 'Unable to load subject profile.'}
         </Notice>
       ) : null}
 
