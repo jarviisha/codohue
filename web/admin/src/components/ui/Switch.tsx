@@ -3,13 +3,17 @@ interface SwitchProps {
   onChange: (next: boolean) => void
   disabled?: boolean
   ariaLabel: string
+  /** Set when the switch is paired with a Field label via htmlFor. */
+  id?: string
 }
 
 // Boolean toggle. `<button role="switch">` so screen readers announce state
-// correctly. Track + knob are pure CSS (no SVG, no icon).
-export default function Switch({ checked, onChange, disabled, ariaLabel }: SwitchProps) {
+// correctly. Track + knob are pure CSS (no SVG, no icon). When wrapped in
+// Field, pass id so the label's htmlFor focuses the switch on click.
+export default function Switch({ checked, onChange, disabled, ariaLabel, id }: SwitchProps) {
   return (
     <button
+      id={id}
       type="button"
       role="switch"
       aria-checked={checked}

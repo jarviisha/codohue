@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Button,
@@ -96,6 +96,22 @@ export default function CatalogConfigPage() {
   const [paramsError, setParamsError] = useState<string | null>(null)
   const [showReEmbedConfirm, setShowReEmbedConfirm] = useState(false)
   const [saved, setSaved] = useState(false)
+  // JSON stringification is fine for dirty detection since FormState is
+  // plain JSON-shaped (no Dates / Maps / class instances).
+  const [pristine, setPristine] = useState(() => JSON.stringify(initialForm(data)))
+  const isDirty = JSON.stringify(form) !== pristine
+
+  // Browser-level guard. In-app navigation guard (sidebar / topbar) requires
+  // a data-router migration and lands in a later phase; mirrors the pattern
+  // already used by NamespaceConfigPage.
+  useEffect(() => {
+    if (!isDirty) return
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [isDirty])
 
   useRegisterCommand(
     `ns.${name}.catalog.reembed`,
@@ -138,7 +154,14 @@ export default function CatalogConfigPage() {
           max_content_bytes: Number(form.maxContentBytes),
         },
       },
-      { onSuccess: () => setSaved(true) },
+      {
+        onSuccess: () => {
+          setSaved(true)
+          // Reset the dirty marker against the now-saved form so the
+          // beforeunload guard releases and the header hint clears.
+          setPristine(JSON.stringify(form))
+        },
+      },
     )
   }
 
@@ -287,7 +310,10 @@ export default function CatalogConfigPage() {
             />
           </Field>
 
-          <div className="flex justify-end">
+          <div className="flex items-center justify-end gap-3">
+            {isDirty ? (
+              <span className="text-sm text-warning">unsaved changes</span>
+            ) : null}
             <Button type="submit" variant="primary" loading={updateCatalog.isPending}>
               Save catalog config
             </Button>

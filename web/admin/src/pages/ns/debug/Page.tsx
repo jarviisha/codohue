@@ -126,6 +126,7 @@ export default function DebugPage() {
             <Field label="debug" htmlFor="debug-toggle">
               <div className="flex items-center gap-2 pt-1">
                 <Switch
+                  id="debug-toggle"
                   checked={form.debug}
                   onChange={(next) => setForm((f) => ({ ...f, debug: next }))}
                   ariaLabel="Include debug envelope"
