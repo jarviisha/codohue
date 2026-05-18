@@ -13,6 +13,7 @@ import {
   Th,
   Thead,
   Tr,
+  useRegisterCommand,
 } from '@/components/ui'
 import type { StatusState } from '@/components/ui'
 import {
@@ -114,6 +115,13 @@ export default function CatalogStatusPage() {
   const { data } = useCatalogContext()
   const bulkRedrive = useBulkRedriveDeadletter()
   const [showBulkConfirm, setShowBulkConfirm] = useState(false)
+
+  useRegisterCommand(
+    `ns.${name}.catalog.status.redriveDeadletter`,
+    `Redrive ${name} dead-letter catalog items`,
+    () => setShowBulkConfirm(true),
+    name,
+  )
 
   const deadLetterCount = data.backlog.dead_letter
   const recentErrors = useCatalogItems({
