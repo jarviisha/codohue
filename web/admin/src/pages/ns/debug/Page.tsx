@@ -153,7 +153,10 @@ export default function DebugPage() {
         </Notice>
       ) : null}
 
-      <Panel title="subject profile">
+      <Panel
+        title="subject profile"
+        busy={profile.isFetching && !profile.isLoading}
+      >
         {!submitted ? (
           <EmptyState
             title="Enter a subject_id"
@@ -200,6 +203,7 @@ export default function DebugPage() {
 
       <Panel
         title="recommendations"
+        busy={recommend.isFetching && !recommend.isLoading}
         actions={
           data ? (
             <span className="font-mono text-xs text-muted">source · {data.source}</span>

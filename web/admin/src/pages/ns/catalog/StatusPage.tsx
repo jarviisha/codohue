@@ -4,6 +4,7 @@ import {
   Button,
   ConfirmDialog,
   KeyValueList,
+  LoadingState,
   Notice,
   Panel,
   StatusToken,
@@ -277,6 +278,7 @@ export default function CatalogStatusPage() {
       {deadLetterCount > 0 ? (
         <Panel
           title="recent dead-letter items"
+          busy={recentErrors.isFetching && !recentErrors.isLoading}
           actions={
             <Link
               to={`${paths.nsCatalogItems(name)}?state=dead_letter`}
@@ -286,8 +288,10 @@ export default function CatalogStatusPage() {
             </Link>
           }
         >
-          {errorRows.length === 0 ? (
-            <p className="text-sm text-muted">Loading…</p>
+          {recentErrors.isLoading ? (
+            <LoadingState rows={3} label="loading dead-letter items" />
+          ) : errorRows.length === 0 ? (
+            <p className="text-sm text-muted">No dead-letter items.</p>
           ) : (
             <Table>
               <Thead>

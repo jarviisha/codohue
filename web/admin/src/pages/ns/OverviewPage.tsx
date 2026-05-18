@@ -125,7 +125,7 @@ export default function NamespaceOverviewPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         {/* ─── HEALTH ─── */}
-        <Panel title="health">
+        <Panel title="health" busy={health.isFetching && !health.isLoading}>
           {health.isLoading ? (
             <LoadingState rows={3} label="loading health" />
           ) : health.isError ? (
@@ -153,7 +153,10 @@ export default function NamespaceOverviewPage() {
         </Panel>
 
         {/* ─── LAST BATCH RUN ─── */}
-        <Panel title="last batch run">
+        <Panel
+          title="last batch run"
+          busy={overview.isFetching && !overview.isLoading}
+        >
           {overview.isLoading ? (
             <LoadingState rows={5} label="loading last batch run" />
           ) : lastRun ? (
@@ -218,7 +221,13 @@ export default function NamespaceOverviewPage() {
         </Panel>
 
         {/* ─── VOLUME (24h) ─── */}
-        <Panel title="volume (24h)">
+        <Panel
+          title="volume (24h)"
+          busy={
+            (overview.isFetching && !overview.isLoading) ||
+            (catalog.isFetching && !catalog.isLoading)
+          }
+        >
           {overview.isLoading || catalog.isLoading ? (
             <LoadingState rows={2} label="loading volume" />
           ) : (
@@ -238,7 +247,13 @@ export default function NamespaceOverviewPage() {
         </Panel>
 
         {/* ─── EMBEDDING ─── */}
-        <Panel title="embedding">
+        <Panel
+          title="embedding"
+          busy={
+            (config.isFetching && !config.isLoading) ||
+            (catalog.isFetching && !catalog.isLoading)
+          }
+        >
           {config.isLoading ? (
             <LoadingState rows={4} label="loading embedding config" />
           ) : config.isError || !config.data ? (
@@ -279,6 +294,7 @@ export default function NamespaceOverviewPage() {
       {/* ─── TRENDING TOP 5 ─── */}
       <Panel
         title="trending top 5"
+        busy={trending.isFetching && !trending.isLoading}
         actions={
           <Button
             variant="ghost"
