@@ -71,13 +71,13 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
 
 ## 2.C — Events
 
-- [ ] **2.C.1 `services/events.ts`**
+- [x] **2.C.1 `services/events.ts`**
   - Types `Event`, `EventsListResponse`, `InjectEventRequest`.
   - Functions: `listEvents({ namespace, limit, offset, subject_id })`, `injectEvent(namespace, payload)`.
   - `InjectEventRequest` mirrors the current backend contract: `subject_id`, `object_id`, `action`, optional `occurred_at`. Do not add `weight` in the UI unless backend support lands first.
   - Hooks: `useEvents` (poll cadence configurable), `useInjectEvent`.
 
-- [ ] **2.C.2 `EventsListPage` + `InjectEventModal` — build-order #6 (BUILD_PLAN §7.3 mockup)**
+- [x] **2.C.2 `EventsListPage` + `InjectEventModal` — build-order #6 (BUILD_PLAN §7.3 mockup)**
   - Replace stub at `/ns/:name/events`. Table with mono ms-precision timestamps, age delta column. Subject filter persisted to URL.
   - Inject event modal: form with action, subject_id, object_id, occurred_at.
   - Live-tail footer using the Phase 1.6 `Switch` to toggle a faster poll cadence; `[ RUN]` / `[IDLE]` status reflects state.
@@ -86,44 +86,45 @@ Granular working checklist for Phase 2 of the `web/admin` build. Companion to [B
 
 ## 2.D — Batch Runs
 
-- [ ] **2.D.1 `services/batchRuns.ts`**
+- [x] **2.D.1 `services/batchRuns.ts`**
   - Types `BatchRun`, `BatchRunsResponse`, `BatchRunCreateResponse`.
   - Functions: `listBatchRuns({ namespace?, status?, limit, offset })`, `createBatchRun(namespace)`, `getBatchRun(id)`.
   - Hooks: `useBatchRuns`, `useCreateBatchRun`.
 
-- [ ] **2.D.2 `BatchRunsListPage` — build-order #9**
+- [x] **2.D.2 `BatchRunsListPage` — build-order #9**
   - Replace stub at `/ns/:name/batch-runs`. List + status / trigger-source filters. Per-row detail Modal with per-phase `StatusToken` and timings.
   - `log_lines` rendered in `CodeBlock` if present.
+  - **Scope expanded during build:** ships as a layout with two child routes — `CfRunsPage` for cron + admin-triggered CF runs (embeds "Run batch now"), `ReEmbedsPage` for catalog re-embed orchestration with target strategy and failure preview.
 
 ---
 
 ## 2.E — Trending
 
-- [ ] **2.E.1 `services/trending.ts`**
+- [x] **2.E.1 `services/trending.ts`**
   - Types `TrendingItem`, `TrendingAdminResponse`.
   - Function `listTrending({ namespace, limit, offset, window_hours })`.
   - Hook `useTrending`.
 
-- [ ] **2.E.2 `TrendingPage` — build-order #7**
+- [x] **2.E.2 `TrendingPage` — build-order #7**
   - Replace stub at `/ns/:name/trending`. Table + window selector (1h / 6h / 24h / 7d) in URL query. Redis TTL surfaced in panel header.
 
 ---
 
 ## 2.F — Recommend Debug
 
-- [ ] **2.F.1 `services/recommend.ts`**
+- [x] **2.F.1 `services/recommend.ts`**
   - Types `RecommendDebugRequest`, `RecommendDebug`, `SubjectProfileResponse`.
   - Functions: `recommendDebug({ namespace, subject_id, limit })`, `subjectProfile({ namespace, subject_id })`.
   - Hooks.
 
-- [ ] **2.F.2 `DebugPage` — build-order #8**
+- [x] **2.F.2 `DebugPage` — build-order #8**
   - Replace stub at `/ns/:name/debug`. Form: subject_id + limit + "debug=true" toggle. Result table with score breakdown columns; the raw debug envelope rendered via `CodeBlock`.
 
 ---
 
 ## 2.G — Demo Data
 
-- [ ] **2.G `DemoDataPage` — build-order #13**
+- [x] **2.G `DemoDataPage` — build-order #13**
   - Replace stub at `/ns/:name/demo-data`. The endpoint surface is tiny (just `POST /api/admin/v1/demo-data` and `DELETE` of same), so the request functions live inline in this file rather than getting their own `services/demoData.ts`.
   - Seed / clear actions, both gated by `ConfirmDialog`. Existing dataset state (last seeded at, row counts) surfaced in a `KeyValueList`.
 
