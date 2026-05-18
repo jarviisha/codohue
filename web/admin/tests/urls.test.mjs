@@ -44,6 +44,7 @@ const ROUTE_PATHS = [
   'path="re-embeds"',
   'path="debug"',
   'path="demo-data"',
+  'path="*"',
 ]
 
 test('routes/index.tsx declares every BUILD_PLAN route', () => {

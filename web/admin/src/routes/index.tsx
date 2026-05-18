@@ -20,6 +20,7 @@ import ReEmbedsPage from '@/pages/ns/batch-runs/ReEmbedsPage'
 import DebugPage from '@/pages/ns/debug/Page'
 import DemoDataPage from '@/pages/ns/demo-data/Page'
 import KitchenSinkPage from '@/pages/_kitchen-sink/Page'
+import NotFoundPage from '@/pages/not-found/Page'
 
 // Route declarations. The `/login` route renders outside AppShell; every other
 // route shares the shell (Sidebar + TopBar + content slot).
@@ -53,7 +54,9 @@ export default function AppRoutes() {
           </Route>
           <Route path="debug" element={<DebugPage />} />
           <Route path="demo-data" element={<DemoDataPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
+        <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>
   )
