@@ -13,6 +13,7 @@ import DenseSection from './DenseSection'
 import IdentitySection from './IdentitySection'
 import ScoringSection from './ScoringSection'
 import TrendingSection from './TrendingSection'
+import type { FormContext } from './types'
 
 interface NamespaceFormProps {
   mode: 'create' | 'edit'
@@ -22,7 +23,10 @@ interface NamespaceFormProps {
   onSubmit: (values: NamespaceFormState) => void
   isPending: boolean
   errorMessage?: string
+  context?: FormContext
 }
+
+const DEFAULT_CONTEXT: FormContext = { catalogEnabled: false }
 
 // DOM id of the input (or the action-weights row container) to focus when a
 // field fails validation on submit. The order matters — submit() walks this
@@ -84,6 +88,7 @@ export default function NamespaceForm({
   onSubmit,
   isPending,
   errorMessage,
+  context = DEFAULT_CONTEXT,
 }: NamespaceFormProps) {
   const [errors, setErrors] = useState<NamespaceFormErrors>(() => ({}))
   const [submitted, setSubmitted] = useState(false)
@@ -132,7 +137,7 @@ export default function NamespaceForm({
     onSubmit(nextState)
   }
 
-  const sectionProps = { state, errors, update, updateNumber }
+  const sectionProps = { state, errors, context, update, updateNumber }
 
   return (
     <Form id={formId} onSubmit={submit}>

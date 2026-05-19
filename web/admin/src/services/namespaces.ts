@@ -20,6 +20,13 @@ export interface NamespaceConfig {
   trending_ttl: number
   lambda_trending: number
   has_api_key: boolean
+  // Read-only mirror of catalog auto-embedding state. The authoritative
+  // config still lives at GET /api/admin/v1/namespaces/{ns}/catalog — these
+  // fields only drive UX (locking dense_strategy + embedding_dim when the
+  // catalog pipeline owns the dense vectors).
+  catalog_enabled: boolean
+  catalog_strategy_id?: string
+  catalog_strategy_version?: string
   updated_at: string // ISO timestamp
 }
 

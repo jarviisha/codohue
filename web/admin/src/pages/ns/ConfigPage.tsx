@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Button,
   ConfirmDialog,
@@ -178,6 +178,27 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
         }
       />
 
+      {config.catalog_enabled ? (
+        <Notice tone="info" title="Catalog auto-embedding is enabled">
+          The embedder pipeline owns dense vectors for{' '}
+          <span className="font-mono text-primary">{name}</span>.{' '}
+          <span className="font-mono">dense_strategy</span> is locked to{' '}
+          <span className="font-mono">byoe</span> or{' '}
+          <span className="font-mono">disabled</span>,{' '}
+          <span className="font-mono">embedding_dim</span> is managed by the catalog
+          strategy, and the data-plane{' '}
+          <span className="font-mono">PUT /v1/namespaces/{'{ns}'}/objects/{'{id}'}/embedding</span>{' '}
+          endpoint returns 409. Adjust these from the{' '}
+          <Link
+            to={paths.nsCatalogConfig(name)}
+            className="text-accent underline-offset-2 hover:underline"
+          >
+            catalog config tab
+          </Link>
+          .
+        </Notice>
+      ) : null}
+
       <NamespaceForm
         mode="edit"
         formId={FORM_ID}
@@ -186,6 +207,11 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
         onSubmit={handleSubmit}
         isPending={upsert.isPending}
         errorMessage={errorMessage}
+        context={{
+          catalogEnabled: config.catalog_enabled,
+          catalogStrategyId: config.catalog_strategy_id,
+          catalogStrategyVersion: config.catalog_strategy_version,
+        }}
       />
 
       <Panel
