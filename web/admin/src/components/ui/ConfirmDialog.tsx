@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import Modal from './Modal'
 import Button from './Button'
 import Input from './Input'
@@ -38,11 +38,17 @@ export default function ConfirmDialog({
 }: ConfirmDialogProps) {
   const [typed, setTyped] = useState('')
 
-  // Reset the typed phrase every time the dialog re-opens so a previous
-  // confirmation can't carry over.
-  useEffect(() => {
+  // Reset the typed phrase every time the dialog re-opens (or the required
+  // phrase changes while open) so a previous confirmation can't carry over.
+  // Adjust state during render rather than in an effect — see the React docs
+  // pattern for "resetting state when a prop changes".
+  const [prevOpen, setPrevOpen] = useState(open)
+  const [prevRequireTyped, setPrevRequireTyped] = useState(requireTyped)
+  if (open !== prevOpen || requireTyped !== prevRequireTyped) {
+    setPrevOpen(open)
+    setPrevRequireTyped(requireTyped)
     if (open) setTyped('')
-  }, [open, requireTyped])
+  }
 
   const typedMatches = requireTyped == null || typed === requireTyped
   const confirmDisabled = loading || !typedMatches
