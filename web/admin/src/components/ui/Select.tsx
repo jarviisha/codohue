@@ -21,7 +21,7 @@ const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select(
       ref={ref}
       className={[
         'rounded-sm border bg-surface text-primary appearance-none pr-8',
-        'bg-no-repeat bg-[right_0.5rem_center]',
+        'bg-no-repeat bg-position-[right_0.5rem_center]',
         'focus:outline-none focus:shadow-focus',
         invalid ? 'border-danger' : 'border-default hover:border-strong focus:border-accent',
         SIZE[selectSize],
