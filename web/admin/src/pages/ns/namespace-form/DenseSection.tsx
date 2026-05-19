@@ -8,7 +8,7 @@ import {
 } from '@/components/ui'
 import type { RadioOption } from '@/components/ui'
 import type { DenseStrategy } from '../configForm'
-import type { TabProps } from './types'
+import type { SectionProps } from './types'
 
 const STRATEGY_OPTIONS: RadioOption<DenseStrategy>[] = [
   { value: 'item2vec', label: 'item2vec', hint: 'Skip-gram trained item embeddings on co-occurrence.' },
@@ -17,7 +17,7 @@ const STRATEGY_OPTIONS: RadioOption<DenseStrategy>[] = [
   { value: 'disabled', label: 'disabled', hint: 'Skip the dense phase entirely (sparse-only recommendations).' },
 ]
 
-export default function DenseTab({ state, errors, update, updateNumber }: TabProps) {
+export default function DenseSection({ state, errors, update, updateNumber }: SectionProps) {
   return (
     <Panel title="dense strategy">
       <Field label="Strategy" htmlFor="ns-strategy">

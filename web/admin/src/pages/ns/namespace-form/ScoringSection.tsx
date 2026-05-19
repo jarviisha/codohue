@@ -1,7 +1,7 @@
 import { Field, FormGrid, NumberInput, Panel } from '@/components/ui'
-import type { TabProps } from './types'
+import type { SectionProps } from './types'
 
-export default function ScoringTab({ state, errors, updateNumber }: TabProps) {
+export default function ScoringSection({ state, errors, updateNumber }: SectionProps) {
   return (
     <Panel title="decay + scoring">
       <FormGrid columns={2}>

@@ -1,8 +1,8 @@
 import { Field, Input, Panel } from '@/components/ui'
 import { normalizeNamespaceName } from '../configForm'
-import type { TabProps } from './types'
+import type { SectionProps } from './types'
 
-export default function IdentityTab({ state, errors, update }: TabProps) {
+export default function IdentitySection({ state, errors, update }: SectionProps) {
   return (
     <Panel title="identity">
       <Field

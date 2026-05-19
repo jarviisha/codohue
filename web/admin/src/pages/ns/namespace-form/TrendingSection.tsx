@@ -1,7 +1,7 @@
 import { Field, FormGrid, NumberInput, Panel } from '@/components/ui'
-import type { TabProps } from './types'
+import type { SectionProps } from './types'
 
-export default function TrendingTab({ state, errors, updateNumber }: TabProps) {
+export default function TrendingSection({ state, errors, updateNumber }: SectionProps) {
   return (
     <Panel title="trending">
       <FormGrid columns={2}>

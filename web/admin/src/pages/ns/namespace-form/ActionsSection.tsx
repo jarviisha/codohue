@@ -4,13 +4,13 @@ import {
   type ActionWeightRow,
   type NamespaceFormState,
 } from '../configForm'
-import type { TabProps } from './types'
+import type { SectionProps } from './types'
 
-type Props = TabProps & {
+type Props = SectionProps & {
   setActions: (rows: ActionWeightRow[]) => void
 }
 
-export default function ActionsTab({ state, errors, setActions }: Props) {
+export default function ActionsSection({ state, errors, setActions }: Props) {
   const rows = state.action_weights
 
   const updateField = <K extends keyof ActionWeightRow>(

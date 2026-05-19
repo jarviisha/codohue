@@ -8,14 +8,11 @@ import {
   type NamespaceFormErrors,
   type NamespaceFormState,
 } from '../configForm'
-import ActionsTab from './ActionsTab'
-import DenseTab from './DenseTab'
-import IdentityTab from './IdentityTab'
-import ScoringTab from './ScoringTab'
-import TabNav from './TabNav'
-import TrendingTab from './TrendingTab'
-import { firstErrorTab, tabsForMode } from './tabs'
-import type { TabId } from './types'
+import ActionsSection from './ActionsSection'
+import DenseSection from './DenseSection'
+import IdentitySection from './IdentitySection'
+import ScoringSection from './ScoringSection'
+import TrendingSection from './TrendingSection'
 
 interface NamespaceFormProps {
   mode: 'create' | 'edit'
@@ -27,6 +24,58 @@ interface NamespaceFormProps {
   errorMessage?: string
 }
 
+// DOM id of the input (or the action-weights row container) to focus when a
+// field fails validation on submit. The order matters — submit() walks this
+// list and jumps to the first matching error.
+const ERROR_TARGET_ID: Record<keyof NamespaceFormErrors, string> = {
+  namespace: 'ns-name',
+  action_weights: 'ns-section-actions',
+  lambda: 'ns-lambda',
+  gamma: 'ns-gamma',
+  alpha: 'ns-alpha',
+  max_results: 'ns-maxr',
+  seen_items_days: 'ns-seen',
+  embedding_dim: 'ns-dim',
+  trending_window: 'ns-tr-win',
+  trending_ttl: 'ns-tr-ttl',
+  lambda_trending: 'ns-tr-lambda',
+}
+
+const ERROR_ORDER_CREATE: (keyof NamespaceFormErrors)[] = [
+  'namespace',
+  'action_weights',
+  'lambda',
+  'gamma',
+  'alpha',
+  'max_results',
+  'seen_items_days',
+  'embedding_dim',
+  'trending_window',
+  'trending_ttl',
+  'lambda_trending',
+]
+const ERROR_ORDER_EDIT = ERROR_ORDER_CREATE.filter((k) => k !== 'namespace')
+
+function firstErrorTargetId(
+  errors: NamespaceFormErrors,
+  mode: 'create' | 'edit',
+): string | null {
+  const order = mode === 'create' ? ERROR_ORDER_CREATE : ERROR_ORDER_EDIT
+  for (const key of order) {
+    if (errors[key]) return ERROR_TARGET_ID[key]
+  }
+  return null
+}
+
+function scrollToError(id: string) {
+  const el = document.getElementById(id)
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  if (typeof (el as HTMLElement).focus === 'function') {
+    ;(el as HTMLElement).focus({ preventScroll: true })
+  }
+}
+
 export default function NamespaceForm({
   mode,
   formId,
@@ -36,8 +85,6 @@ export default function NamespaceForm({
   isPending,
   errorMessage,
 }: NamespaceFormProps) {
-  const tabs = tabsForMode(mode)
-  const [activeTab, setActiveTab] = useState<TabId>(tabs[0])
   const [errors, setErrors] = useState<NamespaceFormErrors>(() => ({}))
   const [submitted, setSubmitted] = useState(false)
 
@@ -77,13 +124,15 @@ export default function NamespaceForm({
     if (nextState !== state) onChange(nextState)
     const nextErrors = validateNamespaceForm(nextState, mode)
     setErrors(nextErrors)
-    const nextTab = firstErrorTab(nextErrors, mode)
-    if (nextTab) setActiveTab(nextTab)
-    if (hasErrors(nextErrors)) return
+    if (hasErrors(nextErrors)) {
+      const target = firstErrorTargetId(nextErrors, mode)
+      if (target) scrollToError(target)
+      return
+    }
     onSubmit(nextState)
   }
 
-  const tabProps = { state, errors, update, updateNumber }
+  const sectionProps = { state, errors, update, updateNumber }
 
   return (
     <Form id={formId} onSubmit={submit}>
@@ -91,24 +140,13 @@ export default function NamespaceForm({
         <Notice tone="fail" title="Save failed">{errorMessage}</Notice>
       ) : null}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[12rem_minmax(0,1fr)] gap-5 items-start">
-        <TabNav
-          tabs={tabs}
-          active={activeTab}
-          errors={errors}
-          onSelect={setActiveTab}
-        />
-
-        <div id={`ns-config-${activeTab}`} role="tabpanel" className="min-w-0">
-          {activeTab === 'identity' ? <IdentityTab {...tabProps} /> : null}
-          {activeTab === 'actions' ? (
-            <ActionsTab {...tabProps} setActions={setActions} />
-          ) : null}
-          {activeTab === 'scoring' ? <ScoringTab {...tabProps} /> : null}
-          {activeTab === 'dense' ? <DenseTab {...tabProps} /> : null}
-          {activeTab === 'trending' ? <TrendingTab {...tabProps} /> : null}
-        </div>
+      {mode === 'create' ? <IdentitySection {...sectionProps} /> : null}
+      <div id="ns-section-actions">
+        <ActionsSection {...sectionProps} setActions={setActions} />
       </div>
+      <ScoringSection {...sectionProps} />
+      <DenseSection {...sectionProps} />
+      <TrendingSection {...sectionProps} />
     </Form>
   )
 }

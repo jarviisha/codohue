@@ -3,12 +3,10 @@ import type {
   NamespaceFormState,
 } from '../configForm'
 
-export type TabId = 'identity' | 'actions' | 'scoring' | 'dense' | 'trending'
-
-// Shared props every tab receives from the orchestrator. Tabs compose their
-// own field-level setters out of `update` and `updateNumber` so each tab file
-// stays focused on its own field layout.
-export interface TabProps {
+// Shared props every section receives from the orchestrator. Sections compose
+// their own field-level setters out of `update` and `updateNumber` so each
+// file stays focused on its own field layout.
+export interface SectionProps {
   state: NamespaceFormState
   errors: NamespaceFormErrors
   update: <K extends keyof NamespaceFormState>(
