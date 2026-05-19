@@ -34,8 +34,8 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 | `bg-subtle` | `#F1F5F9` | `#151b23` | alternate bands and low-emphasis regions |
 | `bg-surface` | `#FFFFFF` | `#161b22` | panels, tables, inputs, modals |
 | `bg-surface-raised` | `#E2E8F0` | `#21262d` | hover, selected-adjacent, raised controls |
-| `border-default` | `#CBD5E1` | `#3d444d` | resting dividers and panel boundaries |
-| `border-strong` | `#94A3B8` | `#6e7681` | hover, focus-adjacent, high-importance dividers |
+| `border-default` | `#7c8a9e` | `#6e7681` | resting dividers + form-control edges (≥3:1 against bg for WCAG 1.4.11) |
+| `border-strong` | `#5b6877` | `#8b929c` | hover, focus-adjacent, high-importance dividers |
 | `text-primary` | `#0F172A` | `#f0f6fc` | dark = Primer fgColor-default |
 | `text-secondary` | `#334155` | `#d1d7e0` | default body, form labels, table body |
 | `text-muted` | `#475569` | `#aeb6c2` | metadata, hints, secondary timestamps |
@@ -44,13 +44,16 @@ Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark the
 | `accent-emphasis` | `#0866FF` | `#1f6feb` | **solid bg with white text** (Button primary) |
 | `accent-subtle` | `#DBEAFE` | `#1b2f4a` | selected / active row bg |
 | `accent-text` | `#FFFFFF` | `#FFFFFF` | text on solid accent (`bg-accent-emphasis`) |
-| `success` | `#10B981` | `#3fb950` | dark = Primer fgColor-success |
-| `warning` | `#F59E0B` | `#d29922` | dark = Primer fgColor-attention |
-| `danger`  | `#EF4444` | `#f85149` | dark = Primer fgColor-danger |
+| `success` | `#0e6c2d` | `#3fb950` | text on canvas + StatusToken; light value darkened so it clears AA on the 20% tint chip |
+| `warning` | `#7a4d00` | `#d29922` | same rationale as success |
+| `danger`  | `#b91c1c` | `#f85149` | text role; dark = Primer fgColor-danger |
+| `danger-emphasis` | `#b91c1c` | `#cf222e` | **solid bg with white text** (Button danger). Dark splits from `danger` because text-color `#f85149` fails white-on contrast |
 
 **Palette notes**
 
 - **`accent` vs `accent-emphasis`.** Dark theme splits the accent into two values because GitHub does: `accent` `#4493f8` is for accent-colored **text** on a neutral background (6.11:1 vs `bg-base` — passes AA-normal); `accent-emphasis` `#1f6feb` is for solid accent **backgrounds** with white text (4.63:1 — passes AA-normal). Using `accent` itself as a button bg with white text would fail (3.10:1). Light theme uses the same value for both because Meta Blue on white passes either way (4.82:1). Always pair `bg-accent-emphasis` with `text-accent-text`; use `text-accent` only on neutral surfaces.
+- **`danger` vs `danger-emphasis`.** Mirrors the accent pattern. Dark `danger` `#f85149` reads fine as text on canvas (5.65:1) but fails as a button background with white text (3.35:1), so `Button variant="danger"` reads `bg-danger-emphasis` (`#cf222e`, 5.36:1) instead. Light reuses the text value for the button — `#b91c1c` on white is 6.47:1 either way.
+- **Status tokens carry tinted backgrounds.** `success` / `warning` / `danger` are the *text* color inside `StatusToken`, which renders the same color at 20% opacity as the chip background. The light values are darkened from the Tailwind 500-tier defaults so the text-on-chip composite clears 4.5:1 (the chip text is 11px mono — normal-AA target).
 - **Layer pattern.** Both themes use visible surface separation: `bg-base` is the page canvas and fixed shell chrome, `bg-surface` is the content surface, `bg-subtle` is the secondary region, and `bg-surface-raised` is reserved for hover/raised states. Panels and tables use both `bg-surface` and `border-default`; they do not rely on hairline borders alone. This is intentionally less flat than the original border-only pass because the app must stay readable during long operator sessions.
 - **Text contrast tiers.** `text-primary` is for titles, IDs, numbers, and current values. `text-secondary` is the default body/readable UI text. `text-muted` is only for metadata, hints, empty-state detail, and secondary timestamps; it must not carry required form labels, table body values, or primary navigation labels.
 - **`text-muted` still passes WCAG AA-normal, but it is no longer the default small-text color.** Small text (`text-xs`, 11px mono labels, timestamps) should prefer `text-secondary` unless the information is genuinely optional.
@@ -272,7 +275,7 @@ Page files compose primitives. Don't repeat Tailwind class strings.
 
 **Content**
 
-- `Panel` (bordered surface, optional title / actions / footer). Use for **card semantics** — a distinct content block standing on the canvas.
+- `Panel` (bordered surface, optional title / actions / footer; an optional `busy` prop renders a small pulsing accent dot next to the title so pages without a manual Refresh button still surface stale-while-refetch state — pass `query.isFetching && !query.isLoading`). Use for **card semantics** — a distinct content block standing on the canvas.
 - `Section` (borderless content group, optional mono-uppercase title / actions). Use for **grouping under a heading** without nesting a bordered card — pick this for form sections so a page doesn't become a stack of rectangles.
 - `Toolbar` (filter and action rows)
 - `Table`, `Thead`, `Th`, `Tbody`, `Tr`, `Td`
@@ -398,7 +401,9 @@ Terminals snap, they don't slide. The system should feel **immediate**.
 - Color is never the only status signal. Pair with glyph + text.
 - Interactive controls have a practical hit area. Sidebar items min `h-8`; fixed shell buttons may use `Button size="xs"` (`h-6`) because they sit in the persistent top bar; page-header and toolbar controls use at least `Button size="sm"` (`h-8`).
 - Keyboard nav: tab order matches visual order. `Esc` closes modals/dropdowns. `Enter` submits forms.
-- `Modal`, `Dropdown`, `ConfirmDialog` must trap focus and restore on close.
+- `Modal`, `Dropdown`, `ConfirmDialog` trap focus and restore on close.
+- `AppShell` mounts a skip-to-content link as its first tab stop and a global error boundary around the route Outlet. The first focusable inside a Modal receives focus on open (skipping the header Close button); focus is restored to the element that opened the modal.
+- `CommandPalette` is keyboard-first: open with `Cmd+K` / `Ctrl+K`, arrow keys move the highlight inside the input, `Enter` runs the highlighted command, `Esc` closes. The TopBar Cmd+K button dispatches the same toggle so mouse operators have parity.
 
 ## 13. State Patterns
 
@@ -445,6 +450,7 @@ Decisions deliberately deferred:
 - Customizable density toggle (default density is the only density).
 - Decorative atmosphere effects (grain overlays, scanlines, vignettes). Operational tools earn identity through ergonomics, not texture.
 - **Icon system.** Every spot that would normally take an icon (sidebar active-row marker, button glyphs, theme/user/menu/close affordances, dropdown chevrons) uses a **plain text label** for now. No SVG drawing, no decorative Unicode glyphs. An `Icon` primitive lands in a separate change once the icon set is supplied; status tokens such as `[ OK ]` / `[FAIL]` stay text (brackets + letters are the designed status format, not icons).
+- **In-app dirty-state navigation guard.** `NamespaceConfigPage` and `CatalogConfigPage` show a `beforeunload` prompt on browser reload/close, but a sidebar/topbar click inside the SPA does not trigger a guard. React Router v7's `useBlocker` requires the data-router (`createBrowserRouter`) and the SPA still uses the legacy `<BrowserRouter>` + `<Routes>` pattern; the migration is deferred to a later phase.
 
 ## 16. Memorability Anchors
 

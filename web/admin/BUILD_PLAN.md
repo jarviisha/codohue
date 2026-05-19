@@ -310,8 +310,27 @@ Deferred to a later pass:
 - Customizable density toggle (default density is the only density)
 - Atmosphere overlays (grain, scanlines, vignettes) — see [DESIGN.md §15](DESIGN.md)
 
-## 9. Definition of done — Phase 0
+## 9. Definition of done
+
+### Phase 0
 
 - [x] [DESIGN.md](DESIGN.md) written and reviewed
 - [x] [BUILD_PLAN.md](BUILD_PLAN.md) written
 - [x] Anchor mockups for Overview, Catalog Items, Events (§7)
+
+### Phase 1, 2, 3 — see the per-phase TODO files
+
+Phase 1 was completed inline with this document; per-task DoD for Phases 2
+and 3 lives in their own checklist files because they are granular enough
+to need per-commit checkboxes:
+
+- Phase 2: [PHASE_2_TODO.md](PHASE_2_TODO.md) — 2.A namespaces, 2.B catalog,
+  2.C events, 2.D batch runs, 2.E trending, 2.F recommend debug, 2.G demo
+  data.
+- Phase 3: [PHASE_3_TODO.md](PHASE_3_TODO.md) — 3.1 foundation polish, 3.2
+  sweep, 3.3 release prep.
+
+Those files are the authoritative DoD tracker for the work they cover. This
+plan is not duplicated there so the two cannot drift; if a phase outcome
+materially changes, update the matching TODO file rather than re-stating
+the DoD here.
