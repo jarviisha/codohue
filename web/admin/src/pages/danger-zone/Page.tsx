@@ -13,6 +13,7 @@ import { ApiError } from '@/services/http'
 import { useResetApp, type ResetAppResponse } from '@/services/danger'
 import { useNamespaces } from '@/services/namespaces'
 import { formatNumber } from '@/utils/format'
+import { clearLastNamespace } from '@/utils/lastNamespace'
 
 // Single-purpose page for app-wide destructive actions. Currently only hosts
 // the full reset; future entries (e.g. wipe trending cache, drop dense
@@ -36,6 +37,9 @@ export default function DangerZonePage() {
       onSuccess: (data) => {
         setLastResult(data)
         setShowConfirm(false)
+        // Every namespace just got wiped — clear the sticky sidebar memory
+        // so the nav doesn't linger pointing at a deleted namespace.
+        clearLastNamespace()
       },
     })
   }

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import SidebarNavGroup from './SidebarNavGroup'
 import SidebarNavItem from './SidebarNavItem'
@@ -5,6 +6,7 @@ import StatusToken, { type StatusState } from '@/components/ui/StatusToken'
 import { namespaceNav, parsePs1 } from '@/routes/nav'
 import { paths } from '@/routes/path'
 import { probeState, useHealth } from '@/services/health'
+import { getLastNamespace, setLastNamespace } from '@/utils/lastNamespace'
 
 // Fixed left sidebar. Two sections: GLOBAL (always shown) and {namespace}
 // (shown when current route is /ns/:name/...). See DESIGN.md §3.1.
@@ -14,7 +16,16 @@ import { probeState, useHealth } from '@/services/health'
 export default function Sidebar() {
   const { pathname } = useLocation()
   const { ns } = parsePs1(pathname)
-  const activeNs = ns === '~' ? undefined : ns
+  const urlNs = ns === '~' ? undefined : ns
+  // Sticky last-namespace memory: when the URL is a global page (Health,
+  // Namespaces, Demo Data, Danger Zone) we still surface the namespace nav
+  // for whichever namespace the operator was on most recently in this tab.
+  // Items show no `aria-current` highlight on global routes, so the nav
+  // reads as "remembered context", not "active".
+  const activeNs = urlNs ?? getLastNamespace() ?? undefined
+  useEffect(() => {
+    if (urlNs) setLastNamespace(urlNs)
+  }, [urlNs])
   const { data: health, isLoading: healthLoading } = useHealth()
 
   const healthState: StatusState = healthLoading

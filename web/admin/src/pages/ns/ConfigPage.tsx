@@ -24,6 +24,7 @@ import {
 } from './configForm'
 import NamespaceForm from './namespace-form'
 import { paths } from '@/routes/path'
+import { clearLastNamespace } from '@/utils/lastNamespace'
 
 const FORM_ID = 'namespace-config-form'
 
@@ -139,6 +140,9 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
         setShowDeleteConfirm(false)
         // Release the unsaved-changes guard before leaving the page.
         setPristine(JSON.stringify(state))
+        // Drop the sticky sidebar memory so the namespace nav doesn't
+        // linger pointing at a namespace that no longer exists.
+        clearLastNamespace()
         navigate(paths.namespaces)
       },
     })
