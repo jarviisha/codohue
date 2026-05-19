@@ -140,6 +140,17 @@ export function upsertNamespace(
   )
 }
 
+export interface NamespaceDeleteResponse {
+  namespace: string
+  events_deleted: number
+}
+
+export function deleteNamespace(name: string) {
+  return http.del<NamespaceDeleteResponse>(
+    `/api/admin/v1/namespaces/${encodeURIComponent(name)}`,
+  )
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Hooks
 // ────────────────────────────────────────────────────────────────────────────
@@ -184,6 +195,18 @@ export function useUpsertNamespace() {
       qc.invalidateQueries({ queryKey: namespaceKeys.list() })
       qc.invalidateQueries({ queryKey: namespaceKeys.overview() })
       qc.invalidateQueries({ queryKey: namespaceKeys.byName(name) })
+    },
+  })
+}
+
+export function useDeleteNamespace() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (name: string) => deleteNamespace(name),
+    onSuccess: () => {
+      // Wipe every cached namespace query — list, overview, and the per-name
+      // detail keys all become stale once a namespace disappears.
+      qc.invalidateQueries({ queryKey: namespaceKeys.all })
     },
   })
 }

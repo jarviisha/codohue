@@ -21,6 +21,7 @@ import CfRunsPage from '@/pages/ns/batch-runs/CfRunsPage'
 import ReEmbedsPage from '@/pages/ns/batch-runs/ReEmbedsPage'
 import DebugPage from '@/pages/ns/debug/Page'
 import DemoDataPage from '@/pages/ns/demo-data/Page'
+import DangerZonePage from '@/pages/danger-zone/Page'
 import NotFoundPage from '@/pages/not-found/Page'
 
 // Kitchen sink is a dev-only design surface. The ternary keeps the dynamic
@@ -56,6 +57,7 @@ export default function AppRoutes() {
         ) : null}
         <Route path="namespaces" element={<NamespacesListPage />} />
         <Route path="namespaces/new" element={<NamespaceCreatePage />} />
+        <Route path="danger-zone" element={<DangerZonePage />} />
         <Route path="ns/:name" element={<NamespaceLayout />}>
           <Route index element={<OverviewPage />} />
           <Route path="config" element={<ConfigPage />} />

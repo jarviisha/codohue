@@ -7,10 +7,15 @@ import {
   Notice,
   PageHeader,
   PageShell,
+  Panel,
   useRegisterCommand,
 } from '@/components/ui'
 import { ApiError } from '@/services/http'
-import { useNamespace, useUpsertNamespace } from '@/services/namespaces'
+import {
+  useDeleteNamespace,
+  useNamespace,
+  useUpsertNamespace,
+} from '@/services/namespaces'
 import type { NamespaceConfig } from '@/services/namespaces'
 import {
   fromNamespaceConfig,
@@ -58,6 +63,7 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
   const { name = '' } = useParams<{ name: string }>()
   const navigate = useNavigate()
   const upsert = useUpsertNamespace()
+  const deleteNs = useDeleteNamespace()
 
   const [state, setState] = useState<NamespaceFormState>(() =>
     fromNamespaceConfig(config),
@@ -68,6 +74,7 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
     JSON.stringify(fromNamespaceConfig(config)),
   )
   const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
   const isDirty = JSON.stringify(state) !== pristine
 
@@ -119,6 +126,24 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
         ? upsert.error.message
         : undefined
 
+  const deleteErrorMessage =
+    deleteNs.error instanceof ApiError
+      ? deleteNs.error.message
+      : deleteNs.error instanceof Error
+        ? deleteNs.error.message
+        : undefined
+
+  const handleDelete = () => {
+    deleteNs.mutate(name, {
+      onSuccess: () => {
+        setShowDeleteConfirm(false)
+        // Release the unsaved-changes guard before leaving the page.
+        setPristine(JSON.stringify(state))
+        navigate(paths.namespaces)
+      },
+    })
+  }
+
   return (
     <PageShell>
       <PageHeader
@@ -159,6 +184,38 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
         errorMessage={errorMessage}
       />
 
+      <Panel
+        title="danger zone"
+        actions={
+          <Button
+            variant="danger"
+            size="sm"
+            loading={deleteNs.isPending}
+            disabled={deleteNs.isPending}
+            onClick={() => setShowDeleteConfirm(true)}
+          >
+            Delete namespace
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-3 text-sm">
+          <p className="text-secondary">
+            Permanently removes namespace{' '}
+            <span className="font-mono text-primary">{name}</span> and every trace
+            of its data: events, catalog items, batch run logs, id mappings,
+            trending caches, recommendation caches, and Qdrant collections.
+          </p>
+          <p className="text-muted">This cannot be undone.</p>
+        </div>
+        {deleteErrorMessage ? (
+          <div className="mt-3">
+            <Notice tone="fail" title="Delete failed" onDismiss={() => deleteNs.reset()}>
+              {deleteErrorMessage}
+            </Notice>
+          </div>
+        ) : null}
+      </Panel>
+
       <ConfirmDialog
         open={showCancelConfirm}
         title="Discard unsaved changes?"
@@ -171,6 +228,18 @@ function NamespaceConfigEditor({ config }: { config: NamespaceConfig }) {
           navigate(paths.ns(name))
         }}
         onCancel={() => setShowCancelConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title={`Delete namespace ${name}?`}
+        description="This removes the namespace from postgres, redis, and qdrant. There is no recovery."
+        confirmLabel="Delete namespace"
+        destructive
+        loading={deleteNs.isPending}
+        requireTyped={name}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
       />
     </PageShell>
   )
