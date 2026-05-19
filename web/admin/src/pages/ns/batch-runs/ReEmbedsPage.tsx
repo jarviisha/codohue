@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Button,
@@ -19,8 +20,9 @@ import {
   useRegisterCommand,
 } from '@/components/ui'
 import { useBatchRunsList } from '@/services/batchRuns'
-import type { BatchRunStatusFilter } from '@/services/batchRuns'
+import type { BatchRunLog, BatchRunStatusFilter } from '@/services/batchRuns'
 import { formatNumber, formatRelative } from '@/utils/format'
+import BatchRunDetailModal from './DetailModal'
 import { formatPhaseDuration, runStatusLabel, runStatusToken } from './helpers'
 import { useRunsFilter } from './useRunsFilter'
 
@@ -49,6 +51,7 @@ export default function ReEmbedsPage() {
     limit: filter.limit,
     offset: filter.offset,
   })
+  const [selected, setSelected] = useState<BatchRunLog | null>(null)
 
   useRegisterCommand(
     `ns.${name}.batchRuns.reembed.refresh`,
@@ -137,7 +140,19 @@ export default function ReEmbedsPage() {
                       ? row.error_message
                       : ''
                   return (
-                    <Tr key={row.id}>
+                    <Tr
+                      key={row.id}
+                      role="button"
+                      tabIndex={0}
+                      className="cursor-pointer"
+                      onClick={() => setSelected(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          setSelected(row)
+                        }
+                      }}
+                    >
                       <Td>
                         <StatusToken
                           state={runStatusToken(row)}
@@ -169,6 +184,8 @@ export default function ReEmbedsPage() {
           </>
         )}
       </div>
+
+      <BatchRunDetailModal run={selected} onClose={() => setSelected(null)} />
     </Panel>
   )
 }

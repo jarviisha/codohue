@@ -48,6 +48,11 @@ export interface BatchRunLog {
   phase3_duration_ms?: number | null
   phase3_items?: number | null
   phase3_error?: string | null
+
+  // Catalog re-embed runs only. Records which (strategy_id, strategy_version)
+  // pair the run was kicked off against; null for cron / manual CF rows.
+  target_strategy_id?: string | null
+  target_strategy_version?: string | null
 }
 
 export interface BatchRunStats {

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   Button,
@@ -22,8 +23,9 @@ import {
   useBatchRunsList,
   useTriggerBatchRun,
 } from '@/services/batchRuns'
-import type { BatchRunStatusFilter } from '@/services/batchRuns'
+import type { BatchRunLog, BatchRunStatusFilter } from '@/services/batchRuns'
 import { formatNumber, formatRelative } from '@/utils/format'
+import BatchRunDetailModal from './DetailModal'
 import {
   formatPhaseDuration,
   phaseToken,
@@ -52,6 +54,7 @@ export default function CfRunsPage() {
     offset: filter.offset,
   })
   const triggerBatch = useTriggerBatchRun()
+  const [selected, setSelected] = useState<BatchRunLog | null>(null)
 
   useRegisterCommand(
     `ns.${name}.batchRuns.cf.refresh`,
@@ -162,7 +165,19 @@ export default function CfRunsPage() {
               </Thead>
               <Tbody>
                 {rows.map((row) => (
-                  <Tr key={row.id}>
+                  <Tr
+                    key={row.id}
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer"
+                    onClick={() => setSelected(row)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        setSelected(row)
+                      }
+                    }}
+                  >
                     <Td>
                       <StatusToken
                         state={runStatusToken(row)}
@@ -210,6 +225,8 @@ export default function CfRunsPage() {
           </>
         )}
       </div>
+
+      <BatchRunDetailModal run={selected} onClose={() => setSelected(null)} />
     </Panel>
   )
 }
