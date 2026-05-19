@@ -115,10 +115,10 @@ Last-mile work before declaring the SPA shippable. Land 3.2 first — release pr
   - Measured 2026-05-19: `dist/assets/index-*.js` = 372.3 kB raw / **111.0 kB gzip** (26% under the 150 kB gzip budget; ~14 kB raw smaller than the Phase 2 baseline thanks to kitchen-sink gating in 3.1.6).
   - No route-split applied — the budget has comfortable headroom. If a future surface (charts, editor, viz) pushes us close, the next candidates in order are `DebugPage` (operator-only), `CatalogItemDetailModal` (modal-route, on-demand), the batch-runs pages.
 
-- [ ] **3.3.2 Font payload verification**
-  - The Google Fonts CSS2 URL in [index.html](index.html) currently carries no `subset` param — the API splits faces by `unicode-range` declarations in the response CSS. Open the actual CSS response and the network panel to see which subsets ship per family (commonly latin + latin-ext + cyrillic + greek + vietnamese).
-  - The UI is English-only ([BUILD_PLAN.md §8](BUILD_PLAN.md)), so anything beyond latin + latin-ext is dead weight. If extra subsets ship, narrow the URL with `&text=` for the static glyphs we actually use, or pin a subset via a different transport, and document the decision.
-  - **Done when:** font payload is the minimum needed for English UI text + monospace digits.
+- [x] **3.3.2 Font payload verification**
+  - Measured 2026-05-19. The CSS2 response (15 kB raw, 0.9 kB gzip) declares six `unicode-range` blocks per font/weight: latin, latin-ext, cyrillic, cyrillic-ext, greek, vietnamese. Per-subset woff2: latin **44.6 kB**, latin-ext **30.2 kB**, cyrillic 28.8, cyrillic-ext 23.0, greek 19.0, vietnamese 12.9.
+  - Browser smart-loading via `unicode-range` only fetches woff2 files whose ranges contain rendered glyphs. An English-only operator pulls **only latin** (6 weights × ~45 kB ≈ 270 kB), or latin + latin-ext if the page renders Eastern-European accents (~450 kB worst case).
+  - **Decision: keep Google Fonts, no narrowing.** `&text=` is unsafe because admin UI surfaces dynamic user content (namespace names, object_ids). Self-hosting a subset would save ~190 kB on first load but adds binary commits + a glyph-subsetting build step — disproportionate for an internal tool with `display=swap` (no FOUT) and CDN-cached forever after first visit. Revisit if the SPA is air-gapped or first-load latency becomes an operator complaint.
 
 - [ ] **3.3.3 CI verifies the embedded build sequence**
   - The `make build-admin` target only runs `go build ./cmd/admin` — no SPA build, no `-tags=embedui`. The only path that produces a real admin binary is [Dockerfile](Dockerfile): `npm ci --no-audit --no-progress` → `npm run build` → `go build -tags=embedui ./cmd/admin`.
