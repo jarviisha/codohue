@@ -16,6 +16,6 @@ export const paths = {
   nsBatchRuns: (name: string) => `/ns/${name}/batch-runs`,
   nsBatchRunsReEmbeds: (name: string) => `/ns/${name}/batch-runs/re-embeds`,
   nsDebug: (name: string) => `/ns/${name}/debug`,
-  nsDemoData: (name: string) => `/ns/${name}/demo-data`,
+  demoData: '/demo',
   dangerZone: '/danger-zone',
 } as const

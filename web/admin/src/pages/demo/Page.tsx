@@ -17,8 +17,8 @@ import { namespaceKeys } from '@/services/namespaces'
 import { paths } from '@/routes/path'
 import { formatNumber } from '@/utils/format'
 
-// Per PHASE_2_TODO §2.G the surface is tiny — two endpoints — so the request
-// functions live inline rather than getting their own services/demoData.ts.
+// Two-endpoint surface (seed + clear) — the request functions live inline
+// rather than getting their own services/demoData.ts.
 
 interface DemoDatasetResponse {
   namespace: string
@@ -43,8 +43,6 @@ function clearDemoData(): Promise<DemoDatasetResponse> {
 
 // Seeds (or wipes) the bundled "demo" namespace + events + catalog items so
 // fresh installs have realistic data to explore the rest of the console.
-// Both endpoints operate on a fixed namespace name regardless of which
-// /ns/:name page surfaced the action.
 export default function DemoDataPage() {
   const qc = useQueryClient()
   const [showSeedConfirm, setShowSeedConfirm] = useState(false)
@@ -122,10 +120,6 @@ export default function DemoDataPage() {
             Seeds the <span className="font-mono text-primary">demo</span> namespace with sample
             events and catalog items so fresh installs have realistic data to explore. Clearing
             removes all rows the seed inserted across postgres, redis, and qdrant.
-          </p>
-          <p className="text-muted">
-            Actions operate on the bundled <span className="font-mono">demo</span> namespace —
-            the namespace surfaced in the URL is informational only.
           </p>
         </div>
       </Panel>

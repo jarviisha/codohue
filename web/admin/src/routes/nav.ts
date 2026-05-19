@@ -14,6 +14,7 @@ export interface NavItem {
 export const globalNav: NavItem[] = [
   { label: 'Health', to: paths.health, end: true },
   { label: 'Namespaces', to: paths.namespaces, end: true },
+  { label: 'Demo Data', to: paths.demoData, end: true },
   { label: 'Danger Zone', to: paths.dangerZone, end: true },
 ]
 
@@ -26,6 +27,5 @@ export function namespaceNav(name: string): NavItem[] {
     { label: 'Trending',   to: paths.nsTrending(name) },
     { label: 'Batch Runs', to: paths.nsBatchRuns(name) },
     { label: 'Debug',      to: paths.nsDebug(name) },
-    { label: 'Demo Data',  to: paths.nsDemoData(name) },
   ]
 }

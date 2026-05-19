@@ -106,7 +106,8 @@ test('routes/index.tsx still declares every documented route path', () => {
     'batch-runs',
     're-embeds',
     'debug',
-    'demo-data',
+    'demo',
+    'danger-zone',
     '*',
   ]
   const declared = new Set(parsed.paths)
@@ -132,7 +133,8 @@ const EXPECTED_BUILDERS = [
   '`/ns/${name}/trending`',
   '`/ns/${name}/batch-runs`',
   '`/ns/${name}/debug`',
-  '`/ns/${name}/demo-data`',
+  "demoData: '/demo'",
+  "dangerZone: '/danger-zone'",
 ]
 
 test('path.ts exposes every URL builder', () => {

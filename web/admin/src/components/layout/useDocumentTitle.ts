@@ -23,6 +23,8 @@ const TITLE_ROUTES: TitleRoute[] = [
   { pattern: '/login', title: 'Login' },
   { pattern: '/namespaces/new', title: 'Create namespace' },
   { pattern: '/namespaces', title: 'Namespaces' },
+  { pattern: '/demo', title: 'Demo data' },
+  { pattern: '/danger-zone', title: 'Danger zone' },
   ...(import.meta.env.DEV
     ? [{ pattern: '/_kitchen-sink', title: 'Kitchen sink' } as TitleRoute]
     : []),
@@ -35,7 +37,6 @@ const TITLE_ROUTES: TitleRoute[] = [
   { pattern: '/ns/:name/batch-runs/re-embeds', title: ({ name }) => withNs('Re-embeds', name) },
   { pattern: '/ns/:name/batch-runs', title: ({ name }) => withNs('Batch runs', name) },
   { pattern: '/ns/:name/debug', title: ({ name }) => withNs('Recommend debug', name) },
-  { pattern: '/ns/:name/demo-data', title: ({ name }) => withNs('Demo data', name) },
   { pattern: '/ns/:name/config', title: ({ name }) => withNs('Config', name) },
   { pattern: '/ns/:name', title: ({ name }) => withNs('Overview', name) },
   { pattern: '/', title: 'Health' },

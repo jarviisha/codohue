@@ -48,6 +48,9 @@ export default function Sidebar() {
           <SidebarNavItem to={paths.namespaces} end>
             Namespaces
           </SidebarNavItem>
+          <SidebarNavItem to={paths.demoData} end>
+            Demo Data
+          </SidebarNavItem>
           <SidebarNavItem to={paths.dangerZone} end>
             Danger Zone
           </SidebarNavItem>

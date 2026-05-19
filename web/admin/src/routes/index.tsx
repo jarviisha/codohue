@@ -20,7 +20,7 @@ import BatchRunsLayout from '@/pages/ns/batch-runs/BatchRunsLayout'
 import CfRunsPage from '@/pages/ns/batch-runs/CfRunsPage'
 import ReEmbedsPage from '@/pages/ns/batch-runs/ReEmbedsPage'
 import DebugPage from '@/pages/ns/debug/Page'
-import DemoDataPage from '@/pages/ns/demo-data/Page'
+import DemoDataPage from '@/pages/demo/Page'
 import DangerZonePage from '@/pages/danger-zone/Page'
 import NotFoundPage from '@/pages/not-found/Page'
 
@@ -57,6 +57,7 @@ export default function AppRoutes() {
         ) : null}
         <Route path="namespaces" element={<NamespacesListPage />} />
         <Route path="namespaces/new" element={<NamespaceCreatePage />} />
+        <Route path="demo" element={<DemoDataPage />} />
         <Route path="danger-zone" element={<DangerZonePage />} />
         <Route path="ns/:name" element={<NamespaceLayout />}>
           <Route index element={<OverviewPage />} />
@@ -75,7 +76,6 @@ export default function AppRoutes() {
             <Route path="re-embeds" element={<ReEmbedsPage />} />
           </Route>
           <Route path="debug" element={<DebugPage />} />
-          <Route path="demo-data" element={<DemoDataPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
