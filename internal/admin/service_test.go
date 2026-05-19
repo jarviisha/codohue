@@ -37,8 +37,13 @@ type fakeRepo struct {
 	seededCatalogNamespace string
 	seedCatalogErr         error
 	clearNamespace         string
+	clearNamespaces        []string // every call appended in order; used by ResetApp/DeleteNamespace tests
 	clearDeleted           int
 	clearErr               error
+	truncateCalled         int
+	truncateEvents         int
+	truncateNamespaces     int
+	truncateErr            error
 
 	// US3 catalog operator endpoints
 	runningReembed    *BatchRunLog
@@ -138,7 +143,13 @@ func (f *fakeRepo) SeedDemoCatalogItems(_ context.Context, namespace string, ite
 
 func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {
 	f.clearNamespace = namespace
+	f.clearNamespaces = append(f.clearNamespaces, namespace)
 	return f.clearDeleted, f.clearErr
+}
+
+func (f *fakeRepo) TruncateAllNamespaceData(_ context.Context) (eventsDeleted, namespacesDeleted int, err error) {
+	f.truncateCalled++
+	return f.truncateEvents, f.truncateNamespaces, f.truncateErr
 }
 
 func (f *fakeRepo) FindLatestReembedRun(_ context.Context, _ string) (*BatchRunLog, error) {
@@ -670,5 +681,126 @@ func TestInjectEvent_ProxyError(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error on non-202, got nil")
+	}
+}
+
+func TestDeleteNamespace_Success(t *testing.T) {
+	repo := &fakeRepo{
+		namespace:    &NamespaceConfig{Namespace: "ns1"},
+		clearDeleted: 42,
+	}
+	svc := newTestService(repo, "", "test-key")
+
+	resp, err := svc.DeleteNamespace(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("DeleteNamespace error: %v", err)
+	}
+	if resp == nil {
+		t.Fatal("expected non-nil response, got nil")
+	}
+	if resp.Namespace != "ns1" {
+		t.Fatalf("Namespace=%q, want ns1", resp.Namespace)
+	}
+	if resp.EventsDeleted != 42 {
+		t.Fatalf("EventsDeleted=%d, want 42", resp.EventsDeleted)
+	}
+	if len(repo.clearNamespaces) != 1 || repo.clearNamespaces[0] != "ns1" {
+		t.Fatalf("clearNamespaces=%v, want [ns1]", repo.clearNamespaces)
+	}
+}
+
+func TestDeleteNamespace_NotFound(t *testing.T) {
+	repo := &fakeRepo{namespace: nil} // GetNamespace returns nil → 404 path
+	svc := newTestService(repo, "", "test-key")
+
+	resp, err := svc.DeleteNamespace(context.Background(), "missing")
+	if err != nil {
+		t.Fatalf("DeleteNamespace error: %v", err)
+	}
+	if resp != nil {
+		t.Fatalf("expected nil response for missing namespace, got %+v", resp)
+	}
+	if len(repo.clearNamespaces) != 0 {
+		t.Fatalf("clear should not run when namespace missing, called for %v", repo.clearNamespaces)
+	}
+}
+
+func TestResetApp_TruncatesEverythingInOneCall(t *testing.T) {
+	repo := &fakeRepo{
+		namespaces: []NamespaceConfig{
+			{Namespace: "alpha"},
+			{Namespace: "beta"},
+			{Namespace: "gamma"},
+		},
+		// TRUNCATE returns the bulk counts; per-namespace loop is no longer used.
+		truncateEvents:     21,
+		truncateNamespaces: 3,
+	}
+	svc := newTestService(repo, "", "test-key")
+
+	resp, err := svc.ResetApp(context.Background())
+	if err != nil {
+		t.Fatalf("ResetApp error: %v", err)
+	}
+	if repo.truncateCalled != 1 {
+		t.Fatalf("TruncateAllNamespaceData called %d times, want 1", repo.truncateCalled)
+	}
+	// The per-namespace ClearNamespaceData path must NOT be invoked — that
+	// was the source of the orphan-row bug.
+	if len(repo.clearNamespaces) != 0 {
+		t.Fatalf("ClearNamespaceData should not be called by ResetApp; got %v", repo.clearNamespaces)
+	}
+	if resp.NamespacesDeleted != 3 {
+		t.Fatalf("NamespacesDeleted=%d, want 3", resp.NamespacesDeleted)
+	}
+	if resp.EventsDeleted != 21 {
+		t.Fatalf("EventsDeleted=%d, want 21", resp.EventsDeleted)
+	}
+	want := []string{"alpha", "beta", "gamma"}
+	if len(resp.Namespaces) != len(want) {
+		t.Fatalf("Namespaces=%v, want %v", resp.Namespaces, want)
+	}
+	for i, ns := range want {
+		if resp.Namespaces[i] != ns {
+			t.Fatalf("Namespaces[%d]=%q, want %q", i, resp.Namespaces[i], ns)
+		}
+	}
+}
+
+// TestResetApp_TruncatesEvenWhenConfigsTableIsAlreadyEmpty guards against
+// the original bug: ResetApp must still wipe events/id_mappings/batch_run_logs
+// when namespace_configs has no rows (orphan data from a partial previous
+// delete).
+func TestResetApp_TruncatesEvenWhenConfigsTableIsAlreadyEmpty(t *testing.T) {
+	repo := &fakeRepo{
+		namespaces:     nil, // no configs left — only orphan rows in other tables
+		truncateEvents: 15,  // but events table still has 15 rows
+	}
+	svc := newTestService(repo, "", "test-key")
+
+	resp, err := svc.ResetApp(context.Background())
+	if err != nil {
+		t.Fatalf("ResetApp error: %v", err)
+	}
+	if repo.truncateCalled != 1 {
+		t.Fatalf("TruncateAllNamespaceData must run even with zero namespaces; called %d times", repo.truncateCalled)
+	}
+	if resp.EventsDeleted != 15 {
+		t.Fatalf("EventsDeleted=%d, want 15", resp.EventsDeleted)
+	}
+	if resp.Namespaces == nil {
+		t.Fatal("Namespaces slice should be non-nil even when empty (JSON should serialise as [])")
+	}
+}
+
+func TestResetApp_PropagatesTruncateError(t *testing.T) {
+	repo := &fakeRepo{
+		namespaces:  []NamespaceConfig{{Namespace: "alpha"}},
+		truncateErr: errors.New("postgres dead"),
+	}
+	svc := newTestService(repo, "", "test-key")
+
+	if _, err := svc.ResetApp(context.Background()); err == nil {
+		t.Fatal("expected error from ResetApp when TruncateAllNamespaceData fails, got nil")
 	}
 }

@@ -29,6 +29,8 @@ type adminSvc interface {
 	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
 	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
+	DeleteNamespace(ctx context.Context, namespace string) (*NamespaceDeleteResponse, error)
+	ResetApp(ctx context.Context) (*ResetAppResponse, error)
 	GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error)
 	UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
 	TriggerReEmbed(ctx context.Context, namespace string) (*CatalogReEmbedResponse, error)
@@ -525,4 +527,50 @@ func (h *Handler) DeleteDemoData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// DeleteNamespace handles DELETE /api/admin/v1/namespaces/{ns} — wipes the
+// namespace and every trace of its data across postgres, redis, and qdrant.
+// Returns 200 with the summary body, or 404 when the namespace does not
+// exist.
+func (h *Handler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
+		return
+	}
+
+	resp, err := h.svc.DeleteNamespace(r.Context(), ns)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not delete namespace")
+		return
+	}
+	if resp == nil {
+		httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+// ResetApp handles POST /api/admin/v1/reset — drops every namespace and its
+// data. The body must contain {"confirm":"RESET"} or the request is rejected
+// with 400 so a misclick or stray curl can't wipe the install.
+func (h *Handler) ResetApp(w http.ResponseWriter, r *http.Request) {
+	var req ResetAppRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+	if req.Confirm != "RESET" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_confirm",
+			`body must contain {"confirm":"RESET"}`)
+		return
+	}
+
+	resp, err := h.svc.ResetApp(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not reset app")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, resp)
 }

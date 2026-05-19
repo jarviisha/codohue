@@ -462,6 +462,43 @@ func (r *Repository) SeedDemoCatalogItems(ctx context.Context, namespace string,
 	return len(items), nil
 }
 
+// TruncateAllNamespaceData wipes every namespace-scoped row from the five
+// data tables in one transaction, regardless of whether a matching
+// namespace_configs row still exists. Used by the app-wide reset so orphan
+// rows (events / id_mappings / batch_run_logs for a namespace whose config
+// row was deleted earlier) also get cleaned up. Returns (events_deleted,
+// namespaces_deleted).
+func (r *Repository) TruncateAllNamespaceData(ctx context.Context) (eventsDeleted, namespacesDeleted int, err error) {
+	tx, txErr := r.db.Begin(ctx)
+	if txErr != nil {
+		return 0, 0, fmt.Errorf("begin reset tx: %w", txErr)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // commit path below owns successful completion
+
+	eventsTag, execErr := tx.Exec(ctx, `DELETE FROM events`)
+	if execErr != nil {
+		return 0, 0, fmt.Errorf("delete events: %w", execErr)
+	}
+	if _, execErr := tx.Exec(ctx, `DELETE FROM catalog_items`); execErr != nil {
+		return 0, 0, fmt.Errorf("delete catalog_items: %w", execErr)
+	}
+	if _, execErr := tx.Exec(ctx, `DELETE FROM batch_run_logs`); execErr != nil {
+		return 0, 0, fmt.Errorf("delete batch_run_logs: %w", execErr)
+	}
+	if _, execErr := tx.Exec(ctx, `DELETE FROM id_mappings`); execErr != nil {
+		return 0, 0, fmt.Errorf("delete id_mappings: %w", execErr)
+	}
+	nsTag, execErr := tx.Exec(ctx, `DELETE FROM namespace_configs`)
+	if execErr != nil {
+		return 0, 0, fmt.Errorf("delete namespace_configs: %w", execErr)
+	}
+
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return 0, 0, fmt.Errorf("commit reset tx: %w", commitErr)
+	}
+	return int(eventsTag.RowsAffected()), int(nsTag.RowsAffected()), nil
+}
+
 // ClearNamespaceData removes all PostgreSQL-owned state for a namespace.
 func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (int, error) {
 	tx, err := r.db.Begin(ctx)

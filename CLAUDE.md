@@ -194,6 +194,8 @@ Authentication models sessions as a resource. Login = create session; logout = d
 | `GET`    | `/api/admin/v1/namespaces`                                          | session       | List all namespace configs from PostgreSQL (`?include=overview`)        |
 | `GET`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Get single namespace config                                             |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Create/update namespace; calls `nsconfig.Service` directly (200 / 201)  |
+| `DELETE` | `/api/admin/v1/namespaces/{ns}`                                     | session       | Wipe namespace + every trace of its data across postgres, redis, qdrant (200 with summary; 404 when missing) |
+| `POST`   | `/api/admin/v1/reset`                                               | session       | App-wide reset — drops every namespace; requires body `{"confirm":"RESET"}` (400 otherwise) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Get catalog auto-embedding config + available strategies + backlog snapshot |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Enable / update / disable catalog auto-embedding for a namespace (400 on dim mismatch with both dims in body; 503 when feature unwired) |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                    | session       | Trigger a namespace-wide re-embed (202 + `Location`); 409 when one is already running; 503 when feature unwired |

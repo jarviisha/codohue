@@ -31,6 +31,8 @@ func TestNewAdminRouter_RegistersCatalogRoutes(t *testing.T) {
 		{http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/items/1/redrive"},
 		{http.MethodPost, "/api/admin/v1/namespaces/ns/catalog/items/redrive-deadletter"},
 		{http.MethodDelete, "/api/admin/v1/namespaces/ns/catalog/items/1"},
+		{http.MethodDelete, "/api/admin/v1/namespaces/ns"},
+		{http.MethodPost, "/api/admin/v1/reset"},
 	}
 
 	for _, tc := range cases {

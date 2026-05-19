@@ -42,6 +42,10 @@ func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
+		r.Delete("/api/admin/v1/namespaces/{ns}", h.DeleteNamespace)
+
+		// App-wide reset (danger zone).
+		r.Post("/api/admin/v1/reset", h.ResetApp)
 
 		// Catalog auto-embedding (feature 004) — per-namespace config.
 		r.Get("/api/admin/v1/namespaces/{ns}/catalog", h.GetCatalogConfig)

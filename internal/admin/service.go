@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type adminRepo interface {
 	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
 	SeedDemoCatalogItems(ctx context.Context, namespace string, items []demoCatalogItem, now time.Time) (int, error)
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
+	TruncateAllNamespaceData(ctx context.Context) (eventsDeleted, namespacesDeleted int, err error)
 
 	// Catalog re-embed orchestration (US3).
 	FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
@@ -812,32 +814,169 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 
 // DeleteDemoData removes the bundled demo namespace and its generated data.
 func (s *Service) DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error) {
-	deleted, err := s.repo.ClearNamespaceData(ctx, demoNamespace)
+	deleted, err := s.clearNamespaceEverywhere(ctx, demoNamespace)
 	if err != nil {
-		return nil, fmt.Errorf("clear demo postgres data: %w", err)
+		return nil, err
+	}
+	return &DemoDatasetResponse{Namespace: demoNamespace, EventsDeleted: deleted}, nil
+}
+
+// DeleteNamespace removes a namespace and every trace of its data from
+// PostgreSQL, Redis, and Qdrant. Returns (nil, nil) when the namespace does
+// not exist so the handler can map that to 404.
+func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*NamespaceDeleteResponse, error) {
+	cfg, err := s.repo.GetNamespace(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace: %w", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+
+	deleted, err := s.clearNamespaceEverywhere(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return &NamespaceDeleteResponse{Namespace: namespace, EventsDeleted: deleted}, nil
+}
+
+// ResetApp wipes every namespace and its associated data across PostgreSQL,
+// Redis, and Qdrant. The caller is expected to gate this on a typed
+// confirmation string at the HTTP layer.
+//
+// Unlike DeleteNamespace's per-namespace loop, this path TRUNCATEs all
+// data tables and SCANs every namespace-prefixed key / Qdrant collection.
+// That way orphan rows whose namespace_configs row was already gone (e.g.
+// from a previous partial delete) also get cleaned up.
+func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
+	// Snapshot the namespace list BEFORE truncating so the response body
+	// can echo which namespaces were wiped.
+	namespaces, err := s.repo.ListNamespaces(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list namespaces: %w", err)
+	}
+	names := make([]string, 0, len(namespaces))
+	for _, ns := range namespaces {
+		names = append(names, ns.Namespace)
+	}
+
+	eventsDeleted, nsDeleted, err := s.repo.TruncateAllNamespaceData(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("truncate postgres data: %w", err)
 	}
 
 	if s.redisClient != nil {
-		if err := s.clearDemoRedis(ctx); err != nil {
-			return nil, fmt.Errorf("clear demo redis data: %w", err)
+		if err := s.flushAllNamespaceRedis(ctx); err != nil {
+			return nil, fmt.Errorf("flush redis: %w", err)
 		}
 	}
 
 	if s.qdrantClient != nil {
-		if err := s.clearDemoQdrant(ctx); err != nil {
-			return nil, fmt.Errorf("clear demo qdrant data: %w", err)
+		if err := s.flushAllNamespaceQdrant(ctx); err != nil {
+			return nil, fmt.Errorf("flush qdrant: %w", err)
 		}
 	}
 
-	return &DemoDatasetResponse{Namespace: demoNamespace, EventsDeleted: deleted}, nil
+	return &ResetAppResponse{
+		NamespacesDeleted: nsDeleted,
+		EventsDeleted:     eventsDeleted,
+		Namespaces:        names,
+	}, nil
 }
 
-func (s *Service) clearDemoRedis(ctx context.Context) error {
-	keys := []string{
-		"trending:" + demoNamespace,
-		"catalog:embed:" + demoNamespace,
+// flushAllNamespaceRedis scans every namespace-prefixed key across the three
+// known patterns and deletes them. Catches orphan keys whose namespace no
+// longer has a config row.
+func (s *Service) flushAllNamespaceRedis(ctx context.Context) error {
+	for _, pattern := range []string{"trending:*", "catalog:embed:*", "rec:*"} {
+		iter := s.redisClient.Scan(ctx, 0, pattern, 500).Iterator()
+		batch := make([]string, 0, 500)
+		flush := func() error {
+			if len(batch) == 0 {
+				return nil
+			}
+			if err := s.redisClient.Del(ctx, batch...).Err(); err != nil {
+				return fmt.Errorf("delete redis keys for %q: %w", pattern, err)
+			}
+			batch = batch[:0]
+			return nil
+		}
+		for iter.Next(ctx) {
+			batch = append(batch, iter.Val())
+			if len(batch) >= 500 {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+		if err := iter.Err(); err != nil {
+			return fmt.Errorf("scan redis keys for %q: %w", pattern, err)
+		}
+		if err := flush(); err != nil {
+			return err
+		}
 	}
-	iter := s.redisClient.Scan(ctx, 0, "rec:"+demoNamespace+":*", 100).Iterator()
+	return nil
+}
+
+// qdrantCollectionSuffixes enumerates the four per-namespace collection
+// names Codohue creates. flushAllNamespaceQdrant only drops collections
+// matching one of these suffixes so a Qdrant instance shared with other
+// applications is left untouched.
+var qdrantCollectionSuffixes = []string{
+	"_subjects_dense",
+	"_objects_dense",
+	"_subjects",
+	"_objects",
+}
+
+func (s *Service) flushAllNamespaceQdrant(ctx context.Context) error {
+	collections, err := s.qdrantClient.ListCollections(ctx)
+	if err != nil {
+		return fmt.Errorf("list collections: %w", err)
+	}
+	for _, name := range collections {
+		for _, suffix := range qdrantCollectionSuffixes {
+			if strings.HasSuffix(name, suffix) {
+				if err := s.qdrantClient.DeleteCollection(ctx, name); err != nil {
+					return fmt.Errorf("delete collection %q: %w", name, err)
+				}
+				break
+			}
+		}
+	}
+	return nil
+}
+
+// clearNamespaceEverywhere removes a single namespace from PostgreSQL, Redis,
+// and Qdrant. Shared by demo cleanup, single-namespace deletion, and the
+// app-wide reset. Returns the number of events removed from Postgres.
+func (s *Service) clearNamespaceEverywhere(ctx context.Context, namespace string) (int, error) {
+	deleted, err := s.repo.ClearNamespaceData(ctx, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("clear postgres data for %q: %w", namespace, err)
+	}
+
+	if s.redisClient != nil {
+		if err := s.clearNamespaceRedis(ctx, namespace); err != nil {
+			return 0, fmt.Errorf("clear redis data for %q: %w", namespace, err)
+		}
+	}
+
+	if s.qdrantClient != nil {
+		if err := s.clearNamespaceQdrant(ctx, namespace); err != nil {
+			return 0, fmt.Errorf("clear qdrant data for %q: %w", namespace, err)
+		}
+	}
+	return deleted, nil
+}
+
+func (s *Service) clearNamespaceRedis(ctx context.Context, namespace string) error {
+	keys := []string{
+		"trending:" + namespace,
+		"catalog:embed:" + namespace,
+	}
+	iter := s.redisClient.Scan(ctx, 0, "rec:"+namespace+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
 	}
@@ -853,12 +992,12 @@ func (s *Service) clearDemoRedis(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) clearDemoQdrant(ctx context.Context) error {
+func (s *Service) clearNamespaceQdrant(ctx context.Context, namespace string) error {
 	for _, collection := range []string{
-		demoNamespace + "_subjects",
-		demoNamespace + "_objects",
-		demoNamespace + "_subjects_dense",
-		demoNamespace + "_objects_dense",
+		namespace + "_subjects",
+		namespace + "_objects",
+		namespace + "_subjects_dense",
+		namespace + "_objects_dense",
 	} {
 		exists, err := s.qdrantClient.CollectionExists(ctx, collection)
 		if err != nil {

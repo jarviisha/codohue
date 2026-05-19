@@ -75,6 +75,14 @@ type fakeSvc struct {
 	bulkRedriveNS     string
 	deleteItemErr     error
 	deleteItemID      int64
+
+	// Danger-zone operations
+	deleteNSResp *NamespaceDeleteResponse
+	deleteNSErr  error
+	deleteNSCall string
+	resetResp    *ResetAppResponse
+	resetErr     error
+	resetCalls   int
 }
 
 func (f *fakeSvc) GetHealth(_ context.Context) (*HealthResponse, int, error) {
@@ -178,6 +186,16 @@ func (f *fakeSvc) BulkRedriveDeadletter(_ context.Context, namespace string) (*C
 func (f *fakeSvc) DeleteCatalogItem(_ context.Context, _ string, id int64) error {
 	f.deleteItemID = id
 	return f.deleteItemErr
+}
+
+func (f *fakeSvc) DeleteNamespace(_ context.Context, namespace string) (*NamespaceDeleteResponse, error) {
+	f.deleteNSCall = namespace
+	return f.deleteNSResp, f.deleteNSErr
+}
+
+func (f *fakeSvc) ResetApp(_ context.Context) (*ResetAppResponse, error) {
+	f.resetCalls++
+	return f.resetResp, f.resetErr
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -1385,6 +1403,133 @@ func TestDeleteCatalogItem_InternalError(t *testing.T) {
 		map[string]string{"ns": "ns", "id": "9"}, "")
 
 	h.DeleteCatalogItem(rec, r)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+// ─── danger-zone tests ────────────────────────────────────────────────────────
+
+func TestDeleteNamespace_Handler_OK(t *testing.T) {
+	svc := &fakeSvc{deleteNSResp: &NamespaceDeleteResponse{Namespace: "ns1", EventsDeleted: 9}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodDelete, "/api/admin/v1/namespaces/ns1",
+		map[string]string{"ns": "ns1"}, "")
+
+	h.DeleteNamespace(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if svc.deleteNSCall != "ns1" {
+		t.Fatalf("service called with %q, want ns1", svc.deleteNSCall)
+	}
+	var body NamespaceDeleteResponse
+	assertJSON(t, rec, &body)
+	if body.EventsDeleted != 9 {
+		t.Fatalf("EventsDeleted=%d, want 9", body.EventsDeleted)
+	}
+}
+
+func TestDeleteNamespace_Handler_NotFound(t *testing.T) {
+	svc := &fakeSvc{deleteNSResp: nil} // service returns nil → 404
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodDelete, "/api/admin/v1/namespaces/missing",
+		map[string]string{"ns": "missing"}, "")
+
+	h.DeleteNamespace(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDeleteNamespace_Handler_InternalError(t *testing.T) {
+	svc := &fakeSvc{deleteNSErr: errors.New("redis down")}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodDelete, "/api/admin/v1/namespaces/ns1",
+		map[string]string{"ns": "ns1"}, "")
+
+	h.DeleteNamespace(rec, r)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+func TestResetApp_Handler_OK(t *testing.T) {
+	svc := &fakeSvc{resetResp: &ResetAppResponse{NamespacesDeleted: 2, EventsDeleted: 5, Namespaces: []string{"a", "b"}}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/reset", nil, `{"confirm":"RESET"}`)
+
+	h.ResetApp(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", rec.Code, rec.Body.String())
+	}
+	if svc.resetCalls != 1 {
+		t.Fatalf("ResetApp called %d times, want 1", svc.resetCalls)
+	}
+	var body ResetAppResponse
+	assertJSON(t, rec, &body)
+	if body.NamespacesDeleted != 2 {
+		t.Fatalf("NamespacesDeleted=%d, want 2", body.NamespacesDeleted)
+	}
+}
+
+func TestResetApp_Handler_BadConfirm(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+	}{
+		{"empty", `{}`},
+		{"lowercase", `{"confirm":"reset"}`},
+		{"typo", `{"confirm":"RESETT"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := &fakeSvc{}
+			h := newTestHandler(svc)
+			rec := httptest.NewRecorder()
+			r := newChiRequest(http.MethodPost, "/api/admin/v1/reset", nil, tc.body)
+
+			h.ResetApp(rec, r)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", rec.Code)
+			}
+			if svc.resetCalls != 0 {
+				t.Fatalf("service must not be called when confirm is wrong; got %d calls", svc.resetCalls)
+			}
+		})
+	}
+}
+
+func TestResetApp_Handler_InvalidJSON(t *testing.T) {
+	svc := &fakeSvc{}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/reset", nil, `{`)
+
+	h.ResetApp(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestResetApp_Handler_InternalError(t *testing.T) {
+	svc := &fakeSvc{resetErr: errors.New("qdrant down")}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/reset", nil, `{"confirm":"RESET"}`)
+
+	h.ResetApp(rec, r)
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)

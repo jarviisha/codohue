@@ -446,6 +446,27 @@ type DemoDatasetResponse struct {
 	APIKey              string `json:"api_key,omitempty"`
 }
 
+// NamespaceDeleteResponse is returned by DELETE /api/admin/v1/namespaces/{ns}
+// after the namespace and all of its data have been wiped from PostgreSQL,
+// Redis, and Qdrant.
+type NamespaceDeleteResponse struct {
+	Namespace     string `json:"namespace"`
+	EventsDeleted int    `json:"events_deleted"`
+}
+
+// ResetAppRequest is the body of POST /api/admin/v1/reset. The operator must
+// type the literal string "RESET" to confirm the destructive action.
+type ResetAppRequest struct {
+	Confirm string `json:"confirm"`
+}
+
+// ResetAppResponse summarises a successful app-wide reset.
+type ResetAppResponse struct {
+	NamespacesDeleted int      `json:"namespaces_deleted"`
+	EventsDeleted     int      `json:"events_deleted"`
+	Namespaces        []string `json:"namespaces"`
+}
+
 // SubjectStats holds raw DB data for a subject used internally by Service.
 type SubjectStats struct {
 	InteractionCount int
