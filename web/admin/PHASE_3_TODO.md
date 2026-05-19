@@ -111,10 +111,9 @@ Walk every page once, light + dark, and fix each finding in the smallest commit 
 
 Last-mile work before declaring the SPA shippable. Land 3.2 first — release prep is about *verifying* polish, not adding it.
 
-- [ ] **3.3.1 Bundle size verification**
-  - Record `dist/assets/index-*.js` size and gzip size. Target: ≤ 150 kB gzip (current: ~114 kB).
-  - If above budget, split routes via `React.lazy` + `Suspense`. Candidate order: `DebugPage` (only operators need it), `CatalogItemDetailModal` (modal-route, opens on demand), the batch-runs pages (`CfRunsPage` + `ReEmbedsPage`). `_kitchen-sink` is already excluded from production by 3.1.6.
-  - **Done when:** bundle is at or below budget, with the route-split fallback `LoadingState` showing for split routes.
+- [x] **3.3.1 Bundle size verification**
+  - Measured 2026-05-19: `dist/assets/index-*.js` = 372.3 kB raw / **111.0 kB gzip** (26% under the 150 kB gzip budget; ~14 kB raw smaller than the Phase 2 baseline thanks to kitchen-sink gating in 3.1.6).
+  - No route-split applied — the budget has comfortable headroom. If a future surface (charts, editor, viz) pushes us close, the next candidates in order are `DebugPage` (operator-only), `CatalogItemDetailModal` (modal-route, on-demand), the batch-runs pages.
 
 - [ ] **3.3.2 Font payload verification**
   - The Google Fonts CSS2 URL in [index.html](index.html) currently carries no `subset` param — the API splits faces by `unicode-range` declarations in the response CSS. Open the actual CSS response and the network panel to see which subsets ship per family (commonly latin + latin-ext + cyrillic + greek + vietnamese).
