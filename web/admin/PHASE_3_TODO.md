@@ -134,9 +134,9 @@ Last-mile work before declaring the SPA shippable. Land 3.2 first — release pr
   - Picked the per-phase TODO files as the authoritative DoD trackers — see [BUILD_PLAN.md §9](BUILD_PLAN.md). PHASE_2_TODO is fully ticked; PHASE_3_TODO §3.1 + §3.2 ticks landed alongside this audit (each task already shipped in its own commit but the boxes weren't crossed off until now).
   - Landed [README.md](README.md) as a short pointer to DESIGN/BUILD_PLAN/PHASE_*_TODO + canonical commands + the three-sentence architecture summary.
 
-- [ ] **3.3.6 Operator UX verification**
+- [ ] **3.3.6 Operator UX verification** *(deferred — operator session pending)*
   - One screen-share session with an operator running through Overview → Config → Events (inject) → CatalogItems → BatchRuns. Capture friction.
-  - This addresses the [BUILD_PLAN §6 risk] for PS1 prompt UX.
+  - This addresses the [BUILD_PLAN §6 risk] for PS1 prompt UX. The risk is rated *low* (operators are engineers familiar with shell prompts), so the session is scheduled out-of-band rather than gating Phase 3 close-out.
   - **Done when:** the session is logged and any showstoppers are tracked as fix tasks (this checklist may grow as a result).
 
 ---
