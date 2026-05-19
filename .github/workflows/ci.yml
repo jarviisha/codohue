@@ -73,6 +73,58 @@ jobs:
           QDRANT_PORT: "6334"
           CODOHUE_ADMIN_API_KEY: ci-test-key
 
+  web-admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/admin/package-lock.json
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install SPA deps
+        run: npm ci --no-audit --no-progress
+        working-directory: web/admin
+
+      - name: Lint SPA
+        run: npm run lint
+        working-directory: web/admin
+
+      - name: Test SPA contract
+        run: npm test
+        working-directory: web/admin
+
+      - name: Build SPA
+        run: npm run build
+        working-directory: web/admin
+
+      - name: Verify dist/ produced
+        run: |
+          test -s web/admin/dist/index.html
+          # `index-*.js` is the main chunk; future route-splits add more chunks.
+          # find -size +1c guards against an empty dist directory regardless of
+          # how many chunks Vite emits.
+          test -n "$(find web/admin/dist/assets -name 'index-*.js' -size +1c -print -quit)"
+
+      - name: Build admin binary with embedded SPA
+        run: go build -tags=embedui -o tmp/admin ./cmd/admin
+
+      - name: Verify SPA bytes are in the binary
+        run: |
+          if ! grep -q -a '<!doctype html>' tmp/admin; then
+            echo "::error::admin binary does not contain the embedded SPA"
+            exit 1
+          fi
+
   e2e:
     needs: [lint, test]
     runs-on: ubuntu-latest

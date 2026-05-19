@@ -120,13 +120,9 @@ Last-mile work before declaring the SPA shippable. Land 3.2 first — release pr
   - Browser smart-loading via `unicode-range` only fetches woff2 files whose ranges contain rendered glyphs. An English-only operator pulls **only latin** (6 weights × ~45 kB ≈ 270 kB), or latin + latin-ext if the page renders Eastern-European accents (~450 kB worst case).
   - **Decision: keep Google Fonts, no narrowing.** `&text=` is unsafe because admin UI surfaces dynamic user content (namespace names, object_ids). Self-hosting a subset would save ~190 kB on first load but adds binary commits + a glyph-subsetting build step — disproportionate for an internal tool with `display=swap` (no FOUT) and CDN-cached forever after first visit. Revisit if the SPA is air-gapped or first-load latency becomes an operator complaint.
 
-- [ ] **3.3.3 CI verifies the embedded build sequence**
-  - The `make build-admin` target only runs `go build ./cmd/admin` — no SPA build, no `-tags=embedui`. The only path that produces a real admin binary is [Dockerfile](Dockerfile): `npm ci --no-audit --no-progress` → `npm run build` → `go build -tags=embedui ./cmd/admin`.
-  - Option A (preferred): add a new Makefile target `build-admin-embed` that runs the full sequence (`cd web/admin && npm ci && npm run build && cd ../.. && go build -tags=embedui ./cmd/admin`), and call that from CI.
-  - Option B: skip the Makefile and have the CI workflow run the steps directly — but document the sequence in the build plan so it does not drift.
-  - Either way, CI must use `npm ci` (deterministic, the repo ships a `package-lock.json` and the Dockerfile already uses it), not `npm install`.
-  - This is the [BUILD_PLAN.md §6](BUILD_PLAN.md) risk mitigation for the missing-`dist/` failure mode.
-  - **Done when:** CI fails if the SPA build fails or if the embedded `dist/` is empty, and the canonical sequence is documented in one place.
+- [x] **3.3.3 CI verifies the embedded build sequence**
+  - Added a `web-admin` job to [.github/workflows/ci.yml](../../.github/workflows/ci.yml) that runs the canonical embed sequence end-to-end: `npm ci` → `npm run lint` → `npm test` → `npm run build` → verify `dist/index.html` and `dist/assets/index-*.js` are present and non-empty → `go build -tags=embedui` → grep the binary for `<!doctype html>` to prove the SPA bytes are embedded. CI now fails at the precise step that breaks instead of in one opaque command.
+  - Added a `build-admin-embed` Makefile target (plus split `web-admin-deps` / `web-admin-lint` / `web-admin-test` / `web-admin-build` helpers) so local dev hits the same sequence the Dockerfile and CI already use. `make build-admin` still produces the unembedded binary for fast Go-only iteration.
 
 - [ ] **3.3.4 Smoke test for `Ps1Prompt`**
   - The CommandPalette registration check already exists in [tests/urls.test.mjs](tests/urls.test.mjs) but the page module list is manually maintained — coverage gap is closed by 3.1.7, not here.

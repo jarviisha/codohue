@@ -45,7 +45,8 @@ MIN_EMBEDDER       ?= 70
 MIN_EMBEDSTRATEGY  ?= 90
 
 .PHONY: \
-	build build-api build-cron build-admin build-embedder \
+	build build-api build-cron build-admin build-admin-embed build-embedder \
+	web-admin-deps web-admin-lint web-admin-test web-admin-build \
 	run run-cron run-admin run-embedder dev dev-admin dev-embedder dev-all \
 	up up-all up-build up-d up-build-d \
 	up-infra up-infra-build up-infra-d up-infra-build-d \
@@ -73,8 +74,32 @@ build-cron:
 build-admin:
 	go build -o $(ADMIN_BIN) ./cmd/admin
 
+# Builds the admin binary with the SPA embedded via -tags=embedui. Mirrors
+# the production Dockerfile sequence: install pinned JS deps with npm ci,
+# compile the SPA, then compile the Go binary that embeds web/admin/dist.
+# Use this target (not `build-admin`) when you need an admin binary that
+# actually serves the operations console.
+build-admin-embed: web-admin-deps web-admin-build
+	go build -tags=embedui -o $(ADMIN_BIN) ./cmd/admin
+
 build-embedder:
 	go build -o $(EMBEDDER_BIN) ./cmd/embedder
+
+# web/admin SPA — used by both local dev and the CI pipeline. Kept as
+# discrete targets so CI can fail at the precise step (deps, lint, test,
+# build) instead of in a single opaque command.
+
+web-admin-deps:
+	cd web/admin && npm ci --no-audit --no-progress
+
+web-admin-lint:
+	cd web/admin && npm run lint
+
+web-admin-test:
+	cd web/admin && npm test
+
+web-admin-build:
+	cd web/admin && npm run build
 
 # Run and development
 
