@@ -3,22 +3,33 @@ package admin
 import "time"
 
 // NamespaceConfig is the admin view of a namespace configuration.
+//
+// Catalog fields surface the catalog auto-embedding state so the admin UI
+// can keep the config form in sync with the constraints enforced by the
+// backend (see CatalogStrategyConflict and CatalogDimensionMismatch). The
+// authoritative catalog configuration still lives behind the dedicated
+// /catalog endpoint — these fields are read-only mirrors used to drive UX
+// decisions (which dense_strategy options to disable, whether to surface
+// the "managed by catalog" hint on embedding_dim, etc.).
 type NamespaceConfig struct {
-	Namespace      string             `json:"namespace"`
-	ActionWeights  map[string]float64 `json:"action_weights"`
-	Lambda         float64            `json:"lambda"`
-	Gamma          float64            `json:"gamma"`
-	Alpha          float64            `json:"alpha"`
-	MaxResults     int                `json:"max_results"`
-	SeenItemsDays  int                `json:"seen_items_days"`
-	DenseStrategy  string             `json:"dense_strategy"`
-	EmbeddingDim   int                `json:"embedding_dim"`
-	DenseDistance  string             `json:"dense_distance"`
-	TrendingWindow int                `json:"trending_window"`
-	TrendingTTL    int                `json:"trending_ttl"`
-	LambdaTrending float64            `json:"lambda_trending"`
-	HasAPIKey      bool               `json:"has_api_key"`
-	UpdatedAt      time.Time          `json:"updated_at"`
+	Namespace              string             `json:"namespace"`
+	ActionWeights          map[string]float64 `json:"action_weights"`
+	Lambda                 float64            `json:"lambda"`
+	Gamma                  float64            `json:"gamma"`
+	Alpha                  float64            `json:"alpha"`
+	MaxResults             int                `json:"max_results"`
+	SeenItemsDays          int                `json:"seen_items_days"`
+	DenseStrategy          string             `json:"dense_strategy"`
+	EmbeddingDim           int                `json:"embedding_dim"`
+	DenseDistance          string             `json:"dense_distance"`
+	TrendingWindow         int                `json:"trending_window"`
+	TrendingTTL            int                `json:"trending_ttl"`
+	LambdaTrending         float64            `json:"lambda_trending"`
+	HasAPIKey              bool               `json:"has_api_key"`
+	CatalogEnabled         bool               `json:"catalog_enabled"`
+	CatalogStrategyID      string             `json:"catalog_strategy_id,omitempty"`
+	CatalogStrategyVersion string             `json:"catalog_strategy_version,omitempty"`
+	UpdatedAt              time.Time          `json:"updated_at"`
 }
 
 // NamespaceCatalogConfig is the per-namespace catalog auto-embedding state.

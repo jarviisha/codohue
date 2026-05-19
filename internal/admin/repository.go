@@ -27,7 +27,10 @@ const nsSelectCols = `
 	SELECT namespace, action_weights, time_decay_factor, gamma, alpha, max_results,
 	       seen_items_days, dense_strategy, embedding_dim, dense_distance,
 	       trending_window, trending_ttl, lambda_trending,
-	       api_key_hash IS NOT NULL AS has_api_key, updated_at
+	       api_key_hash IS NOT NULL AS has_api_key,
+	       catalog_enabled,
+	       COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+	       updated_at
 	FROM namespace_configs`
 
 // scanNamespaceConfigRow scans one namespace_configs row.
@@ -41,7 +44,9 @@ func scanNamespaceConfigRow(scan func(...any) error) (*NamespaceConfig, error) {
 		&ns.Namespace, &weightsJSON, &ns.Lambda, &ns.Gamma, &ns.Alpha,
 		&ns.MaxResults, &ns.SeenItemsDays, &ns.DenseStrategy, &ns.EmbeddingDim,
 		&ns.DenseDistance, &ns.TrendingWindow, &ns.TrendingTTL, &ns.LambdaTrending,
-		&ns.HasAPIKey, &ns.UpdatedAt,
+		&ns.HasAPIKey,
+		&ns.CatalogEnabled, &ns.CatalogStrategyID, &ns.CatalogStrategyVersion,
+		&ns.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
