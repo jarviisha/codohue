@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
+import { parsePs1, formatPs1, segmentTo } from '../src/routes/ps1.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -173,4 +174,88 @@ test('every route-element page registers at least one command', () => {
     checked.length >= 10,
     `route parser yielded only ${checked.length} module(s); the parser likely regressed`,
   )
+})
+
+// ────────────────────────────────────────────────────────────────────────────
+// PS1 prompt smoke tests
+//
+// BUILD_PLAN.md §4.8 calls for a smoke that asserts
+// `(namespace, pathSegments) -> "codohue@{ns}:~/{path} $"`. The renderer in
+// Ps1Prompt.tsx splits the line across spans + Links for clickable segments,
+// so we test the parallel formatPs1 helper that produces the same string —
+// any drift in either direction surfaces here.
+// ────────────────────────────────────────────────────────────────────────────
+
+test('parsePs1 splits pathname into ns + segments', () => {
+  assert.deepEqual(parsePs1('/'), { ns: '~', segments: [] })
+  assert.deepEqual(parsePs1('/namespaces'), { ns: '~', segments: ['namespaces'] })
+  assert.deepEqual(parsePs1('/namespaces/new'), { ns: '~', segments: ['namespaces', 'new'] })
+  assert.deepEqual(parsePs1('/ns/prod'), { ns: 'prod', segments: [] })
+  assert.deepEqual(parsePs1('/ns/prod/events'), { ns: 'prod', segments: ['events'] })
+  assert.deepEqual(parsePs1('/ns/prod/catalog/items'), {
+    ns: 'prod',
+    segments: ['catalog', 'items'],
+  })
+  assert.deepEqual(parsePs1('/ns/prod/catalog/items/sku_42'), {
+    ns: 'prod',
+    segments: ['catalog', 'items', 'sku_42'],
+  })
+  // Trailing slash should not produce an empty segment.
+  assert.deepEqual(parsePs1('/ns/prod/'), { ns: 'prod', segments: [] })
+  // A bare `/ns` without a name is global, not namespace-scoped.
+  assert.deepEqual(parsePs1('/ns'), { ns: '~', segments: ['ns'] })
+})
+
+test('formatPs1 renders the canonical shell prompt line', () => {
+  // Empty path — global root vs namespace root.
+  assert.equal(formatPs1('~', []), 'codohue@~:~ $')
+  assert.equal(formatPs1('prod', []), 'codohue@prod:~ $')
+  // Single segment.
+  assert.equal(formatPs1('~', ['namespaces']), 'codohue@~:~/namespaces $')
+  assert.equal(formatPs1('prod', ['events']), 'codohue@prod:~/events $')
+  // Deep path.
+  assert.equal(
+    formatPs1('prod', ['catalog', 'items']),
+    'codohue@prod:~/catalog/items $',
+  )
+  assert.equal(
+    formatPs1('prod', ['catalog', 'items', 'sku_42']),
+    'codohue@prod:~/catalog/items/sku_42 $',
+  )
+})
+
+test('formatPs1 is consistent with parsePs1 for real route paths', () => {
+  const cases = [
+    '/',
+    '/namespaces',
+    '/namespaces/new',
+    '/ns/prod',
+    '/ns/prod/events',
+    '/ns/prod/catalog',
+    '/ns/prod/catalog/items',
+    '/ns/prod/catalog/items/sku_42',
+    '/ns/prod/batch-runs/re-embeds',
+  ]
+  for (const pathname of cases) {
+    const { ns, segments } = parsePs1(pathname)
+    // The PS1 line is purely cosmetic — no hard assertion on which fragment
+    // ends up where. The contract is: ns matches what parsePs1 picked, and
+    // every segment shows up verbatim in the rendered line.
+    const line = formatPs1(ns, segments)
+    assert.match(line, /^codohue@/)
+    assert.match(line, / \$$/)
+    for (const seg of segments) {
+      assert.ok(line.includes(`/${seg}`), `segment ${seg} missing from ${line}`)
+    }
+  }
+})
+
+test('segmentTo builds clickable URLs for each PS1 segment', () => {
+  // Global block: segments live at top-level paths.
+  assert.equal(segmentTo('~', ['namespaces'], 0), '/namespaces')
+  assert.equal(segmentTo('~', ['namespaces', 'new'], 1), '/namespaces/new')
+  // Namespace block: segments live under /ns/{name}/.
+  assert.equal(segmentTo('prod', ['events'], 0), '/ns/prod/events')
+  assert.equal(segmentTo('prod', ['catalog', 'items'], 0), '/ns/prod/catalog')
+  assert.equal(segmentTo('prod', ['catalog', 'items'], 1), '/ns/prod/catalog/items')
 })

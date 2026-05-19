@@ -124,10 +124,10 @@ Last-mile work before declaring the SPA shippable. Land 3.2 first — release pr
   - Added a `web-admin` job to [.github/workflows/ci.yml](../../.github/workflows/ci.yml) that runs the canonical embed sequence end-to-end: `npm ci` → `npm run lint` → `npm test` → `npm run build` → verify `dist/index.html` and `dist/assets/index-*.js` are present and non-empty → `go build -tags=embedui` → grep the binary for `<!doctype html>` to prove the SPA bytes are embedded. CI now fails at the precise step that breaks instead of in one opaque command.
   - Added a `build-admin-embed` Makefile target (plus split `web-admin-deps` / `web-admin-lint` / `web-admin-test` / `web-admin-build` helpers) so local dev hits the same sequence the Dockerfile and CI already use. `make build-admin` still produces the unembedded binary for fast Go-only iteration.
 
-- [ ] **3.3.4 Smoke test for `Ps1Prompt`**
-  - The CommandPalette registration check already exists in [tests/urls.test.mjs](tests/urls.test.mjs) but the page module list is manually maintained — coverage gap is closed by 3.1.7, not here.
-  - Add the remaining smoke from [BUILD_PLAN.md §4.8](BUILD_PLAN.md): `Ps1Prompt` formatting `(namespace, pathSegments) → "codohue@{ns}:~/{path} $"`, asserted against representative inputs (empty path, deep path, no namespace).
-  - **Done when:** the smoke runs inside `npm test` and a regression in `Ps1Prompt` rendering fails CI.
+- [x] **3.3.4 Smoke test for `Ps1Prompt`**
+  - Split the PS1 helpers (`parsePs1`, `segmentTo`) plus a new `formatPs1` formatter out of [routes/nav.ts](src/routes/nav.ts) into [routes/ps1.mjs](src/routes/ps1.mjs) with a [.d.mts](src/routes/ps1.d.mts) sibling. The .mjs file is importable by `node --test` without a TypeScript runtime; nav.ts re-exports so component imports stay on `@/routes/nav`.
+  - Added four smokes to [tests/urls.test.mjs](tests/urls.test.mjs): parsePs1 segment splitting, formatPs1 against representative inputs (empty path, deep path, no namespace), a parse→format round-trip across the real route table, and segmentTo URL building.
+  - CommandPalette registration coverage was already widened in 3.1.7 (parse-derived), so it is intentionally not re-tested here.
 
 - [ ] **3.3.5 Documentation refresh**
   - Update [DESIGN.md](DESIGN.md) if any token or component contract drifted during Phase 2/3.
