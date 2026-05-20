@@ -70,11 +70,8 @@ func TestHealthzDegraded(t *testing.T) {
 	if !errors.Is(err, ErrDegraded) {
 		t.Errorf("errors.Is(err, ErrDegraded) = false, got %v", err)
 	}
-	if out == nil {
-		t.Fatal("expected non-nil HealthStatus on degraded response")
-	}
-	if out.Status != "degraded" || out.Redis != "error: dial tcp" || out.Postgres != "ok" {
-		t.Errorf("got %+v", out)
+	if out == nil || out.Status != "degraded" || out.Redis != "error: dial tcp" || out.Postgres != "ok" {
+		t.Fatalf("expected populated HealthStatus on degraded response, got %+v", out)
 	}
 }
 
