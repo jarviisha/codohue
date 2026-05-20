@@ -70,6 +70,20 @@ jobs:
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:latest
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.event.workflow_run.head_branch }}
 
+      - name: Build and push Embedder image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: embedder
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:${{ github.event.workflow_run.head_branch }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:latest
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:${{ github.event.workflow_run.head_branch }}
+
       - name: Build and push Admin image
         uses: docker/build-push-action@v6
         with:
