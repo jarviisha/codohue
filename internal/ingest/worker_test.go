@@ -47,10 +47,10 @@ func TestWorkerHandleMessage_ValidPayload(t *testing.T) {
 
 	now := time.Now().UTC()
 	p := EventPayload{
-		Namespace: "test-ns",
-		SubjectID: "user-1",
-		ObjectID:  "item-1",
-		Action:    ActionLike,
+		Namespace:  "test-ns",
+		SubjectID:  "user-1",
+		ObjectID:   "item-1",
+		Action:     ActionLike,
 		OccurredAt: now,
 	}
 	raw, err := json.Marshal(p)

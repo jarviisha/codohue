@@ -83,9 +83,9 @@ func TestIngestStream_DefaultWeightUsedWhenActionNotConfigured(t *testing.T) {
 	})
 
 	publishEvent(t, map[string]any{
-		"namespace":  namespace,
-		"subject_id": "stream_user_2",
-		"object_id":  "stream_item_2",
+		"namespace":   namespace,
+		"subject_id":  "stream_user_2",
+		"object_id":   "stream_item_2",
 		"action":      "VIEW",
 		"occurred_at": time.Now().UTC().Format(time.RFC3339),
 	})
@@ -131,8 +131,8 @@ func TestIngestStream_MissingRequiredFieldDoesNotPersistRow(t *testing.T) {
 	namespace, _ := createIsolatedNamespace(t, "ingest_missing_field", nil)
 
 	publishEvent(t, map[string]any{
-		"namespace":  namespace,
-		"subject_id": "stream_user_3",
+		"namespace":   namespace,
+		"subject_id":  "stream_user_3",
 		"action":      "LIKE",
 		"occurred_at": time.Now().UTC().Format(time.RFC3339),
 	})

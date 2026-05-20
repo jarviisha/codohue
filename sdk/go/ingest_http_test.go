@@ -39,9 +39,9 @@ func TestNamespaceIngestEvent(t *testing.T) {
 	c, _ := New(srv.URL)
 	err := c.Namespace("feed", "k").IngestEvent(context.Background(), codohuetypes.EventPayload{
 		// Namespace intentionally left empty — SDK must populate it.
-		SubjectID: "u",
-		ObjectID:  "o",
-		Action:    codohuetypes.ActionLike,
+		SubjectID:  "u",
+		ObjectID:   "o",
+		Action:     codohuetypes.ActionLike,
 		OccurredAt: time.Now(),
 	})
 	if err != nil {

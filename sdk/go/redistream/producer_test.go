@@ -37,10 +37,10 @@ func TestProducerPublishUsesDefaultStream(t *testing.T) {
 	p := NewProducer(f)
 
 	event := codohuetypes.EventPayload{
-		Namespace: "feed",
-		SubjectID: "u-1",
-		ObjectID:  "o-1",
-		Action:    codohuetypes.ActionLike,
+		Namespace:  "feed",
+		SubjectID:  "u-1",
+		ObjectID:   "o-1",
+		Action:     codohuetypes.ActionLike,
 		OccurredAt: time.Unix(1700000000, 0).UTC(),
 	}
 	id, err := p.Publish(context.Background(), event)
