@@ -72,7 +72,7 @@ func TestServiceProcess_DefaultWeight(t *testing.T) {
 
 	if err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
-		Action: ActionLike, Timestamp: time.Now(),
+		Action: ActionLike, OccurredAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestServiceProcess_CustomNamespaceWeight(t *testing.T) {
 
 	if err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
-		Action: ActionLike, Timestamp: time.Now(),
+		Action: ActionLike, OccurredAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestServiceProcess_NsConfigError_FallsBackToDefault(t *testing.T) {
 
 	if err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
-		Action: ActionView, Timestamp: time.Now(),
+		Action: ActionView, OccurredAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestServiceProcess_UnknownAction(t *testing.T) {
 
 	err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
-		Action: Action("UNKNOWN"), Timestamp: time.Now(),
+		Action: Action("UNKNOWN"), OccurredAt: time.Now(),
 	})
 	if err == nil {
 		t.Error("expected error for unknown action, got nil")
@@ -141,7 +141,7 @@ func TestServiceProcess_InsertError(t *testing.T) {
 
 	err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
-		Action: ActionView, Timestamp: time.Now(),
+		Action: ActionView, OccurredAt: time.Now(),
 	})
 	if err == nil {
 		t.Error("expected error from repo.Insert, got nil")
@@ -159,7 +159,7 @@ func TestServiceProcess_EventFields(t *testing.T) {
 		SubjectID:       "u1",
 		ObjectID:        "o1",
 		Action:          ActionShare,
-		Timestamp:       now,
+		OccurredAt:      now,
 		ObjectCreatedAt: &createdAt,
 	}
 
@@ -180,8 +180,8 @@ func TestServiceProcess_EventFields(t *testing.T) {
 	if e.Action != payload.Action {
 		t.Errorf("Action: got %q, want %q", e.Action, payload.Action)
 	}
-	if !e.OccurredAt.Equal(payload.Timestamp) {
-		t.Errorf("OccurredAt: got %v, want %v", e.OccurredAt, payload.Timestamp)
+	if !e.OccurredAt.Equal(payload.OccurredAt) {
+		t.Errorf("OccurredAt: got %v, want %v", e.OccurredAt, payload.OccurredAt)
 	}
 	if e.ObjectCreatedAt != payload.ObjectCreatedAt {
 		t.Errorf("ObjectCreatedAt: got %v, want %v", e.ObjectCreatedAt, payload.ObjectCreatedAt)

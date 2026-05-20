@@ -30,7 +30,7 @@ func TestIngestStream_ValidEventPersistsToPostgres(t *testing.T) {
 		"subject_id":        "stream_user_1",
 		"object_id":         "stream_item_1",
 		"action":            "LIKE",
-		"timestamp":         occurredAt.Format(time.RFC3339),
+		"occurred_at":       occurredAt.Format(time.RFC3339),
 		"object_created_at": objectCreatedAt.Format(time.RFC3339),
 	})
 
@@ -86,8 +86,8 @@ func TestIngestStream_DefaultWeightUsedWhenActionNotConfigured(t *testing.T) {
 		"namespace":  namespace,
 		"subject_id": "stream_user_2",
 		"object_id":  "stream_item_2",
-		"action":     "VIEW",
-		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"action":      "VIEW",
+		"occurred_at": time.Now().UTC().Format(time.RFC3339),
 	})
 
 	waitForEventPersisted(t, namespace, "stream_user_2", "stream_item_2")
@@ -133,8 +133,8 @@ func TestIngestStream_MissingRequiredFieldDoesNotPersistRow(t *testing.T) {
 	publishEvent(t, map[string]any{
 		"namespace":  namespace,
 		"subject_id": "stream_user_3",
-		"action":     "LIKE",
-		"timestamp":  time.Now().UTC().Format(time.RFC3339),
+		"action":      "LIKE",
+		"occurred_at": time.Now().UTC().Format(time.RFC3339),
 	})
 
 	time.Sleep(500 * time.Millisecond)

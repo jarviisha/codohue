@@ -42,7 +42,7 @@ func TestNamespaceIngestEvent(t *testing.T) {
 		SubjectID: "u",
 		ObjectID:  "o",
 		Action:    codohuetypes.ActionLike,
-		Timestamp: time.Now(),
+		OccurredAt: time.Now(),
 	})
 	if err != nil {
 		t.Fatalf("IngestEvent: %v", err)

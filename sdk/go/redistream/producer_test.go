@@ -41,7 +41,7 @@ func TestProducerPublishUsesDefaultStream(t *testing.T) {
 		SubjectID: "u-1",
 		ObjectID:  "o-1",
 		Action:    codohuetypes.ActionLike,
-		Timestamp: time.Unix(1700000000, 0).UTC(),
+		OccurredAt: time.Unix(1700000000, 0).UTC(),
 	}
 	id, err := p.Publish(context.Background(), event)
 	if err != nil {

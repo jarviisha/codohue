@@ -51,7 +51,7 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) error {
 		ObjectID:        payload.ObjectID,
 		Action:          payload.Action,
 		Weight:          weight,
-		OccurredAt:      payload.Timestamp,
+		OccurredAt:      payload.OccurredAt,
 		ObjectCreatedAt: payload.ObjectCreatedAt,
 	}
 

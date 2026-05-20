@@ -51,7 +51,7 @@ func TestWorkerHandleMessage_ValidPayload(t *testing.T) {
 		SubjectID: "user-1",
 		ObjectID:  "item-1",
 		Action:    ActionLike,
-		Timestamp: now,
+		OccurredAt: now,
 	}
 	raw, err := json.Marshal(p)
 	if err != nil {

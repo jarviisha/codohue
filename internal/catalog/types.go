@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"time"
+
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // State enumerates the lifecycle states of a catalog item, matching the
@@ -24,17 +26,11 @@ const (
 
 // IngestRequest is the JSON body accepted by POST /v1/namespaces/{ns}/catalog.
 //
-// Per Q4 of the spec clarifications, only the `content` field feeds the
-// embedder and contributes to the content hash. The optional `metadata`
-// field is stored verbatim alongside the row and ignored by the embedder.
-//
-// `namespace` is intentionally absent from the body — the URL path is the
-// single source of truth (consistent with the 003 RESTful redesign).
-type IngestRequest struct {
-	ObjectID string         `json:"object_id"`
-	Content  string         `json:"content"`
-	Metadata map[string]any `json:"metadata,omitempty"`
-}
+// Re-exported from codohuetypes so external clients (e.g., the Go SDK) parse
+// the same struct. Per Q4 of the spec clarifications, only the `content`
+// field feeds the embedder and contributes to the content hash; the optional
+// `metadata` field is stored verbatim and ignored by the embedder.
+type IngestRequest = codohuetypes.CatalogIngestRequest
 
 // Item is the in-memory representation of a row in catalog_items.
 type Item struct {
