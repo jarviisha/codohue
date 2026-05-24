@@ -230,6 +230,7 @@ type BatchRunLog struct {
 	Success           bool       `json:"success"`
 	ErrorMessage      *string    `json:"error_message"`
 	TriggerSource     string     `json:"trigger_source"`
+	CancelRequested   bool       `json:"cancel_requested"`
 	LogLines          []LogEntry `json:"log_lines"`
 
 	// Per-phase breakdown (nil when the phase was skipped or the row predates migration 007).

@@ -125,7 +125,7 @@ Each feature domain lives in `internal/<domain>/` with a consistent `handler.go`
 | `core/httpapi`         | Shared JSON HTTP response helpers and middleware                                                                  |
 | `architecture`         | Repository architecture tests — enforces the import rule below                                                    |
 
-**Import rule** (enforced by [internal/architecture/imports_test.go](internal/architecture/imports_test.go)): packages under `internal/` may only import `internal/config`, `internal/core/...`, and `internal/infra/...`. Peer-domain imports are forbidden. Cross-domain coordination happens through `cmd/api` and `cmd/admin` wiring (e.g. [cmd/admin/nsconfig_adapter.go](cmd/admin/nsconfig_adapter.go)).
+**Import rule** (enforced by [internal/architecture/imports_test.go](internal/architecture/imports_test.go)): packages under `internal/` may only import `internal/config`, `internal/core/...`, `internal/infra/...`, and their own subpackages (e.g. `internal/admin` may import `internal/admin/sse`). Peer-domain imports are forbidden. Cross-domain coordination happens through `cmd/api` and `cmd/admin` wiring (e.g. [cmd/admin/nsconfig_adapter.go](cmd/admin/nsconfig_adapter.go)).
 
 ### Infrastructure Clients (`internal/infra/`)
 

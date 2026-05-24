@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/admin"
+	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
@@ -76,6 +77,12 @@ func run() error {
 	computeRepo := compute.NewRepository(db)
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := compute.NewJob(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, 5)
+
+	// Wire the admin-plane event bus. Cron emits run/phase/log events into it;
+	// SSE handlers subscribe with run-id / namespace filters in Phase 1+.
+	bus := eventbus.NewBus()
+	defer bus.Close()
+	job.SetObserver(newBatchRunObserverAdapter(bus))
 
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}

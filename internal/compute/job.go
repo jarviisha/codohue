@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -51,7 +52,26 @@ type batchLogger interface {
 	InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource batchrun.TriggerSource) (int64, error)
 	UpdateBatchRunLog(ctx context.Context, id int64, completedAt time.Time, durationMs int, subjectsProcessed int, success bool, errMsg string, logLines []LogEntry) error
 	UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error
+	GetCancelRequested(ctx context.Context, id int64) (bool, error)
 }
+
+// BatchRunObserver receives lifecycle callbacks during a batch run. The admin
+// plane wires this to its in-process event bus so SSE handlers can forward
+// run progress to operators in real time. All callbacks fire from the cron
+// goroutine — keep them cheap; the bus drops to slow subscribers itself.
+type BatchRunObserver interface {
+	OnRunStarted(runID int64, namespace string, triggerSource batchrun.TriggerSource)
+	OnPhaseStarted(runID int64, namespace string, phase int)
+	OnPhaseCompleted(runID int64, namespace string, phase int, result PhaseResult)
+	OnLogLine(runID int64, namespace string, entry LogEntry)
+	OnRunCompleted(runID int64, namespace string, success bool, errMsg string)
+	OnRunCancelled(runID int64, namespace string)
+}
+
+// operatorCancelledMessage is a local alias of [batchrun.OperatorCancelledMessage]
+// so callers in this file can use a short identifier. The canonical literal
+// lives in internal/core/batchrun.
+const operatorCancelledMessage = batchrun.OperatorCancelledMessage
 
 // Job is a periodic batch job that recomputes sparse and dense vectors for all namespaces.
 type Job struct {
@@ -61,6 +81,7 @@ type Job struct {
 	batchLog    batchLogger
 	redis       *goredis.Client
 	interval    time.Duration
+	observer    BatchRunObserver // optional; nil = no-op
 
 	// injectable for testing — wired to real implementations in NewJob
 	ensureCollectionsFn      func(ctx context.Context, ns string) error
@@ -69,6 +90,11 @@ type Job struct {
 	upsertSubjectDenseFn     func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
 	storeTrendingFn          func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error
 }
+
+// SetObserver attaches a BatchRunObserver — the admin bridge wires this to
+// its event bus at startup. Passing nil clears the observer. Safe to call
+// before Run starts; not safe to swap observers while a run is in flight.
+func (j *Job) SetObserver(o BatchRunObserver) { j.observer = o }
 
 // NewJob creates a new Job with the given run interval in minutes.
 // redisClient may be nil; Phase 3 (trending) is skipped when it is.
@@ -142,6 +168,11 @@ func (j *Job) runOnce(ctx context.Context) {
 // RunNamespace runs all batch phases for a single namespace and writes
 // batch_run_logs. triggerSource is the typed enum from core/batchrun so the
 // caller cannot pass an unconstrained string by accident.
+//
+// Between phases the job polls batch_run_logs.cancel_requested; when set, it
+// finalizes the row with error_message="operator_cancelled" and returns
+// without running the remaining phases. Mid-phase cancel is intentionally
+// unsupported — see BUILD_PLAN §9.2.
 func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) {
 	nsStart := time.Now()
 	capture := &LogCapture{}
@@ -155,7 +186,16 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 		}
 	}
 
+	// Forward every captured log line to the observer so the admin SSE
+	// stream sees them as they happen, not just when the run finalizes.
+	if j.observer != nil && logID > 0 {
+		runID := logID
+		capture.SetOnEntry(func(e LogEntry) { j.observer.OnLogLine(runID, ns, e) })
+		j.observer.OnRunStarted(logID, ns, triggerSource)
+	}
+
 	var runErr error
+	var cancelled bool
 	var phases PhaseResults
 
 	cfg, err := j.nsConfigSvc.Get(ctx, ns)
@@ -168,55 +208,37 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 	}
 
 	if runErr == nil {
-		capture.Info("phase 1 · sparse CF starting")
-		t0 := time.Now()
-		subjects, objects, err := j.runPhase1(ctx, ns, cfg, capture)
-		durMs := int(time.Since(t0).Milliseconds())
-		p := &PhaseResult{OK: err == nil, DurationMs: durMs, Count1: subjects, Count2: objects}
-		if err != nil {
-			slog.Error("phase 1 failed", "namespace", ns, "error", err)
-			capture.Error(fmt.Sprintf("phase 1 · sparse CF failed (%dms): %v", durMs, err))
-			p.Error = err.Error()
-			runErr = err
-		} else {
-			capture.Info(fmt.Sprintf("phase 1 · sparse CF done (%dms) — subjects: %d, objects: %d", durMs, subjects, objects))
+		phases.Phase1 = j.executePhase(ctx, logID, ns, 1, "sparse CF", capture, func() (int, int, error) {
+			return j.runPhase1(ctx, ns, cfg, capture)
+		})
+		if !phases.Phase1.OK {
+			runErr = errors.New(phases.Phase1.Error)
 		}
-		phases.Phase1 = p
 	}
 
-	if runErr == nil && cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
-		capture.Info(fmt.Sprintf("phase 2 · dense starting (strategy: %s)", cfg.DenseStrategy))
-		t0 := time.Now()
-		items, subjectCount, err := j.runPhase2Dense(ctx, ns, cfg, capture)
-		durMs := int(time.Since(t0).Milliseconds())
-		p := &PhaseResult{OK: err == nil, DurationMs: durMs, Count1: items, Count2: subjectCount}
-		if err != nil {
-			slog.Error("phase 2 dense failed", "namespace", ns, "error", err)
-			capture.Error(fmt.Sprintf("phase 2 · dense failed (%dms): %v", durMs, err))
-			p.Error = err.Error()
-		} else {
-			capture.Info(fmt.Sprintf("phase 2 · dense done (%dms) — items: %d, subjects: %d", durMs, items, subjectCount))
-		}
-		phases.Phase2 = p
-	} else if cfg != nil && (cfg.DenseStrategy == "byoe" || cfg.DenseStrategy == "disabled") {
+	if runErr == nil && j.checkCancelBetweenPhases(ctx, logID, 1, capture) {
+		cancelled = true
+	}
+
+	if !cancelled && runErr == nil && cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
+		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseStrategy), capture, func() (int, int, error) {
+			return j.runPhase2Dense(ctx, ns, cfg, capture)
+		})
+		// Phase 2 failure is logged but does not abort the run — phase 3 still
+		// runs because trending and dense are independent surfaces.
+	} else if !cancelled && cfg != nil && (cfg.DenseStrategy == "byoe" || cfg.DenseStrategy == "disabled") {
 		capture.Info(fmt.Sprintf("phase 2 · dense skipped (strategy: %s)", cfg.DenseStrategy))
 	}
 
-	if j.redis != nil {
-		capture.Info("phase 3 · trending starting")
-		t0 := time.Now()
-		items, err := j.runPhase3Trending(ctx, ns, cfg, capture)
-		durMs := int(time.Since(t0).Milliseconds())
-		p := &PhaseResult{OK: err == nil, DurationMs: durMs, Count1: items}
-		if err != nil {
-			slog.Error("phase 3 trending failed", "namespace", ns, "error", err)
-			capture.Error(fmt.Sprintf("phase 3 · trending failed (%dms): %v", durMs, err))
-			p.Error = err.Error()
-		} else {
-			capture.Info(fmt.Sprintf("phase 3 · trending done (%dms) — items: %d", durMs, items))
-		}
-		phases.Phase3 = p
-	} else {
+	if !cancelled && j.checkCancelBetweenPhases(ctx, logID, 2, capture) {
+		cancelled = true
+	}
+
+	if !cancelled && j.redis != nil {
+		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", capture, func() (int, error) {
+			return j.runPhase3Trending(ctx, ns, cfg, capture)
+		})
+	} else if !cancelled {
 		capture.Info("phase 3 · trending skipped (no Redis)")
 	}
 
@@ -226,25 +248,103 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 	}
 
 	totalMs := int(time.Since(nsStart).Milliseconds())
-	if runErr != nil {
+	errMsg := ""
+	success := runErr == nil && !cancelled
+	switch {
+	case cancelled:
+		errMsg = operatorCancelledMessage
+		capture.Warn(fmt.Sprintf("run cancelled by operator after %dms", totalMs))
+	case runErr != nil:
+		errMsg = runErr.Error()
 		capture.Error(fmt.Sprintf("run failed in %dms: %v", totalMs, runErr))
-	} else {
+	default:
 		capture.Info(fmt.Sprintf("run complete in %dms", totalMs))
 	}
 
 	if j.batchLog != nil && logID > 0 {
 		now := time.Now()
-		errMsg := ""
-		if runErr != nil {
-			errMsg = runErr.Error()
-		}
-		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, totalMs, subjects, runErr == nil, errMsg, capture.Entries()); err != nil {
+		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, totalMs, subjects, success, errMsg, capture.Entries()); err != nil {
 			slog.Warn("could not update batch_run_log", "namespace", ns, "error", err)
 		}
 		if err := j.batchLog.UpdateBatchRunPhases(ctx, logID, phases); err != nil {
 			slog.Warn("could not update batch_run_phases", "namespace", ns, "error", err)
 		}
 	}
+
+	if j.observer != nil && logID > 0 {
+		if cancelled {
+			j.observer.OnRunCancelled(logID, ns)
+		} else {
+			j.observer.OnRunCompleted(logID, ns, success, errMsg)
+		}
+	}
+}
+
+// executePhase wraps a two-count phase (subjects/objects or items/subjects)
+// with start/complete observer notifications, timing, and structured logging.
+func (j *Job) executePhase(ctx context.Context, runID int64, ns string, phase int, label string, capture *LogCapture, run func() (int, int, error)) *PhaseResult {
+	_ = ctx
+	capture.Info(fmt.Sprintf("phase %d · %s starting", phase, label))
+	if j.observer != nil && runID > 0 {
+		j.observer.OnPhaseStarted(runID, ns, phase)
+	}
+	t0 := time.Now()
+	c1, c2, err := run()
+	durMs := int(time.Since(t0).Milliseconds())
+	p := PhaseResult{OK: err == nil, DurationMs: durMs, Count1: c1, Count2: c2}
+	if err != nil {
+		slog.Error("phase failed", "phase", phase, "namespace", ns, "error", err)
+		capture.Error(fmt.Sprintf("phase %d · %s failed (%dms): %v", phase, label, durMs, err))
+		p.Error = err.Error()
+	} else {
+		capture.Info(fmt.Sprintf("phase %d · %s done (%dms) — %d / %d", phase, label, durMs, c1, c2))
+	}
+	if j.observer != nil && runID > 0 {
+		j.observer.OnPhaseCompleted(runID, ns, phase, p)
+	}
+	return &p
+}
+
+// executePhase1Arg is the single-count variant used by phase 3 (trending).
+func (j *Job) executePhase1Arg(ctx context.Context, runID int64, ns string, phase int, label string, capture *LogCapture, run func() (int, error)) *PhaseResult {
+	_ = ctx
+	capture.Info(fmt.Sprintf("phase %d · %s starting", phase, label))
+	if j.observer != nil && runID > 0 {
+		j.observer.OnPhaseStarted(runID, ns, phase)
+	}
+	t0 := time.Now()
+	c1, err := run()
+	durMs := int(time.Since(t0).Milliseconds())
+	p := PhaseResult{OK: err == nil, DurationMs: durMs, Count1: c1}
+	if err != nil {
+		slog.Error("phase failed", "phase", phase, "namespace", ns, "error", err)
+		capture.Error(fmt.Sprintf("phase %d · %s failed (%dms): %v", phase, label, durMs, err))
+		p.Error = err.Error()
+	} else {
+		capture.Info(fmt.Sprintf("phase %d · %s done (%dms) — items: %d", phase, label, durMs, c1))
+	}
+	if j.observer != nil && runID > 0 {
+		j.observer.OnPhaseCompleted(runID, ns, phase, p)
+	}
+	return &p
+}
+
+// checkCancelBetweenPhases polls cancel_requested between phases. Returns
+// true when the operator has asked to stop; the caller skips the remaining
+// phases and finalizes the row as cancelled.
+func (j *Job) checkCancelBetweenPhases(ctx context.Context, runID int64, afterPhase int, capture *LogCapture) bool {
+	if j.batchLog == nil || runID == 0 {
+		return false
+	}
+	requested, err := j.batchLog.GetCancelRequested(ctx, runID)
+	if err != nil {
+		slog.Warn("check cancel_requested failed", "id", runID, "error", err)
+		return false
+	}
+	if requested {
+		capture.Warn(fmt.Sprintf("cancel requested after phase %d — stopping", afterPhase))
+	}
+	return requested
 }
 
 // runPhase1 recomputes CF sparse vectors for a namespace.
