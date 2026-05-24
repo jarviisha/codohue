@@ -83,6 +83,46 @@ type fakeSvc struct {
 	resetResp    *ResetAppResponse
 	resetErr     error
 	resetCalls   int
+
+	// Phase 1 batch-run lifecycle + aggregates
+	batchRunDetail        *BatchRunDetail
+	batchRunDetailErr     error
+	cancelSummary         *BatchRunSummary
+	cancelStatus          int
+	cancelErr             error
+	retryCreate           *BatchRunCreateResponse
+	retryStatus           int
+	retryErr              error
+	statsBuckets          []BatchRunStatsBucket
+	statsErr              error
+	overviewResp          *OverviewResponse
+	overviewErr           error
+	nsDashboardResp       *NamespaceDashboardResponse
+	nsDashboardErr        error
+}
+
+func (f *fakeSvc) GetBatchRunDetail(_ context.Context, _ int64) (*BatchRunDetail, error) {
+	return f.batchRunDetail, f.batchRunDetailErr
+}
+
+func (f *fakeSvc) CancelBatchRun(_ context.Context, _ int64) (*BatchRunSummary, int, error) {
+	return f.cancelSummary, f.cancelStatus, f.cancelErr
+}
+
+func (f *fakeSvc) RetryBatchRun(_ context.Context, _ int64) (*BatchRunCreateResponse, int, error) {
+	return f.retryCreate, f.retryStatus, f.retryErr
+}
+
+func (f *fakeSvc) GetBatchRunStats(_ context.Context, _, _ time.Duration) ([]BatchRunStatsBucket, error) {
+	return f.statsBuckets, f.statsErr
+}
+
+func (f *fakeSvc) GetOverview(_ context.Context) (*OverviewResponse, error) {
+	return f.overviewResp, f.overviewErr
+}
+
+func (f *fakeSvc) GetNamespaceDashboard(_ context.Context, _ string) (*NamespaceDashboardResponse, error) {
+	return f.nsDashboardResp, f.nsDashboardErr
 }
 
 func (f *fakeSvc) GetHealth(_ context.Context) (*HealthResponse, int, error) {

@@ -41,16 +41,25 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 
 		r.Get("/api/admin/v1/health", h.GetHealth)
 
-		// Phase 0 SSE smoke endpoint — emits one `tick` event per second.
-		// Foundation proof of the SSE + CORS pipeline. Remove when real
-		// stream endpoints land in Phase 1.
+		// SSE smoke endpoint — kept around as a low-cost end-to-end probe for
+		// the streaming pipeline. Removeable once the SPA settles on real
+		// stream sources.
 		r.Get("/api/admin/v1/ping/stream", admin.PingStream)
+
+		// Fleet aggregate — drives the Fleet overview page in one round-trip.
+		r.Get("/api/admin/v1/overview", h.GetOverview)
+
+		// Global ops bus — sidebar badges, toast notifications, etc.
+		r.Get("/api/admin/v1/stream", h.StreamOps)
 
 		// Namespaces
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
 		r.Delete("/api/admin/v1/namespaces/{ns}", h.DeleteNamespace)
+
+		// Per-namespace dashboard aggregate.
+		r.Get("/api/admin/v1/namespaces/{ns}/dashboard", h.GetNamespaceDashboard)
 
 		// App-wide reset (danger zone).
 		r.Post("/api/admin/v1/reset", h.ResetApp)
@@ -69,8 +78,16 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 		r.Post("/api/admin/v1/namespaces/{ns}/catalog/items/{id}/redrive", h.RedriveCatalogItem)
 		r.Delete("/api/admin/v1/namespaces/{ns}/catalog/items/{id}", h.DeleteCatalogItem)
 
-		// Batch runs
+		// Batch runs — list / stats / detail / lifecycle / stream.
+		// stats and {id} are siblings under /batch-runs; chi parses the static
+		// "stats" before the {id} parameter, so registering order does not
+		// matter, but keeping them together aids readability.
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
+		r.Get("/api/admin/v1/batch-runs/stats", h.GetBatchRunStats)
+		r.Get("/api/admin/v1/batch-runs/{id}", h.GetBatchRunDetail)
+		r.Get("/api/admin/v1/batch-runs/{id}/stream", h.StreamBatchRun)
+		r.Post("/api/admin/v1/batch-runs/{id}/cancel", h.CancelBatchRun)
+		r.Post("/api/admin/v1/batch-runs/{id}/retry", h.RetryBatchRun)
 		r.Get("/api/admin/v1/namespaces/{ns}/batch-runs", h.GetBatchRuns)
 		r.Post("/api/admin/v1/namespaces/{ns}/batch-runs", h.CreateBatchRun)
 

@@ -97,6 +97,7 @@ func run() error {
 	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
 
 	h := admin.NewHandler(svc, cfg.AdminAPIKey)
+	h.SetEventBus(bus)
 
 	r := newAdminRouter(h, cfg.AdminAPIKey, cfg.AllowDevOrigin)
 

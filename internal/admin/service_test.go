@@ -93,6 +93,28 @@ type fakeRepo struct {
 	numericObjectID    uint64
 	numericObjectFound bool
 	numericObjectErr   error
+
+	// Phase 1 batch-run lifecycle endpoints
+	batchRunByID            *BatchRunLog
+	batchRunByIDErr         error
+	requestCancelResult     RequestCancelResult
+	requestCancelErr        error
+	requestCancelCalledWith int64
+	batchRunStats           []BatchRunStatsBucket
+	batchRunStatsErr        error
+}
+
+func (f *fakeRepo) GetBatchRunByID(_ context.Context, _ int64) (*BatchRunLog, error) {
+	return f.batchRunByID, f.batchRunByIDErr
+}
+
+func (f *fakeRepo) RequestCancel(_ context.Context, id int64) (RequestCancelResult, error) {
+	f.requestCancelCalledWith = id
+	return f.requestCancelResult, f.requestCancelErr
+}
+
+func (f *fakeRepo) GetBatchRunStats(_ context.Context, _, _ int) ([]BatchRunStatsBucket, error) {
+	return f.batchRunStats, f.batchRunStatsErr
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {

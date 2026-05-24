@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -25,6 +27,12 @@ type adminSvc interface {
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
 	GetQdrant(ctx context.Context, namespace string) (*QdrantInspectResponse, error)
 	CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreateResponse, error)
+	GetBatchRunDetail(ctx context.Context, id int64) (*BatchRunDetail, error)
+	CancelBatchRun(ctx context.Context, id int64) (*BatchRunSummary, int, error)
+	RetryBatchRun(ctx context.Context, id int64) (*BatchRunCreateResponse, int, error)
+	GetBatchRunStats(ctx context.Context, window, bucket time.Duration) ([]BatchRunStatsBucket, error)
+	GetOverview(ctx context.Context) (*OverviewResponse, error)
+	GetNamespaceDashboard(ctx context.Context, namespace string) (*NamespaceDashboardResponse, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
 	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
 	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
@@ -45,12 +53,18 @@ type adminSvc interface {
 type Handler struct {
 	svc    adminSvc
 	apiKey string
+	bus    *eventbus.Bus // optional; SSE handlers return 503 when nil
 }
 
 // NewHandler creates a new Handler.
 func NewHandler(svc adminSvc, apiKey string) *Handler {
 	return &Handler{svc: svc, apiKey: apiKey}
 }
+
+// SetEventBus wires the in-process event bus into the handler so SSE
+// endpoints can subscribe. The wiring layer (cmd/admin) is expected to call
+// this once at startup. When unset, SSE endpoints return 503.
+func (h *Handler) SetEventBus(b *eventbus.Bus) { h.bus = b }
 
 // CreateSession handles POST /api/v1/auth/sessions — validates the admin API
 // key and issues a session cookie. Returns 201 Created with body
@@ -114,13 +128,10 @@ func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, health)
 }
 
-// ListNamespaces handles GET /api/admin/v1/namespaces.
+// ListNamespaces handles GET /api/admin/v1/namespaces. The legacy
+// ?include=overview branch is gone — the dedicated /api/admin/v1/overview
+// endpoint replaces it.
 func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("include") == "overview" {
-		h.GetNamespacesOverview(w, r)
-		return
-	}
-
 	namespaces, err := h.svc.ListNamespaces(r.Context())
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not list namespaces")
@@ -311,10 +322,11 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get batch runs")
 		return
 	}
-	if runs == nil {
-		runs = []BatchRunLog{}
+	summaries := make([]BatchRunSummary, 0, len(runs))
+	for _, r := range runs {
+		summaries = append(summaries, BatchRunSummaryFromLog(r))
 	}
-	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Items: runs, Total: total, Offset: offset, Stats: stats})
+	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Items: summaries, Total: total, Offset: offset, Stats: stats})
 }
 
 // GetSubjectRecommendations handles

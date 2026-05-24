@@ -336,11 +336,13 @@ type BatchRunStats struct {
 }
 
 // BatchRunsResponse is the response for GET /api/admin/v1/batch-runs.
+// Items are summaries (no log_lines / no full per-phase blob); operators
+// click into a row to fetch the BatchRunDetail via /batch-runs/{id}.
 type BatchRunsResponse struct {
-	Items  []BatchRunLog `json:"items"`
-	Total  int           `json:"total"`
-	Offset int           `json:"offset"`
-	Stats  BatchRunStats `json:"stats"`
+	Items  []BatchRunSummary `json:"items"`
+	Total  int               `json:"total"`
+	Offset int               `json:"offset"`
+	Stats  BatchRunStats     `json:"stats"`
 }
 
 // TrendingAdminResponse is the response for GET /api/admin/v1/namespaces/{ns}/trending.
