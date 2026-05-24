@@ -91,7 +91,7 @@ func run() error {
 
 	h := admin.NewHandler(svc, cfg.AdminAPIKey)
 
-	r := newAdminRouter(h, cfg.AdminAPIKey)
+	r := newAdminRouter(h, cfg.AdminAPIKey, cfg.AllowDevOrigin)
 
 	// Static file serving — React SPA embedded in the binary
 	distFS, err := fs.Sub(adminui.Files, "dist")

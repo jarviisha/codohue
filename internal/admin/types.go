@@ -478,6 +478,150 @@ type ResetAppResponse struct {
 	Namespaces        []string `json:"namespaces"`
 }
 
+// ----------------------------------------------------------------------------
+// Phase 0 schema for the redesigned admin API.
+//
+// These types back the new aggregate + lifecycle endpoints introduced in
+// BUILD_PLAN_WEB_ADMIN_V2.md §3. Existing types above remain in use by the
+// v1 handlers; the new types are wired up as their handlers land per phase.
+// ----------------------------------------------------------------------------
+
+// PhaseEntry is one phase result inside a BatchRunDetail. The mapping of OK
+// + Skipped follows BUILD_PLAN §3.2:
+//
+//	OK = true,  Skipped = nil          → phase ran and succeeded.
+//	OK = false, Error    != nil        → phase ran and failed.
+//	OK = nil,   Skipped  != nil        → phase was skipped (reason in Skipped).
+//
+// Per-phase metric fields (Subjects/Objects/Items) use pointer + omitempty so
+// JSON only carries the metrics that apply to the named phase.
+type PhaseEntry struct {
+	N          int     `json:"n"`
+	Name       string  `json:"name"`
+	OK         *bool   `json:"ok"`
+	Skipped    *string `json:"skipped"`
+	DurationMs int     `json:"duration_ms"`
+	Subjects   *int    `json:"subjects,omitempty"`
+	Objects    *int    `json:"objects,omitempty"`
+	Items      *int    `json:"items,omitempty"`
+	Error      *string `json:"error"`
+}
+
+// TargetStrategy identifies the embed strategy a re-embed batch run was kicked
+// off against. Nil on cron / manual CF runs.
+type TargetStrategy struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+}
+
+// BatchRunSummary is the lightweight row returned in batch-run list endpoints.
+// PhaseStatus[i] ∈ "ok" | "fail" | "skipped" | nil (nil = phase not yet run /
+// run still in flight). UI renders it as three Badge tones (Davinci).
+type BatchRunSummary struct {
+	ID                int64      `json:"id"`
+	Namespace         string     `json:"namespace"`
+	Kind              string     `json:"kind"` // "cf" | "reembed"
+	TriggerSource     string     `json:"trigger_source"`
+	StartedAt         time.Time  `json:"started_at"`
+	CompletedAt       *time.Time `json:"completed_at"`
+	DurationMs        *int       `json:"duration_ms"`
+	Success           bool       `json:"success"`
+	CancelRequested   bool       `json:"cancel_requested"`
+	EntitiesProcessed int        `json:"entities_processed"`
+	PhaseStatus       [3]*string `json:"phase_status"`
+	ErrorMessage      *string    `json:"error_message"`
+}
+
+// BatchRunDetail is the full payload for the single run detail page. Embeds
+// BatchRunSummary and adds the full per-phase breakdown, captured log lines,
+// and target strategy (re-embed only).
+type BatchRunDetail struct {
+	BatchRunSummary
+	Phases         []PhaseEntry    `json:"phases"`
+	LogLines       []LogEntry      `json:"log_lines"`
+	TargetStrategy *TargetStrategy `json:"target_strategy"`
+}
+
+// Alert is one entry on OverviewResponse.Alerts. Levels: "warn" | "error".
+// Kinds match the generation rules in BUILD_PLAN §3.1.
+type Alert struct {
+	Level     string `json:"level"`
+	Namespace string `json:"namespace,omitempty"`
+	Kind      string `json:"kind"`
+	Message   string `json:"message"`
+}
+
+// CronHeartbeat reports cron liveness on /overview.
+type CronHeartbeat struct {
+	LastRunAt  *time.Time `json:"last_run_at"`
+	LagSeconds int        `json:"lag_seconds"`
+	OK         bool       `json:"ok"`
+}
+
+// EmbedderHeartbeat reports embedder liveness on /overview.
+type EmbedderHeartbeat struct {
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	OK         bool       `json:"ok"`
+}
+
+// NamespaceOverviewRun is the compact last-run snapshot inside NamespaceOverview.
+type NamespaceOverviewRun struct {
+	ID          int64      `json:"id"`
+	StartedAt   time.Time  `json:"started_at"`
+	Success     bool       `json:"success"`
+	PhaseStatus [3]*string `json:"phase_status"`
+}
+
+// NamespaceOverviewCatalog is the catalog summary inside NamespaceOverview.
+type NamespaceOverviewCatalog struct {
+	Enabled    bool `json:"enabled"`
+	Pending    int  `json:"pending"`
+	DeadLetter int  `json:"dead_letter"`
+}
+
+// NamespaceOverviewQdrant is the Qdrant point-count summary inside NamespaceOverview.
+type NamespaceOverviewQdrant struct {
+	Subjects uint64 `json:"subjects"`
+	Objects  uint64 `json:"objects"`
+}
+
+// NamespaceOverview is one row in OverviewResponse.Namespaces.
+type NamespaceOverview struct {
+	Namespace       string                   `json:"namespace"`
+	Status          NamespaceStatus          `json:"status"`
+	LastRun         *NamespaceOverviewRun    `json:"last_run"`
+	Events24h       int                      `json:"events_24h"`
+	EventsPerMinNow float64                  `json:"events_per_min_now"`
+	Catalog         NamespaceOverviewCatalog `json:"catalog"`
+	Qdrant          NamespaceOverviewQdrant  `json:"qdrant"`
+}
+
+// OverviewResponse is the body of GET /api/admin/v1/overview — a single
+// payload that drives the Fleet overview page.
+type OverviewResponse struct {
+	GeneratedAt       time.Time           `json:"generated_at"`
+	Health            HealthResponse      `json:"health"`
+	CronHeartbeat     CronHeartbeat       `json:"cron_heartbeat"`
+	EmbedderHeartbeat EmbedderHeartbeat   `json:"embedder_heartbeat"`
+	Alerts            []Alert             `json:"alerts"`
+	Namespaces        []NamespaceOverview `json:"namespaces"`
+}
+
+// NamespaceDashboardResponse is the body of
+// GET /api/admin/v1/namespaces/{ns}/dashboard — everything the /ns/:ns page
+// needs in one round-trip.
+type NamespaceDashboardResponse struct {
+	Namespace       string                `json:"namespace"`
+	GeneratedAt     time.Time             `json:"generated_at"`
+	Config          NamespaceConfig       `json:"config"`
+	LastRuns        []BatchRunSummary     `json:"last_runs"` // up to 12 most recent
+	Catalog         CatalogBacklog        `json:"catalog"`
+	Events24h       int                   `json:"events_24h"`
+	EventsPerMinNow float64               `json:"events_per_min_now"`
+	Qdrant          QdrantInspectResponse `json:"qdrant"`
+	TrendingTTLSec  int                   `json:"trending_ttl_sec"`
+}
+
 // SubjectStats holds raw DB data for a subject used internally by Service.
 type SubjectStats struct {
 	InteractionCount int

@@ -1,10 +1,25 @@
-import useDocumentTitle from '@/components/layout/useDocumentTitle'
-import AppRoutes from './routes'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import AppShellLayout from '@/components/shell/AppShellLayout'
+import { AuthGuard } from '@/components/shell/AuthGuard'
+import HomePage from '@/pages/home/HomePage'
+import LoginPage from '@/pages/login/LoginPage'
 
-// Top-level component inside <BrowserRouter>. Mounts the global
-// document.title hook here (one mount point covers /login, the AppShell
-// routes, and the catch-all not-found) and renders the route tree.
+const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <LoginPage />,
+  },
+  {
+    path: '/',
+    element: (
+      <AuthGuard>
+        <AppShellLayout />
+      </AuthGuard>
+    ),
+    children: [{ index: true, element: <HomePage /> }],
+  },
+])
+
 export default function App() {
-  useDocumentTitle()
-  return <AppRoutes />
+  return <RouterProvider router={router} />
 }

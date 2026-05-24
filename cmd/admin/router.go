@@ -15,9 +15,12 @@ import (
 // extracted from main.run() so cmd/admin/main_test.go can assert that all
 // expected paths are registered without spinning up the full binary.
 //
-// apiKey is forwarded to the session-cookie middleware.
-func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
+// apiKey is forwarded to the session-cookie middleware. allowDevOrigin enables
+// credentialed CORS for the Vite dev server when non-empty (dev mode); empty
+// in production where the SPA is embedded same-origin.
+func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router {
 	r := chi.NewRouter()
+	r.Use(admin.CORSMiddleware(allowDevOrigin))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +40,11 @@ func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
 		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
 
 		r.Get("/api/admin/v1/health", h.GetHealth)
+
+		// Phase 0 SSE smoke endpoint — emits one `tick` event per second.
+		// Foundation proof of the SSE + CORS pipeline. Remove when real
+		// stream endpoints land in Phase 1.
+		r.Get("/api/admin/v1/ping/stream", admin.PingStream)
 
 		// Namespaces
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)

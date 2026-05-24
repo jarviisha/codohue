@@ -88,14 +88,15 @@ func loadBase() (*AppConfig, error) {
 
 // AdminConfig holds configuration for the admin dashboard binary.
 type AdminConfig struct {
-	DatabaseURL string
-	RedisURL    string
-	AdminAPIKey string
-	APIURL      string // internal URL of cmd/api for proxying
-	AdminPort   string // HTTP listen port (default: "2002")
-	LogFormat   string // "json" | "text" (default: "text")
-	QdrantHost  string
-	QdrantPort  int
+	DatabaseURL    string
+	RedisURL       string
+	AdminAPIKey    string
+	APIURL         string // internal URL of cmd/api for proxying
+	AdminPort      string // HTTP listen port (default: "2002")
+	LogFormat      string // "json" | "text" (default: "text")
+	QdrantHost     string
+	QdrantPort     int
+	AllowDevOrigin string // CORS allow-origin for the Vite dev server; empty in prod (same-origin embed)
 }
 
 // LoadAdmin reads and validates configuration for the admin binary.
@@ -103,13 +104,14 @@ func LoadAdmin() (*AdminConfig, error) {
 	loadDotenv()
 
 	cfg := &AdminConfig{
-		DatabaseURL: getEnv("DATABASE_URL", ""),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
-		AdminAPIKey: getEnv("CODOHUE_ADMIN_API_KEY", ""),
-		APIURL:      getEnv("CODOHUE_API_URL", "http://localhost:2001"),
-		AdminPort:   getEnv("CODOHUE_ADMIN_PORT", "2002"),
-		LogFormat:   getEnv("CODOHUE_LOG_FORMAT", "text"),
-		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
+		DatabaseURL:    getEnv("DATABASE_URL", ""),
+		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
+		AdminAPIKey:    getEnv("CODOHUE_ADMIN_API_KEY", ""),
+		APIURL:         getEnv("CODOHUE_API_URL", "http://localhost:2001"),
+		AdminPort:      getEnv("CODOHUE_ADMIN_PORT", "2002"),
+		LogFormat:      getEnv("CODOHUE_LOG_FORMAT", "text"),
+		QdrantHost:     getEnv("QDRANT_HOST", "localhost"),
+		AllowDevOrigin: getEnv("CODOHUE_ALLOW_DEV_ORIGIN", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

@@ -1,15 +1,17 @@
-// Re-export barrel for every domain's TanStack Query key factory.
-// Convention: keys are hierarchical tuples `[domain, ns?, ...params]` so
-// invalidation patterns stay obvious (e.g. invalidate all namespace data
-// with `['ns', name]`).
-//
-// Each domain service file owns its keys; this file is the single import
-// surface for consumers that need to invalidate cross-domain.
-export { authKeys } from './auth'
-export { batchRunKeys } from './batchRuns'
-export { catalogKeys } from './catalog'
-export { eventKeys } from './events'
-export { healthKeys } from './health'
-export { namespaceKeys } from './namespaces'
-export { recommendKeys } from './recommend'
-export { trendingKeys } from './trending'
+/**
+ * Centralised TanStack Query keys. Keep the literal tuples here so refactors
+ * stay grep-able and invalidation across services lines up (e.g. mutating a
+ * namespace invalidates the overview + dashboard keys).
+ */
+export const queryKeys = {
+  session: ['session'] as const,
+  health: ['health'] as const,
+  overview: ['overview'] as const,
+  namespaces: ['namespaces'] as const,
+  namespaceDashboard: (ns: string) => ['namespaces', ns, 'dashboard'] as const,
+  batchRuns: (filter?: Record<string, unknown>) =>
+    ['batch-runs', filter ?? {}] as const,
+  batchRunDetail: (id: number | string) => ['batch-runs', id] as const,
+  batchRunStats: (window: string, bucket: string) =>
+    ['batch-runs', 'stats', { window, bucket }] as const,
+}
