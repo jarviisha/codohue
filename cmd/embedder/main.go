@@ -104,10 +104,13 @@ func run() error {
 		idmapSvc,
 		qdrantClient,
 	)
-	// Pub/sub publisher broadcasts item state changes to
-	// codohue:catalog-events:{ns}; cmd/admin's catalog bridge subscribes
-	// and republishes onto the admin event bus for SSE fan-out.
-	embedderSvc.SetEventPublisher(embedder.NewRedisCatalogEventPublisher(redisClient))
+	// Pub/sub publisher broadcasts item state changes + backlog snapshots
+	// + dead-letter growth alerts to codohue:catalog-events:{ns}; cmd/admin's
+	// catalog bridge subscribes and republishes onto the admin event bus
+	// for SSE fan-out. One publisher is shared by the embed service (per-
+	// item events) and the sampler (snapshot + alert events).
+	catalogPublisher := embedder.NewRedisCatalogEventPublisher(redisClient)
+	embedderSvc.SetEventPublisher(catalogPublisher)
 
 	consumerName := cfg.ReplicaName
 	if consumerName == "" {
@@ -129,8 +132,11 @@ func run() error {
 
 	// Backlog sampler — snapshots per-namespace catalog backlog into
 	// catalog_backlog_samples on a 30s tick. Backs the admin /catalog/
-	// backlog-history endpoint so the timeline survives reload.
+	// backlog-history endpoint so the timeline survives reload. Wired to
+	// the same publisher so each persisted sample also fans out a live
+	// backlog_snapshot event to the SPA (and dead_letter_grew on rises).
 	backlogSampler := embedder.NewBacklogSampler(embedderRepo, redisClient, nsConfigSvc, embedder.BacklogSamplerConfig{})
+	backlogSampler.SetEventPublisher(catalogPublisher)
 
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.

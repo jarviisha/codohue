@@ -28,6 +28,7 @@ import { useLogout, useSession } from '@/services/auth'
 import { recordRecentNamespace } from '@/services/recentNamespaces'
 import SidebarNav from '@/components/shell/SidebarNav'
 import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
+import ReembedOverlay from '@/components/shell/ReembedOverlay'
 
 /**
  * AppShellLayout uses the Davinci AppShell "global top bar" pattern:
@@ -114,6 +115,8 @@ export default function AppShellLayout() {
           <Outlet />
         </PageHeaderSlotContext.Provider>
       </AppShellMain>
+
+      <ReembedOverlay />
     </AppShell>
   )
 }

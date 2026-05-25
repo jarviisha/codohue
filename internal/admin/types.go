@@ -60,12 +60,17 @@ type CatalogStrategyDescriptor struct {
 // CatalogBacklog is a snapshot of operational counts surfaced by
 // GET .../catalog. Counts are approximate (sampled, not transactional).
 type CatalogBacklog struct {
-	Pending    int `json:"pending"`
-	InFlight   int `json:"in_flight"`
-	Embedded   int `json:"embedded"`
-	Failed     int `json:"failed"`
-	DeadLetter int `json:"dead_letter"`
-	StreamLen  int `json:"stream_len"`
+	Pending      int `json:"pending"`
+	InFlight     int `json:"in_flight"`
+	Embedded     int `json:"embedded"`
+	Failed       int `json:"failed"`
+	DeadLetter   int `json:"dead_letter"`
+	StreamLen    int `json:"stream_len"`
+	// ConsumerLag is the embedder consumer-group PEL depth on
+	// catalog:embed:{ns} — how many delivered-but-unacked items the worker
+	// is still processing or crashed mid-batch on. 0 when Redis is
+	// unreachable or the group doesn't exist yet.
+	ConsumerLag int `json:"consumer_lag"`
 }
 
 // CatalogBacklogSample is one row of catalog_backlog_samples — written by

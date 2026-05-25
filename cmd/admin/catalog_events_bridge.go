@@ -83,7 +83,9 @@ func (b *catalogEventsBridge) runOnce(ctx context.Context) error {
 }
 
 // handle parses one pub/sub message and republishes it onto the admin bus.
-// Bad payloads are logged + dropped.
+// Discriminates by the payload's `kind` field; unknown kinds are logged and
+// dropped. Bad JSON is logged and dropped — bus consumers should never
+// observe a broken message.
 func (b *catalogEventsBridge) handle(ctx context.Context, msg *goredis.Message) {
 	ns := strings.TrimPrefix(msg.Channel, "codohue:catalog-events:")
 	if ns == msg.Channel {
@@ -93,25 +95,75 @@ func (b *catalogEventsBridge) handle(ctx context.Context, msg *goredis.Message) 
 		return
 	}
 
-	var ev embedder.CatalogItemStateChangedEvent
-	if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+	// Read just the kind off the payload to pick the bus event kind, then
+	// re-unmarshal into the typed event for known kinds. Unknown kinds get
+	// forwarded as-is with kind=catalog.<raw> so future event types arrive
+	// at the SPA before this bridge gets recompiled.
+	var envelope struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal([]byte(msg.Payload), &envelope); err != nil {
 		slog.Warn("catalog events bridge: malformed payload", "channel", msg.Channel, "error", err)
 		return
 	}
 
-	// Republish on the in-process bus. Kind prefix `catalog.` keeps it
-	// distinct from `batch_run.*` events; SSE filter subscribes by kind.
-	b.bus.Publish(ctx, eventbus.Event{
-		Kind:      "catalog.item_state_changed",
-		Namespace: ns,
-		EntityID:  strconv.FormatInt(ev.ItemID, 10),
-		Payload: map[string]any{
-			"namespace": ev.Namespace,
-			"item_id":   ev.ItemID,
-			"object_id": ev.ObjectID,
-			"from":      ev.From,
-			"to":        ev.To,
-			"at":        ev.At,
-		},
-	})
+	switch envelope.Kind {
+	case "item_state_changed":
+		var ev embedder.CatalogItemStateChangedEvent
+		if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+			slog.Warn("catalog events bridge: item_state_changed unmarshal", "error", err)
+			return
+		}
+		b.bus.Publish(ctx, eventbus.Event{
+			Kind:      "catalog.item_state_changed",
+			Namespace: ns,
+			EntityID:  strconv.FormatInt(ev.ItemID, 10),
+			Payload: map[string]any{
+				"namespace": ev.Namespace,
+				"item_id":   ev.ItemID,
+				"object_id": ev.ObjectID,
+				"from":      ev.From,
+				"to":        ev.To,
+				"at":        ev.At,
+			},
+		})
+	case "backlog_snapshot":
+		var ev embedder.CatalogBacklogSnapshotEvent
+		if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+			slog.Warn("catalog events bridge: backlog_snapshot unmarshal", "error", err)
+			return
+		}
+		b.bus.Publish(ctx, eventbus.Event{
+			Kind:      "catalog.backlog_snapshot",
+			Namespace: ns,
+			Payload: map[string]any{
+				"namespace":   ev.Namespace,
+				"pending":     ev.Backlog.Pending,
+				"in_flight":   ev.Backlog.InFlight,
+				"failed":      ev.Backlog.Failed,
+				"dead_letter": ev.Backlog.DeadLetter,
+				"stream_len":  ev.Backlog.StreamLen,
+				"at":          ev.At,
+			},
+		})
+	case "dead_letter_grew":
+		var ev embedder.CatalogDeadLetterGrewEvent
+		if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+			slog.Warn("catalog events bridge: dead_letter_grew unmarshal", "error", err)
+			return
+		}
+		b.bus.Publish(ctx, eventbus.Event{
+			Kind:      "catalog.dead_letter_grew",
+			Namespace: ns,
+			Payload: map[string]any{
+				"namespace":      ev.Namespace,
+				"previous_count": ev.PreviousCount,
+				"new_count":      ev.NewCount,
+				"delta":          ev.Delta,
+				"at":             ev.At,
+			},
+		})
+	default:
+		slog.Debug("catalog events bridge: unknown kind", "kind", envelope.Kind)
+	}
 }

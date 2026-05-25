@@ -29,11 +29,46 @@ type CatalogItemStateChangedEvent struct {
 	At        time.Time `json:"at"`
 }
 
-// CatalogEventPublisher publishes catalog state-change events to a transport
-// the admin plane can subscribe to. Production uses Redis pub/sub; tests
-// inject an in-memory fake.
+// CatalogBacklogSnapshotPayload is the structured backlog body inside a
+// backlog_snapshot event. Same shape as the admin CatalogBacklog wire type
+// so the SPA can re-render tiles without a refetch.
+type CatalogBacklogSnapshotPayload struct {
+	Pending    int `json:"pending"`
+	InFlight   int `json:"in_flight"`
+	Failed     int `json:"failed"`
+	DeadLetter int `json:"dead_letter"`
+	StreamLen  int `json:"stream_len"`
+}
+
+// CatalogBacklogSnapshotEvent fires when the sampler writes a new sample
+// (counts changed or ForceWriteAfter elapsed). Drives live tile updates on
+// the Catalog status page between polling refetches.
+type CatalogBacklogSnapshotEvent struct {
+	Kind      string                        `json:"kind"` // always "backlog_snapshot"
+	Namespace string                        `json:"namespace"`
+	Backlog   CatalogBacklogSnapshotPayload `json:"backlog"`
+	At        time.Time                     `json:"at"`
+}
+
+// CatalogDeadLetterGrewEvent fires when dead_letter rose since the previous
+// sample. Drives the global ops toast + Status-page alert so operators see
+// problems land in dead-letter without staring at the catalog page.
+type CatalogDeadLetterGrewEvent struct {
+	Kind          string    `json:"kind"` // always "dead_letter_grew"
+	Namespace     string    `json:"namespace"`
+	PreviousCount int       `json:"previous_count"`
+	NewCount      int       `json:"new_count"`
+	Delta         int       `json:"delta"`
+	At            time.Time `json:"at"`
+}
+
+// CatalogEventPublisher publishes catalog events to a transport the admin
+// plane can subscribe to. Production uses Redis pub/sub; tests inject an
+// in-memory fake.
 type CatalogEventPublisher interface {
 	PublishItemStateChanged(ctx context.Context, ev CatalogItemStateChangedEvent)
+	PublishBacklogSnapshot(ctx context.Context, ev CatalogBacklogSnapshotEvent)
+	PublishDeadLetterGrew(ctx context.Context, ev CatalogDeadLetterGrewEvent)
 }
 
 // CatalogEventChannel computes the Redis pub/sub channel name for a
@@ -67,14 +102,38 @@ func (p *redisPubsubPublisher) PublishItemStateChanged(ctx context.Context, ev C
 	if ev.At.IsZero() {
 		ev.At = time.Now().UTC()
 	}
+	p.publish(ctx, ev.Namespace, ev)
+}
+
+func (p *redisPubsubPublisher) PublishBacklogSnapshot(ctx context.Context, ev CatalogBacklogSnapshotEvent) {
+	if ev.Kind == "" {
+		ev.Kind = "backlog_snapshot"
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now().UTC()
+	}
+	p.publish(ctx, ev.Namespace, ev)
+}
+
+func (p *redisPubsubPublisher) PublishDeadLetterGrew(ctx context.Context, ev CatalogDeadLetterGrewEvent) {
+	if ev.Kind == "" {
+		ev.Kind = "dead_letter_grew"
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now().UTC()
+	}
+	p.publish(ctx, ev.Namespace, ev)
+}
+
+// publish is the shared marshal-then-PUBLISH helper. Errors are logged but
+// never surfaced — pub/sub is best-effort observability, not a critical path.
+func (p *redisPubsubPublisher) publish(ctx context.Context, namespace string, ev any) {
 	payload, err := json.Marshal(ev)
 	if err != nil {
-		slog.WarnContext(ctx, "catalog event marshal failed", "namespace", ev.Namespace, "error", err)
+		slog.WarnContext(ctx, "catalog event marshal failed", "namespace", namespace, "error", err)
 		return
 	}
-	if err := p.rdb.Publish(ctx, CatalogEventChannel(ev.Namespace), payload).Err(); err != nil {
-		// Pub/sub publish errors are non-fatal — the DB state is the truth.
-		// Log so an operator can correlate but don't surface to the embed path.
-		slog.DebugContext(ctx, "catalog event publish failed", "namespace", ev.Namespace, "error", fmt.Sprintf("%v", err))
+	if err := p.rdb.Publish(ctx, CatalogEventChannel(namespace), payload).Err(); err != nil {
+		slog.DebugContext(ctx, "catalog event publish failed", "namespace", namespace, "error", fmt.Sprintf("%v", err))
 	}
 }

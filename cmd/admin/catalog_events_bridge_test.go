@@ -62,6 +62,55 @@ func TestCatalogBridgeDropsMalformedPayload(t *testing.T) {
 	}
 }
 
+func TestCatalogBridgeRoutesBacklogSnapshot(t *testing.T) {
+	bus := eventbus.NewBus()
+	defer bus.Close()
+	ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{"catalog.backlog_snapshot"}})
+	defer cancel()
+
+	bridge := newCatalogEventsBridge(nil, bus)
+	bridge.handle(context.Background(), &goredis.Message{
+		Channel: "codohue:catalog-events:prod",
+		Payload: `{"kind":"backlog_snapshot","namespace":"prod","backlog":{"pending":3,"in_flight":1,"failed":0,"dead_letter":0,"stream_len":4},"at":"2025-05-25T10:00:00Z"}`,
+	})
+
+	select {
+	case ev := <-ch:
+		payload, _ := ev.Payload.(map[string]any)
+		if payload["pending"] != 3 {
+			t.Errorf("payload[pending]=%v, want 3", payload["pending"])
+		}
+		if payload["stream_len"] != 4 {
+			t.Errorf("payload[stream_len]=%v, want 4", payload["stream_len"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
+func TestCatalogBridgeRoutesDeadLetterGrew(t *testing.T) {
+	bus := eventbus.NewBus()
+	defer bus.Close()
+	ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{"catalog.dead_letter_grew"}})
+	defer cancel()
+
+	bridge := newCatalogEventsBridge(nil, bus)
+	bridge.handle(context.Background(), &goredis.Message{
+		Channel: "codohue:catalog-events:prod",
+		Payload: `{"kind":"dead_letter_grew","namespace":"prod","previous_count":2,"new_count":5,"delta":3,"at":"2025-05-25T10:00:00Z"}`,
+	})
+
+	select {
+	case ev := <-ch:
+		payload, _ := ev.Payload.(map[string]any)
+		if payload["delta"] != 3 {
+			t.Errorf("payload[delta]=%v, want 3", payload["delta"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestCatalogBridgeIgnoresUnknownChannel(t *testing.T) {
 	bus := eventbus.NewBus()
 	defer bus.Close()

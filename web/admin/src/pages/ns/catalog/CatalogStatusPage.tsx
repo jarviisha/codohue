@@ -45,17 +45,42 @@ export default function CatalogStatusPage() {
   const reembed = useTriggerReEmbed(ns ?? null)
   const bulkRedrive = useBulkRedriveDeadletter(ns ?? null)
 
-  // Subscribe to catalog SSE stream while we're on the page. Each
-  // item_state_changed event increments a counter so operators see the
-  // stream is alive even before the polling refetch lands.
+  // Live backlog snapshot from SSE — when present we render it on the tiles
+  // so the page tracks the embedder's sample cadence (30s) rather than the
+  // /catalog poll interval (15s). embedded + consumer_lag aren't carried on
+  // the SSE event; they come from the polled config response.
+  const [liveBacklog, setLiveBacklog] = useState<CatalogBacklog | null>(null)
+  const [dlAlert, setDlAlert] = useState<{ namespace: string; new_count: number; delta: number } | null>(null)
+
   const { connected: streamConnected } = useServerStream(
     ns ? `/api/admin/v1/namespaces/${ns}/catalog/stream` : null,
     useMemo(
       () => ({
         item_state_changed: () => setStreamEvents((n) => n + 1),
-        dead_letter_grew: () => setStreamEvents((n) => n + 1),
+        backlog_snapshot: (data: unknown) => {
+          const d = data as Record<string, number | undefined>
+          setLiveBacklog((prev) => ({
+            pending: d.pending ?? 0,
+            in_flight: d.in_flight ?? 0,
+            failed: d.failed ?? 0,
+            dead_letter: d.dead_letter ?? 0,
+            stream_len: d.stream_len ?? 0,
+            embedded: prev?.embedded ?? 0,
+            consumer_lag: prev?.consumer_lag ?? 0,
+          }))
+          setStreamEvents((n) => n + 1)
+        },
+        dead_letter_grew: (data: unknown) => {
+          const d = data as { namespace?: string; new_count?: number; delta?: number }
+          setDlAlert({
+            namespace: d.namespace ?? ns ?? '',
+            new_count: d.new_count ?? 0,
+            delta: d.delta ?? 0,
+          })
+          setStreamEvents((n) => n + 1)
+        },
       }),
-      [],
+      [ns],
     ),
   )
 
@@ -82,6 +107,7 @@ export default function CatalogStatusPage() {
   }
 
   const data = config.data
+
   if (!data || !data.catalog.enabled) {
     return (
       <Container size="full" className="py-6 px-6">
@@ -98,7 +124,16 @@ export default function CatalogStatusPage() {
     )
   }
 
-  const backlog = data.backlog
+  // Merge live SSE deltas onto the polled snapshot. SSE only carries the
+  // four backlog states + stream_len, so embedded + consumer_lag come from
+  // the polled response.
+  const backlog: CatalogBacklog = liveBacklog
+    ? {
+        ...liveBacklog,
+        embedded: data.backlog.embedded,
+        consumer_lag: data.backlog.consumer_lag,
+      }
+    : data.backlog
   const reembedStatus = data.last_re_embed
   const reembedRunning = reembedStatus?.status === 'running'
 
@@ -152,6 +187,18 @@ export default function CatalogStatusPage() {
       </PageHeader>
 
       <Stack gap="300">
+        {dlAlert && dlAlert.delta > 0 && (
+          <Alert
+            variant="danger"
+            title={`Dead-letter grew by ${dlAlert.delta}`}
+            description={`Namespace ${dlAlert.namespace} now has ${dlAlert.new_count} dead-letter items. Investigate or bulk-redrive once the root cause is fixed.`}
+            actions={
+              <Button size="sm" variant="ghost" onClick={() => setDlAlert(null)}>
+                Dismiss
+              </Button>
+            }
+          />
+        )}
         {reembed.error && (
           <Alert variant="danger" title="Re-embed failed" description={reembed.error.message} />
         )}
@@ -315,7 +362,7 @@ export default function CatalogStatusPage() {
 }
 
 function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
-  const tiles: Array<{ label: string; value: number; tone: 'neutral' | 'warning' | 'danger' }> = [
+  const tiles: Array<{ label: string; value: number; tone: 'neutral' | 'warning' | 'danger'; hint?: string }> = [
     { label: 'Pending', value: backlog.pending, tone: 'neutral' },
     { label: 'In flight', value: backlog.in_flight, tone: 'neutral' },
     {
@@ -329,7 +376,13 @@ function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
       tone: backlog.dead_letter > 0 ? 'danger' : 'neutral',
     },
     { label: 'Embedded', value: backlog.embedded, tone: 'neutral' },
-    { label: 'Stream length', value: backlog.stream_len, tone: 'neutral' },
+    { label: 'Stream length', value: backlog.stream_len, tone: 'neutral', hint: 'XLEN' },
+    {
+      label: 'Consumer lag',
+      value: backlog.consumer_lag,
+      tone: backlog.consumer_lag > 1000 ? 'warning' : 'neutral',
+      hint: 'PEL',
+    },
   ]
   return (
     <Inline gap="200" align="start" wrap>
@@ -345,6 +398,9 @@ function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
                   {t.value.toLocaleString()}
                 </span>
                 {t.tone !== 'neutral' && <Badge variant={t.tone}>!</Badge>}
+                {t.hint && (
+                  <span className="text-foreground-subtle text-xs">{t.hint}</span>
+                )}
               </Inline>
             </Stack>
           </CardContent>

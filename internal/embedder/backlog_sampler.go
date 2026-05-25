@@ -48,16 +48,22 @@ type BacklogSamplerConfig struct {
 // last sample. Identical-and-recent ticks are dropped to keep the table
 // from bloating during idle hours.
 type BacklogSampler struct {
-	repo     backlogRepo
-	redis    streamObserver
-	nsLister nsLister
-	cfg      BacklogSamplerConfig
+	repo      backlogRepo
+	redis     streamObserver
+	nsLister  nsLister
+	publisher CatalogEventPublisher // optional; nil = no pub/sub fan-out
+	cfg       BacklogSamplerConfig
 
 	// lastSample tracks the in-memory snapshot we last wrote per namespace
 	// so the skip check doesn't need a DB read every tick. The DB query in
 	// LatestBacklogSample is the source of truth on startup.
 	lastSample map[string]sampleSnapshot
 }
+
+// SetEventPublisher wires the pub/sub publisher used to emit backlog_snapshot
+// + dead_letter_grew events. nil = no fan-out (sampler still writes to DB
+// + Prometheus gauges). Safe to call before Run.
+func (s *BacklogSampler) SetEventPublisher(p CatalogEventPublisher) { s.publisher = p }
 
 type sampleSnapshot struct {
 	counts    BacklogStateCounts
@@ -167,10 +173,48 @@ func (s *BacklogSampler) sampleOne(ctx context.Context, namespace string, now ti
 		return nil
 	}
 
+	// Capture the previous dead-letter count before overwriting lastSample
+	// so we can fire dead_letter_grew when it rises this tick.
+	prevDeadLetter := 0
+	if ok {
+		prevDeadLetter = prev.counts.DeadLetter
+	}
+
 	if err := s.repo.InsertBacklogSample(ctx, namespace, now, counts.Pending, counts.InFlight, counts.Failed, counts.DeadLetter, streamLen); err != nil {
 		return err
 	}
 	s.lastSample[namespace] = sampleSnapshot{counts: counts, streamLen: streamLen, at: now}
+
+	// Pub/sub fan-out (optional). Publishes happen AFTER the DB write so
+	// the admin SSE stream's view of "latest sample" can't get ahead of
+	// the persisted timeline — operators see the same backlog in tiles +
+	// chart.
+	if s.publisher != nil {
+		s.publisher.PublishBacklogSnapshot(ctx, CatalogBacklogSnapshotEvent{
+			Namespace: namespace,
+			Backlog: CatalogBacklogSnapshotPayload{
+				Pending:    counts.Pending,
+				InFlight:   counts.InFlight,
+				Failed:     counts.Failed,
+				DeadLetter: counts.DeadLetter,
+				StreamLen:  streamLen,
+			},
+			At: now,
+		})
+		// dead_letter_grew fires only when DL strictly rose. Cold start
+		// (no prev sample) is treated as "previous=0" so an existing
+		// DL pool on restart still triggers an alert; the operator
+		// dismisses it once.
+		if counts.DeadLetter > prevDeadLetter {
+			s.publisher.PublishDeadLetterGrew(ctx, CatalogDeadLetterGrewEvent{
+				Namespace:     namespace,
+				PreviousCount: prevDeadLetter,
+				NewCount:      counts.DeadLetter,
+				Delta:         counts.DeadLetter - prevDeadLetter,
+				At:            now,
+			})
+		}
+	}
 
 	// Mirror the snapshot into Prometheus gauges so /metrics scrapes show
 	// live backlog state without hitting the DB. Each non-embedded state is

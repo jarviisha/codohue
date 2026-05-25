@@ -26,6 +26,7 @@ export type CatalogBacklog = {
   failed: number
   dead_letter: number
   stream_len: number
+  consumer_lag: number
 }
 
 export type CatalogStrategyDescriptor = {
