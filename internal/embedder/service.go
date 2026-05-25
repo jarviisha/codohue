@@ -95,7 +95,18 @@ type Service struct {
 
 	ensuredMu sync.Mutex
 	ensured   map[string]struct{}
+
+	// eventPublisher is optional. When set, the service emits one
+	// CatalogItemStateChangedEvent after every successful state transition
+	// so the admin plane can fan progress out to operators over SSE.
+	eventPublisher CatalogEventPublisher
 }
+
+// SetEventPublisher wires a pub/sub publisher used to broadcast catalog item
+// state changes. Production wiring (cmd/embedder/main.go) passes a Redis-
+// backed publisher; tests inject a fake or leave it nil. Safe to call
+// before Run.
+func (s *Service) SetEventPublisher(p CatalogEventPublisher) { s.eventPublisher = p }
 
 type cachedStrategy struct {
 	strategy embedstrategy.Strategy
@@ -172,9 +183,10 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("mark in_flight: %w", err)
 	}
+	s.publishItemStateChanged(ctx, item, "pending", "in_flight")
 
 	if attempt > maxAttempts {
-		s.markDeadLetter(ctx, item.ID,
+		s.markDeadLetter(ctx, item,
 			fmt.Sprintf("attempt %d exceeds max %d", attempt, maxAttempts))
 		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "max_attempts")
 		slog.WarnContext(ctx, "catalog item dead-lettered (max attempts exceeded)",
@@ -191,7 +203,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		// Misconfiguration (unknown strategy or factory rejected params) —
 		// terminal until operator fixes config; dead-letter immediately.
-		s.markDeadLetter(ctx, item.ID, fmt.Sprintf("strategy resolve: %v", err))
+		s.markDeadLetter(ctx, item, fmt.Sprintf("strategy resolve: %v", err))
 		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "strategy_resolve")
 		return OutcomeDeadLetter, nil
 	}
@@ -203,28 +215,28 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	}
 
 	if len(vec) != cfg.EmbeddingDim {
-		s.markDeadLetter(ctx, item.ID,
+		s.markDeadLetter(ctx, item,
 			fmt.Sprintf("dim mismatch: produced=%d expected=%d", len(vec), cfg.EmbeddingDim))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "dim_mismatch")
 		return OutcomeDeadLetter, nil
 	}
 
 	if err := s.ensureNamespaceCollections(ctx, item.Namespace, cfg); err != nil {
-		s.markFailed(ctx, item.ID, fmt.Sprintf("ensure dense collections: %v", err))
+		s.markFailed(ctx, item, fmt.Sprintf("ensure dense collections: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "ensure_collections")
 		return OutcomeFailed, fmt.Errorf("ensure dense collections: %w", err)
 	}
 
 	pointID, err := s.idmap.GetOrCreateObjectID(ctx, item.ObjectID, item.Namespace)
 	if err != nil {
-		s.markFailed(ctx, item.ID, fmt.Sprintf("idmap: %v", err))
+		s.markFailed(ctx, item, fmt.Sprintf("idmap: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "idmap")
 		return OutcomeFailed, fmt.Errorf("idmap: %w", err)
 	}
 
 	embeddedAt := s.clock().UTC()
 	if err := s.upsertVector(ctx, item.Namespace, item.ObjectID, pointID, vec, strategy, embeddedAt); err != nil {
-		s.markFailed(ctx, item.ID, fmt.Sprintf("qdrant: %v", err))
+		s.markFailed(ctx, item, fmt.Sprintf("qdrant: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "qdrant")
 		return OutcomeFailed, fmt.Errorf("qdrant upsert: %w", err)
 	}
@@ -236,6 +248,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "mark_embedded")
 		return OutcomeFailed, fmt.Errorf("mark embedded: %w", err)
 	}
+	s.publishItemStateChanged(ctx, item, "in_flight", "embedded")
 
 	elapsed := s.clock().Sub(embedStart)
 	s.recordSuccess(item.Namespace, strategy.ID(), strategy.Version(), elapsed)
@@ -271,26 +284,49 @@ func (s *Service) recordFailure(ns, strategyID, strategyVersion, reason string) 
 // markDeadLetter is a thin wrapper that ignores the repo error after logging.
 // Failed bookkeeping must not block the outer flow — the row stays 'in_flight'
 // in that case and the embedder's recovery sweep will eventually re-process it.
-func (s *Service) markDeadLetter(ctx context.Context, itemID int64, reason string) {
-	if err := s.repo.MarkDeadLetter(ctx, itemID, reason); err != nil {
+// Publishes an item_state_changed event on success so the admin SSE stream
+// surfaces the transition to operators.
+func (s *Service) markDeadLetter(ctx context.Context, item *PendingItem, reason string) {
+	if err := s.repo.MarkDeadLetter(ctx, item.ID, reason); err != nil {
 		slog.WarnContext(ctx, "catalog mark dead_letter failed",
-			slog.Int64("catalog_item_id", itemID),
+			slog.Int64("catalog_item_id", item.ID),
 			slog.String("reason", reason),
 			slog.String("error", err.Error()),
 		)
+		return
 	}
+	s.publishItemStateChanged(ctx, item, "in_flight", "dead_letter")
 }
 
 // markFailed is the transient-failure counterpart of markDeadLetter. The row
 // stays eligible for retry until attempt_count exceeds max_attempts.
-func (s *Service) markFailed(ctx context.Context, itemID int64, reason string) {
-	if err := s.repo.MarkFailed(ctx, itemID, reason); err != nil {
+func (s *Service) markFailed(ctx context.Context, item *PendingItem, reason string) {
+	if err := s.repo.MarkFailed(ctx, item.ID, reason); err != nil {
 		slog.WarnContext(ctx, "catalog mark failed (transient) failed",
-			slog.Int64("catalog_item_id", itemID),
+			slog.Int64("catalog_item_id", item.ID),
 			slog.String("reason", reason),
 			slog.String("error", err.Error()),
 		)
+		return
 	}
+	s.publishItemStateChanged(ctx, item, "in_flight", "failed")
+}
+
+// publishItemStateChanged is the single fan-out point for state-change
+// events. nil publisher = no-op (production wires it; tests usually leave
+// it nil). Errors inside the publisher are swallowed there.
+func (s *Service) publishItemStateChanged(ctx context.Context, item *PendingItem, from, to string) {
+	if s.eventPublisher == nil || item == nil {
+		return
+	}
+	s.eventPublisher.PublishItemStateChanged(ctx, CatalogItemStateChangedEvent{
+		Namespace: item.Namespace,
+		ItemID:    item.ID,
+		ObjectID:  item.ObjectID,
+		From:      from,
+		To:        to,
+		At:        s.clock().UTC(),
+	})
 }
 
 // logDeadLetter emits a structured warn-level log for terminal failures so
@@ -316,19 +352,19 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 	sid, sver := strategy.ID(), strategy.Version()
 	switch {
 	case errors.Is(err, embedstrategy.ErrZeroNorm):
-		s.markDeadLetter(ctx, item.ID, err.Error())
+		s.markDeadLetter(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "zero_norm")
 		s.logDeadLetter(ctx, item, sid, sver, "zero_norm", err)
 		return OutcomeDeadLetter, nil
 
 	case errors.Is(err, embedstrategy.ErrInputTooLarge):
-		s.markDeadLetter(ctx, item.ID, err.Error())
+		s.markDeadLetter(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "input_too_large")
 		s.logDeadLetter(ctx, item, sid, sver, "input_too_large", err)
 		return OutcomeDeadLetter, nil
 
 	case errors.Is(err, embedstrategy.ErrDimensionMismatch):
-		s.markDeadLetter(ctx, item.ID, err.Error())
+		s.markDeadLetter(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "dim_mismatch")
 		s.logDeadLetter(ctx, item, sid, sver, "dim_mismatch", err)
 		return OutcomeDeadLetter, nil
@@ -336,7 +372,7 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 	case errors.Is(err, embedstrategy.ErrTransient),
 		errors.Is(err, context.Canceled),
 		errors.Is(err, context.DeadlineExceeded):
-		s.markFailed(ctx, item.ID, err.Error())
+		s.markFailed(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "transient")
 		return OutcomeFailed, err
 
@@ -344,7 +380,7 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 		// Unknown errors are conservatively treated as transient so the
 		// item gets retried; persistent unknown errors will eventually
 		// hit max_attempts and dead-letter via the attempt cap above.
-		s.markFailed(ctx, item.ID, err.Error())
+		s.markFailed(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "unknown")
 		return OutcomeFailed, err
 	}

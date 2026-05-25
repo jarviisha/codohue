@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // backlogRepo is the slice of [Repository] the sampler needs. Declared as an
@@ -17,10 +19,12 @@ type backlogRepo interface {
 	LatestBacklogSample(ctx context.Context, namespace string) (BacklogStateCounts, int, bool, error)
 }
 
-// streamLengther is the subset of *redis.Client the sampler uses. Tests
-// inject a fake.
-type streamLengther interface {
+// streamObserver is the subset of *redis.Client the sampler uses to inspect
+// catalog:embed:{ns} — length for the backlog row + consumer-group PEL depth
+// for the consumer_lag gauge. Tests inject a fake.
+type streamObserver interface {
 	XLen(ctx context.Context, stream string) *redis.IntCmd
+	XInfoGroups(ctx context.Context, stream string) *redis.XInfoGroupsCmd
 }
 
 // BacklogSamplerConfig bundles the runtime knobs. Zero values are filled
@@ -45,7 +49,7 @@ type BacklogSamplerConfig struct {
 // from bloating during idle hours.
 type BacklogSampler struct {
 	repo     backlogRepo
-	redis    streamLengther
+	redis    streamObserver
 	nsLister nsLister
 	cfg      BacklogSamplerConfig
 
@@ -67,7 +71,7 @@ func NewBacklogSampler(repo *Repository, rdb *redis.Client, nsLister nsLister, c
 	return newBacklogSamplerWithDeps(repo, rdb, nsLister, cfg)
 }
 
-func newBacklogSamplerWithDeps(repo backlogRepo, rdb streamLengther, nsLister nsLister, cfg BacklogSamplerConfig) *BacklogSampler {
+func newBacklogSamplerWithDeps(repo backlogRepo, rdb streamObserver, nsLister nsLister, cfg BacklogSamplerConfig) *BacklogSampler {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 30 * time.Second
 	}
@@ -167,7 +171,48 @@ func (s *BacklogSampler) sampleOne(ctx context.Context, namespace string, now ti
 		return err
 	}
 	s.lastSample[namespace] = sampleSnapshot{counts: counts, streamLen: streamLen, at: now}
+
+	// Mirror the snapshot into Prometheus gauges so /metrics scrapes show
+	// live backlog state without hitting the DB. Each non-embedded state is
+	// a separate label value rather than four metrics — keeps Grafana dashboards
+	// idiomatic ("sum by (state)").
+	metrics.CatalogPendingItems.WithLabelValues(namespace, "pending").Set(float64(counts.Pending))
+	metrics.CatalogPendingItems.WithLabelValues(namespace, "in_flight").Set(float64(counts.InFlight))
+	metrics.CatalogPendingItems.WithLabelValues(namespace, "failed").Set(float64(counts.Failed))
+	metrics.CatalogPendingItems.WithLabelValues(namespace, "dead_letter").Set(float64(counts.DeadLetter))
+
+	// Consumer-lag = XINFO GROUPS pending count for the embedder consumer
+	// group on this stream. Logged + zeroed on error rather than failing
+	// the whole sample; the rest of the snapshot is still useful.
+	if lag, err := s.consumerLag(ctx, namespace); err != nil {
+		slog.Warn("backlog sampler: consumer lag lookup failed", "namespace", namespace, "error", err)
+		metrics.CatalogConsumerLag.WithLabelValues(namespace).Set(0)
+	} else {
+		metrics.CatalogConsumerLag.WithLabelValues(namespace).Set(float64(lag))
+	}
 	return nil
+}
+
+// consumerLag reports the embedder consumer group's PEL depth via XINFO
+// GROUPS. Returns 0 when the stream or group doesn't exist yet (cold start)
+// rather than a hard error.
+func (s *BacklogSampler) consumerLag(ctx context.Context, namespace string) (int64, error) {
+	if s.redis == nil {
+		return 0, nil
+	}
+	groups, err := s.redis.XInfoGroups(ctx, streamName(namespace)).Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	for _, g := range groups {
+		if g.Name == defaultConsumerGroup {
+			return g.Pending, nil
+		}
+	}
+	return 0, nil
 }
 
 func (s *BacklogSampler) streamLen(ctx context.Context, namespace string) (int, error) {

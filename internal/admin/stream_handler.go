@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -71,7 +72,7 @@ func (h *Handler) StreamBatchRun(w http.ResponseWriter, r *http.Request) {
 
 // StreamOps handles GET /api/admin/v1/stream — the global ops bus that drives
 // sidebar badges, toast notifications, and recent-items in the SPA. Filters
-// at the bus level to the run-lifecycle and admin-plane alert kinds; other
+// at the bus level to the run-lifecycle + catalog-alert kinds; other
 // internal events stay private to handlers that care.
 func (h *Handler) StreamOps(w http.ResponseWriter, r *http.Request) {
 	if h.bus == nil {
@@ -83,7 +84,40 @@ func (h *Handler) StreamOps(w http.ResponseWriter, r *http.Request) {
 			"batch_run.started",
 			"batch_run.completed",
 			"batch_run.cancelled",
-			// Phase 2+ adds catalog.dead_letter_grew, health_changed, etc.
+			"catalog.dead_letter_grew",
+		},
+	})
+	defer cancel()
+	streamRun(w, r, events)
+}
+
+// StreamCatalog handles GET /api/admin/v1/namespaces/{ns}/catalog/stream —
+// pushes catalog item state changes for one namespace. Unlike the batch run
+// stream, the catalog stream has no terminal kind — it stays alive until
+// the client disconnects.
+//
+//   - 400 when ns is missing.
+//   - 503 when the event bus is not wired (defensive; main.go always wires it).
+//   - 200 text/event-stream otherwise.
+//
+// Events forwarded: item_state_changed (per-item transition), plus
+// dead_letter_grew + backlog_snapshot when those signals come online.
+func (h *Handler) StreamCatalog(w http.ResponseWriter, r *http.Request) {
+	if h.bus == nil {
+		httpapi.WriteError(w, http.StatusServiceUnavailable, "stream_unavailable", "event bus is not wired")
+		return
+	}
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
+		return
+	}
+	events, cancel := h.bus.Subscribe(eventbus.Filter{
+		Namespace: ns,
+		Kinds: []string{
+			"catalog.item_state_changed",
+			"catalog.dead_letter_grew",
+			"catalog.backlog_snapshot",
 		},
 	})
 	defer cancel()
@@ -127,13 +161,15 @@ func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Ev
 	}
 }
 
-// sseEventName strips the "batch_run." prefix so the client-side switch can
-// key off "phase_started" rather than "batch_run.phase_started". Other event
+// sseEventName strips the bus's kind namespace prefix ("batch_run." or
+// "catalog.") so the client-side switch can key off "phase_started" or
+// "item_state_changed" rather than the fully-qualified bus kind. Other event
 // kinds pass through unchanged.
 func sseEventName(kind string) string {
-	const prefix = "batch_run."
-	if len(kind) > len(prefix) && kind[:len(prefix)] == prefix {
-		return kind[len(prefix):]
+	for _, prefix := range []string{"batch_run.", "catalog."} {
+		if strings.HasPrefix(kind, prefix) {
+			return kind[len(prefix):]
+		}
 	}
 	return kind
 }

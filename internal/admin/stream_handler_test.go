@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,84 @@ func TestStreamOpsReturns503WhenBusNotWired(t *testing.T) {
 	h.StreamOps(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+}
+
+func TestStreamCatalogReturns503WhenBusNotWired(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	req := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/prod/catalog/stream",
+		map[string]string{"ns": "prod"}, "")
+	rec := httptest.NewRecorder()
+	h.StreamCatalog(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want 503", rec.Code)
+	}
+}
+
+func TestStreamCatalogReturns400WhenNsMissing(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	bus := eventbus.NewBus()
+	defer bus.Close()
+	h.SetEventBus(bus)
+
+	req := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces//catalog/stream",
+		map[string]string{"ns": ""}, "")
+	rec := httptest.NewRecorder()
+	h.StreamCatalog(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", rec.Code)
+	}
+}
+
+func TestStreamCatalogForwardsItemStateChanged(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	bus := eventbus.NewBus()
+	defer bus.Close()
+	h.SetEventBus(bus)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("ns", "prod")
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+		h.StreamCatalog(w, r)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/stream")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	time.Sleep(50 * time.Millisecond)
+	bus.Publish(context.Background(), eventbus.Event{
+		Kind:      "catalog.item_state_changed",
+		Namespace: "prod",
+		Payload:   map[string]any{"item_id": 42, "to": "embedded"},
+	})
+	// Other namespace's event must NOT be delivered.
+	bus.Publish(context.Background(), eventbus.Event{
+		Kind:      "catalog.item_state_changed",
+		Namespace: "staging",
+		Payload:   map[string]any{"item_id": 99, "to": "embedded"},
+	})
+	bus.Publish(context.Background(), eventbus.Event{
+		Kind:      "catalog.item_state_changed",
+		Namespace: "prod",
+		Payload:   map[string]any{"item_id": 43, "to": "failed"},
+	})
+
+	events := ssetest.Read(t, resp.Body, 2, 3*time.Second)
+	if events[0].Name != "item_state_changed" {
+		t.Errorf("events[0].Name=%q, want item_state_changed", events[0].Name)
+	}
+	if !strings.Contains(events[0].Data, `"item_id":42`) {
+		t.Errorf("events[0].Data missing item_id=42: %s", events[0].Data)
+	}
+	if !strings.Contains(events[1].Data, `"item_id":43`) {
+		t.Errorf("events[1].Data missing item_id=43 (cross-ns leak?): %s", events[1].Data)
 	}
 }
 

@@ -72,6 +72,7 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 		r.Post("/api/admin/v1/namespaces/{ns}/catalog/re-embed", h.TriggerReEmbed)
 		r.Get("/api/admin/v1/namespaces/{ns}/catalog/backlog-history", h.GetCatalogBacklogHistory)
 		r.Get("/api/admin/v1/namespaces/{ns}/catalog/failures-summary", h.GetCatalogFailuresSummary)
+		r.Get("/api/admin/v1/namespaces/{ns}/catalog/stream", h.StreamCatalog)
 		r.Get("/api/admin/v1/namespaces/{ns}/catalog/items", h.ListCatalogItems)
 		// Note: bulk redrive must be registered BEFORE the {id} variants so
 		// chi does not parse "redrive-deadletter" as the id parameter.

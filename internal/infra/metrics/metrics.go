@@ -95,6 +95,24 @@ var (
 		Name: "codohue_catalog_strategy_work_volume_total",
 		Help: "Total strategy-specific work volume (units depend on strategy: items, billed_tokens, billed_cost_micro_usd, etc.).",
 	}, []string{"namespace", "strategy_id", "strategy_version", "unit"})
+
+	// CatalogPendingItems is the live count of catalog_items in non-embedded
+	// state (pending + in_flight + failed + dead_letter) per namespace.
+	// Updated by cmd/embedder's backlog sampler each tick. Operators wire
+	// this in alerts ("backlog > 1000 for 5 min").
+	CatalogPendingItems = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_catalog_pending_items",
+		Help: "Live count of catalog_items still awaiting (pending+in_flight) or failed (failed+dead_letter), per namespace.",
+	}, []string{"namespace", "state"})
+
+	// CatalogConsumerLag is the Redis consumer group pending-entry-list size
+	// for catalog:embed:{ns} — the number of XREADGROUP-delivered items the
+	// embedder consumer hasn't ACKed yet. Spikes mean the worker is choking
+	// or crashed mid-batch.
+	CatalogConsumerLag = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_catalog_consumer_lag",
+		Help: "Redis consumer-group PEL depth on catalog:embed:{ns} per namespace.",
+	}, []string{"namespace"})
 )
 
 // Register registers all Codohue metrics with the default Prometheus registry.
@@ -112,5 +130,7 @@ func Register() {
 		CatalogEmbedDuration,
 		CatalogEmbedFailuresTotal,
 		CatalogStrategyWorkVolumeTotal,
+		CatalogPendingItems,
+		CatalogConsumerLag,
 	)
 }

@@ -75,8 +75,9 @@ func (f *fakeBacklogRepo) LatestBacklogSample(_ context.Context, ns string) (Bac
 }
 
 type fakeRedis struct {
-	lens map[string]int64
-	err  error
+	lens   map[string]int64
+	groups map[string][]redis.XInfoGroup
+	err    error
 }
 
 func (f *fakeRedis) XLen(_ context.Context, stream string) *redis.IntCmd {
@@ -89,6 +90,12 @@ func (f *fakeRedis) XLen(_ context.Context, stream string) *redis.IntCmd {
 	return cmd
 }
 
+func (f *fakeRedis) XInfoGroups(_ context.Context, stream string) *redis.XInfoGroupsCmd {
+	cmd := redis.NewXInfoGroupsCmd(context.Background(), stream)
+	cmd.SetVal(f.groups[stream])
+	return cmd
+}
+
 type fakeNsLister struct {
 	configs []*namespace.Config
 	err     error
@@ -98,7 +105,7 @@ func (f *fakeNsLister) ListCatalogEnabled(_ context.Context) ([]*namespace.Confi
 	return f.configs, f.err
 }
 
-func samplerWith(repo backlogRepo, rdb streamLengther, ns ...string) *BacklogSampler {
+func samplerWith(repo backlogRepo, rdb streamObserver, ns ...string) *BacklogSampler {
 	cfgs := make([]*namespace.Config, 0, len(ns))
 	for _, n := range ns {
 		cfgs = append(cfgs, &namespace.Config{Namespace: n})

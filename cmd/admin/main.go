@@ -84,6 +84,15 @@ func run() error {
 	defer bus.Close()
 	job.SetObserver(newBatchRunObserverAdapter(bus))
 
+	// Catalog events bridge — subscribes to the Redis pub/sub channel
+	// cmd/embedder publishes item state changes onto and republishes each
+	// message as a `catalog.item_state_changed` event on the local bus.
+	// Goroutine lifecycle is bound to ctx; bus shutdown happens via defer.
+	if redisClient != nil {
+		bridge := newCatalogEventsBridge(redisClient, bus)
+		go bridge.Run(ctx)
+	}
+
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
 	svc := admin.NewService(repo, cfg.APIURL, cfg.AdminAPIKey, redisClient, qdrantClient, job, nsAdapter)

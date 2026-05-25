@@ -104,6 +104,10 @@ func run() error {
 		idmapSvc,
 		qdrantClient,
 	)
+	// Pub/sub publisher broadcasts item state changes to
+	// codohue:catalog-events:{ns}; cmd/admin's catalog bridge subscribes
+	// and republishes onto the admin event bus for SSE fan-out.
+	embedderSvc.SetEventPublisher(embedder.NewRedisCatalogEventPublisher(redisClient))
 
 	consumerName := cfg.ReplicaName
 	if consumerName == "" {
