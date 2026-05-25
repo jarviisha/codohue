@@ -99,6 +99,20 @@ type fakeSvc struct {
 	overviewErr           error
 	nsDashboardResp       *NamespaceDashboardResponse
 	nsDashboardErr        error
+
+	// Phase 2 catalog history endpoints
+	backlogHistoryResp  *CatalogBacklogHistoryResponse
+	backlogHistoryErr   error
+	failuresSummaryResp *CatalogFailuresSummaryResponse
+	failuresSummaryErr  error
+}
+
+func (f *fakeSvc) GetCatalogBacklogHistory(_ context.Context, _ string, _ time.Duration) (*CatalogBacklogHistoryResponse, error) {
+	return f.backlogHistoryResp, f.backlogHistoryErr
+}
+
+func (f *fakeSvc) GetCatalogFailuresSummary(_ context.Context, _ string, _ time.Duration, _ int) (*CatalogFailuresSummaryResponse, error) {
+	return f.failuresSummaryResp, f.failuresSummaryErr
 }
 
 func (f *fakeSvc) GetBatchRunDetail(_ context.Context, _ int64) (*BatchRunDetail, error) {

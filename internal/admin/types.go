@@ -68,6 +68,44 @@ type CatalogBacklog struct {
 	StreamLen  int `json:"stream_len"`
 }
 
+// CatalogBacklogSample is one row of catalog_backlog_samples — written by
+// cmd/embedder's sampler, read by GET /catalog/backlog-history. Embedded is
+// deliberately omitted (the sampler doesn't track it: the timeline is about
+// work-still-to-do, not throughput history).
+type CatalogBacklogSample struct {
+	SampledAt  time.Time `json:"sampled_at"`
+	Pending    int       `json:"pending"`
+	InFlight   int       `json:"in_flight"`
+	Failed     int       `json:"failed"`
+	DeadLetter int       `json:"dead_letter"`
+	StreamLen  int       `json:"stream_len"`
+}
+
+// CatalogBacklogHistoryResponse is the body of
+// GET /api/admin/v1/namespaces/{ns}/catalog/backlog-history.
+type CatalogBacklogHistoryResponse struct {
+	Namespace     string                 `json:"namespace"`
+	WindowSeconds int                    `json:"window_seconds"`
+	Samples       []CatalogBacklogSample `json:"samples"`
+}
+
+// CatalogFailureReason is one bucket of "items that failed for this reason
+// in the requested window" — used by the catalog Status page to surface the
+// top causes operators should investigate first.
+type CatalogFailureReason struct {
+	Reason         string `json:"reason"`
+	Count          int    `json:"count"`
+	SampleObjectID string `json:"sample_object_id,omitempty"`
+}
+
+// CatalogFailuresSummaryResponse is the body of
+// GET /api/admin/v1/namespaces/{ns}/catalog/failures-summary.
+type CatalogFailuresSummaryResponse struct {
+	Namespace     string                 `json:"namespace"`
+	WindowSeconds int                    `json:"window_seconds"`
+	Reasons       []CatalogFailureReason `json:"reasons"`
+}
+
 // NamespaceCatalogResponse is the body of GET /api/admin/v1/namespaces/{ns}/catalog.
 // available_strategies is filtered to descriptors whose Dim matches the
 // namespace's embedding_dim so the operator UI only shows admissible options.

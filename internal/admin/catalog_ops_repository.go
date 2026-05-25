@@ -559,6 +559,90 @@ func (r *Repository) DeleteCatalogItem(ctx context.Context, namespace string, id
 // LookupNumericObjectID returns the BIGSERIAL numeric_id assigned to a string
 // object_id under (namespace, entity_type='object'). When no mapping exists
 // (the object was never seen by the recommend service), found=false.
+// GetCatalogBacklogHistory returns the samples written by cmd/embedder's
+// BacklogSampler over the requested window, oldest-first so the SPA can pipe
+// them straight into a time-series chart.
+//
+// The sampler skips duplicate-and-recent ticks, so the returned series is
+// step-function-shaped rather than evenly-spaced — that's a feature for
+// rendering ("changes happened here") not a defect.
+func (r *Repository) GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds int) ([]CatalogBacklogSample, error) {
+	if windowSeconds <= 0 {
+		return nil, fmt.Errorf("invalid window seconds: %d", windowSeconds)
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT sampled_at, pending, in_flight, failed, dead_letter, stream_len
+		FROM catalog_backlog_samples
+		WHERE namespace = $1
+		  AND sampled_at > now() - make_interval(secs => $2)
+		ORDER BY sampled_at`,
+		namespace, windowSeconds,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query backlog history: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CatalogBacklogSample
+	for rows.Next() {
+		var s CatalogBacklogSample
+		if err := rows.Scan(&s.SampledAt, &s.Pending, &s.InFlight, &s.Failed, &s.DeadLetter, &s.StreamLen); err != nil {
+			return nil, fmt.Errorf("scan backlog sample: %w", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate backlog samples: %w", err)
+	}
+	return out, nil
+}
+
+// GetCatalogFailuresSummary buckets catalog_items in state ∈ {failed,
+// dead_letter} by their last_error message within the time window. Top
+// failure reasons (count desc) bubble up so the UI can surface the most
+// impactful causes first.
+//
+// The window is matched against updated_at (the moment state transitioned
+// to failed / dead_letter, not the original ingest time).
+func (r *Repository) GetCatalogFailuresSummary(ctx context.Context, namespace string, windowSeconds, limit int) ([]CatalogFailureReason, error) {
+	if windowSeconds <= 0 {
+		return nil, fmt.Errorf("invalid window seconds: %d", windowSeconds)
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT COALESCE(last_error, '<no error message>') AS reason,
+		       COUNT(*) AS cnt,
+		       (ARRAY_AGG(object_id ORDER BY updated_at DESC))[1] AS sample
+		FROM catalog_items
+		WHERE namespace = $1
+		  AND state IN ('failed', 'dead_letter')
+		  AND updated_at > now() - make_interval(secs => $2)
+		GROUP BY reason
+		ORDER BY cnt DESC
+		LIMIT $3`,
+		namespace, windowSeconds, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query failures summary: %w", err)
+	}
+	defer rows.Close()
+
+	var out []CatalogFailureReason
+	for rows.Next() {
+		var r CatalogFailureReason
+		if err := rows.Scan(&r.Reason, &r.Count, &r.SampleObjectID); err != nil {
+			return nil, fmt.Errorf("scan failures row: %w", err)
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate failures rows: %w", err)
+	}
+	return out, nil
+}
+
 func (r *Repository) LookupNumericObjectID(ctx context.Context, namespace, objectID string) (numericID uint64, found bool, err error) {
 	err = r.db.QueryRow(ctx, `
 		SELECT numeric_id FROM id_mappings

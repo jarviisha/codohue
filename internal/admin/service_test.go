@@ -102,6 +102,12 @@ type fakeRepo struct {
 	requestCancelCalledWith int64
 	batchRunStats           []BatchRunStatsBucket
 	batchRunStatsErr        error
+
+	// Phase 2 catalog backlog history + failures summary
+	backlogHistory     []CatalogBacklogSample
+	backlogHistoryErr  error
+	failuresSummary    []CatalogFailureReason
+	failuresSummaryErr error
 }
 
 func (f *fakeRepo) GetBatchRunByID(_ context.Context, _ int64) (*BatchRunLog, error) {
@@ -115,6 +121,14 @@ func (f *fakeRepo) RequestCancel(_ context.Context, id int64) (RequestCancelResu
 
 func (f *fakeRepo) GetBatchRunStats(_ context.Context, _, _ int) ([]BatchRunStatsBucket, error) {
 	return f.batchRunStats, f.batchRunStatsErr
+}
+
+func (f *fakeRepo) GetCatalogBacklogHistory(_ context.Context, _ string, _ int) ([]CatalogBacklogSample, error) {
+	return f.backlogHistory, f.backlogHistoryErr
+}
+
+func (f *fakeRepo) GetCatalogFailuresSummary(_ context.Context, _ string, _, _ int) ([]CatalogFailureReason, error) {
+	return f.failuresSummary, f.failuresSummaryErr
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {

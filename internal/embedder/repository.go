@@ -162,3 +162,101 @@ func (r *Repository) MarkDeadLetter(ctx context.Context, id int64, lastError str
 	}
 	return nil
 }
+
+// BacklogStateCounts holds per-state catalog_items counts the sampler writes
+// to catalog_backlog_samples each tick. Only the operationally interesting
+// states are tracked — `embedded` rows are deliberately omitted because the
+// backlog timeline is about work-still-to-do, not throughput history.
+type BacklogStateCounts struct {
+	Pending    int
+	InFlight   int
+	Failed     int
+	DeadLetter int
+}
+
+// CountBacklogStates returns the live count of catalog_items in each non-
+// embedded state for a namespace. Wraps the same group-by-state aggregate
+// internal/admin uses but lives here so the architecture rule's cross-domain
+// import ban is honoured.
+func (r *Repository) CountBacklogStates(ctx context.Context, namespace string) (BacklogStateCounts, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT state, COUNT(*)
+		FROM catalog_items
+		WHERE namespace = $1
+		  AND state IN ('pending', 'in_flight', 'failed', 'dead_letter')
+		GROUP BY state`,
+		namespace,
+	)
+	if err != nil {
+		return BacklogStateCounts{}, fmt.Errorf("count backlog states: %w", err)
+	}
+	defer rows.Close()
+
+	var out BacklogStateCounts
+	for rows.Next() {
+		var state string
+		var n int
+		if err := rows.Scan(&state, &n); err != nil {
+			return BacklogStateCounts{}, fmt.Errorf("scan backlog row: %w", err)
+		}
+		switch state {
+		case "pending":
+			out.Pending = n
+		case "in_flight":
+			out.InFlight = n
+		case "failed":
+			out.Failed = n
+		case "dead_letter":
+			out.DeadLetter = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return BacklogStateCounts{}, fmt.Errorf("iterate backlog rows: %w", err)
+	}
+	return out, nil
+}
+
+// InsertBacklogSample appends one row to catalog_backlog_samples (migration
+// 014). The (namespace, sampled_at) PRIMARY KEY makes repeated inserts at
+// the same instant a hard error — callers must space samples at least one
+// microsecond apart, which the sampler trivially does (30s cadence).
+func (r *Repository) InsertBacklogSample(
+	ctx context.Context,
+	namespace string,
+	sampledAt time.Time,
+	pending, inFlight, failed, deadLetter, streamLen int,
+) error {
+	if _, err := r.execFn(ctx, `
+		INSERT INTO catalog_backlog_samples
+		    (namespace, sampled_at, pending, in_flight, failed, dead_letter, stream_len)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		namespace, sampledAt, pending, inFlight, failed, deadLetter, streamLen,
+	); err != nil {
+		return fmt.Errorf("insert backlog sample for %s: %w", namespace, err)
+	}
+	return nil
+}
+
+// LatestBacklogSample returns the most recently recorded sample for a
+// namespace plus whether one exists. The sampler uses this to skip writing
+// duplicate snapshots when no field changed since last tick (BUILD_PLAN §8
+// "Sampler skip rule" — keeps the table from bloating during idle hours).
+func (r *Repository) LatestBacklogSample(ctx context.Context, namespace string) (BacklogStateCounts, int, bool, error) {
+	row := r.queryRowFn(ctx, `
+		SELECT pending, in_flight, failed, dead_letter, stream_len
+		FROM catalog_backlog_samples
+		WHERE namespace = $1
+		ORDER BY sampled_at DESC
+		LIMIT 1`,
+		namespace,
+	)
+	var counts BacklogStateCounts
+	var streamLen int
+	if err := row.Scan(&counts.Pending, &counts.InFlight, &counts.Failed, &counts.DeadLetter, &streamLen); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return BacklogStateCounts{}, 0, false, nil
+		}
+		return BacklogStateCounts{}, 0, false, fmt.Errorf("latest backlog sample for %s: %w", namespace, err)
+	}
+	return counts, streamLen, true, nil
+}

@@ -123,6 +123,11 @@ func run() error {
 	// namespace's catalog backlog at the new strategy_version has drained.
 	reembedWatcher := embedder.NewReembedWatcher(embedder.NewPgReembedRepo(db), 5*time.Second)
 
+	// Backlog sampler — snapshots per-namespace catalog backlog into
+	// catalog_backlog_samples on a 30s tick. Backs the admin /catalog/
+	// backlog-history endpoint so the timeline survives reload.
+	backlogSampler := embedder.NewBacklogSampler(embedderRepo, redisClient, nsConfigSvc, embedder.BacklogSamplerConfig{})
+
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.
 	healthSrv := newHealthServer(cfg.HealthPort, db, redisClient, qdrantClient)
@@ -146,6 +151,14 @@ func run() error {
 	watcherDone := make(chan error, 1)
 	go func() {
 		watcherDone <- reembedWatcher.Run(ctx)
+	}()
+
+	// Backlog sampler runs as a fire-and-forget goroutine — best-effort
+	// observability writer. Returns when ctx is cancelled.
+	samplerDone := make(chan struct{})
+	go func() {
+		defer close(samplerDone)
+		backlogSampler.Run(ctx)
 	}()
 
 	slog.Info("embedder started",
@@ -188,6 +201,13 @@ func run() error {
 	case <-watcherDone:
 	case <-shutdownCtx.Done():
 		slog.Warn("reembed watcher shutdown timed out")
+	}
+
+	// Wait for the sampler goroutine to drain.
+	select {
+	case <-samplerDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("backlog sampler shutdown timed out")
 	}
 
 	slog.Info("embedder stopped")
