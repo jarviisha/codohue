@@ -8,6 +8,9 @@ import HealthPage from '@/pages/health/HealthPage'
 import LoginPage from '@/pages/login/LoginPage'
 import CreateNamespacePage from '@/pages/namespaces/CreateNamespacePage'
 import NamespacesListPage from '@/pages/namespaces/NamespacesListPage'
+import CatalogItemDetailPage from '@/pages/ns/catalog/CatalogItemDetailPage'
+import CatalogItemsPage from '@/pages/ns/catalog/CatalogItemsPage'
+import CatalogStatusPage from '@/pages/ns/catalog/CatalogStatusPage'
 import NamespaceOverviewPage from '@/pages/ns/NamespaceOverviewPage'
 
 const router = createBrowserRouter([
@@ -35,6 +38,9 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: <NamespaceOverviewPage /> },
           { path: 'batch-runs', element: <BatchRunsListPage /> },
+          { path: 'catalog', element: <CatalogStatusPage /> },
+          { path: 'catalog/items', element: <CatalogItemsPage /> },
+          { path: 'catalog/items/:id', element: <CatalogItemDetailPage /> },
         ],
       },
     ],
