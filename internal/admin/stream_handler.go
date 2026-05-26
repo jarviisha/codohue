@@ -11,6 +11,7 @@ import (
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/admin/sse"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // sseHeartbeatInterval is how often each SSE stream emits a `ping` event
@@ -67,7 +68,7 @@ func (h *Handler) StreamBatchRun(w http.ResponseWriter, r *http.Request) {
 	})
 	defer cancel()
 
-	streamRun(w, r, events)
+	streamRun(w, r, events, "batch_run")
 }
 
 // StreamOps handles GET /api/admin/v1/stream — the global ops bus that drives
@@ -89,7 +90,7 @@ func (h *Handler) StreamOps(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	defer cancel()
-	streamRun(w, r, events)
+	streamRun(w, r, events, "ops")
 }
 
 // StreamCatalog handles GET /api/admin/v1/namespaces/{ns}/catalog/stream —
@@ -123,19 +124,25 @@ func (h *Handler) StreamCatalog(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	defer cancel()
-	streamRun(w, r, events)
+	streamRun(w, r, events, "catalog")
 }
 
 // streamRun is the shared writer loop used by both stream endpoints. It opens
 // an SSE connection, ships every event from the bus channel until either the
 // channel closes (cancelled subscription), the client disconnects, or — when
 // a terminal kind is observed — the run finishes.
-func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Event) {
+//
+// The `stream` label is fed straight into the Prometheus collectors so the
+// active-connection gauge + dropped counter can be sliced by stream kind.
+func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Event, stream string) {
 	sw, err := sse.NewWriter(w, r)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "sse_unsupported", err.Error())
 		return
 	}
+
+	metrics.AdminSSEConnectionsActive.WithLabelValues(stream).Inc()
+	defer metrics.AdminSSEConnectionsActive.WithLabelValues(stream).Dec()
 
 	heartbeat := time.NewTicker(sseHeartbeatInterval)
 	defer heartbeat.Stop()
@@ -146,6 +153,7 @@ func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Ev
 			return
 		case <-heartbeat.C:
 			if err := sw.Ping(); err != nil {
+				metrics.AdminSSEDroppedTotal.WithLabelValues(stream, "client_slow").Inc()
 				return
 			}
 		case e, ok := <-events:
@@ -154,6 +162,7 @@ func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Ev
 			}
 			name := sseEventName(e.Kind)
 			if err := sw.Send(name, e.Payload); err != nil {
+				metrics.AdminSSEDroppedTotal.WithLabelValues(stream, "client_slow").Inc()
 				return
 			}
 			if isTerminalKind(e.Kind) {

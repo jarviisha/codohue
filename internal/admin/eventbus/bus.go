@@ -43,11 +43,14 @@ func (f Filter) matches(e Event) bool {
 
 // Bus is the publish/subscribe primitive. Safe for concurrent use.
 type Bus struct {
-	mu          sync.RWMutex
-	subscribers map[*subscription]struct{}
-	bufferSize  int
-	onDrop      func(Event)
-	closed      atomic.Bool
+	mu            sync.RWMutex
+	subscribers   map[*subscription]struct{}
+	bufferSize    int
+	onDrop        func(Event)
+	onPublish     func(kind string)
+	onSubscribe   func()
+	onUnsubscribe func()
+	closed        atomic.Bool
 }
 
 type subscription struct {
@@ -74,6 +77,33 @@ func WithBufferSize(n int) Option {
 func WithDropCallback(fn func(Event)) Option {
 	return func(b *Bus) {
 		b.onDrop = fn
+	}
+}
+
+// WithPublishCallback registers a callback invoked once per Publish call,
+// after the fan-out completes. Receives the event kind so a Prometheus
+// counter can label by kind without rebuilding the event surface in the
+// caller. Runs synchronously — keep it cheap.
+func WithPublishCallback(fn func(kind string)) Option {
+	return func(b *Bus) {
+		b.onPublish = fn
+	}
+}
+
+// WithSubscribeCallback registers a callback invoked every time a subscriber
+// attaches. Pair with WithUnsubscribeCallback to maintain a live subscriber
+// gauge.
+func WithSubscribeCallback(fn func()) Option {
+	return func(b *Bus) {
+		b.onSubscribe = fn
+	}
+}
+
+// WithUnsubscribeCallback registers a callback invoked every time a
+// subscriber detaches (cancel func called OR Close fans out closures).
+func WithUnsubscribeCallback(fn func()) Option {
+	return func(b *Bus) {
+		b.onUnsubscribe = fn
 	}
 }
 
@@ -105,7 +135,6 @@ func (b *Bus) Publish(ctx context.Context, e Event) {
 		e.At = time.Now()
 	}
 	b.mu.RLock()
-	defer b.mu.RUnlock()
 	for s := range b.subscribers {
 		if !s.filter.matches(e) {
 			continue
@@ -127,6 +156,10 @@ func (b *Bus) Publish(ctx context.Context, e Event) {
 			}
 		}
 	}
+	b.mu.RUnlock()
+	if b.onPublish != nil {
+		b.onPublish(e.Kind)
+	}
 }
 
 // Subscribe returns a channel that receives events matching filter and a
@@ -145,6 +178,9 @@ func (b *Bus) Subscribe(filter Filter) (<-chan Event, func()) {
 	}
 	b.subscribers[s] = struct{}{}
 	b.mu.Unlock()
+	if b.onSubscribe != nil {
+		b.onSubscribe()
+	}
 
 	var once sync.Once
 	cancel := func() {
@@ -153,6 +189,9 @@ func (b *Bus) Subscribe(filter Filter) (<-chan Event, func()) {
 			delete(b.subscribers, s)
 			b.mu.Unlock()
 			close(s.ch)
+			if b.onUnsubscribe != nil {
+				b.onUnsubscribe()
+			}
 		})
 	}
 	return s.ch, cancel
@@ -165,9 +204,15 @@ func (b *Bus) Close() {
 		return
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	count := len(b.subscribers)
 	for s := range b.subscribers {
 		close(s.ch)
 	}
 	b.subscribers = nil
+	b.mu.Unlock()
+	if b.onUnsubscribe != nil {
+		for i := 0; i < count; i++ {
+			b.onUnsubscribe()
+		}
+	}
 }

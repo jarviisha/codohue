@@ -113,6 +113,44 @@ var (
 		Name: "codohue_catalog_consumer_lag",
 		Help: "Redis consumer-group PEL depth on catalog:embed:{ns} per namespace.",
 	}, []string{"namespace"})
+
+	// Admin-plane self-observability metrics. Live in their own
+	// `codohue_admin_*` namespace so dashboards can split operator-facing
+	// data-plane metrics from admin-process health (BUILD_PLAN §12.3).
+
+	// AdminSSEConnectionsActive tracks how many SSE handlers are currently
+	// streaming per stream kind. `stream` label values: "ops" (global ops
+	// bus), "batch_run" (per-run lifecycle stream), "catalog" (per-ns
+	// catalog stream), "ping" (foundation health-check stream).
+	AdminSSEConnectionsActive = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_admin_sse_connections_active",
+		Help: "Active SSE connections by stream kind on the admin plane.",
+	}, []string{"stream"})
+
+	// AdminSSEDroppedTotal counts events dropped on an SSE connection.
+	// `reason` is either "backpressure" (subscriber buffer full — bus drops
+	// oldest) or "client_slow" (Send failed writing to the client socket;
+	// the handler closes the stream after the failure).
+	AdminSSEDroppedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_admin_sse_dropped_total",
+		Help: "Total dropped events on admin SSE streams by stream + reason.",
+	}, []string{"stream", "reason"})
+
+	// AdminEventbusPublishTotal counts every event the in-process admin bus
+	// fans out, by kind. Mirrors the bus's Publish call site exactly.
+	AdminEventbusPublishTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_admin_eventbus_publish_total",
+		Help: "Total events published on the admin event bus by kind.",
+	}, []string{"kind"})
+
+	// AdminEventbusSubscribersActive tracks how many subscribers are
+	// currently attached to the admin event bus. One SSE connection = one
+	// subscriber. A subscriber may filter to multiple kinds — we don't
+	// label by kind because that would double-count.
+	AdminEventbusSubscribersActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "codohue_admin_eventbus_subscribers_active",
+		Help: "Active subscriber count on the admin event bus.",
+	})
 )
 
 // Register registers all Codohue metrics with the default Prometheus registry.
@@ -132,5 +170,9 @@ func Register() {
 		CatalogStrategyWorkVolumeTotal,
 		CatalogPendingItems,
 		CatalogConsumerLag,
+		AdminSSEConnectionsActive,
+		AdminSSEDroppedTotal,
+		AdminEventbusPublishTotal,
+		AdminEventbusSubscribersActive,
 	)
 }

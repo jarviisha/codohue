@@ -2,6 +2,7 @@ package eventbus
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -244,6 +245,78 @@ loop:
 	}
 	if drained == 0 {
 		t.Fatal("channel had no readable events after drops")
+	}
+}
+
+func TestPublishCallbackFiresPerEvent(t *testing.T) {
+	var publishedKinds []string
+	var mu sync.Mutex
+	b := NewBus(WithPublishCallback(func(kind string) {
+		mu.Lock()
+		defer mu.Unlock()
+		publishedKinds = append(publishedKinds, kind)
+	}))
+	defer b.Close()
+
+	b.Publish(context.Background(), Event{Kind: "a"})
+	b.Publish(context.Background(), Event{Kind: "b"})
+	b.Publish(context.Background(), Event{Kind: "a"})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got, want := publishedKinds, []string{"a", "b", "a"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("publishedKinds = %v, want %v", got, want)
+	}
+}
+
+func TestPublishAfterCloseDoesNotFirePublishCallback(t *testing.T) {
+	var fires atomic.Int64
+	b := NewBus(WithPublishCallback(func(string) { fires.Add(1) }))
+	b.Close()
+	b.Publish(context.Background(), Event{Kind: "x"})
+	if got := fires.Load(); got != 0 {
+		t.Fatalf("fires=%d, want 0 after Close", got)
+	}
+}
+
+func TestSubscribeAndUnsubscribeCallbacksTrackGauge(t *testing.T) {
+	var gauge atomic.Int64
+	b := NewBus(
+		WithSubscribeCallback(func() { gauge.Add(1) }),
+		WithUnsubscribeCallback(func() { gauge.Add(-1) }),
+	)
+	defer b.Close()
+
+	_, cancel1 := b.Subscribe(Filter{})
+	_, cancel2 := b.Subscribe(Filter{})
+	if got := gauge.Load(); got != 2 {
+		t.Fatalf("after 2 subscribes gauge=%d, want 2", got)
+	}
+
+	cancel1()
+	cancel1() // idempotent — must not double-decrement
+	if got := gauge.Load(); got != 1 {
+		t.Fatalf("after cancel1 (twice) gauge=%d, want 1", got)
+	}
+
+	cancel2()
+	if got := gauge.Load(); got != 0 {
+		t.Fatalf("after cancel2 gauge=%d, want 0", got)
+	}
+}
+
+func TestCloseFiresUnsubscribeForEverySubscriber(t *testing.T) {
+	var unsubs atomic.Int64
+	b := NewBus(WithUnsubscribeCallback(func() { unsubs.Add(1) }))
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		_, _ = b.Subscribe(Filter{})
+	}
+	b.Close()
+
+	if got := unsubs.Load(); got != n {
+		t.Fatalf("unsubs=%d, want %d", got, n)
 	}
 }
 

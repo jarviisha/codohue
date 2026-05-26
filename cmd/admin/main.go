@@ -19,6 +19,7 @@ import (
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 
 	// Side-effect import: internal/embedder.init() registers the V1 hashing
 	// strategy with embedstrategy.DefaultRegistry, which the catalog admin
@@ -81,7 +82,26 @@ func run() error {
 
 	// Wire the admin-plane event bus. Cron emits run/phase/log events into it;
 	// SSE handlers subscribe with run-id / namespace filters in Phase 1+.
-	bus := eventbus.NewBus()
+	// Hook the bus's optional callbacks into the admin self-observability
+	// collectors so Grafana can chart publish rate, subscriber gauge, and
+	// backpressure drops without poking into bus internals.
+	bus := eventbus.NewBus(
+		eventbus.WithPublishCallback(func(kind string) {
+			metrics.AdminEventbusPublishTotal.WithLabelValues(kind).Inc()
+		}),
+		eventbus.WithSubscribeCallback(func() {
+			metrics.AdminEventbusSubscribersActive.Inc()
+		}),
+		eventbus.WithUnsubscribeCallback(func() {
+			metrics.AdminEventbusSubscribersActive.Dec()
+		}),
+		eventbus.WithDropCallback(func(e eventbus.Event) {
+			// Backpressure drops don't carry the receiving stream name —
+			// we attribute by the event kind's prefix so dashboards can
+			// still slice (ops/batch_run/catalog).
+			metrics.AdminSSEDroppedTotal.WithLabelValues(streamLabelForKind(e.Kind), "backpressure").Inc()
+		}),
+	)
 	defer bus.Close()
 	job.SetObserver(newBatchRunObserverAdapter(bus))
 
@@ -164,6 +184,25 @@ func run() error {
 
 	slog.Info("admin stopped")
 	return nil
+}
+
+// streamLabelForKind maps an eventbus kind to the same stream label the SSE
+// handlers expose on the connection gauge. Used by the drop callback to keep
+// backpressure drops sliceable by stream in Grafana.
+func streamLabelForKind(kind string) string {
+	switch {
+	case len(kind) > len("batch_run.") && kind[:len("batch_run.")] == "batch_run.":
+		// "batch_run.started" / "batch_run.completed" / "batch_run.cancelled"
+		// are fanned out on both /stream (ops) and /batch-runs/{id}/stream
+		// (batch_run). Without a per-subscriber tag we can't tell which side
+		// dropped — attribute to "ops" because every run lifecycle event
+		// fans out there.
+		return "ops"
+	case len(kind) > len("catalog.") && kind[:len("catalog.")] == "catalog.":
+		return "catalog"
+	default:
+		return "unknown"
+	}
 }
 
 func initLogger(format string) {
