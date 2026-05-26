@@ -1,7 +1,8 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
+  Button,
   Card,
   CardContent,
   Container,
@@ -22,6 +23,7 @@ import PhaseStrip from '@/components/monitoring/PhaseStrip'
 
 export default function NamespaceOverviewPage() {
   const { ns } = useParams<{ ns: string }>()
+  const navigate = useNavigate()
   const q = useNamespaceDashboard(ns ?? null)
 
   if (q.isLoading) {
@@ -70,18 +72,38 @@ export default function NamespaceOverviewPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Stack gap="025">
+        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
+          <Stack gap="025">
+            <Inline gap="100" align="center">
+              <h1 className="text-foreground text-xl font-semibold">{data.namespace}</h1>
+              {config?.catalog_enabled && <Badge variant="success">catalog</Badge>}
+            </Inline>
+            {config && (
+              <p className="text-foreground-subtle text-sm">
+                dense_strategy={config.dense_strategy} · embedding_dim={config.embedding_dim} ·
+                alpha={config.alpha} · λ={config.lambda}
+              </p>
+            )}
+          </Stack>
           <Inline gap="100" align="center">
-            <h1 className="text-foreground text-xl font-semibold">{data.namespace}</h1>
-            {config?.catalog_enabled && <Badge variant="success">catalog</Badge>}
+            <Button
+              size="sm"
+              variant="outline"
+              tone="neutral"
+              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/events`)}
+            >
+              Events →
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              tone="neutral"
+              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/subjects`)}
+            >
+              Inspect subject →
+            </Button>
           </Inline>
-          {config && (
-            <p className="text-foreground-subtle text-sm">
-              dense_strategy={config.dense_strategy} · embedding_dim={config.embedding_dim} ·
-              alpha={config.alpha} · λ={config.lambda}
-            </p>
-          )}
-        </Stack>
+        </Inline>
       </PageHeader>
 
       <Stack gap="300">

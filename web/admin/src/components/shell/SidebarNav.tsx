@@ -35,7 +35,9 @@ function namespaceEntries(ns: string): NavEntry[] {
     { label: 'Overview', to: `/ns/${ns}` },
     { label: 'Batch runs', to: `/ns/${ns}/batch-runs`, matchPrefixes: [`/ns/${ns}/batch-runs`] },
     { label: 'Catalog', to: `/ns/${ns}/catalog`, matchPrefixes: [`/ns/${ns}/catalog`] },
-    // Phase 3+ will add: Config, Events, Trending, Debug, Demo data.
+    { label: 'Subjects', to: `/ns/${ns}/subjects`, matchPrefixes: [`/ns/${ns}/subjects`] },
+    { label: 'Events', to: `/ns/${ns}/events`, matchPrefixes: [`/ns/${ns}/events`] },
+    // Phase 3+ will add: Config, Trending, Demo data.
   ]
 }
 

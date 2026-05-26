@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@jarviisha/davinci-react-theme-provider": "0.1.0",
-    "@jarviisha/davinci-react-ui": "0.4.0",
+    "@jarviisha/davinci-react-ui": "0.4.1",
     "@jarviisha/davinci-tailwind-preset": "0.3.0",
     "@jarviisha/davinci-tokens": "0.4.0",
     "@tailwindcss/vite": "^4.2.4",

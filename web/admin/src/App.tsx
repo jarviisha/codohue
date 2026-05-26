@@ -11,6 +11,9 @@ import NamespacesListPage from '@/pages/namespaces/NamespacesListPage'
 import CatalogItemDetailPage from '@/pages/ns/catalog/CatalogItemDetailPage'
 import CatalogItemsPage from '@/pages/ns/catalog/CatalogItemsPage'
 import CatalogStatusPage from '@/pages/ns/catalog/CatalogStatusPage'
+import EventsPage from '@/pages/ns/events/EventsPage'
+import SubjectInspectorPage from '@/pages/ns/subjects/SubjectInspectorPage'
+import SubjectLookupPage from '@/pages/ns/subjects/SubjectLookupPage'
 import NamespaceOverviewPage from '@/pages/ns/NamespaceOverviewPage'
 
 const router = createBrowserRouter([
@@ -41,6 +44,9 @@ const router = createBrowserRouter([
           { path: 'catalog', element: <CatalogStatusPage /> },
           { path: 'catalog/items', element: <CatalogItemsPage /> },
           { path: 'catalog/items/:id', element: <CatalogItemDetailPage /> },
+          { path: 'subjects', element: <SubjectLookupPage /> },
+          { path: 'subjects/:id', element: <SubjectInspectorPage /> },
+          { path: 'events', element: <EventsPage /> },
         ],
       },
     ],
