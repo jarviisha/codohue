@@ -28,6 +28,7 @@ const GLOBAL_ENTRIES: NavEntry[] = [
   { label: 'Namespaces', to: '/namespaces', matchPrefixes: ['/namespaces'] },
   { label: 'Batch runs', to: '/batch-runs', matchPrefixes: ['/batch-runs'] },
   { label: 'Health', to: '/health' },
+  { label: 'Danger zone', to: '/danger-zone' },
 ]
 
 function namespaceEntries(ns: string): NavEntry[] {
@@ -37,7 +38,8 @@ function namespaceEntries(ns: string): NavEntry[] {
     { label: 'Catalog', to: `/ns/${ns}/catalog`, matchPrefixes: [`/ns/${ns}/catalog`] },
     { label: 'Subjects', to: `/ns/${ns}/subjects`, matchPrefixes: [`/ns/${ns}/subjects`] },
     { label: 'Events', to: `/ns/${ns}/events`, matchPrefixes: [`/ns/${ns}/events`] },
-    // Phase 3+ will add: Config, Trending, Demo data.
+    { label: 'Trending', to: `/ns/${ns}/trending` },
+    // Phase 4+ will add: Config, Demo data, Danger zone.
   ]
 }
 

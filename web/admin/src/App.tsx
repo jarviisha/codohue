@@ -3,6 +3,7 @@ import AppShellLayout from '@/components/shell/AppShellLayout'
 import { AuthGuard } from '@/components/shell/AuthGuard'
 import BatchRunDetailPage from '@/pages/batch-runs/BatchRunDetailPage'
 import BatchRunsListPage from '@/pages/batch-runs/BatchRunsListPage'
+import DangerZonePage from '@/pages/danger-zone/DangerZonePage'
 import FleetOverviewPage from '@/pages/fleet/FleetOverviewPage'
 import HealthPage from '@/pages/health/HealthPage'
 import LoginPage from '@/pages/login/LoginPage'
@@ -14,6 +15,7 @@ import CatalogStatusPage from '@/pages/ns/catalog/CatalogStatusPage'
 import EventsPage from '@/pages/ns/events/EventsPage'
 import SubjectInspectorPage from '@/pages/ns/subjects/SubjectInspectorPage'
 import SubjectLookupPage from '@/pages/ns/subjects/SubjectLookupPage'
+import TrendingPage from '@/pages/ns/trending/TrendingPage'
 import NamespaceOverviewPage from '@/pages/ns/NamespaceOverviewPage'
 
 const router = createBrowserRouter([
@@ -35,6 +37,7 @@ const router = createBrowserRouter([
       { path: 'namespaces/new', element: <CreateNamespacePage /> },
       { path: 'batch-runs', element: <BatchRunsListPage /> },
       { path: 'batch-runs/:id', element: <BatchRunDetailPage /> },
+      { path: 'danger-zone', element: <DangerZonePage /> },
       {
         path: 'ns/:ns',
         element: <Outlet />,
@@ -47,6 +50,7 @@ const router = createBrowserRouter([
           { path: 'subjects', element: <SubjectLookupPage /> },
           { path: 'subjects/:id', element: <SubjectInspectorPage /> },
           { path: 'events', element: <EventsPage /> },
+          { path: 'trending', element: <TrendingPage /> },
         ],
       },
     ],

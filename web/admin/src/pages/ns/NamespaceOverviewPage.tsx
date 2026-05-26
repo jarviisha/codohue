@@ -1,3 +1,4 @@
+import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
@@ -6,7 +7,15 @@ import {
   Card,
   CardContent,
   Container,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  FormField,
   Inline,
+  Input,
   Skeleton,
   Stack,
   Table,
@@ -18,6 +27,7 @@ import {
   TableRow,
 } from '@jarviisha/davinci-react-ui'
 import { useNamespaceDashboard } from '@/services/namespaces'
+import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 
@@ -25,6 +35,7 @@ export default function NamespaceOverviewPage() {
   const { ns } = useParams<{ ns: string }>()
   const navigate = useNavigate()
   const q = useNamespaceDashboard(ns ?? null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   if (q.isLoading) {
     return (
@@ -169,8 +180,125 @@ export default function NamespaceOverviewPage() {
             </TableContainer>
           )}
         </Stack>
+
+        <Card>
+          <CardContent>
+            <Inline gap="200" align="center" justify="between" wrap>
+              <Stack gap="025">
+                <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+                  Danger zone
+                </span>
+                <p className="text-foreground-subtle text-sm">
+                  Wipe this namespace and every trace of its data across Postgres, Redis, and
+                  Qdrant. Cannot be undone.
+                </p>
+              </Stack>
+              <Button tone="danger" variant="outline" onClick={() => setDeleteOpen(true)}>
+                Delete namespace…
+              </Button>
+            </Inline>
+          </CardContent>
+        </Card>
       </Stack>
+
+      <DeleteNamespaceDialog
+        namespace={data.namespace}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        onSuccess={() => {
+          setDeleteOpen(false)
+          navigate('/namespaces')
+        }}
+      />
     </Container>
+  )
+}
+
+function DeleteNamespaceDialog({
+  namespace,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  namespace: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onSuccess: () => void
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange} size="md">
+      {open && (
+        <DeleteNamespaceForm
+          namespace={namespace}
+          onClose={() => onOpenChange(false)}
+          onSuccess={onSuccess}
+        />
+      )}
+    </Dialog>
+  )
+}
+
+function DeleteNamespaceForm({
+  namespace,
+  onClose,
+  onSuccess,
+}: {
+  namespace: string
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const del = useDeleteNamespace()
+  const [confirm, setConfirm] = useState('')
+
+  const onSubmit = (e: FormEvent) => {
+    e.preventDefault()
+    del.mutate(namespace, {
+      onSuccess: () => onSuccess(),
+    })
+  }
+
+  return (
+    <form onSubmit={onSubmit}>
+      <DialogHeader>
+        <DialogTitle>Delete namespace · {namespace}</DialogTitle>
+        <DialogDescription>
+          Drops every event, vector, catalog item, and trending entry for this namespace. Cannot be
+          undone — type the namespace name to confirm.
+        </DialogDescription>
+      </DialogHeader>
+      <DialogContent>
+        <Stack gap="200">
+          {del.error && (
+            <Alert variant="danger" title="Delete failed" description={del.error.message} />
+          )}
+          <FormField
+            label={`Type "${namespace}" to confirm`}
+            required
+          >
+            <Input
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder={namespace}
+              autoFocus
+            />
+          </FormField>
+        </Stack>
+      </DialogContent>
+      <DialogFooter>
+        <Inline gap="100" justify="end">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            tone="danger"
+            disabled={confirm !== namespace || del.isPending}
+          >
+            {del.isPending ? 'Deleting…' : 'Delete namespace'}
+          </Button>
+        </Inline>
+      </DialogFooter>
+    </form>
   )
 }
 
