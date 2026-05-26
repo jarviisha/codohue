@@ -128,7 +128,10 @@ func run() error {
 
 	// Re-embed completion watcher (US3): closes batch_run_logs rows once a
 	// namespace's catalog backlog at the new strategy_version has drained.
+	// Also emits one reembed_progress event per open run per tick so the
+	// SPA overlay can render a live progress bar.
 	reembedWatcher := embedder.NewReembedWatcher(embedder.NewPgReembedRepo(db), 5*time.Second)
+	reembedWatcher.SetEventPublisher(catalogPublisher)
 
 	// Backlog sampler — snapshots per-namespace catalog backlog into
 	// catalog_backlog_samples on a 30s tick. Backs the admin /catalog/

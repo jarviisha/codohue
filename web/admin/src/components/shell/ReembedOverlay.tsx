@@ -1,12 +1,14 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Inline } from '@jarviisha/davinci-react-ui'
+import { Badge, Button, Inline, Stack } from '@jarviisha/davinci-react-ui'
 import { useServerStream } from '@/services/stream'
 
 type RunningReembed = {
   id: number
   namespace: string
   startedAt: string
+  processed?: number
+  total?: number
 }
 
 /**
@@ -16,10 +18,11 @@ type RunningReembed = {
  *   - Global SSE `/stream` provides `batch_run.started` / `.completed` /
  *     `.cancelled` events; we filter on `kind=reembed` and maintain a small
  *     in-memory map keyed by run id.
+ *   - `catalog.reembed_progress` ticks (one per watcher poll per open run)
+ *     fill in processed / total so each chip renders a tiny progress bar.
  *   - The banner is hidden when the map is empty (idle path renders nothing).
  *
- * Click a chip → `/batch-runs/{id}` for full progress. No polling here — the
- * detail page handles live phase + log streaming.
+ * Click a chip → `/batch-runs/{id}` for full progress + log lines.
  */
 export default function ReembedOverlay() {
   const [active, setActive] = useState<Record<number, RunningReembed>>({})
@@ -58,6 +61,31 @@ export default function ReembedOverlay() {
           const d = data as { id?: number }
           if (d.id != null) dismiss(d.id)
         },
+        // Catalog watcher emits one of these per open run per 5s tick. The
+        // first one may arrive BEFORE batch_run.started (different event
+        // loops), so we upsert defensively rather than skip-unknown.
+        'catalog.reembed_progress': (data: unknown) => {
+          const d = data as {
+            batch_run_id?: number
+            namespace?: string
+            processed?: number
+            total?: number
+          }
+          if (d.batch_run_id == null || !d.namespace) return
+          setActive((m) => {
+            const existing = m[d.batch_run_id!]
+            return {
+              ...m,
+              [d.batch_run_id!]: {
+                id: d.batch_run_id!,
+                namespace: d.namespace!,
+                startedAt: existing?.startedAt ?? new Date().toISOString(),
+                processed: d.processed,
+                total: d.total,
+              },
+            }
+          })
+        },
       }),
       [dismiss],
     ),
@@ -69,7 +97,7 @@ export default function ReembedOverlay() {
   return (
     <div
       role="status"
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-2xl"
+      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-3xl"
     >
       <div className="bg-surface-raised border border-default rounded shadow-lg px-4 py-3">
         <Inline gap="200" align="center" wrap>
@@ -79,15 +107,9 @@ export default function ReembedOverlay() {
               {runs.length} run{runs.length === 1 ? '' : 's'} in flight
             </span>
           </Inline>
-          <Inline gap="100" align="center" wrap>
+          <Inline gap="200" align="center" wrap>
             {runs.map((r) => (
-              <Link
-                key={r.id}
-                to={`/batch-runs/${r.id}`}
-                className="text-foreground text-sm font-medium underline-offset-2 hover:underline"
-              >
-                #{r.id} {r.namespace}
-              </Link>
+              <ProgressChip key={r.id} run={r} />
             ))}
           </Inline>
           <Button
@@ -102,5 +124,37 @@ export default function ReembedOverlay() {
         </Inline>
       </div>
     </div>
+  )
+}
+
+function ProgressChip({ run }: { run: RunningReembed }) {
+  const hasProgress = run.processed != null && run.total != null && run.total > 0
+  const pct = hasProgress ? Math.min(100, Math.round((run.processed! / run.total!) * 100)) : null
+  return (
+    <Link
+      to={`/batch-runs/${run.id}`}
+      className="block text-foreground no-underline hover:underline"
+    >
+      <Stack gap="025">
+        <Inline gap="050" align="center">
+          <span className="text-sm font-medium">
+            #{run.id} {run.namespace}
+          </span>
+          {hasProgress && (
+            <span className="text-foreground-subtle text-xs tabular-nums">
+              {run.processed!.toLocaleString()} / {run.total!.toLocaleString()} · {pct}%
+            </span>
+          )}
+        </Inline>
+        {hasProgress && (
+          <div className="h-1 w-40 bg-surface-sunken rounded overflow-hidden">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
+      </Stack>
+    </Link>
   )
 }

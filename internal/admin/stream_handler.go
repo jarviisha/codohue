@@ -85,6 +85,7 @@ func (h *Handler) StreamOps(w http.ResponseWriter, r *http.Request) {
 			"batch_run.completed",
 			"batch_run.cancelled",
 			"catalog.dead_letter_grew",
+			"catalog.reembed_progress",
 		},
 	})
 	defer cancel()
@@ -118,6 +119,7 @@ func (h *Handler) StreamCatalog(w http.ResponseWriter, r *http.Request) {
 			"catalog.item_state_changed",
 			"catalog.dead_letter_grew",
 			"catalog.backlog_snapshot",
+			"catalog.reembed_progress",
 		},
 	})
 	defer cancel()

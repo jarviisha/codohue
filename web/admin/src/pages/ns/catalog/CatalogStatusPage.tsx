@@ -30,14 +30,23 @@ import {
 import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import CatalogConfigDialog from './CatalogConfigDialog'
 
 const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
 type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
+
+type ReembedProgress = {
+  batch_run_id: number
+  processed: number
+  total: number
+  at: string
+}
 
 export default function CatalogStatusPage() {
   const { ns } = useParams<{ ns: string }>()
   const [window, setWindow] = useState<HistoryWindow>('1h')
   const [streamEvents, setStreamEvents] = useState(0)
+  const [configDialogOpen, setConfigDialogOpen] = useState(false)
 
   const config = useCatalogConfig(ns ?? null)
   const history = useCatalogBacklogHistory(ns ?? null, window)
@@ -51,6 +60,10 @@ export default function CatalogStatusPage() {
   // the SSE event; they come from the polled config response.
   const [liveBacklog, setLiveBacklog] = useState<CatalogBacklog | null>(null)
   const [dlAlert, setDlAlert] = useState<{ namespace: string; new_count: number; delta: number } | null>(null)
+  // Per-batch reembed_progress samples. Keyed by batch_run_id so multiple
+  // concurrent runs each get their own tick — the watcher emits one event
+  // per open run per 5s.
+  const [progressByRun, setProgressByRun] = useState<Record<number, ReembedProgress>>({})
 
   const { connected: streamConnected } = useServerStream(
     ns ? `/api/admin/v1/namespaces/${ns}/catalog/stream` : null,
@@ -77,6 +90,28 @@ export default function CatalogStatusPage() {
             new_count: d.new_count ?? 0,
             delta: d.delta ?? 0,
           })
+          setStreamEvents((n) => n + 1)
+        },
+        // ReembedWatcher emits one of these per open run per 5s tick. We
+        // keep a small map keyed by batch_run_id so the Last re-embed card
+        // and any later widget can render live processed/total.
+        reembed_progress: (data: unknown) => {
+          const d = data as {
+            batch_run_id?: number
+            processed?: number
+            total?: number
+            at?: string
+          }
+          if (d.batch_run_id == null) return
+          setProgressByRun((m) => ({
+            ...m,
+            [d.batch_run_id!]: {
+              batch_run_id: d.batch_run_id!,
+              processed: d.processed ?? 0,
+              total: d.total ?? 0,
+              at: d.at ?? new Date().toISOString(),
+            },
+          }))
           setStreamEvents((n) => n + 1)
         },
       }),
@@ -112,14 +147,29 @@ export default function CatalogStatusPage() {
     return (
       <Container size="full" className="py-6 px-6">
         <PageHeader>
-          <Stack gap="025">
-            <h1 className="text-foreground text-xl font-semibold">Catalog · {ns}</h1>
-          </Stack>
+          <Inline gap="200" align="center" justify="between" className="w-full" wrap>
+            <Stack gap="025">
+              <h1 className="text-foreground text-xl font-semibold">Catalog · {ns}</h1>
+              <p className="text-foreground-subtle text-sm">Auto-embedding is currently off.</p>
+            </Stack>
+            <Button size="sm" onClick={() => setConfigDialogOpen(true)}>
+              Configure catalog
+            </Button>
+          </Inline>
         </PageHeader>
         <EmptyState
           title="Catalog auto-embedding is off"
           description="Enable it in the namespace config to start ingesting raw content for embedding."
         />
+        {data && (
+          <CatalogConfigDialog
+            namespace={ns}
+            open={configDialogOpen}
+            onOpenChange={setConfigDialogOpen}
+            config={data.catalog}
+            strategies={data.available_strategies}
+          />
+        )}
       </Container>
     )
   }
@@ -158,6 +208,14 @@ export default function CatalogStatusPage() {
             </p>
           </Stack>
           <Inline gap="100" align="center">
+            <Button
+              size="sm"
+              variant="outline"
+              tone="neutral"
+              onClick={() => setConfigDialogOpen(true)}
+            >
+              Configure
+            </Button>
             {backlog.dead_letter > 0 && (
               <Button
                 size="sm"
@@ -239,6 +297,9 @@ export default function CatalogStatusPage() {
                 </span>
                 {reembedStatus.error_message && (
                   <span className="text-danger text-xs">{reembedStatus.error_message}</span>
+                )}
+                {reembedRunning && progressByRun[reembedStatus.batch_run_id] && (
+                  <ReembedProgressBar progress={progressByRun[reembedStatus.batch_run_id]} />
                 )}
               </Stack>
             </CardContent>
@@ -357,7 +418,38 @@ export default function CatalogStatusPage() {
           </Link>
         </Inline>
       </Stack>
+
+      <CatalogConfigDialog
+        namespace={ns}
+        open={configDialogOpen}
+        onOpenChange={setConfigDialogOpen}
+        config={data.catalog}
+        strategies={data.available_strategies}
+      />
     </Container>
+  )
+}
+
+function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
+  const total = progress.total > 0 ? progress.total : 1
+  const pct = Math.min(100, Math.round((progress.processed / total) * 100))
+  return (
+    <Stack gap="025">
+      <Inline gap="100" align="center" justify="between">
+        <span className="text-foreground-subtle text-xs tabular-nums">
+          {progress.processed.toLocaleString()} / {progress.total.toLocaleString()} · {pct}%
+        </span>
+        <span className="text-foreground-subtle text-xs">
+          updated {new Date(progress.at).toLocaleTimeString()}
+        </span>
+      </Inline>
+      <div className="h-1 w-full bg-surface-sunken rounded overflow-hidden">
+        <div
+          className="h-full bg-primary transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </Stack>
   )
 }
 

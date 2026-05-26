@@ -163,6 +163,24 @@ func (b *catalogEventsBridge) handle(ctx context.Context, msg *goredis.Message) 
 				"at":             ev.At,
 			},
 		})
+	case "reembed_progress":
+		var ev embedder.CatalogReembedProgressEvent
+		if err := json.Unmarshal([]byte(msg.Payload), &ev); err != nil {
+			slog.Warn("catalog events bridge: reembed_progress unmarshal", "error", err)
+			return
+		}
+		b.bus.Publish(ctx, eventbus.Event{
+			Kind:      "catalog.reembed_progress",
+			Namespace: ns,
+			EntityID:  strconv.FormatInt(ev.BatchRunID, 10),
+			Payload: map[string]any{
+				"namespace":    ev.Namespace,
+				"batch_run_id": ev.BatchRunID,
+				"processed":    ev.Processed,
+				"total":        ev.Total,
+				"at":           ev.At,
+			},
+		})
 	default:
 		slog.Debug("catalog events bridge: unknown kind", "kind", envelope.Kind)
 	}

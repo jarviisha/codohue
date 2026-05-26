@@ -302,3 +302,37 @@ export function useTriggerReEmbed(ns: string | null) {
     },
   })
 }
+
+// ---------------------------------------------------------------------------
+// Catalog config update — PUT /api/admin/v1/namespaces/{ns}/catalog
+// Mirrors internal/admin/types.go::NamespaceCatalogUpdateRequest. All
+// pointer-style fields are optional; only `enabled` is always sent. When
+// flipping enabled → true, strategy_id + strategy_version MUST be set or the
+// service rejects with 400 dim-mismatch / unknown-strategy errors.
+// ---------------------------------------------------------------------------
+
+export type UpdateCatalogConfigRequest = {
+  enabled: boolean
+  strategy_id?: string
+  strategy_version?: string
+  params?: Record<string, unknown>
+  max_attempts?: number
+  max_content_bytes?: number
+}
+
+export function useUpdateCatalogConfig(ns: string | null) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateCatalogConfigRequest) =>
+      apiFetch<NamespaceCatalogConfig>(`/api/admin/v1/namespaces/${ns}/catalog`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      if (ns) {
+        qc.invalidateQueries({ queryKey: catalogKeys.config(ns) })
+        qc.invalidateQueries({ queryKey: ['namespaces'] })
+      }
+    },
+  })
+}

@@ -62,6 +62,22 @@ type CatalogDeadLetterGrewEvent struct {
 	At            time.Time `json:"at"`
 }
 
+// CatalogReembedProgressEvent fires once per ReembedWatcher tick for every
+// open re-embed run. Drives the ReembedOverlay progress bar so operators
+// see how far along a re-embed is without leaving the page they're on.
+//
+// `Processed` counts catalog_items in state='embedded' at the namespace's
+// active strategy_version; `Total` is processed + still-stale items (the
+// rows the watcher waits on before closing the run).
+type CatalogReembedProgressEvent struct {
+	Kind       string    `json:"kind"` // always "reembed_progress"
+	Namespace  string    `json:"namespace"`
+	BatchRunID int64     `json:"batch_run_id"`
+	Processed  int       `json:"processed"`
+	Total      int       `json:"total"`
+	At         time.Time `json:"at"`
+}
+
 // CatalogEventPublisher publishes catalog events to a transport the admin
 // plane can subscribe to. Production uses Redis pub/sub; tests inject an
 // in-memory fake.
@@ -69,6 +85,7 @@ type CatalogEventPublisher interface {
 	PublishItemStateChanged(ctx context.Context, ev CatalogItemStateChangedEvent)
 	PublishBacklogSnapshot(ctx context.Context, ev CatalogBacklogSnapshotEvent)
 	PublishDeadLetterGrew(ctx context.Context, ev CatalogDeadLetterGrewEvent)
+	PublishReembedProgress(ctx context.Context, ev CatalogReembedProgressEvent)
 }
 
 // CatalogEventChannel computes the Redis pub/sub channel name for a
@@ -118,6 +135,16 @@ func (p *redisPubsubPublisher) PublishBacklogSnapshot(ctx context.Context, ev Ca
 func (p *redisPubsubPublisher) PublishDeadLetterGrew(ctx context.Context, ev CatalogDeadLetterGrewEvent) {
 	if ev.Kind == "" {
 		ev.Kind = "dead_letter_grew"
+	}
+	if ev.At.IsZero() {
+		ev.At = time.Now().UTC()
+	}
+	p.publish(ctx, ev.Namespace, ev)
+}
+
+func (p *redisPubsubPublisher) PublishReembedProgress(ctx context.Context, ev CatalogReembedProgressEvent) {
+	if ev.Kind == "" {
+		ev.Kind = "reembed_progress"
 	}
 	if ev.At.IsZero() {
 		ev.At = time.Now().UTC()
