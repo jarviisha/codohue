@@ -19,7 +19,6 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   Inline,
-  SearchInput,
   Skeleton,
   Stack,
 } from '@jarviisha/davinci-react-ui'
@@ -31,6 +30,7 @@ import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
 import ReembedOverlay from '@/components/shell/ReembedOverlay'
 import RouteErrorBoundary from '@/components/shell/ErrorBoundary'
 import OpsToastBridge from '@/components/shell/OpsToastBridge'
+import CommandPalette from '@/components/shell/CommandPalette'
 
 /**
  * AppShellLayout uses the Davinci AppShell "global top bar" pattern:
@@ -55,6 +55,21 @@ export default function AppShellLayout() {
   // PageHeader portal target — ref callback re-renders consumers via state
   // when the slot mounts (avoids first-paint flash of empty header).
   const [pageHeaderSlot, setPageHeaderSlot] = useState<HTMLDivElement | null>(null)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Cmd+K (Mac) / Ctrl+K (everywhere else) opens the command palette from
+  // any focused element. Skip when the user is mid-typing in an input or
+  // already inside the palette — those have their own keyboard semantics.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isToggle = (e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')
+      if (!isToggle) return
+      e.preventDefault()
+      setPaletteOpen((v) => !v)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   useEffect(() => {
     const handler = () => {
@@ -87,7 +102,7 @@ export default function AppShellLayout() {
         >
           codohue
         </Link>
-        <GlobalSearch />
+        <PaletteTrigger onOpen={() => setPaletteOpen(true)} />
         <Inline gap="100" align="center">
           <ThemeMenu />
           <AccountMenu
@@ -122,37 +137,30 @@ export default function AppShellLayout() {
 
       <ReembedOverlay />
       <OpsToastBridge />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </AppShell>
   )
 }
 
 /**
- * GlobalSearch is the cluster-wide search input that lives in the top bar.
- * Submit (Enter) navigates to a search results route that page-level handlers
- * will wire in Phase 1+. For now the search is a no-op on submit, but the
- * input itself is real (controlled value + clear) so operators can verify the
- * affordance is keyboard-reachable.
+ * PaletteTrigger is the top-bar button that opens the command palette. It
+ * mimics a search input shape so the affordance reads visually as "type to
+ * jump", but it's a real button — typing happens inside the palette dialog
+ * where the keyboard semantics (Arrow/Enter/Esc) live.
  */
-function GlobalSearch() {
-  const [value, setValue] = useState('')
+function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
+  const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
+  const shortcut = isMac ? '⌘K' : 'Ctrl+K'
   return (
-    <form
-      role="search"
-      className="flex-1 max-w-md"
-      onSubmit={(event) => {
-        event.preventDefault()
-        /* TODO: navigate to search results (Phase 1+) */
-      }}
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label="Open command palette"
+      className="flex-1 max-w-md flex items-center justify-between px-3 py-1.5 rounded border border-default bg-surface text-foreground-subtle text-sm hover:bg-surface-sunken transition-colors"
     >
-      <SearchInput
-        size="sm"
-        placeholder="Search namespaces, runs, items…"
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onClear={() => setValue('')}
-        aria-label="Global search"
-      />
-    </form>
+      <span>Jump to…</span>
+      <kbd className="font-mono text-xs">{shortcut}</kbd>
+    </button>
   )
 }
 
