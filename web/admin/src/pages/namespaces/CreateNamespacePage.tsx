@@ -16,6 +16,7 @@ import {
   Stack,
 } from '@jarviisha/davinci-react-ui'
 import { useUpsertNamespace } from '@/services/namespaces'
+import DirtyFormGuard from '@/components/shell/DirtyFormGuard'
 
 const DENSE_STRATEGIES = [
   { value: 'disabled', label: 'disabled — sparse only' },
@@ -57,6 +58,15 @@ export default function CreateNamespacePage() {
     )
   }
 
+  // The form is "dirty" while the user has typed/tweaked anything but the
+  // upsert hasn't either landed or been cancelled. Once apiKeyShown is set
+  // we're past the form and the guard must be off so the success-screen
+  // navigation buttons don't trip it.
+  const isDirty =
+    !apiKeyShown &&
+    !upsert.isPending &&
+    (namespace !== '' || denseStrategy !== 'disabled' || embeddingDim !== 64)
+
   if (apiKeyShown) {
     return (
       <Container size="sm" className="py-8">
@@ -90,6 +100,7 @@ export default function CreateNamespacePage() {
 
   return (
     <Container size="sm" className="py-8">
+      <DirtyFormGuard dirty={isDirty} />
       <Card>
         <CardHeader>
           <CardTitle>New namespace</CardTitle>
