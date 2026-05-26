@@ -39,7 +39,7 @@ function namespaceEntries(ns: string): NavEntry[] {
     { label: 'Subjects', to: `/ns/${ns}/subjects`, matchPrefixes: [`/ns/${ns}/subjects`] },
     { label: 'Events', to: `/ns/${ns}/events`, matchPrefixes: [`/ns/${ns}/events`] },
     { label: 'Trending', to: `/ns/${ns}/trending` },
-    // Phase 4+ will add: Config, Demo data, Danger zone.
+    { label: 'Config', to: `/ns/${ns}/config` },
   ]
 }
 

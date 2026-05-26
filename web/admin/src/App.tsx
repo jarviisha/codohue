@@ -23,6 +23,7 @@ const EventsPage = lazy(() => import('@/pages/ns/events/EventsPage'))
 const SubjectInspectorPage = lazy(() => import('@/pages/ns/subjects/SubjectInspectorPage'))
 const SubjectLookupPage = lazy(() => import('@/pages/ns/subjects/SubjectLookupPage'))
 const TrendingPage = lazy(() => import('@/pages/ns/trending/TrendingPage'))
+const NamespaceConfigPage = lazy(() => import('@/pages/ns/config/NamespaceConfigPage'))
 const NamespaceOverviewPage = lazy(() => import('@/pages/ns/NamespaceOverviewPage'))
 
 // withSuspense wraps a lazy page in a Suspense boundary so each route gets
@@ -69,6 +70,7 @@ const router = createBrowserRouter([
           { path: 'subjects/:id', element: withSuspense(SubjectInspectorPage) },
           { path: 'events', element: withSuspense(EventsPage) },
           { path: 'trending', element: withSuspense(TrendingPage) },
+          { path: 'config', element: withSuspense(NamespaceConfigPage) },
         ],
       },
     ],

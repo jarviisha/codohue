@@ -113,6 +113,14 @@ export default function NamespaceOverviewPage() {
             >
               Inspect subject →
             </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              tone="neutral"
+              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/config`)}
+            >
+              Configure →
+            </Button>
           </Inline>
         </Inline>
       </PageHeader>
