@@ -332,15 +332,6 @@ function ConfigForm({
           >
             <ActionWeightsEditor weights={weights} onChange={setWeights} />
           </SectionCard>
-
-          <Inline gap="100" justify="end">
-            <Button variant="ghost" tone="neutral" type="button" disabled={!dirty || saving} onClick={reset}>
-              Reset
-            </Button>
-            <Button type="submit" disabled={!dirty || saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-          </Inline>
         </Stack>
       </form>
     </Container>
