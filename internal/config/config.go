@@ -31,6 +31,13 @@ type AppConfig struct {
 	BatchIntervalMinutes int
 	LogFormat            string // "json" | "text" (default: "text")
 	APIPort              string // HTTP listen port (default: "2001")
+
+	// Retention windows for observability tables that grow unbounded under
+	// steady-state operation. Zero or negative disables the prune for the
+	// matching table. Read by cmd/cron only.
+	BatchRunRetentionDays       int           // default 30
+	BacklogSamplesRetentionDays int           // default 7
+	RetentionInterval           time.Duration // default 1h
 }
 
 // LoadAPI reads and validates configuration for the API binary.
@@ -82,6 +89,27 @@ func loadBase() (*AppConfig, error) {
 		return nil, fmt.Errorf("invalid CODOHUE_BATCH_INTERVAL_MINUTES: %w", err)
 	}
 	cfg.BatchIntervalMinutes = batchInterval
+
+	batchRetention, err := strconv.Atoi(getEnv("CODOHUE_BATCH_RUN_RETENTION_DAYS", "30"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_BATCH_RUN_RETENTION_DAYS: %w", err)
+	}
+	cfg.BatchRunRetentionDays = batchRetention
+
+	backlogRetention, err := strconv.Atoi(getEnv("CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS", "7"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS: %w", err)
+	}
+	cfg.BacklogSamplesRetentionDays = backlogRetention
+
+	retentionInterval, err := time.ParseDuration(getEnv("CODOHUE_RETENTION_INTERVAL", "1h"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_RETENTION_INTERVAL: %w", err)
+	}
+	if retentionInterval <= 0 {
+		return nil, fmt.Errorf("CODOHUE_RETENTION_INTERVAL must be positive, got %s", retentionInterval)
+	}
+	cfg.RetentionInterval = retentionInterval
 
 	return cfg, nil
 }

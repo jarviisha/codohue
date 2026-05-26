@@ -237,6 +237,9 @@ Key columns added by later migrations:
 - **010** — `catalog_items` table (raw content store consumed by `cmd/embedder`)
 - **011** — `catalog_enabled`, `catalog_strategy_id`, `catalog_strategy_version`, `catalog_strategy_params` on `namespace_configs`
 - **012** — pre-prod hardening of `batch_run_logs`: `trigger_source` CHECK-constrained to `('cron', 'manual', 'admin_reembed')`; adds `target_strategy_id` / `target_strategy_version` for catalog re-embed runs; renames `subjects_processed` → `entities_processed` (column now carries CF subject counts during cron runs and catalog item counts during re-embed runs)
+- **013** — `cancel_requested` on `batch_run_logs` + partial index `idx_batch_run_logs_running_cancel` for operator-initiated cancel between phases
+- **014** — `catalog_backlog_samples` table for the persisted backlog timeline (one row per ns per 30s sampler tick, skip-on-unchanged)
+- **015** — indexes on `batch_run_logs.started_at` + `catalog_backlog_samples.sampled_at` to support the cron retention prune (`CODOHUE_BATCH_RUN_RETENTION_DAYS` / `CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS`)
 
 ## Environment Variables
 
@@ -260,6 +263,11 @@ CODOHUE_EMBED_MAX_ATTEMPTS=5             # transient retries before dead-letteri
 CODOHUE_EMBEDDER_HEALTH_PORT=2003        # /healthz + /metrics
 CODOHUE_EMBEDDER_REPLICA_NAME=           # consumer name for XREADGROUP; defaults to hostname
 CODOHUE_EMBEDDER_POLL_INTERVAL=30s       # how often the worker rescans for newly-enabled namespaces
+
+# Retention (cmd/cron) — keeps observability tables bounded. Set days to 0 to disable a given prune.
+CODOHUE_BATCH_RUN_RETENTION_DAYS=30       # batch_run_logs older than this are deleted
+CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS=7  # catalog_backlog_samples older than this are deleted
+CODOHUE_RETENTION_INTERVAL=1h             # how often the prune fires
 ```
 
 ## Conventions
