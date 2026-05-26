@@ -29,6 +29,8 @@ import { recordRecentNamespace } from '@/services/recentNamespaces'
 import SidebarNav from '@/components/shell/SidebarNav'
 import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
 import ReembedOverlay from '@/components/shell/ReembedOverlay'
+import RouteErrorBoundary from '@/components/shell/ErrorBoundary'
+import OpsToastBridge from '@/components/shell/OpsToastBridge'
 
 /**
  * AppShellLayout uses the Davinci AppShell "global top bar" pattern:
@@ -112,11 +114,14 @@ export default function AppShellLayout() {
 
       <AppShellMain>
         <PageHeaderSlotContext.Provider value={pageHeaderSlot}>
-          <Outlet />
+          <RouteErrorBoundary resetKey={location.pathname}>
+            <Outlet />
+          </RouteErrorBoundary>
         </PageHeaderSlotContext.Provider>
       </AppShellMain>
 
       <ReembedOverlay />
+      <OpsToastBridge />
     </AppShell>
   )
 }
