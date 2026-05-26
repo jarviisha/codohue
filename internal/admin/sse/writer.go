@@ -24,6 +24,13 @@ type Writer struct {
 
 // NewWriter sets SSE headers, flushes them, and returns a Writer ready for
 // Send/Ping calls. Returns ErrNotFlushable when the response writer cannot flush.
+//
+// The per-handler write deadline is cleared via http.ResponseController — the
+// server's WriteTimeout would otherwise kill a long-lived SSE connection at
+// the deadline (the deadline is fixed from request start and does NOT reset
+// on each write). Servers that wrap the response writer in a way that
+// doesn't surface SetWriteDeadline still get a working stream; we just can't
+// extend the deadline and the connection dies at WriteTimeout.
 func NewWriter(w http.ResponseWriter, r *http.Request) (*Writer, error) {
 	f, ok := w.(http.Flusher)
 	if !ok {
@@ -34,6 +41,16 @@ func NewWriter(w http.ResponseWriter, r *http.Request) (*Writer, error) {
 	h.Set("Cache-Control", "no-cache")
 	h.Set("Connection", "keep-alive")
 	h.Set("X-Accel-Buffering", "no")
+
+	// Opt out of the server's WriteTimeout for this connection — SSE streams
+	// stay open for the lifetime of the operator's session, which is well
+	// beyond any reasonable read/write deadline. Errors are silently ignored:
+	// not all response writers support deadlines (e.g. httptest recorders),
+	// and the stream still functions, it just inherits whatever deadline the
+	// server set.
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Time{})
+
 	w.WriteHeader(http.StatusOK)
 	f.Flush()
 	return &Writer{w: w, f: f, r: r}, nil

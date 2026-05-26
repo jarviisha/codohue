@@ -136,6 +136,35 @@ func TestRunHeartbeatExitsOnContextCancel(t *testing.T) {
 	}
 }
 
+// deadlineRecorder wraps httptest.ResponseRecorder with a Flush + a
+// SetWriteDeadline implementation so http.NewResponseController surfaces it.
+// The recorder captures whatever deadline NewWriter sets.
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadlineCalls []time.Time
+}
+
+func (d *deadlineRecorder) Flush() { d.ResponseRecorder.Flush() }
+
+func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
+	d.deadlineCalls = append(d.deadlineCalls, t)
+	return nil
+}
+
+func TestNewWriterClearsWriteDeadline(t *testing.T) {
+	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	req := httptest.NewRequest("GET", "/", nil)
+	if _, err := NewWriter(rec, req); err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	if len(rec.deadlineCalls) != 1 {
+		t.Fatalf("SetWriteDeadline called %d times, want 1", len(rec.deadlineCalls))
+	}
+	if !rec.deadlineCalls[0].IsZero() {
+		t.Errorf("SetWriteDeadline called with %v, want zero (no deadline)", rec.deadlineCalls[0])
+	}
+}
+
 func TestSendConcurrencyIsSerialized(t *testing.T) {
 	rec := httptest.NewRecorder()
 	w, _ := NewWriter(rec, httptest.NewRequest("GET", "/", nil))

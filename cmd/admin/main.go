@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -122,10 +123,22 @@ func run() error {
 	})
 
 	srv := &http.Server{
-		Addr:         ":" + cfg.AdminPort,
-		Handler:      r,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		Addr:    ":" + cfg.AdminPort,
+		Handler: r,
+		// ReadTimeout is fine for SSE — the handshake completes well within
+		// it and SSE is one-way (server → client) after that. WriteTimeout
+		// stays out of the struct because it's a fixed deadline from request
+		// start; SSE handlers opt out of it per-connection via
+		// http.NewResponseController inside sse.NewWriter. Non-SSE handlers
+		// rely on chi's request-level timeout middleware (if any) plus
+		// shutdownCtx below.
+		ReadTimeout: 10 * time.Second,
+		// BaseContext ties every request context to the app root ctx, so a
+		// cancel() on shutdown propagates straight into in-flight SSE
+		// handlers' r.Context().Done() select arms — without this, Shutdown
+		// would block on the full shutdownCtx timeout because long-lived
+		// SSE handlers never see the app stopping.
+		BaseContext: func(_ net.Listener) context.Context { return ctx },
 	}
 
 	go func() {
