@@ -12,6 +12,7 @@ import LoginPage from '@/pages/login/LoginPage'
 const BatchRunDetailPage = lazy(() => import('@/pages/batch-runs/BatchRunDetailPage'))
 const BatchRunsListPage = lazy(() => import('@/pages/batch-runs/BatchRunsListPage'))
 const DangerZonePage = lazy(() => import('@/pages/danger-zone/DangerZonePage'))
+const DemoDataPage = lazy(() => import('@/pages/demo-data/DemoDataPage'))
 const FleetOverviewPage = lazy(() => import('@/pages/fleet/FleetOverviewPage'))
 const HealthPage = lazy(() => import('@/pages/health/HealthPage'))
 const CreateNamespacePage = lazy(() => import('@/pages/namespaces/CreateNamespacePage'))
@@ -56,6 +57,7 @@ const router = createBrowserRouter([
       { path: 'namespaces/new', element: withSuspense(CreateNamespacePage) },
       { path: 'batch-runs', element: withSuspense(BatchRunsListPage) },
       { path: 'batch-runs/:id', element: withSuspense(BatchRunDetailPage) },
+      { path: 'demo-data', element: withSuspense(DemoDataPage) },
       { path: 'danger-zone', element: withSuspense(DangerZonePage) },
       {
         path: 'ns/:ns',

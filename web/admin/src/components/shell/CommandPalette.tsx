@@ -258,7 +258,8 @@ function buildCommands({
     { id: 'namespaces-new', title: 'New namespace', subtitle: '/namespaces/new', group: 'Global', run: go('/namespaces/new'), keywords: 'create' },
     { id: 'batch-runs', title: 'Batch runs', subtitle: '/batch-runs', group: 'Global', run: go('/batch-runs') },
     { id: 'health', title: 'Health', subtitle: '/health', group: 'Global', run: go('/health') },
-    { id: 'danger-zone', title: 'Danger zone', subtitle: '/danger-zone', group: 'Global', run: go('/danger-zone'), keywords: 'reset demo' },
+    { id: 'demo-data', title: 'Demo data', subtitle: '/demo-data', group: 'Global', run: go('/demo-data'), keywords: 'seed sample bundled' },
+    { id: 'danger-zone', title: 'Danger zone', subtitle: '/danger-zone', group: 'Global', run: go('/danger-zone'), keywords: 'reset wipe' },
   )
 
   // Namespace-scoped commands appear only when a namespace is active.

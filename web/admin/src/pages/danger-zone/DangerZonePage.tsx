@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   Alert,
   Button,
@@ -17,28 +16,17 @@ import {
   Input,
   Stack,
 } from '@jarviisha/davinci-react-ui'
-import {
-  useClearDemoData,
-  useResetApp,
-  useSeedDemoData,
-  type DemoDatasetResponse,
-  type ResetAppResponse,
-} from '@/services/dangerZone'
+import { useResetApp, type ResetAppResponse } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 
 /**
  * DangerZonePage gathers global destructive admin actions in one place so an
  * operator doesn't accidentally trigger them while drilling into a specific
- * namespace.
- *
- *   - Demo data seed / clear: idempotent helpers for the bundled demo.
- *   - App-wide reset: wipes every namespace. Guarded by a type-RESET dialog
- *     because the backend rejects any other body.
+ * namespace. Currently the app-wide reset, guarded by a type-RESET dialog
+ * because the backend rejects any other body. (Non-destructive demo seeding
+ * lives on its own /demo-data page.)
  */
 export default function DangerZonePage() {
-  const navigate = useNavigate()
-  const seed = useSeedDemoData()
-  const clear = useClearDemoData()
   const [resetOpen, setResetOpen] = useState(false)
   const [resetResult, setResetResult] = useState<ResetAppResponse | null>(null)
 
@@ -66,29 +54,6 @@ export default function DangerZonePage() {
             }
           />
         )}
-
-        <DemoCard
-          title="Seed demo dataset"
-          description="Creates the bundled demo namespace plus sample events and catalog items. Idempotent — re-runs reset the dataset back to its baseline state."
-          action="Seed"
-          tone="primary"
-          loading={seed.isPending}
-          error={seed.error}
-          result={seed.data}
-          onRun={() => seed.mutate()}
-          onOpen={(ns) => navigate(`/ns/${encodeURIComponent(ns)}`)}
-        />
-
-        <DemoCard
-          title="Clear demo dataset"
-          description="Wipes the bundled demo namespace if present. Safe to run when the namespace doesn't exist."
-          action="Clear"
-          tone="danger"
-          loading={clear.isPending}
-          error={clear.error}
-          result={clear.data}
-          onRun={() => clear.mutate()}
-        />
 
         <Card>
           <CardContent>
@@ -120,75 +85,6 @@ export default function DangerZonePage() {
       />
     </Container>
   )
-}
-
-function DemoCard({
-  title,
-  description,
-  action,
-  tone,
-  loading,
-  error,
-  result,
-  onRun,
-  onOpen,
-}: {
-  title: string
-  description: string
-  action: string
-  tone: 'primary' | 'danger'
-  loading: boolean
-  error: Error | null
-  result: DemoDatasetResponse | undefined
-  onRun: () => void
-  onOpen?: (ns: string) => void
-}) {
-  return (
-    <Card>
-      <CardContent>
-        <Stack gap="100">
-          <span className="text-foreground-subtle text-xs uppercase tracking-wide">{title}</span>
-          <p className="text-foreground-subtle text-sm">{description}</p>
-          {error && (
-            <Alert variant="danger" title={`${title} failed`} description={error.message} />
-          )}
-          {result && (
-            <Alert
-              variant="success"
-              title={`${title} complete`}
-              description={describeDemoResult(result)}
-              actions={
-                onOpen && (
-                  <Button size="sm" variant="ghost" onClick={() => onOpen(result.namespace)}>
-                    Open {result.namespace}
-                  </Button>
-                )
-              }
-            />
-          )}
-          <Inline gap="100" justify="end">
-            <Button
-              tone={tone === 'danger' ? 'danger' : undefined}
-              onClick={onRun}
-              disabled={loading}
-            >
-              {loading ? `${action.replace(/e$/, '')}ing…` : action}
-            </Button>
-          </Inline>
-        </Stack>
-      </CardContent>
-    </Card>
-  )
-}
-
-function describeDemoResult(r: DemoDatasetResponse): string {
-  const bits: string[] = [`namespace ${r.namespace}`]
-  if (r.events_created) bits.push(`${r.events_created.toLocaleString()} events created`)
-  if (r.events_deleted) bits.push(`${r.events_deleted.toLocaleString()} events deleted`)
-  if (r.catalog_items_created)
-    bits.push(`${r.catalog_items_created.toLocaleString()} catalog items created`)
-  if (r.api_key) bits.push('new api_key issued — copy from the response if you need it')
-  return bits.join(' · ')
 }
 
 function ResetAppDialog({

@@ -28,6 +28,7 @@ const GLOBAL_ENTRIES: NavEntry[] = [
   { label: 'Namespaces', to: '/namespaces', matchPrefixes: ['/namespaces'] },
   { label: 'Batch runs', to: '/batch-runs', matchPrefixes: ['/batch-runs'] },
   { label: 'Health', to: '/health' },
+  { label: 'Demo data', to: '/demo-data' },
   { label: 'Danger zone', to: '/danger-zone' },
 ]
 
