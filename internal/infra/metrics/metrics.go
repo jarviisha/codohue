@@ -56,6 +56,23 @@ var (
 		Help: "Total GET /v1/trending requests by namespace.",
 	}, []string{"namespace"})
 
+	// EventsIngestedTotal counts behavioral events successfully persisted,
+	// sliced by namespace + action. Lives in cmd/api's process; the admin
+	// plane derives ingest rates from its own event-tail counter, not from
+	// this metric (the two run in separate processes).
+	EventsIngestedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_events_ingested_total",
+		Help: "Total behavioral events successfully ingested, by namespace + action.",
+	}, []string{"namespace", "action"})
+
+	// IngestErrorsTotal counts events rejected or failed during ingest, by
+	// reason. `reason` is one of: "invalid_payload", "unknown_action",
+	// "insert" (DB write failed), "decode" (malformed request body).
+	IngestErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_ingest_errors_total",
+		Help: "Total ingest errors by namespace + reason.",
+	}, []string{"namespace", "reason"})
+
 	// Catalog auto-embedding metrics (feature 004-catalog-embedder).
 
 	// CatalogItemsEmbeddedTotal counts catalog items successfully embedded
@@ -164,6 +181,8 @@ func Register() {
 		IDMappingErrors,
 		TrendingItemsTotal,
 		TrendingRequestsTotal,
+		EventsIngestedTotal,
+		IngestErrorsTotal,
 		CatalogItemsEmbeddedTotal,
 		CatalogEmbedDuration,
 		CatalogEmbedFailuresTotal,

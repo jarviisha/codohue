@@ -19,8 +19,8 @@ func TestNewRepository(t *testing.T) {
 
 func TestRepositoryInsert_ExecError(t *testing.T) {
 	repo := &Repository{
-		execFn: func(_ context.Context, _ string, _ ...any) error {
-			return errors.New("exec failed")
+		insertFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
+			return 0, errors.New("exec failed")
 		},
 	}
 

@@ -16,7 +16,7 @@ const (
 )
 
 type eventProcessor interface {
-	Process(ctx context.Context, payload *EventPayload) error
+	Process(ctx context.Context, payload *EventPayload) (int64, error)
 }
 
 // Worker consumes events from Redis Streams and forwards them to the Service for processing.
@@ -104,7 +104,7 @@ func (w *Worker) handleMessage(ctx context.Context, msg redis.XMessage) error {
 		return fmt.Errorf("unmarshal payload: %w", err)
 	}
 
-	if err := w.service.Process(ctx, &payload); err != nil {
+	if _, err := w.service.Process(ctx, &payload); err != nil {
 		return fmt.Errorf("process event: %w", err)
 	}
 	return nil

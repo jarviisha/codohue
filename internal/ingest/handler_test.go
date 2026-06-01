@@ -13,12 +13,13 @@ import (
 
 type fakeHTTPProcessor struct {
 	err         error
+	id          int64
 	lastPayload *EventPayload
 }
 
-func (f *fakeHTTPProcessor) Process(_ context.Context, payload *EventPayload) error {
+func (f *fakeHTTPProcessor) Process(_ context.Context, payload *EventPayload) (int64, error) {
 	f.lastPayload = payload
-	return f.err
+	return f.id, f.err
 }
 
 func newIngestRequest(body, namespace string) *http.Request {

@@ -13,13 +13,28 @@ import (
 type fakeRepo struct {
 	insertErr    error
 	insertCalled bool
+	insertID     int64
 	lastEvent    *Event
 }
 
 func (f *fakeRepo) Insert(_ context.Context, e *Event) error {
 	f.insertCalled = true
 	f.lastEvent = e
+	if f.insertErr == nil {
+		e.ID = f.insertID
+	}
 	return f.insertErr
+}
+
+// fakeTailPublisher records the last message handed to the tail.
+type fakeTailPublisher struct {
+	called bool
+	last   EventTailMessage
+}
+
+func (f *fakeTailPublisher) Publish(msg EventTailMessage) {
+	f.called = true
+	f.last = msg
 }
 
 // fakeNsConfig implements nsConfigGetter for testing.
@@ -59,7 +74,7 @@ func TestServiceProcess_Validation(t *testing.T) {
 
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := svc.Process(context.Background(), tt.payload); err == nil {
+			if _, err := svc.Process(context.Background(), tt.payload); err == nil {
 				t.Error("expected validation error, got nil")
 			}
 		})
@@ -70,7 +85,7 @@ func TestServiceProcess_DefaultWeight(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := newTestService(repo, &fakeNsConfig{cfg: nil})
 
-	if err := svc.Process(context.Background(), &EventPayload{
+	if _, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
 		Action: ActionLike, OccurredAt: time.Now(),
 	}); err != nil {
@@ -93,7 +108,7 @@ func TestServiceProcess_CustomNamespaceWeight(t *testing.T) {
 		},
 	})
 
-	if err := svc.Process(context.Background(), &EventPayload{
+	if _, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
 		Action: ActionLike, OccurredAt: time.Now(),
 	}); err != nil {
@@ -109,7 +124,7 @@ func TestServiceProcess_NsConfigError_FallsBackToDefault(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := newTestService(repo, &fakeNsConfig{err: errors.New("db error")})
 
-	if err := svc.Process(context.Background(), &EventPayload{
+	if _, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
 		Action: ActionView, OccurredAt: time.Now(),
 	}); err != nil {
@@ -124,7 +139,7 @@ func TestServiceProcess_NsConfigError_FallsBackToDefault(t *testing.T) {
 func TestServiceProcess_UnknownAction(t *testing.T) {
 	svc := newTestService(&fakeRepo{}, &fakeNsConfig{})
 
-	err := svc.Process(context.Background(), &EventPayload{
+	_, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
 		Action: Action("UNKNOWN"), OccurredAt: time.Now(),
 	})
@@ -139,12 +154,53 @@ func TestServiceProcess_InsertError(t *testing.T) {
 		&fakeNsConfig{},
 	)
 
-	err := svc.Process(context.Background(), &EventPayload{
+	_, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
 		Action: ActionView, OccurredAt: time.Now(),
 	})
 	if err == nil {
 		t.Error("expected error from repo.Insert, got nil")
+	}
+}
+
+func TestServiceProcess_ReturnsIDAndPublishesTail(t *testing.T) {
+	repo := &fakeRepo{insertID: 4242}
+	pub := &fakeTailPublisher{}
+	svc := newTestService(repo, &fakeNsConfig{})
+	svc.SetTailPublisher(pub)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	id, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionLike, OccurredAt: now,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != 4242 {
+		t.Errorf("returned id: got %d, want 4242", id)
+	}
+	if !pub.called {
+		t.Fatal("expected tail publisher to be called")
+	}
+	if pub.last.ID != 4242 || pub.last.SubjectID != "u1" || pub.last.Action != "LIKE" {
+		t.Errorf("tail message mismatch: %+v", pub.last)
+	}
+}
+
+func TestServiceProcess_NoTailOnError(t *testing.T) {
+	pub := &fakeTailPublisher{}
+	svc := newTestService(&fakeRepo{insertErr: errors.New("db error")}, &fakeNsConfig{})
+	svc.SetTailPublisher(pub)
+
+	if _, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionView, OccurredAt: time.Now(),
+	}); err == nil {
+		t.Fatal("expected insert error")
+	}
+	if pub.called {
+		t.Error("tail publisher must not fire when ingest fails")
 	}
 }
 
@@ -163,7 +219,7 @@ func TestServiceProcess_EventFields(t *testing.T) {
 		ObjectCreatedAt: &createdAt,
 	}
 
-	if err := svc.Process(context.Background(), payload); err != nil {
+	if _, err := svc.Process(context.Background(), payload); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 

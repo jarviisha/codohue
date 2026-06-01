@@ -108,6 +108,11 @@ func run() error {
 	// ingest
 	ingestRepo := ingest.NewRepository(db)
 	ingestSvc := ingest.NewService(ingestRepo, nsConfigSvc)
+	// Live event tail: every processed event (HTTP or Redis-stream path) is
+	// published best-effort to Redis pub/sub so cmd/admin's SSE tail can fan
+	// it out. Async + drop-on-full → never back-pressures ingest.
+	tailPublisher := ingest.NewRedisEventTailPublisher(redisClient, 0)
+	ingestSvc.SetTailPublisher(tailPublisher)
 	ingestHandler := ingest.NewHandler(ingestSvc)
 	ingestWorker := ingest.NewWorker(redisClient, ingestSvc)
 
@@ -167,6 +172,7 @@ func run() error {
 
 	// Goroutines
 	go ingestWorker.Run(ctx)
+	go tailPublisher.Run(ctx)
 
 	// HTTP Server
 	srv := &http.Server{
