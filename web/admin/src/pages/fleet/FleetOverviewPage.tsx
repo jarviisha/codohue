@@ -19,6 +19,7 @@ import {
 } from '@jarviisha/davinci-react-ui'
 import { useOverview, type NamespaceOverview, type NamespaceStatus } from '@/services/overview'
 import { useBatchRunStats } from '@/services/batchRuns'
+import { useMetricsSummary, sumRates } from '@/services/metrics'
 import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
@@ -168,12 +169,21 @@ export default function FleetOverviewPage() {
 }
 
 function SummaryRow({ data }: { data: ReturnType<typeof useOverview>['data'] }) {
+  // Fleet-wide ingest rate comes from the rolling-window metrics summary, not
+  // the events table — keeps the tile cheap and live.
+  const metrics = useMetricsSummary()
   if (!data) return null
+  const ingestPerSec = sumRates(metrics.data?.ingest.events_per_sec_1m)
   const tiles = [
     {
       label: 'Health',
       value: data.health.status,
       tone: data.health.status === 'ok' ? 'success' : 'danger',
+    },
+    {
+      label: 'Ingest events/s',
+      value: ingestPerSec.toFixed(1),
+      tone: ingestPerSec > 0 ? 'success' : 'neutral',
     },
     {
       label: 'Cron heartbeat',

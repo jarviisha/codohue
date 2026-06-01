@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
   Button,
-  Container,
+  Card,
+  CardContent,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -15,9 +16,7 @@ import {
   FormField,
   Inline,
   Input,
-  Pagination,
   SearchInput,
-  Skeleton,
   Stack,
   Table,
   TableBody,
@@ -28,85 +27,74 @@ import {
   TableRow,
 } from '@jarviisha/davinci-react-ui'
 import {
+  eventsStreamPath,
+  useEventsSummary,
   useInjectEvent,
-  useRecentEvents,
+  type EventStreamMessage,
   type EventSummary,
+  type EventsSummaryResponse,
+  type EventsSummaryWindow,
 } from '@/services/events'
+import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
+import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 
-const PAGE_SIZE = 50
+const TAIL_CAP = 1000
+const FLASH_MS = 1500
+const KNOWN_ACTIONS = ['view', 'like', 'comment', 'share', 'skip'] as const
+const WINDOWS: EventsSummaryWindow[] = ['1m', '5m', '1h']
 
 /**
- * EventsPage tails the events table for one namespace. Operators use it to
- * verify ingest is landing, debug a quiet subject, or inject a test event
- * when wiring a new client.
- *
- *   - The list auto-refreshes every 10s (matches the service-layer poll).
- *   - `?subject_id=` filter survives URL refresh so deep links from the
- *     subject inspector remain bookmark-able.
- *   - "Inject event" toggles an inline form; on success it refetches the
- *     list so the new row appears at the top.
+ * EventsPage owns the toolbar (action / subject filters, inject) and frames the
+ * live tail + summary sidebar. The tail itself lives in <LiveTail>, keyed by
+ * the stream URL so a filter change remounts it with a fresh buffer and a fresh
+ * SSE subscription — no manual reset effect needed.
  */
 export default function EventsPage() {
   const { ns } = useParams<{ ns: string }>()
   const [searchParams, setSearchParams] = useSearchParams()
+  const action = searchParams.get('action') ?? ''
   const subjectId = searchParams.get('subject_id') ?? ''
-  const offset = Number(searchParams.get('offset') ?? '0') || 0
 
-  const [draftSubjectId, setDraftSubjectId] = useState(subjectId)
+  const [draftSubject, setDraftSubject] = useState(subjectId)
   const [injectOpen, setInjectOpen] = useState(false)
+  const [lastInjectedId, setLastInjectedId] = useState<number | null>(null)
 
-  const events = useRecentEvents(ns ?? null, {
-    subjectId: subjectId || undefined,
-    limit: PAGE_SIZE,
-    offset,
-  })
-
-  if (!ns) return null
-
-  const applyFilter = (e: FormEvent) => {
-    e.preventDefault()
-    const next = new URLSearchParams(searchParams)
-    const trimmed = draftSubjectId.trim()
-    if (trimmed) {
-      next.set('subject_id', trimmed)
-    } else {
-      next.delete('subject_id')
-    }
-    next.delete('offset')
-    setSearchParams(next, { replace: true })
-  }
-
-  const clearFilter = () => {
-    setDraftSubjectId('')
-    const next = new URLSearchParams(searchParams)
-    next.delete('subject_id')
-    next.delete('offset')
-    setSearchParams(next, { replace: true })
-  }
-
-  const setOffset = (next: number) => {
+  const setActionFilter = (next: string) => {
     const params = new URLSearchParams(searchParams)
-    if (next > 0) {
-      params.set('offset', String(next))
-    } else {
-      params.delete('offset')
-    }
+    if (next) params.set('action', next)
+    else params.delete('action')
     setSearchParams(params, { replace: true })
   }
 
-  const total = events.data?.total ?? 0
-  const items = events.data?.items ?? []
+  const applySubject = (e: FormEvent) => {
+    e.preventDefault()
+    const params = new URLSearchParams(searchParams)
+    const trimmed = draftSubject.trim()
+    if (trimmed) params.set('subject_id', trimmed)
+    else params.delete('subject_id')
+    setSearchParams(params, { replace: true })
+  }
+
+  const clearSubject = () => {
+    setDraftSubject('')
+    const params = new URLSearchParams(searchParams)
+    params.delete('subject_id')
+    setSearchParams(params, { replace: true })
+  }
+
+  if (!ns) return null
+
+  const streamUrl =
+    eventsStreamPath(ns, { action: action || undefined, subjectId: subjectId || undefined }) ?? ''
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <div className="px-6 py-6">
       <PageHeader>
         <Inline gap="200" align="center" justify="between" className="w-full" wrap>
           <Stack gap="025">
             <h1 className="text-foreground text-xl font-semibold">Events · {ns}</h1>
-            <p className="text-foreground-subtle text-sm">
-              Recent ingest tail. Auto-refreshes every 10 seconds.
-            </p>
+            <p className="text-foreground-subtle text-sm">Live ingest tail · forward-only</p>
           </Stack>
           <Button size="sm" onClick={() => setInjectOpen(true)}>
             Inject test event
@@ -114,77 +102,197 @@ export default function EventsPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
-        <Inline gap="200" align="center" justify="between" wrap>
-          <form onSubmit={applyFilter} className="max-w-sm w-full">
-            <SearchInput
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
+        <Stack gap="200">
+          {lastInjectedId != null && (
+            <Alert
+              variant="success"
+              title={`Injected event #${lastInjectedId}`}
+              description="It flashes in the tail below as soon as ingest lands it."
+            />
+          )}
+
+          <Inline gap="100" align="center" wrap>
+            <Button
               size="sm"
-              value={draftSubjectId}
-              onChange={(e) => setDraftSubjectId(e.target.value)}
-              onClear={clearFilter}
-              placeholder="Filter by subject id — press Enter"
-              aria-label="Filter events by subject id"
-            />
-          </form>
-          <span className="text-foreground-subtle text-xs tabular-nums">
-            {events.isLoading
-              ? '…'
-              : `${total.toLocaleString()} event${total === 1 ? '' : 's'}${subjectId ? ` · subject ${subjectId}` : ''}`}
-          </span>
-        </Inline>
+              variant={action === '' ? 'solid' : 'outline'}
+              tone="neutral"
+              onClick={() => setActionFilter('')}
+            >
+              all
+            </Button>
+            {KNOWN_ACTIONS.map((a) => (
+              <Button
+                key={a}
+                size="sm"
+                variant={action === a ? 'solid' : 'outline'}
+                tone="neutral"
+                onClick={() => setActionFilter(a)}
+              >
+                {a}
+              </Button>
+            ))}
+            <form onSubmit={applySubject} className="max-w-xs w-full ml-auto">
+              <SearchInput
+                size="sm"
+                value={draftSubject}
+                onChange={(e) => setDraftSubject(e.target.value)}
+                onClear={clearSubject}
+                placeholder="Filter by subject id — Enter"
+                aria-label="Filter tail by subject id"
+              />
+            </form>
+          </Inline>
 
-        {events.isError && (
-          <Alert
-            variant="danger"
-            title="Could not load events"
-            description={events.error?.message ?? 'unknown error'}
+          <LiveTail
+            key={streamUrl}
+            namespace={ns}
+            streamUrl={streamUrl}
+            onInject={() => setInjectOpen(true)}
+          />
+        </Stack>
+
+        <SummarySidebar namespace={ns} />
+      </div>
+
+      <Dialog open={injectOpen} onOpenChange={setInjectOpen} size="md">
+        {injectOpen && (
+          <InjectEventForm
+            namespace={ns}
+            onClose={() => setInjectOpen(false)}
+            onInjected={(id) => setLastInjectedId(id)}
           />
         )}
-
-        {events.isLoading ? (
-          <Skeleton className="h-60 w-full" />
-        ) : items.length === 0 ? (
-          <EmptyState
-            title={subjectId ? `No events for subject "${subjectId}"` : 'No events yet'}
-            description={
-              subjectId
-                ? 'Either this subject id has never been seen, or every event is outside the current page. Clear the filter to scan the full namespace.'
-                : 'Once ingest lands the first event for this namespace, it shows up here within seconds.'
-            }
-            actions={
-              subjectId ? (
-                <Button size="sm" variant="outline" tone="neutral" onClick={clearFilter}>
-                  Clear filter
-                </Button>
-              ) : (
-                <Button size="sm" onClick={() => setInjectOpen(true)}>
-                  Inject test event
-                </Button>
-              )
-            }
-          />
-        ) : (
-          <Stack gap="100">
-            <EventsTable namespace={ns} items={items} />
-            <Pagination
-              page={Math.floor(offset / PAGE_SIZE) + 1}
-              pageCount={Math.max(1, Math.ceil(total / PAGE_SIZE))}
-              onPageChange={(page) => setOffset((page - 1) * PAGE_SIZE)}
-            />
-          </Stack>
-        )}
-      </Stack>
-
-      <InjectEventDialog
-        namespace={ns}
-        open={injectOpen}
-        onOpenChange={setInjectOpen}
-      />
-    </Container>
+      </Dialog>
+    </div>
   )
 }
 
-function EventsTable({ namespace, items }: { namespace: string; items: EventSummary[] }) {
+/**
+ * LiveTail subscribes to the events SSE stream and renders a 1000-row ring
+ * buffer, newest first. Pausing buffers arrivals; resuming flushes them. New
+ * rows flash briefly. A `dropped` frame from the server (client fell behind)
+ * raises a warning banner.
+ */
+function LiveTail({
+  namespace,
+  streamUrl,
+  onInject,
+}: {
+  namespace: string
+  streamUrl: string
+  onInject: () => void
+}) {
+  const [events, setEvents] = useState<EventSummary[]>([])
+  const [paused, setPaused] = useState(false)
+  const [flashIds, setFlashIds] = useState<Set<number>>(() => new Set())
+  const [droppedCount, setDroppedCount] = useState(0)
+  const [pendingCount, setPendingCount] = useState(0)
+
+  const pausedRef = useRef(paused)
+  useEffect(() => {
+    pausedRef.current = paused
+  }, [paused])
+  const pendingRef = useRef<EventSummary[]>([])
+
+  const flash = useCallback((id: number) => {
+    setFlashIds((prev) => {
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+    window.setTimeout(() => {
+      setFlashIds((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    }, FLASH_MS)
+  }, [])
+
+  const { connected } = useServerStream(streamUrl || null, {
+    event: (data: unknown) => {
+      const e = data as EventStreamMessage
+      if (pausedRef.current) {
+        pendingRef.current = [e, ...pendingRef.current].slice(0, TAIL_CAP)
+        setPendingCount(pendingRef.current.length)
+        return
+      }
+      flash(e.id)
+      setEvents((prev) => [e, ...prev].slice(0, TAIL_CAP))
+    },
+    dropped: (data: unknown) => {
+      const d = data as { count?: number }
+      setDroppedCount((c) => c + (d.count ?? 0))
+    },
+  })
+
+  const resume = () => {
+    const buffered = pendingRef.current
+    pendingRef.current = []
+    setPendingCount(0)
+    setPaused(false)
+    if (buffered.length > 0) {
+      buffered.forEach((e) => flash(e.id))
+      setEvents((prev) => [...buffered, ...prev].slice(0, TAIL_CAP))
+    }
+  }
+
+  return (
+    <Stack gap="200">
+      <Inline gap="100" align="center" justify="between" wrap>
+        <Badge variant={connected ? 'success' : 'neutral'}>
+          {connected ? 'streaming' : 'offline'}
+        </Badge>
+        <Button
+          size="sm"
+          variant="outline"
+          tone="neutral"
+          onClick={() => (paused ? resume() : setPaused(true))}
+        >
+          {paused ? `Resume${pendingCount > 0 ? ` (${pendingCount})` : ''}` : 'Pause'}
+        </Button>
+      </Inline>
+
+      {droppedCount > 0 && (
+        <Alert
+          variant="warning"
+          title={`${droppedCount} event${droppedCount === 1 ? '' : 's'} dropped`}
+          description="The browser fell behind the ingest rate. Filter by action or subject to thin the stream."
+        />
+      )}
+
+      {events.length === 0 ? (
+        <EmptyState
+          title={paused ? 'Tail paused' : 'Waiting for events'}
+          description={
+            paused
+              ? 'Resume to start appending live events again.'
+              : 'This is a forward-only tail — rows appear as ingest lands them. Inject a test event to see it flow through.'
+          }
+          actions={
+            <Button size="sm" onClick={onInject}>
+              Inject test event
+            </Button>
+          }
+        />
+      ) : (
+        <TailTable namespace={namespace} items={events} flashIds={flashIds} />
+      )}
+    </Stack>
+  )
+}
+
+function TailTable({
+  namespace,
+  items,
+  flashIds,
+}: {
+  namespace: string
+  items: EventSummary[]
+  flashIds: Set<number>
+}) {
   return (
     <TableContainer>
       <Table>
@@ -199,9 +307,14 @@ function EventsTable({ namespace, items }: { namespace: string; items: EventSumm
         </TableHeader>
         <TableBody>
           {items.map((e) => (
-            <TableRow key={e.id}>
+            <TableRow
+              key={e.id}
+              className={
+                flashIds.has(e.id) ? 'bg-background-selected transition-colors' : 'transition-colors'
+              }
+            >
               <TableCell className="text-foreground-subtle text-xs tabular-nums">
-                {new Date(e.occurred_at).toLocaleString()}
+                {new Date(e.occurred_at).toLocaleTimeString()}
               </TableCell>
               <TableCell>
                 <Link
@@ -228,30 +341,103 @@ function EventsTable({ namespace, items }: { namespace: string; items: EventSumm
   )
 }
 
-function InjectEventDialog({
-  namespace,
-  open,
-  onOpenChange,
-}: {
-  namespace: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
+function SummarySidebar({ namespace }: { namespace: string }) {
+  const [window, setWindow] = useState<EventsSummaryWindow>('1m')
+  const summary = useEventsSummary(namespace, window)
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="md">
-      {open && (
-        <InjectEventForm namespace={namespace} onClose={() => onOpenChange(false)} />
-      )}
-    </Dialog>
+    <Stack gap="200">
+      <Inline gap="050" align="center">
+        {WINDOWS.map((w) => (
+          <Button
+            key={w}
+            size="sm"
+            variant={window === w ? 'solid' : 'outline'}
+            tone="neutral"
+            onClick={() => setWindow(w)}
+          >
+            {w}
+          </Button>
+        ))}
+      </Inline>
+
+      <Inline gap="100" wrap>
+        <SummaryTile
+          label={`Events · ${window}`}
+          value={(summary.data?.total ?? 0).toLocaleString()}
+        />
+        <SummaryTile label="Rate / s" value={(summary.data?.rate_per_second ?? 0).toFixed(2)} />
+      </Inline>
+
+      <ActionMix data={summary.data} />
+
+      <Stack gap="050">
+        <span className="text-foreground-subtle text-xs uppercase tracking-wide">Over time</span>
+        {summary.data && summary.data.series.length > 0 ? (
+          <TimeSeriesChart
+            data={summary.data.series.map((b) => ({ ts: b.ts, count: b.count }))}
+            series={[{ key: 'count', label: 'Events', color: 'var(--davinci-semantic-color-success)' }]}
+            height={140}
+          />
+        ) : (
+          <p className="text-foreground-subtle text-sm">No events in this window.</p>
+        )}
+      </Stack>
+    </Stack>
+  )
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <Card className="flex-1 min-w-30">
+      <CardContent>
+        <Stack gap="025">
+          <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
+          <span className="text-foreground text-xl font-semibold tabular-nums">{value}</span>
+        </Stack>
+      </CardContent>
+    </Card>
+  )
+}
+
+function ActionMix({ data }: { data: EventsSummaryResponse | undefined }) {
+  if (!data || data.by_action.length === 0) {
+    return null
+  }
+  const total = data.total || 1
+  return (
+    <Stack gap="050">
+      <span className="text-foreground-subtle text-xs uppercase tracking-wide">Action mix</span>
+      <Stack gap="050">
+        {data.by_action.map((a) => {
+          const pct = Math.round((a.count / total) * 100)
+          return (
+            <Stack key={a.action} gap="025">
+              <Inline gap="100" align="center" justify="between">
+                <span className="text-foreground text-sm">{a.action}</span>
+                <span className="text-foreground-subtle text-xs tabular-nums">
+                  {a.count.toLocaleString()} · {pct}%
+                </span>
+              </Inline>
+              <div className="h-1.5 w-full rounded-full bg-surface-sunken">
+                <div className="h-1.5 rounded-full bg-success" style={{ width: `${pct}%` }} />
+              </div>
+            </Stack>
+          )
+        })}
+      </Stack>
+    </Stack>
   )
 }
 
 function InjectEventForm({
   namespace,
   onClose,
+  onInjected,
 }: {
   namespace: string
   onClose: () => void
+  onInjected: (eventID: number) => void
 }) {
   const inject = useInjectEvent(namespace)
   const [subjectId, setSubjectId] = useState('')
@@ -263,13 +449,15 @@ function InjectEventForm({
     inject.mutate(
       { subject_id: subjectId.trim(), object_id: objectId.trim(), action },
       {
-        onSuccess: () => onClose(),
+        onSuccess: (res) => {
+          onInjected(res.event_id)
+          onClose()
+        },
       },
     )
   }
 
-  const canSubmit =
-    !inject.isPending && subjectId.trim() !== '' && objectId.trim() !== ''
+  const canSubmit = !inject.isPending && subjectId.trim() !== '' && objectId.trim() !== ''
 
   return (
     <form onSubmit={onSubmit}>
@@ -277,7 +465,7 @@ function InjectEventForm({
         <DialogTitle>Inject test event · {namespace}</DialogTitle>
         <DialogDescription>
           Proxied through the admin event injection endpoint. Lands in the same events table the
-          ingest worker writes to — useful for wiring up a new client or unblocking a quiet subject.
+          ingest worker writes to, and flashes in the live tail as it arrives.
         </DialogDescription>
       </DialogHeader>
       <DialogContent>
