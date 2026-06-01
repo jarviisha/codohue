@@ -171,7 +171,7 @@ Every business capability is reachable from exactly one canonical path. Legacy d
 
 | Method   | Path                                                                    | Description                                                            |
 | -------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `POST`   | `/v1/namespaces/{ns}/events`                                            | Ingest a behavioral event (202 Accepted; namespace in body is ignored) |
+| `POST`   | `/v1/namespaces/{ns}/events`                                            | Ingest a behavioral event (202 Accepted + `{"event_id":N}`; namespace in body is ignored). Also fans the event onto the `codohue:events-tail:{ns}` pub/sub channel for the admin live tail. |
 | `POST`   | `/v1/namespaces/{ns}/catalog`                                           | Ingest raw content for catalog auto-embedding (202; only when `catalog_enabled`; embedder consumer asynchronously upserts the dense vector) |
 | `GET`    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`                     | CF recommendations for a subject (`?limit=&offset=`)                   |
 | `POST`   | `/v1/namespaces/{ns}/rankings`                                          | Score and rank up to 500 candidate items for a subject (200, computed) |
@@ -186,31 +186,47 @@ Every business capability is reachable from exactly one canonical path. Legacy d
 
 Authentication models sessions as a resource. Login = create session; logout = delete current session.
 
+The admin API is designed for a monitoring UI, not plain REST CRUD: it exposes **aggregate** endpoints (one payload per view), **SSE streams** (`text/event-stream`, `event: <kind>` frames, `event: ping` heartbeat, `X-Accel-Buffering: no`), and **lifecycle** endpoints for batch runs. SSE rows are marked **(SSE)** below.
+
 | Method   | Path                                                                | Auth          | Description                                                             |
 | -------- | ------------------------------------------------------------------- | ------------- | ----------------------------------------------------------------------- |
 | `POST`   | `/api/v1/auth/sessions`                                             | none (public) | Validate `CODOHUE_ADMIN_API_KEY`; set session cookie (201 + `expires_at`) |
 | `DELETE` | `/api/v1/auth/sessions/current`                                     | session       | Clear session cookie (204)                                              |
 | `GET`    | `/api/admin/v1/health`                                              | session       | Proxy `GET /healthz` from `cmd/api`                                     |
-| `GET`    | `/api/admin/v1/namespaces`                                          | session       | List all namespace configs from PostgreSQL (`?include=overview`)        |
+| `GET`    | `/api/admin/v1/overview`                                            | session       | Fleet aggregate: health + cron/embedder heartbeat + alerts + per-namespace summary (events 24h, events/min, catalog, qdrant). Replaces the old `?include=overview`. |
+| `GET`    | `/api/admin/v1/metrics/summary`                                     | session       | Curated rolling-window metrics: ingest events/sec (1m/5m) per ns + cron batch lag. (Recommend/embedder metrics are scraped from Prometheus, not proxied.) |
+| `GET`    | `/api/admin/v1/stream`                                             | session       | **(SSE)** Global ops bus: `batch_run.*`, `catalog.dead_letter_grew`, `catalog.reembed_progress`; drives sidebar badges + toasts |
+| `GET`    | `/api/admin/v1/namespaces`                                          | session       | List all namespace configs from PostgreSQL                              |
 | `GET`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Get single namespace config                                             |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Create/update namespace; calls `nsconfig.Service` directly (200 / 201)  |
 | `DELETE` | `/api/admin/v1/namespaces/{ns}`                                     | session       | Wipe namespace + every trace of its data across postgres, redis, qdrant (200 with summary; 404 when missing) |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/dashboard`                          | session       | Per-namespace aggregate: config + last 12 runs (phase strip) + catalog backlog + events 24h/rate + qdrant counts + trending TTL |
 | `POST`   | `/api/admin/v1/reset`                                               | session       | App-wide reset — drops every namespace; requires body `{"confirm":"RESET"}` (400 otherwise) |
-| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Get catalog auto-embedding config + available strategies + backlog snapshot |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Catalog config + available strategies + backlog + consumer lag + failures + throughput |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Enable / update / disable catalog auto-embedding for a namespace (400 on dim mismatch with both dims in body; 503 when feature unwired) |
-| `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                    | session       | Trigger a namespace-wide re-embed (202 + `Location`); 409 when one is already running; 503 when feature unwired |
-| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/items`                       | session       | Paginated browse of catalog items (`?state=&limit=&offset=&object_id=`); excludes `content` |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                    | session       | Trigger a namespace-wide re-embed (202 + `Location`); body `{"only_state":"all\|embedded\|failed"}`; 409 when one is already running; 503 when feature unwired |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/backlog-history`            | session       | Backlog time-series from `catalog_backlog_samples` (`?window=&bucket=`) |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/failures-summary`          | session       | Top `last_error` reasons in window (`?window=`) with a sample object id |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/stream`                    | session       | **(SSE)** Live catalog signals: `item_state_changed`, `backlog_snapshot`, `dead_letter_grew`, `reembed_progress` |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/items`                       | session       | Paginated browse of catalog items (`?state=&limit=&offset=&object_id=&include_summary=&sort=`); excludes `content` |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/items/{id}`                  | session       | Full catalog item including `content` and `metadata`                    |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/items/{id}/redrive`          | session       | Re-drive a single failed / dead-letter item (202; 404 when not redrivable) |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/items/redrive-deadletter`    | session       | Bulk re-drive every dead-letter item in the namespace (200 with count)  |
 | `DELETE` | `/api/admin/v1/namespaces/{ns}/catalog/items/{id}`                  | session       | Hard-delete a catalog item (Postgres + Qdrant point removal, idempotent 204) |
-| `GET`    | `/api/admin/v1/batch-runs`                                          | session       | Recent batch run history (`?namespace=&status=&limit=&offset=`)         |
+| `GET`    | `/api/admin/v1/batch-runs`                                          | session       | Recent batch runs as lightweight `BatchRunSummary` (`?namespace=&status=&kind=&limit=&offset=`) |
+| `GET`    | `/api/admin/v1/batch-runs/stats`                                   | session       | Batch-run time-series for the fleet (`?window=&bucket=`)                |
+| `GET`    | `/api/admin/v1/batch-runs/{id}`                                    | session       | Full `BatchRunDetail` (phases + `log_lines` + target strategy)          |
+| `GET`    | `/api/admin/v1/batch-runs/{id}/stream`                            | session       | **(SSE)** Live run: `phase_started/completed`, `log_line`, `run_completed`, `cancelled`. 204 when the run is already terminal (client falls back to the snapshot) |
+| `POST`   | `/api/admin/v1/batch-runs/{id}/cancel`                            | session       | Request operator cancel between phases (200; 409 when terminal)         |
+| `POST`   | `/api/admin/v1/batch-runs/{id}/retry`                             | session       | Re-run with the same namespace/kind/target (202 + `Location`; 409/422/404 per reject rules) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/batch-runs`                          | session       | Batch run history scoped to one namespace                               |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/batch-runs`                          | session       | Create a new batch run (202 Accepted + `Location` header)               |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/qdrant`                              | session       | Points count for `{ns}_subjects/objects/subjects_dense/objects_dense`   |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/trending`                            | session       | Trending items + Redis TTL (`?limit=&offset=&window_hours=`)            |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/events`                              | session       | Paginated recent events (`?limit=&offset=&subject_id=`)                 |
-| `POST`   | `/api/admin/v1/namespaces/{ns}/events`                              | session       | Inject a test event (proxied to `cmd/api`, 202)                         |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/events/stream`                      | session       | **(SSE)** Live event tail (`?action=&subject_id=`): `event` per ingested event, `dropped` on backpressure. Fed by the `codohue:events-tail:*` pub/sub bridge, so it captures HTTP + Redis-stream + injected events |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/events/summary`                    | session       | Server-side ingest aggregation (`?window=1m\|5m\|1h`): total + rate + by-action + time-bucketed series |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/events`                              | session       | Inject a test event (proxied to `cmd/api`, 202 + `{"ok":true,"event_id":N}`) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/subjects/{id}/profile`               | session       | Subject profile: interaction count, seen items, sparse vector NNZ       |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations`       | session       | Recommendations for a subject (`?limit=&offset=&debug=`)                |
 | `POST`   | `/api/admin/v1/demo-data`                                           | session       | Seed the bundled demo dataset (202)                                     |
