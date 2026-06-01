@@ -11,9 +11,9 @@ import (
 // so the TypeScript client generated from these structs cannot get out of
 // sync silently.
 
-func boolp(b bool) *bool       { return &b }
-func intp(n int) *int          { return &n }
-func strp(s string) *string    { return &s }
+func boolp(b bool) *bool           { return &b }
+func intp(n int) *int              { return &n }
+func strp(s string) *string        { return &s }
 func timep(t time.Time) *time.Time { return &t }
 
 func roundtripJSON[T any](t *testing.T, in T) T {
@@ -37,6 +37,37 @@ func roundtripJSON[T any](t *testing.T, in T) T {
 }
 
 var refTime = time.Date(2026, 5, 24, 10, 30, 0, 0, time.UTC)
+
+func TestJSONRoundtripInjectEventResponse(t *testing.T) {
+	roundtripJSON(t, InjectEventResponse{OK: true, EventID: 12345})
+}
+
+func TestJSONRoundtripEventsSummaryResponse(t *testing.T) {
+	roundtripJSON(t, EventsSummaryResponse{
+		WindowSeconds: 60,
+		BucketSeconds: 1,
+		Total:         850,
+		RatePerSecond: 14.16,
+		ByAction: []EventsSummaryAction{
+			{Action: "view", Count: 612, Rate: 10.2},
+			{Action: "like", Count: 180, Rate: 3.0},
+		},
+		Series: []EventsSummaryBucket{
+			{Ts: refTime.Format(time.RFC3339), Count: 13},
+		},
+	})
+}
+
+func TestJSONRoundtripMetricsSummaryResponse(t *testing.T) {
+	roundtripJSON(t, MetricsSummaryResponse{
+		GeneratedAt: refTime.Format(time.RFC3339),
+		Ingest: MetricsSummaryIngest{
+			EventsPerSec1m: map[string]float64{"prod": 14.2, "staging": 0.4},
+			EventsPerSec5m: map[string]float64{"prod": 12.1},
+		},
+		Cron: MetricsSummaryCron{BatchLagSeconds: 42},
+	})
+}
 
 func TestJSONRoundtripPhaseEntry(t *testing.T) {
 	cases := map[string]PhaseEntry{

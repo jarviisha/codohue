@@ -104,9 +104,16 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 		// Trending
 		r.Get("/api/admin/v1/namespaces/{ns}/trending", h.GetTrending)
 
-		// Events
+		// Events — list / live tail (SSE) / server-side summary / inject.
+		// "stream" and "summary" are static siblings of the list path; chi
+		// resolves them before any parameterised segment.
 		r.Get("/api/admin/v1/namespaces/{ns}/events", h.GetRecentEvents)
+		r.Get("/api/admin/v1/namespaces/{ns}/events/stream", h.StreamEvents)
+		r.Get("/api/admin/v1/namespaces/{ns}/events/summary", h.GetEventsSummary)
 		r.Post("/api/admin/v1/namespaces/{ns}/events", h.InjectEvent)
+
+		// Curated rolling-window metrics for the fleet dashboard.
+		r.Get("/api/admin/v1/metrics/summary", h.GetMetricsSummary)
 
 		// Demo data
 		r.Post("/api/admin/v1/demo-data", h.CreateDemoData)

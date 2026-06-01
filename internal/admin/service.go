@@ -34,6 +34,7 @@ type adminRepo interface {
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
+	GetEventsSummary(ctx context.Context, ns string, windowSecs, bucketSecs int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error)
 	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
 	SeedDemoCatalogItems(ctx context.Context, namespace string, items []demoCatalogItem, now time.Time) (int, error)
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
@@ -90,6 +91,14 @@ type catalogBacklogReader interface {
 	Read(ctx context.Context, namespace string) (CatalogBacklog, error)
 }
 
+// eventRateReader exposes the admin-plane per-namespace ingest rate, fed by
+// the events-tail bridge. Wired by cmd/admin; *eventsrate.Tracker satisfies
+// it. When nil, ingest rates surface as zero.
+type eventRateReader interface {
+	RatePerSec(namespace string, window time.Duration) float64
+	RatesPerSec(window time.Duration) map[string]float64
+}
+
 type batchRunner interface {
 	RunNamespace(ctx context.Context, namespace string, triggerSource batchrun.TriggerSource)
 }
@@ -131,6 +140,7 @@ type Service struct {
 	catalogPicker   catalogStrategyPicker
 	streamPublisher streamPublisher
 	qdrantDeleter   qdrantPointDeleter
+	eventRate       eventRateReader
 	nowFn           func() time.Time
 	runningBatch    sync.Map // keyed by namespace name; prevents concurrent batch triggers
 	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
@@ -179,6 +189,12 @@ func (s *Service) SetCatalogBacklogReader(r catalogBacklogReader) {
 // re-embed handler returns 503 Service Unavailable.
 func (s *Service) SetCatalogStrategyPicker(p catalogStrategyPicker) {
 	s.catalogPicker = p
+}
+
+// SetEventRateTracker wires the per-namespace ingest-rate tracker. Optional —
+// when nil, ingest rates (fleet events/min, /metrics/summary) surface as zero.
+func (s *Service) SetEventRateTracker(t eventRateReader) {
+	s.eventRate = t
 }
 
 // SetStreamPublisher overrides the default Redis-backed XAdd publisher.
@@ -715,8 +731,9 @@ func (s *Service) GetRecentEvents(ctx context.Context, ns string, limit, offset 
 	}, nil
 }
 
-// InjectEvent proxies a test event injection to cmd/api.
-func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error {
+// InjectEvent proxies a test event injection to cmd/api and returns the id of
+// the persisted event so the SPA can highlight it in the live tail.
+func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventRequest) (int64, error) {
 	if req.OccurredAt == nil {
 		now := time.Now().UTC().Format(time.RFC3339)
 		req.OccurredAt = &now
@@ -724,28 +741,35 @@ func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventReq
 
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("marshal inject event: %w", err)
+		return 0, fmt.Errorf("marshal inject event: %w", err)
 	}
 
 	url := s.apiURL + "/v1/namespaces/" + ns + "/events"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("build inject event request: %w", err)
+		return 0, fmt.Errorf("build inject event request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("inject event proxy: %w", err)
+		return 0, fmt.Errorf("inject event proxy: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // best-effort read for error context
-		return fmt.Errorf("inject event upstream returned %d: %s", resp.StatusCode, string(body))
+		return 0, fmt.Errorf("inject event upstream returned %d: %s", resp.StatusCode, string(body))
 	}
-	return nil
+
+	// cmd/api returns {"event_id": N}. Best-effort decode — a missing/garbled
+	// body still means the event landed (202), so we return id=0, not an error.
+	var upstream struct {
+		EventID int64 `json:"event_id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&upstream) //nolint:errcheck // id is a nice-to-have; absence is non-fatal
+	return upstream.EventID, nil
 }
 
 // CreateDemoData creates the bundled demo namespace and loads deterministic sample events.

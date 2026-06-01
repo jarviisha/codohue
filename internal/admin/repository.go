@@ -507,6 +507,69 @@ func (r *Repository) GetRecentEvents(ctx context.Context, ns string, limit, offs
 	return out, total, nil
 }
 
+// GetEventsSummary aggregates events for ns over the trailing windowSecs. It
+// returns the total count, per-action counts, and a time series with one entry
+// per non-empty bucketSecs bucket (sparse — empty buckets are omitted; the SPA
+// fills gaps). Both queries ride the occurred_at index.
+func (r *Repository) GetEventsSummary(ctx context.Context, ns string, windowSecs, bucketSecs int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error) {
+	byAction = make(map[string]int)
+
+	actionRows, err := r.db.Query(ctx, `
+		SELECT action, COUNT(*) AS cnt
+		FROM events
+		WHERE namespace = $1 AND occurred_at > NOW() - make_interval(secs => $2)
+		GROUP BY action`,
+		ns, windowSecs,
+	)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("query events by action: %w", err)
+	}
+	defer actionRows.Close()
+	for actionRows.Next() {
+		var action string
+		var cnt int
+		if err := actionRows.Scan(&action, &cnt); err != nil {
+			return 0, nil, nil, fmt.Errorf("scan action count: %w", err)
+		}
+		byAction[action] = cnt
+		total += cnt
+	}
+	if err := actionRows.Err(); err != nil {
+		return 0, nil, nil, fmt.Errorf("iterate action counts: %w", err)
+	}
+
+	seriesRows, err := r.db.Query(ctx, `
+		SELECT to_timestamp(floor(extract(epoch FROM occurred_at) / $2) * $2) AS bucket, COUNT(*) AS cnt
+		FROM events
+		WHERE namespace = $1 AND occurred_at > NOW() - make_interval(secs => $3)
+		GROUP BY bucket
+		ORDER BY bucket`,
+		ns, bucketSecs, windowSecs,
+	)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("query events series: %w", err)
+	}
+	defer seriesRows.Close()
+	for seriesRows.Next() {
+		var bucket time.Time
+		var cnt int
+		if err := seriesRows.Scan(&bucket, &cnt); err != nil {
+			return 0, nil, nil, fmt.Errorf("scan series bucket: %w", err)
+		}
+		series = append(series, EventsSummaryBucket{
+			Ts:    bucket.UTC().Format(time.RFC3339),
+			Count: cnt,
+		})
+	}
+	if err := seriesRows.Err(); err != nil {
+		return 0, nil, nil, fmt.Errorf("iterate series: %w", err)
+	}
+	if series == nil {
+		series = []EventsSummaryBucket{}
+	}
+	return total, byAction, series, nil
+}
+
 // SeedDemoEvents replaces the events for the demo namespace with the bundled fixture.
 func (r *Repository) SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error) {
 	tx, err := r.db.Begin(ctx)

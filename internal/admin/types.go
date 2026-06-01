@@ -60,12 +60,12 @@ type CatalogStrategyDescriptor struct {
 // CatalogBacklog is a snapshot of operational counts surfaced by
 // GET .../catalog. Counts are approximate (sampled, not transactional).
 type CatalogBacklog struct {
-	Pending      int `json:"pending"`
-	InFlight     int `json:"in_flight"`
-	Embedded     int `json:"embedded"`
-	Failed       int `json:"failed"`
-	DeadLetter   int `json:"dead_letter"`
-	StreamLen    int `json:"stream_len"`
+	Pending    int `json:"pending"`
+	InFlight   int `json:"in_flight"`
+	Embedded   int `json:"embedded"`
+	Failed     int `json:"failed"`
+	DeadLetter int `json:"dead_letter"`
+	StreamLen  int `json:"stream_len"`
 	// ConsumerLag is the embedder consumer-group PEL depth on
 	// catalog:embed:{ns} — how many delivered-but-unacked items the worker
 	// is still processing or crashed mid-batch on. 0 when Redis is
@@ -492,6 +492,61 @@ type InjectEventRequest struct {
 	ObjectID   string  `json:"object_id"`
 	Action     string  `json:"action"`
 	OccurredAt *string `json:"occurred_at,omitempty"`
+}
+
+// InjectEventResponse is returned by POST /api/admin/v1/namespaces/{ns}/events.
+// event_id is the id of the freshly-persisted row so the SPA can highlight it
+// in the live tail.
+type InjectEventResponse struct {
+	OK      bool  `json:"ok"`
+	EventID int64 `json:"event_id"`
+}
+
+// EventsSummaryAction is one action's share of ingest within the summary window.
+type EventsSummaryAction struct {
+	Action string  `json:"action"`
+	Count  int     `json:"count"`
+	Rate   float64 `json:"rate"`
+}
+
+// EventsSummaryBucket is one time-bucket of the events-over-time series.
+type EventsSummaryBucket struct {
+	Ts    string `json:"ts"`
+	Count int    `json:"count"`
+}
+
+// EventsSummaryResponse is the server-side aggregation backing the events tail
+// sidebar (GET /api/admin/v1/namespaces/{ns}/events/summary).
+type EventsSummaryResponse struct {
+	WindowSeconds int                   `json:"window_seconds"`
+	BucketSeconds int                   `json:"bucket_seconds"`
+	Total         int                   `json:"total"`
+	RatePerSecond float64               `json:"rate_per_second"`
+	ByAction      []EventsSummaryAction `json:"by_action"`
+	Series        []EventsSummaryBucket `json:"series"`
+}
+
+// MetricsSummaryIngest is the ingest slice of /metrics/summary — per-namespace
+// events-per-second derived from the admin-plane rate tracker (not a cross-
+// process Prometheus scrape).
+type MetricsSummaryIngest struct {
+	EventsPerSec1m map[string]float64 `json:"events_per_sec_1m"`
+	EventsPerSec5m map[string]float64 `json:"events_per_sec_5m"`
+}
+
+// MetricsSummaryCron is the cron slice — current batch-job lag.
+type MetricsSummaryCron struct {
+	BatchLagSeconds float64 `json:"batch_lag_seconds"`
+}
+
+// MetricsSummaryResponse is the curated rolling-window metrics view
+// (GET /api/admin/v1/metrics/summary). Recommend/embedder slices are omitted:
+// those counters live in separate processes (cmd/api, cmd/embedder) and are
+// scraped by Prometheus/Grafana directly rather than proxied here.
+type MetricsSummaryResponse struct {
+	GeneratedAt string               `json:"generated_at"`
+	Ingest      MetricsSummaryIngest `json:"ingest"`
+	Cron        MetricsSummaryCron   `json:"cron"`
 }
 
 // DemoDatasetResponse is returned after seeding or clearing the bundled demo dataset.

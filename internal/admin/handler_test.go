@@ -17,42 +17,47 @@ import (
 // ─── fake service ─────────────────────────────────────────────────────────────
 
 type fakeSvc struct {
-	healthResp        *HealthResponse
-	healthStatus      int
-	healthErr         error
-	nsListResp        []NamespaceConfig
-	nsListErr         error
-	nsGetResp         *NamespaceConfig
-	nsGetErr          error
-	nsOverviewResp    *NamespacesOverviewResponse
-	nsOverviewErr     error
-	upsertResp        *NamespaceUpsertResponse
-	upsertStatus      int
-	upsertErr         error
-	batchRuns         []BatchRunLog
-	batchRunsErr      error
-	batchRunsGotKind  string
-	debugResp         *RecommendResponse
-	debugStatus       int
-	debugErr          error
-	trendingResp      *TrendingAdminResponse
-	trendingErr       error
-	profileResp       *SubjectProfileResponse
-	profileErr        error
-	qdrantStatsResp   *QdrantInspectResponse
-	qdrantStatsErr    error
-	triggerResp       *BatchRunCreateResponse
-	triggerErr        error
-	eventsResp        *EventsListResponse
-	eventsErr         error
-	injectErr         error
-	demoResp          *DemoDatasetResponse
-	demoErr           error
-	catalogGetResp    *NamespaceCatalogResponse
-	catalogGetErr     error
-	catalogUpdateResp *NamespaceCatalogConfig
-	catalogUpdateErr  error
-	catalogUpdateReq  *NamespaceCatalogUpdateRequest
+	healthResp         *HealthResponse
+	healthStatus       int
+	healthErr          error
+	nsListResp         []NamespaceConfig
+	nsListErr          error
+	nsGetResp          *NamespaceConfig
+	nsGetErr           error
+	nsOverviewResp     *NamespacesOverviewResponse
+	nsOverviewErr      error
+	upsertResp         *NamespaceUpsertResponse
+	upsertStatus       int
+	upsertErr          error
+	batchRuns          []BatchRunLog
+	batchRunsErr       error
+	batchRunsGotKind   string
+	debugResp          *RecommendResponse
+	debugStatus        int
+	debugErr           error
+	trendingResp       *TrendingAdminResponse
+	trendingErr        error
+	profileResp        *SubjectProfileResponse
+	profileErr         error
+	qdrantStatsResp    *QdrantInspectResponse
+	qdrantStatsErr     error
+	triggerResp        *BatchRunCreateResponse
+	triggerErr         error
+	eventsResp         *EventsListResponse
+	eventsErr          error
+	eventsSummaryResp  *EventsSummaryResponse
+	eventsSummaryErr   error
+	metricsSummaryResp *MetricsSummaryResponse
+	metricsSummaryErr  error
+	injectErr          error
+	injectID           int64
+	demoResp           *DemoDatasetResponse
+	demoErr            error
+	catalogGetResp     *NamespaceCatalogResponse
+	catalogGetErr      error
+	catalogUpdateResp  *NamespaceCatalogConfig
+	catalogUpdateErr   error
+	catalogUpdateReq   *NamespaceCatalogUpdateRequest
 
 	// US3 operator endpoints
 	reembedResp       *CatalogReEmbedResponse
@@ -85,20 +90,20 @@ type fakeSvc struct {
 	resetCalls   int
 
 	// Phase 1 batch-run lifecycle + aggregates
-	batchRunDetail        *BatchRunDetail
-	batchRunDetailErr     error
-	cancelSummary         *BatchRunSummary
-	cancelStatus          int
-	cancelErr             error
-	retryCreate           *BatchRunCreateResponse
-	retryStatus           int
-	retryErr              error
-	statsBuckets          []BatchRunStatsBucket
-	statsErr              error
-	overviewResp          *OverviewResponse
-	overviewErr           error
-	nsDashboardResp       *NamespaceDashboardResponse
-	nsDashboardErr        error
+	batchRunDetail    *BatchRunDetail
+	batchRunDetailErr error
+	cancelSummary     *BatchRunSummary
+	cancelStatus      int
+	cancelErr         error
+	retryCreate       *BatchRunCreateResponse
+	retryStatus       int
+	retryErr          error
+	statsBuckets      []BatchRunStatsBucket
+	statsErr          error
+	overviewResp      *OverviewResponse
+	overviewErr       error
+	nsDashboardResp   *NamespaceDashboardResponse
+	nsDashboardErr    error
 
 	// Phase 2 catalog history endpoints
 	backlogHistoryResp  *CatalogBacklogHistoryResponse
@@ -188,8 +193,16 @@ func (f *fakeSvc) GetRecentEvents(_ context.Context, _ string, _, _ int, _ strin
 	return f.eventsResp, f.eventsErr
 }
 
-func (f *fakeSvc) InjectEvent(_ context.Context, _ string, _ InjectEventRequest) error {
-	return f.injectErr
+func (f *fakeSvc) GetEventsSummary(_ context.Context, _ string, _, _ time.Duration) (*EventsSummaryResponse, error) {
+	return f.eventsSummaryResp, f.eventsSummaryErr
+}
+
+func (f *fakeSvc) GetMetricsSummary(_ context.Context) (*MetricsSummaryResponse, error) {
+	return f.metricsSummaryResp, f.metricsSummaryErr
+}
+
+func (f *fakeSvc) InjectEvent(_ context.Context, _ string, _ InjectEventRequest) (int64, error) {
+	return f.injectID, f.injectErr
 }
 
 func (f *fakeSvc) CreateDemoData(_ context.Context) (*DemoDatasetResponse, error) {

@@ -46,7 +46,7 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 			Namespace:       ns.Namespace,
 			Status:          deriveNamespaceStatus(lastRuns, eventCounts, ns.Namespace),
 			Events24h:       eventCounts[ns.Namespace],
-			EventsPerMinNow: 0, // Phase 3 wires the rolling counter
+			EventsPerMinNow: s.eventsPerMin(ns.Namespace),
 			Catalog: NamespaceOverviewCatalog{
 				Enabled: ns.CatalogEnabled,
 				// Pending / DeadLetter populated by the catalog stream once
@@ -119,10 +119,20 @@ func (s *Service) GetNamespaceDashboard(ctx context.Context, namespace string) (
 		LastRuns:        lastRuns,
 		Catalog:         CatalogBacklog{}, // Phase 2 wires real backlog
 		Events24h:       eventCounts[namespace],
-		EventsPerMinNow: 0, // Phase 3 wires rolling counter
+		EventsPerMinNow: s.eventsPerMin(namespace),
 		Qdrant:          *qdrant,
 		TrendingTTLSec:  0, // Phase 2/3 wires trending TTL probe
 	}, nil
+}
+
+// eventsPerMin converts the rate tracker's 1-minute events/sec for a namespace
+// into events/min. Returns 0 when no tracker is wired (e.g. in tests) or the
+// namespace has no recent ingest.
+func (s *Service) eventsPerMin(namespace string) float64 {
+	if s.eventRate == nil {
+		return 0
+	}
+	return s.eventRate.RatePerSec(namespace, time.Minute) * 60
 }
 
 // deriveCronHeartbeat picks the most recent cron run across all namespaces

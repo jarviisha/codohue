@@ -258,18 +258,30 @@ Giữ logic. Thêm body option `{"only_state": "embedded" | "failed" | "all"}` (
 
 ### 3.4 Events — live tail & aggregate
 
-#### `GET /api/admin/v1/namespaces/{ns}/events/stream?action=&subject_id=` (SSE) *(mới)*
+#### `GET /api/admin/v1/namespaces/{ns}/events/stream?action=&subject_id=` (SSE) *(mới — ✅ implemented)*
 Live event tail:
-- Backend XREAD BLOCK trên `codohue:events` với consumer group ephemeral `admin-tail-{requestID}` (cleanup khi disconnect).
 - Filter server-side theo `action` + `subject_id`.
 - `event: event` — `EventSummary` JSON.
 - `event: ping` mỗi 15s.
-- Backpressure: bounded channel 1024, drop oldest + push `event: dropped {"count": 12}`.
+- Backpressure: forwarder per-connection buffer 256, drop oldest + push `event: dropped {"count": 12}`.
 
-**Janitor consumer group ephemeral** chạy trong `cmd/admin` mỗi 5 phút:
-- Đọc `XINFO GROUPS codohue:events` (và mỗi `catalog:embed:{ns}`).
-- Xóa group có prefix `admin-tail-` và `idle > 1h`.
-- Metric `codohue_admin_sse_orphan_groups_reaped_total` để track.
+> **⚠️ Deviation from original design — implemented via pub/sub, not XREAD.**
+> The plan originally specced an `XREAD BLOCK codohue:events` tail with ephemeral
+> consumer groups + a janitor. That can't work: the HTTP ingest path (the primary
+> client transport, and the path admin "inject test event" proxies to) writes
+> straight to the `events` table and **never touches the Redis stream**, so a
+> stream tail would miss most real traffic and fail the "inject < 2s" exit
+> criterion. Implemented instead by mirroring the Phase 2 catalog pattern:
+> `ingest.Service.Process` (cmd/api) publishes every persisted event to Redis
+> pub/sub `codohue:events-tail:{ns}` (async, drop-on-full — never back-pressures
+> ingest); `cmd/admin`'s `eventsTailBridge` PSUBSCRIBEs `codohue:events-tail:*`
+> and republishes as `events.ingested` on the in-process event bus; `StreamEvents`
+> subscribes + filters + fans out. Captures HTTP + Redis-stream + injected events
+> uniformly. **Consequence:** no ephemeral consumer groups → no janitor → the
+> `codohue_admin_sse_orphan_groups_reaped_total` metric (§3.4/§12.3) is not built.
+> The same bridge feeds `EventRateTracker`, which backs `events_per_min_now`
+> (§3.1 `/overview`, `/dashboard`) and `/metrics/summary` ingest rates without
+> querying the `events` table.
 
 #### `GET /api/admin/v1/namespaces/{ns}/events/summary?window=1m|5m|1h&bucket=auto` *(mới)*
 Server-side aggregation:
@@ -286,10 +298,10 @@ Server-side aggregation:
 }
 ```
 
-Implement: query `events WHERE namespace=? AND occurred_at > now() - interval`, group by `action` + `time_bucket`. Cache 5s.
+Implement (✅): two queries on the `occurred_at`-indexed `events` table — one `GROUP BY action`, one `GROUP BY time_bucket` (`floor(epoch/bucket)*bucket`). `bucket` auto-derived as `window/60` (≈60 points), floored at 1s. No server cache yet (the frontend already throttles to a 5s poll); add one if the perf budget §12.2 is breached.
 
-#### `POST /api/admin/v1/namespaces/{ns}/events` (sửa response)
-Logic không đổi. Trả `{"ok": true, "event_id": 12345}` để UI highlight được event vừa inject.
+#### `POST /api/admin/v1/namespaces/{ns}/events` (sửa response — ✅ implemented)
+Logic không đổi. Trả `{"ok": true, "event_id": 12345}` để UI highlight được event vừa inject. cmd/api's HTTP ingest 202 body now carries `{"event_id": N}` (non-breaking additive); admin proxies the id through.
 
 ### 3.5 Operations stream — global event bus (SSE)
 
@@ -302,7 +314,15 @@ Một SSE kết nối duy nhất gắn với mỗi tab UI:
 
 ### 3.6 Metrics surface
 
-#### `GET /api/admin/v1/metrics/summary` *(mới)*
+#### `GET /api/admin/v1/metrics/summary` *(mới — ✅ partial)*
+
+> **Implemented scope:** only the `ingest` (events/sec 1m+5m per ns, from
+> `EventRateTracker`) and `cron` (batch lag, from DB) slices ship. The
+> `recommend` and `embedder` slices below are **deferred**: those counters live
+> in the cmd/api and cmd/embedder processes, so the admin process can't observe
+> them in-process — they're scraped by Prometheus/Grafana directly. Wiring a
+> cross-process scrape into admin is out of scope for Phase 3.
+
 Curated JSON từ rolling window internal:
 
 ```json
@@ -632,19 +652,19 @@ Mỗi phase ship một slice end-to-end: API mới + UI mới + migration nếu 
 
 ---
 
-### Phase 3 — Live event ingest (1.5 tuần)
+### Phase 3 — Live event ingest (1.5 tuần) — ✅ DONE
 
 **Backend**
-- Metrics: `codohue_events_ingested_total`, `codohue_ingest_errors_total`.
-- Endpoints `/events/stream` (+ janitor consumer group ở `cmd/admin`), `/events/summary`, sửa `POST /events` trả `event_id`.
-- `/metrics/summary` curated.
+- ✅ Metrics: `codohue_events_ingested_total{namespace,action}`, `codohue_ingest_errors_total{namespace,reason}` (cmd/api ingest).
+- ✅ `/events/stream` (SSE via pub/sub bridge — see §3.4 deviation; **no** janitor/orphan-group metric, that approach was abandoned), `/events/summary` (group by action + time bucket), `POST /events` returns `{ok, event_id}` (cmd/api 202 body now carries the id, admin proxies it through).
+- ✅ `/metrics/summary` curated — ingest events/sec (1m/5m) from `EventRateTracker`, cron batch lag from DB. Recommend/embedder slices intentionally omitted (separate processes → Prometheus scrape, not proxied).
 
 **Frontend**
-- `/ns/:ns/events` — live tail + sidebar summary.
-- `/ns/:ns/events/inject`.
-- Fleet tile "events/s" gắn `/metrics/summary`.
+- ✅ `/ns/:ns/events` — live SSE tail (1000-row ring buffer, pause/resume, new-row flash, dropped banner) + sidebar summary (rate tiles + action mix + over-time chart, window selector 1m/5m/1h).
+- ✅ Inject as in-context dialog (returns + surfaces `event_id`; event flashes on arrival via the tail — a dedicated `/inject` route is unnecessary with a live tail on the same page).
+- ✅ Fleet "Ingest events/s" tile gắn `/metrics/summary`.
 
-**Exit:** tail real-time, inject xuất hiện < 2s, action mix so với baseline.
+**Exit:** ✅ tail real-time, inject xuất hiện < 2s (qua pub/sub fan-out), action mix so với baseline.
 
 ---
 
@@ -675,7 +695,7 @@ Mỗi phase ship một slice end-to-end: API mới + UI mới + migration nếu 
 | 0 — Foundation | 1 | Skeleton, login |
 | 1 — Batch runs | 2–3 | Run real-time, cancel/retry, fleet overview |
 | 2 — Catalog | 4–5 | Backlog timeline persisted + SSE + redrive |
-| 3 — Live ingest | 6–7 | Event tail SSE + summary |
+| 3 — Live ingest | 6–7 | Event tail SSE + summary ✅ |
 | 4 — Polish | 8 | Cut over + retention |
 
 Tổng ~8 tuần.
@@ -867,7 +887,7 @@ Metric mới ở `cmd/admin` (riêng namespace với metric data-plane §3.8):
 - `codohue_admin_sse_reconnects_total{stream}` — Counter.
 - `codohue_admin_eventbus_publish_total{kind}` — Counter.
 - `codohue_admin_eventbus_subscribers{kind}` — Gauge.
-- `codohue_admin_sse_orphan_groups_reaped_total` — Counter (janitor §3.4).
+- ~~`codohue_admin_sse_orphan_groups_reaped_total` — Counter (janitor §3.4).~~ **Dropped:** the events tail uses pub/sub, not ephemeral consumer groups, so there is nothing to reap (see §3.4 deviation).
 
 Plot trên Grafana ngoài; **không** proxy vào `/metrics/summary` — tách concern: operator monitor data plane qua admin UI, admin plane chính nó monitor qua Prometheus + Grafana như mọi infra khác.
 

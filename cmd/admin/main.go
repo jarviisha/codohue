@@ -109,9 +109,19 @@ func run() error {
 	// cmd/embedder publishes item state changes onto and republishes each
 	// message as a `catalog.item_state_changed` event on the local bus.
 	// Goroutine lifecycle is bound to ctx; bus shutdown happens via defer.
+	//
+	// Events-tail bridge — same shape for ingest: cmd/api publishes every
+	// processed event to `codohue:events-tail:*`; this republishes them as
+	// `events.ingested` on the bus (driving the live tail SSE) and feeds the
+	// per-namespace rate tracker that backs fleet events/min + /metrics/summary.
+	eventRate := admin.NewEventRateTracker()
 	if redisClient != nil {
 		bridge := newCatalogEventsBridge(redisClient, bus)
 		go bridge.Run(ctx)
+
+		eventsBridge := newEventsTailBridge(redisClient, bus, eventRate)
+		go eventsBridge.Run(ctx)
+		go eventRate.Run(ctx, 10*time.Second)
 	}
 
 	repo := admin.NewRepository(db)
@@ -125,6 +135,7 @@ func run() error {
 	svc.SetCatalogConfigurator(catalogAdapter)
 	svc.SetCatalogStrategyPicker(catalogAdapter)
 	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
+	svc.SetEventRateTracker(eventRate)
 
 	h := admin.NewHandler(svc, cfg.AdminAPIKey)
 	h.SetEventBus(bus)
@@ -200,6 +211,8 @@ func streamLabelForKind(kind string) string {
 		return "ops"
 	case len(kind) > len("catalog.") && kind[:len("catalog.")] == "catalog.":
 		return "catalog"
+	case len(kind) > len("events.") && kind[:len("events.")] == "events.":
+		return "events"
 	default:
 		return "unknown"
 	}

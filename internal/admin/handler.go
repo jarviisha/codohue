@@ -36,7 +36,9 @@ type adminSvc interface {
 	GetCatalogBacklogHistory(ctx context.Context, namespace string, window time.Duration) (*CatalogBacklogHistoryResponse, error)
 	GetCatalogFailuresSummary(ctx context.Context, namespace string, window time.Duration, limit int) (*CatalogFailuresSummaryResponse, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
-	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
+	GetEventsSummary(ctx context.Context, ns string, window, bucket time.Duration) (*EventsSummaryResponse, error)
+	GetMetricsSummary(ctx context.Context) (*MetricsSummaryResponse, error)
+	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) (int64, error)
 	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteNamespace(ctx context.Context, namespace string) (*NamespaceDeleteResponse, error)
@@ -514,11 +516,58 @@ func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.InjectEvent(r.Context(), ns, req); err != nil {
+	eventID, err := h.svc.InjectEvent(r.Context(), ns, req)
+	if err != nil {
 		httpapi.WriteError(w, http.StatusBadGateway, "upstream_error", "upstream event API unavailable")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusAccepted, InjectEventResponse{OK: true, EventID: eventID})
+}
+
+// windowParam maps the ?window= query string (1m|5m|1h) to a duration,
+// defaulting to 1m. Used by the events summary endpoint.
+func windowParam(raw string) time.Duration {
+	switch raw {
+	case "5m":
+		return 5 * time.Minute
+	case "1h":
+		return time.Hour
+	default:
+		return time.Minute
+	}
+}
+
+// GetEventsSummary handles GET /api/admin/v1/namespaces/{ns}/events/summary.
+// The bucket is auto-derived as window/60 (≈60 points), floored at 1s.
+func (h *Handler) GetEventsSummary(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
+		return
+	}
+	window := windowParam(r.URL.Query().Get("window"))
+	bucket := window / 60
+	if bucket < time.Second {
+		bucket = time.Second
+	}
+
+	result, err := h.svc.GetEventsSummary(r.Context(), ns, window, bucket)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not aggregate events")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+// GetMetricsSummary handles GET /api/admin/v1/metrics/summary — curated
+// rolling-window metrics for the fleet dashboard.
+func (h *Handler) GetMetricsSummary(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.GetMetricsSummary(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not build metrics summary")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
 // CreateDemoData handles POST /api/admin/v1/demo-data — seeds the bundled
