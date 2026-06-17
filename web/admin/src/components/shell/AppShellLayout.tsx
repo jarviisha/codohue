@@ -156,7 +156,7 @@ function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
       type="button"
       onClick={onOpen}
       aria-label="Open command palette"
-      className="flex-1 max-w-md flex items-center justify-between px-3 py-1.5 rounded border border-default bg-surface text-foreground-subtle text-sm hover:bg-surface-sunken transition-colors"
+      className="flex-1 max-w-md flex items-center justify-between px-3 py-1.5 rounded border border-border bg-surface text-foreground-subtle text-sm hover:bg-surface-sunken transition-colors"
     >
       <span>Jump to…</span>
       <kbd className="font-mono text-xs">{shortcut}</kbd>

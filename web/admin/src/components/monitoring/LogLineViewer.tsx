@@ -94,7 +94,7 @@ export default function LogLineViewer({ lines, follow = true, height = 360 }: Lo
                 <span className="shrink-0">
                   <Badge variant={LEVEL_BADGE[l.level] ?? 'neutral'}>{l.level}</Badge>
                 </span>
-                <span className="text-foreground whitespace-pre-wrap break-words">{l.msg}</span>
+                <span className="text-foreground whitespace-pre-wrap wrap-break-word">{l.msg}</span>
               </li>
             ))}
           </ol>

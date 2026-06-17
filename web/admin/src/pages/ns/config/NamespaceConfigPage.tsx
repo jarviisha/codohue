@@ -4,8 +4,6 @@ import {
   Alert,
   Badge,
   Button,
-  Card,
-  CardContent,
   Container,
   FormField,
   IconButton,
@@ -122,10 +120,11 @@ function ConfigForm({
 }) {
   const [draft, setDraft] = useState<NamespaceConfig>(initial)
   // Action weights kept as ordered entries so adds/removes don't reshuffle
-  // existing rows on every keystroke.
+  // existing rows on every keystroke. A freshly created namespace can come
+  // back with action_weights = null, so coalesce before iterating.
   const [weights, setWeights] = useState<Array<{ name: string; value: string }>>(
     () =>
-      Object.entries(initial.action_weights).map(([name, value]) => ({
+      Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({
         name,
         value: String(value),
       })),
@@ -136,7 +135,7 @@ function ConfigForm({
   const reset = () => {
     setDraft(initial)
     setWeights(
-      Object.entries(initial.action_weights).map(([name, value]) => ({
+      Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({
         name,
         value: String(value),
       })),
@@ -150,7 +149,7 @@ function ConfigForm({
   }
 
   return (
-    <Container size="md" className="py-6 px-6">
+    <Container size="lg" className="py-6 px-6">
       <DirtyFormGuard dirty={dirty && !saving} />
       <PageHeader>
         <Inline gap="200" align="center" justify="between" className="w-full" wrap>
@@ -175,7 +174,7 @@ function ConfigForm({
       </PageHeader>
 
       <form onSubmit={handleSubmit}>
-        <Stack gap="300">
+        <Stack gap="500">
           {error && <Alert variant="danger" title="Save failed" description={error} />}
 
           <SectionCard
@@ -248,7 +247,10 @@ function ConfigForm({
             title="Dense vectors"
             description="Source + shape of dense embeddings used in the hybrid blend."
           >
-            <FormField label="Dense strategy">
+            <FormField
+              label="Dense strategy"
+              helpText="How dense vectors are produced: disabled (sparse only), byoe (you push embeddings), or item2vec / svd (cron retrains from events)."
+            >
               <Select
                 value={draft.dense_strategy}
                 onChange={(e) => setDraft({ ...draft, dense_strategy: e.target.value })}
@@ -272,7 +274,10 @@ function ConfigForm({
                 onChange={(e) => setDraft({ ...draft, embedding_dim: Number(e.target.value) })}
               />
             </FormField>
-            <FormField label="Dense distance">
+            <FormField
+              label="Dense distance"
+              helpText="Similarity metric for the dense Qdrant collections. cosine for normalized embeddings, dot product when magnitude carries signal."
+            >
               <Select
                 value={draft.dense_distance}
                 onChange={(e) => setDraft({ ...draft, dense_distance: e.target.value })}
@@ -348,17 +353,13 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <Card>
-      <CardContent>
-        <Stack gap="200">
-          <Stack gap="025">
-            <span className="text-foreground-subtle text-xs uppercase tracking-wide">{title}</span>
-            <p className="text-foreground-subtle text-sm">{description}</p>
-          </Stack>
-          {children}
-        </Stack>
-      </CardContent>
-    </Card>
+    <Stack gap="200">
+      <Stack gap="025" className="border-border border-b-2 pb-3">
+        <span className="text-foreground text-2xl font-semibold tracking-wide">{title}</span>
+        <p className="text-muted text-sm">{description}</p>
+      </Stack>
+      {children}
+    </Stack>
   )
 }
 
@@ -483,12 +484,13 @@ function diffConfig(
     if (!Number.isFinite(v)) continue
     nextMap[name] = v
   }
-  const initialKeys = Object.keys(initial.action_weights)
+  const initialWeights = initial.action_weights ?? {}
+  const initialKeys = Object.keys(initialWeights)
   const nextKeys = Object.keys(nextMap)
   let weightsChanged = initialKeys.length !== nextKeys.length
   if (!weightsChanged) {
     for (const k of nextKeys) {
-      if (initial.action_weights[k] !== nextMap[k]) {
+      if (initialWeights[k] !== nextMap[k]) {
         weightsChanged = true
         break
       }
