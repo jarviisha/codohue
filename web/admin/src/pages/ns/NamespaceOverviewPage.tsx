@@ -38,6 +38,8 @@ export default function NamespaceOverviewPage() {
   const q = useNamespaceDashboard(ns ?? null)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
+  if (!ns) return null
+
   if (q.isLoading) {
     return (
       <Container size="full" className="py-6 px-6">
