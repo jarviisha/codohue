@@ -88,7 +88,7 @@ func TestSSEStress_100Clients_1kEventsPerSec(t *testing.T) {
 			// Reuse a single client per goroutine with no overall timeout —
 			// the test bounds wall time via appCancel below.
 			httpClient := &http.Client{}
-			req, err := http.NewRequest("GET", srv.URL+"/stream", nil)
+			req, err := http.NewRequestWithContext(context.Background(), "GET", srv.URL+"/stream", http.NoBody)
 			if err != nil {
 				st.err = err
 				connectedWg.Done()

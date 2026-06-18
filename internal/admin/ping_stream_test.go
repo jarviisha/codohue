@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,11 +15,15 @@ func TestPingStreamEmitsTickEvents(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(PingStream))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck // test cleanup; close error is irrelevant to assertions
 
 	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type=%q, want text/event-stream", got)

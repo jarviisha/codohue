@@ -241,7 +241,7 @@ func (r *Repository) InsertBacklogSample(
 // namespace plus whether one exists. The sampler uses this to skip writing
 // duplicate snapshots when no field changed since last tick (BUILD_PLAN §8
 // "Sampler skip rule" — keeps the table from bloating during idle hours).
-func (r *Repository) LatestBacklogSample(ctx context.Context, namespace string) (BacklogStateCounts, int, bool, error) {
+func (r *Repository) LatestBacklogSample(ctx context.Context, namespace string) (counts BacklogStateCounts, streamLen int, found bool, err error) {
 	row := r.queryRowFn(ctx, `
 		SELECT pending, in_flight, failed, dead_letter, stream_len
 		FROM catalog_backlog_samples
@@ -250,8 +250,6 @@ func (r *Repository) LatestBacklogSample(ctx context.Context, namespace string) 
 		LIMIT 1`,
 		namespace,
 	)
-	var counts BacklogStateCounts
-	var streamLen int
 	if err := row.Scan(&counts.Pending, &counts.InFlight, &counts.Failed, &counts.DeadLetter, &streamLen); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return BacklogStateCounts{}, 0, false, nil

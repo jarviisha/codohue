@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -60,19 +61,21 @@ func (b *catalogEventsBridge) Run(ctx context.Context) {
 func (b *catalogEventsBridge) runOnce(ctx context.Context) error {
 	pubsub := b.rdb.PSubscribe(ctx, embedder.CatalogEventChannelPattern)
 	defer func() {
-		_ = pubsub.Close()
+		if err := pubsub.Close(); err != nil {
+			slog.Warn("catalog events bridge: pubsub close", "error", err)
+		}
 	}()
 	// Receive() flushes the SUBSCRIBE handshake; surface errors here so the
 	// outer retry loop can back off rather than spin tight on a closed conn.
 	if _, err := pubsub.Receive(ctx); err != nil {
-		return err
+		return fmt.Errorf("pubsub receive: %w", err)
 	}
 
 	ch := pubsub.Channel()
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("context done: %w", ctx.Err())
 		case msg, ok := <-ch:
 			if !ok {
 				return errors.New("pubsub channel closed")

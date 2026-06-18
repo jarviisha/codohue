@@ -95,11 +95,15 @@ func TestStreamBatchRunEmitsEventsAndClosesOnTerminal(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/stream")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/stream", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck // test cleanup; close error is irrelevant to assertions
 
 	// Give the handler a beat to subscribe before publishing.
 	time.Sleep(50 * time.Millisecond)
@@ -175,11 +179,15 @@ func TestStreamCatalogForwardsItemStateChanged(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL + "/stream")
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/stream", http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck // test cleanup; close error is irrelevant to assertions
 
 	time.Sleep(50 * time.Millisecond)
 	bus.Publish(context.Background(), eventbus.Event{
@@ -220,11 +228,15 @@ func TestStreamOpsForwardsRunLifecycleEvents(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(h.StreamOps))
 	defer srv.Close()
 
-	resp, err := http.Get(srv.URL)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck // test cleanup; close error is irrelevant to assertions
 
 	time.Sleep(50 * time.Millisecond)
 	bus.Publish(context.Background(), eventbus.Event{

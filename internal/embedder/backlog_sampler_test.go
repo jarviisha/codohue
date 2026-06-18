@@ -29,8 +29,8 @@ type fakeBacklogRepo struct {
 }
 
 type insertCall struct {
-	namespace                                string
-	at                                       time.Time
+	namespace                                        string
+	at                                               time.Time
 	pending, inFlight, failed, deadLetter, streamLen int
 }
 
@@ -61,7 +61,7 @@ func (f *fakeBacklogRepo) InsertBacklogSample(_ context.Context, ns string, at t
 	return nil
 }
 
-func (f *fakeBacklogRepo) LatestBacklogSample(_ context.Context, ns string) (BacklogStateCounts, int, bool, error) {
+func (f *fakeBacklogRepo) LatestBacklogSample(_ context.Context, ns string) (counts BacklogStateCounts, streamLen int, found bool, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.latestErr != nil {

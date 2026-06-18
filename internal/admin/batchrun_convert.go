@@ -73,7 +73,7 @@ func derivePhaseStatus(ok *bool) *string {
 	return &s
 }
 
-func phaseEntry(n int, name string, ok *bool, durMs *int, subjects, objects, items *int, errMsg *string) PhaseEntry {
+func phaseEntry(n int, name string, ok *bool, durMs, subjects, objects, items *int, errMsg *string) PhaseEntry {
 	dur := 0
 	if durMs != nil {
 		dur = *durMs

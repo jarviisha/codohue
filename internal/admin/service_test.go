@@ -169,7 +169,7 @@ func (f *fakeRepo) GetRecentEvents(_ context.Context, _ string, _, _ int, _ stri
 	return f.events, f.eventsTotal, f.eventsErr
 }
 
-func (f *fakeRepo) GetEventsSummary(_ context.Context, _ string, _, _ int) (int, map[string]int, []EventsSummaryBucket, error) {
+func (f *fakeRepo) GetEventsSummary(_ context.Context, _ string, _, _ int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error) {
 	return f.eventsSummaryTotal, f.eventsSummaryByAction, f.eventsSummarySeries, f.eventsSummaryErr
 }
 

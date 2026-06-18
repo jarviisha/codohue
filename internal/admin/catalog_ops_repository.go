@@ -556,9 +556,6 @@ func (r *Repository) DeleteCatalogItem(ctx context.Context, namespace string, id
 	return objectID, true, nil
 }
 
-// LookupNumericObjectID returns the BIGSERIAL numeric_id assigned to a string
-// object_id under (namespace, entity_type='object'). When no mapping exists
-// (the object was never seen by the recommend service), found=false.
 // GetCatalogBacklogHistory returns the samples written by cmd/embedder's
 // BacklogSampler over the requested window, oldest-first so the SPA can pipe
 // them straight into a time-series chart.
@@ -643,6 +640,9 @@ func (r *Repository) GetCatalogFailuresSummary(ctx context.Context, namespace st
 	return out, nil
 }
 
+// LookupNumericObjectID returns the BIGSERIAL numeric_id assigned to a string
+// object_id under (namespace, entity_type='object'). When no mapping exists
+// (the object was never seen by the recommend service), found=false.
 func (r *Repository) LookupNumericObjectID(ctx context.Context, namespace, objectID string) (numericID uint64, found bool, err error) {
 	err = r.db.QueryRow(ctx, `
 		SELECT numeric_id FROM id_mappings

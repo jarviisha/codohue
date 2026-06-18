@@ -165,7 +165,7 @@ func (b *Bus) Publish(ctx context.Context, e Event) {
 // Subscribe returns a channel that receives events matching filter and a
 // cancel func that removes the subscription and closes the channel. cancel is
 // idempotent.
-func (b *Bus) Subscribe(filter Filter) (<-chan Event, func()) {
+func (b *Bus) Subscribe(filter Filter) (events <-chan Event, cancel func()) {
 	s := &subscription{
 		filter: filter,
 		ch:     make(chan Event, b.bufferSize),
@@ -183,7 +183,7 @@ func (b *Bus) Subscribe(filter Filter) (<-chan Event, func()) {
 	}
 
 	var once sync.Once
-	cancel := func() {
+	cancel = func() {
 		once.Do(func() {
 			b.mu.Lock()
 			delete(b.subscribers, s)

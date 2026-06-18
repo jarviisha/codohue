@@ -112,6 +112,8 @@ func NewRedisCatalogEventPublisher(rdb *redis.Client) CatalogEventPublisher {
 	return &redisPubsubPublisher{rdb: rdb}
 }
 
+// PublishItemStateChanged publishes an item_state_changed event onto the
+// namespace's Redis pub/sub channel, defaulting the kind and timestamp.
 func (p *redisPubsubPublisher) PublishItemStateChanged(ctx context.Context, ev CatalogItemStateChangedEvent) {
 	if ev.Kind == "" {
 		ev.Kind = "item_state_changed"
@@ -122,6 +124,8 @@ func (p *redisPubsubPublisher) PublishItemStateChanged(ctx context.Context, ev C
 	p.publish(ctx, ev.Namespace, ev)
 }
 
+// PublishBacklogSnapshot publishes a backlog_snapshot event onto the
+// namespace's Redis pub/sub channel, defaulting the kind and timestamp.
 func (p *redisPubsubPublisher) PublishBacklogSnapshot(ctx context.Context, ev CatalogBacklogSnapshotEvent) {
 	if ev.Kind == "" {
 		ev.Kind = "backlog_snapshot"
@@ -132,6 +136,8 @@ func (p *redisPubsubPublisher) PublishBacklogSnapshot(ctx context.Context, ev Ca
 	p.publish(ctx, ev.Namespace, ev)
 }
 
+// PublishDeadLetterGrew publishes a dead_letter_grew event onto the
+// namespace's Redis pub/sub channel, defaulting the kind and timestamp.
 func (p *redisPubsubPublisher) PublishDeadLetterGrew(ctx context.Context, ev CatalogDeadLetterGrewEvent) {
 	if ev.Kind == "" {
 		ev.Kind = "dead_letter_grew"
@@ -142,6 +148,8 @@ func (p *redisPubsubPublisher) PublishDeadLetterGrew(ctx context.Context, ev Cat
 	p.publish(ctx, ev.Namespace, ev)
 }
 
+// PublishReembedProgress publishes a reembed_progress event onto the
+// namespace's Redis pub/sub channel, defaulting the kind and timestamp.
 func (p *redisPubsubPublisher) PublishReembedProgress(ctx context.Context, ev CatalogReembedProgressEvent) {
 	if ev.Kind == "" {
 		ev.Kind = "reembed_progress"

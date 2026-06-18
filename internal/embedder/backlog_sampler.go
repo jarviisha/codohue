@@ -3,6 +3,7 @@ package embedder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -249,7 +250,7 @@ func (s *BacklogSampler) consumerLag(ctx context.Context, namespace string) (int
 		if errors.Is(err, redis.Nil) {
 			return 0, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("xinfo groups for %s: %w", namespace, err)
 	}
 	for _, g := range groups {
 		if g.Name == defaultConsumerGroup {
@@ -272,7 +273,7 @@ func (s *BacklogSampler) streamLen(ctx context.Context, namespace string) (int, 
 		if errors.Is(err, redis.Nil) {
 			return 0, nil
 		}
-		return 0, err
+		return 0, fmt.Errorf("xlen for %s: %w", namespace, err)
 	}
 	return int(n), nil
 }

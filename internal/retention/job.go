@@ -105,4 +105,3 @@ func (j *Job) tick(ctx context.Context) {
 		}
 	}
 }
-

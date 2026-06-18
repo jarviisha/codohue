@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -14,7 +15,7 @@ func newOKHandler() http.Handler {
 
 func TestCORSAllowsMatchingOrigin(t *testing.T) {
 	h := CORSMiddleware("http://localhost:5173")(newOKHandler())
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	req.Header.Set("Origin", "http://localhost:5173")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -35,7 +36,7 @@ func TestCORSAllowsMatchingOrigin(t *testing.T) {
 
 func TestCORSIgnoresNonMatchingOrigin(t *testing.T) {
 	h := CORSMiddleware("http://localhost:5173")(newOKHandler())
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	req.Header.Set("Origin", "http://evil.example.com")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -53,7 +54,7 @@ func TestCORSPreflightShortCircuits(t *testing.T) {
 	h := CORSMiddleware("http://localhost:5173")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		called = true
 	}))
-	req := httptest.NewRequest("OPTIONS", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "OPTIONS", "/", http.NoBody)
 	req.Header.Set("Origin", "http://localhost:5173")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -81,7 +82,7 @@ func TestCORSPreflightFromNonMatchingOriginDoesNotShortCircuit(t *testing.T) {
 		called = true
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}))
-	req := httptest.NewRequest("OPTIONS", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "OPTIONS", "/", http.NoBody)
 	req.Header.Set("Origin", "http://evil.example.com")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -96,7 +97,7 @@ func TestCORSPreflightFromNonMatchingOriginDoesNotShortCircuit(t *testing.T) {
 
 func TestCORSEmptyOriginIsNoop(t *testing.T) {
 	h := CORSMiddleware("")(newOKHandler())
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	req.Header.Set("Origin", "http://localhost:5173")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)

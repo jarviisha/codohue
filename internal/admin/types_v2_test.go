@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 	"time"
@@ -30,7 +31,7 @@ func roundtripJSON[T any](t *testing.T, in T) T {
 	if err != nil {
 		t.Fatalf("re-marshal: %v", err)
 	}
-	if string(data) != string(redata) {
+	if !bytes.Equal(data, redata) {
 		t.Errorf("roundtrip mismatch:\nin : %s\nout: %s", data, redata)
 	}
 	return out

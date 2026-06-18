@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -60,16 +61,20 @@ func (b *eventsTailBridge) Run(ctx context.Context) {
 
 func (b *eventsTailBridge) runOnce(ctx context.Context) error {
 	pubsub := b.rdb.PSubscribe(ctx, ingest.EventTailChannelPattern)
-	defer func() { _ = pubsub.Close() }()
+	defer func() {
+		if err := pubsub.Close(); err != nil {
+			slog.Warn("events tail bridge: pubsub close", "error", err)
+		}
+	}()
 	if _, err := pubsub.Receive(ctx); err != nil {
-		return err
+		return fmt.Errorf("pubsub receive: %w", err)
 	}
 
 	ch := pubsub.Channel()
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return fmt.Errorf("context done: %w", ctx.Err())
 		case msg, ok := <-ch:
 			if !ok {
 				return errors.New("pubsub channel closed")

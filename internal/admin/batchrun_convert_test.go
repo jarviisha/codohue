@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-func ptrB(v bool) *bool       { return &v }
-func ptrI(v int) *int         { return &v }
-func ptrS(v string) *string   { return &v }
+func ptrB(v bool) *bool           { return &v }
+func ptrI(v int) *int             { return &v }
+func ptrS(v string) *string       { return &v }
 func ptrT(v time.Time) *time.Time { return &v }
 
 func TestBatchRunSummaryFromLogPhaseStatusOK(t *testing.T) {

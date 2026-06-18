@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -149,5 +150,9 @@ func parseDurationDefault(raw string, def time.Duration) (time.Duration, error) 
 	if raw == "" {
 		return def, nil
 	}
-	return time.ParseDuration(raw)
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse duration %q: %w", raw, err)
+	}
+	return d, nil
 }

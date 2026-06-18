@@ -12,7 +12,7 @@ import (
 
 func TestNewWriterSetsHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	if _, err := NewWriter(rec, req); err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -40,7 +40,7 @@ type nonFlushable struct {
 func TestNewWriterRejectsNonFlushable(t *testing.T) {
 	rec := httptest.NewRecorder()
 	nf := &nonFlushable{ResponseWriter: rec}
-	_, err := NewWriter(nf, httptest.NewRequest("GET", "/", nil))
+	_, err := NewWriter(nf, httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody))
 	if err != ErrNotFlushable {
 		t.Fatalf("err=%v, want ErrNotFlushable", err)
 	}
@@ -48,7 +48,7 @@ func TestNewWriterRejectsNonFlushable(t *testing.T) {
 
 func TestSendWritesSSEFormat(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w, err := NewWriter(rec, httptest.NewRequest("GET", "/", nil))
+	w, err := NewWriter(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody))
 	if err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestSendWritesSSEFormat(t *testing.T) {
 
 func TestSendWithIDIncludesIDLine(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w, _ := NewWriter(rec, httptest.NewRequest("GET", "/", nil))
+	w, _ := NewWriter(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody))
 	if err := w.SendWithID("test", "42", nil); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestSendWithIDIncludesIDLine(t *testing.T) {
 
 func TestPingWritesPingEvent(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w, _ := NewWriter(rec, httptest.NewRequest("GET", "/", nil))
+	w, _ := NewWriter(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody))
 	if err := w.Ping(); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestPingWritesPingEvent(t *testing.T) {
 func TestDoneSignalsOnRequestContextCancel(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, "GET", "/", http.NoBody)
 	w, _ := NewWriter(rec, req)
 	cancel()
 	select {
@@ -101,7 +101,7 @@ func TestRunHeartbeatPingsEveryInterval(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req := httptest.NewRequest("GET", "/", nil).WithContext(ctx)
+	req := httptest.NewRequestWithContext(ctx, "GET", "/", http.NoBody)
 	w, _ := NewWriter(rec, req)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -121,7 +121,7 @@ func TestRunHeartbeatPingsEveryInterval(t *testing.T) {
 func TestRunHeartbeatExitsOnContextCancel(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest("GET", "/", nil).WithContext(context.Background())
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	w, _ := NewWriter(rec, req)
 	done := make(chan struct{})
 	go func() {
@@ -153,7 +153,7 @@ func (d *deadlineRecorder) SetWriteDeadline(t time.Time) error {
 
 func TestNewWriterClearsWriteDeadline(t *testing.T) {
 	rec := &deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
 	if _, err := NewWriter(rec, req); err != nil {
 		t.Fatalf("NewWriter: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestNewWriterClearsWriteDeadline(t *testing.T) {
 
 func TestSendConcurrencyIsSerialized(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w, _ := NewWriter(rec, httptest.NewRequest("GET", "/", nil))
+	w, _ := NewWriter(rec, httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody))
 
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {

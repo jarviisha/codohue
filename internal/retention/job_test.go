@@ -61,7 +61,7 @@ func TestRunOnce_SkipsPruneWhenDaysIsZeroOrNegative(t *testing.T) {
 		BatchRunRetentionDays:       0,
 		BacklogSamplesRetentionDays: -1,
 	})
-	job.clock = func() time.Time { return time.Now() }
+	job.clock = time.Now
 
 	job.RunOnce(context.Background())
 

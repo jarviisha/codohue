@@ -145,12 +145,12 @@ func matchEventFilter(e eventbus.Event, actionFilter, subjectFilter string) bool
 		return false
 	}
 	if actionFilter != "" {
-		if a, _ := m["action"].(string); a != actionFilter {
+		if a, ok := m["action"].(string); !ok || a != actionFilter {
 			return false
 		}
 	}
 	if subjectFilter != "" {
-		if s, _ := m["subject_id"].(string); s != subjectFilter {
+		if s, ok := m["subject_id"].(string); !ok || s != subjectFilter {
 			return false
 		}
 	}

@@ -35,11 +35,11 @@ func TestSSE_ExitsOnBaseContextCancel(t *testing.T) {
 	// Stream client. Open the connection and start a goroutine that consumes
 	// bytes until the body closes — we don't care about the events, just the
 	// fact that the body returns EOF promptly after appCancel.
-	req, err := http.NewRequest(http.MethodGet, srv.URL+"/stream", nil)
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL+"/stream", http.NoBody)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := http.DefaultClient.Do(req) //nolint:bodyclose // body closed via the defer below; bodyclose can't track resp through the reader goroutine
 	if err != nil {
 		t.Fatalf("GET /stream: %v", err)
 	}

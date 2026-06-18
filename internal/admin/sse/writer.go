@@ -49,7 +49,8 @@ func NewWriter(w http.ResponseWriter, r *http.Request) (*Writer, error) {
 	// and the stream still functions, it just inherits whatever deadline the
 	// server set.
 	rc := http.NewResponseController(w)
-	_ = rc.SetWriteDeadline(time.Time{})
+	//nolint:errcheck // deadline opt-out is best-effort; recorders without deadline support just keep the server default and the stream still works (see comment above)
+	rc.SetWriteDeadline(time.Time{})
 
 	w.WriteHeader(http.StatusOK)
 	f.Flush()
@@ -105,7 +106,7 @@ func (sw *Writer) sendRaw(event, id string, data []byte) error {
 	buf = append(buf, data...)
 	buf = append(buf, '\n', '\n')
 	if _, err := sw.w.Write(buf); err != nil {
-		return err
+		return fmt.Errorf("sse: write event: %w", err)
 	}
 	sw.f.Flush()
 	return nil
