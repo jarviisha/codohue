@@ -326,7 +326,7 @@ test-e2e-api: build-api
 	go test -v -tags=e2e -timeout=120s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
 
 test-e2e-heavy: build
-	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog'
+	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog|Admin'
 
 # Black-box smoke test against a RUNNING stack (api + admin must be up).
 # Seeds demo data, triggers a batch run, asserts the full ingest -> compute
