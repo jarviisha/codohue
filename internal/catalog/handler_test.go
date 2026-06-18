@@ -49,18 +49,20 @@ func TestHandlerIngest_HappyPath_202(t *testing.T) {
 	}
 }
 
-func TestHandlerIngest_PathNamespacePrevailsOverBody(t *testing.T) {
-	// If the body sneaks a "namespace" field, the URL path is the only
-	// source of truth — consistent with the 003 RESTful redesign.
+func TestHandlerIngest_BodyNamespaceRejected(t *testing.T) {
+	// "namespace" is not part of the catalog ingest contract — the URL path is
+	// the only source of truth. A body that sneaks one in is rejected as an
+	// unknown field (400) instead of being silently ignored, so the service is
+	// never reached.
 	ing := &fakeIngester{item: &Item{ID: 1}}
 	h := &Handler{service: ing}
 	rec := httptest.NewRecorder()
 	h.Ingest(rec, newCatalogRequest(`{"object_id":"o1","content":"hi","namespace":"WRONG"}`, "real-ns"))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("expected 202, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
-	if ing.lastNS != "real-ns" {
-		t.Errorf("expected service to receive ns from path, got %q", ing.lastNS)
+	if ing.lastNS != "" {
+		t.Errorf("service must not be called on a rejected body, got ns %q", ing.lastNS)
 	}
 }
 

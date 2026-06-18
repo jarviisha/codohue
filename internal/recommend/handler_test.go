@@ -290,28 +290,24 @@ func TestRank_Success(t *testing.T) {
 	}
 }
 
-// Body field "namespace" is silently ignored — path is the single source of truth.
-func TestRank_BodyNamespaceIgnored(t *testing.T) {
-	fake := &fakeSvc{
-		rankResp: &RankResponse{
-			SubjectID: "u1", Namespace: "ns-from-path",
-			Items:  []RankedItem{{ObjectID: "p1", Score: 0.5, Rank: 1}},
-			Source: SourceHybridRank, GeneratedAt: time.Now(),
-		},
-	}
+// Body field "namespace" is not part of the rankings contract — the path is
+// the single source of truth, so a stray "namespace" is rejected as an unknown
+// field rather than silently ignored.
+func TestRank_BodyNamespaceRejected(t *testing.T) {
+	fake := &fakeSvc{}
 	h := &Handler{service: fake}
 
 	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns-from-path/rankings",
 		map[string]string{"ns": "ns-from-path"},
-		`{"namespace":"WRONG-WILL-BE-IGNORED","subject_id":"u1","candidates":["p1"]}`)
+		`{"namespace":"WRONG","subject_id":"u1","candidates":["p1"]}`)
 	rec := httptest.NewRecorder()
 	h.Rank(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Errorf("expected 200, got %d", rec.Code)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", rec.Code)
 	}
-	if fake.rankNamespace != "ns-from-path" {
-		t.Errorf("service must receive path namespace, got %q", fake.rankNamespace)
+	if fake.rankNamespace != "" {
+		t.Errorf("service must not be called on a rejected body, got ns %q", fake.rankNamespace)
 	}
 }
 

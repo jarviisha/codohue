@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -38,7 +37,7 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var payload EventPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &payload); err != nil {
 		metrics.IngestErrorsTotal.WithLabelValues(namespace, "decode").Inc()
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return

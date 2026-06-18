@@ -34,14 +34,19 @@ func TestClientErrors_InvalidRequestIsJSON(t *testing.T) {
 	}
 }
 
-func TestClientErrors_RedundantNamespaceIsIgnored(t *testing.T) {
+func TestClientErrors_RedundantNamespaceIsRejected(t *testing.T) {
+	// "namespace" is not a field of the rankings body — the path is the single
+	// source of truth. Strict decoding rejects the unknown field with a 400
+	// JSON error instead of silently ignoring it.
 	resp := doRequest(t, http.MethodPost, baseURL+"/v1/namespaces/"+testNS+"/rankings", nsKey, map[string]any{
-		"namespace":  testNS + "_ignored",
+		"namespace":  testNS + "_unknown",
 		"subject_id": "u1",
 		"candidates": []string{"item_a"},
 	})
-	assertStatus(t, resp, http.StatusOK)
-	resp.Body.Close()
+	code, _ := decodeErrorJSON(t, resp, http.StatusBadRequest)
+	if code != "invalid_request" {
+		t.Fatalf("error code = %q, want invalid_request", code)
+	}
 }
 
 func TestClientErrors_EmbeddingDimMismatchIsJSON(t *testing.T) {

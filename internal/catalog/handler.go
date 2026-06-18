@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -29,13 +28,14 @@ func NewHandler(service *Service) *Handler {
 }
 
 // Ingest handles POST /v1/namespaces/{ns}/catalog. The namespace is taken
-// exclusively from the URL path; any namespace value in the body is ignored
-// (consistent with the 003 RESTful redesign).
+// exclusively from the URL path; the body has no namespace field, so a stray
+// one is rejected as an unknown field rather than silently ignored (strict
+// request decoding locks the wire contract).
 //
 // Status code mapping per contracts/rest-api.md:
 //
 //	202 Accepted             — happy path
-//	400 Bad Request          — invalid JSON / missing object_id / bad request shape
+//	400 Bad Request          — invalid JSON / unknown field / missing object_id / bad request shape
 //	404 Not Found            — namespace missing OR not enabled (same body to
 //	                           avoid leaking namespace existence)
 //	413 Payload Too Large    — len(content) exceeds catalog_max_content_bytes
@@ -49,7 +49,7 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req IngestRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
