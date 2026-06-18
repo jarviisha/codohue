@@ -16,7 +16,7 @@ func TestStringField(t *testing.T) {
 }
 
 func TestStrategyCacheKey(t *testing.T) {
-	noParams, err := strategyCacheKey("strat", "v1", nil)
+	noParams, err := strategyCacheKey("item2vec", "v1", nil)
 	if err != nil {
 		t.Fatalf("nil params: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestStrategyCacheKey(t *testing.T) {
 		t.Error("nil params produced empty key")
 	}
 
-	withParams, err := strategyCacheKey("strat", "v1", map[string]any{"dim": 384})
+	withParams, err := strategyCacheKey("item2vec", "v1", map[string]any{"dim": 384})
 	if err != nil {
 		t.Fatalf("with params: %v", err)
 	}
@@ -33,11 +33,11 @@ func TestStrategyCacheKey(t *testing.T) {
 	}
 
 	// Deterministic for identical input; sensitive to version.
-	again, _ := strategyCacheKey("strat", "v1", map[string]any{"dim": 384})
+	again, _ := strategyCacheKey("item2vec", "v1", map[string]any{"dim": 384})
 	if again != withParams {
 		t.Error("same input should yield the same key")
 	}
-	otherVersion, _ := strategyCacheKey("strat", "v2", map[string]any{"dim": 384})
+	otherVersion, _ := strategyCacheKey("item2vec", "v2", map[string]any{"dim": 384})
 	if otherVersion == withParams {
 		t.Error("different version should change the key")
 	}
