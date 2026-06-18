@@ -29,6 +29,7 @@ import {
 } from '@/services/namespaces'
 import PageHeader from '@/components/shell/PageHeader'
 import DirtyFormGuard from '@/components/shell/DirtyFormGuard'
+import NamespaceTag from '@/components/NamespaceTag'
 
 const DENSE_STRATEGIES = [
   { value: 'disabled', label: 'disabled — sparse only' },
@@ -92,7 +93,7 @@ export default function NamespaceConfigPage() {
           {
             onSuccess: () => {
               toast.success('Configuration saved', {
-                description: `${ns} updated.`,
+                description: `#${ns} updated.`,
               })
               onReset()
             },
@@ -152,17 +153,19 @@ function ConfigForm({
     <Container size="lg" className="py-6 px-6">
       <DirtyFormGuard dirty={dirty && !saving} />
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
-          <Stack gap="025">
-            <Inline gap="100" align="center">
-              <h1 className="text-foreground text-xl font-semibold">Configuration · {ns}</h1>
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack gap="050">
+            <Inline align="center">
+              <h1 className="text-foreground text-xl font-semibold">
+                Configuration · <NamespaceTag name={ns} />
+              </h1>
               {dirty && <Badge variant="warning">unsaved</Badge>}
             </Inline>
             <p className="text-foreground-subtle text-sm">
               Mirrors PUT /api/admin/v1/namespaces/{ns}. Only changed fields are sent.
             </p>
           </Stack>
-          <Inline gap="100" align="center">
+          <Inline align="center">
             <Button variant="ghost" tone="neutral" disabled={!dirty || saving} onClick={reset}>
               Reset
             </Button>
@@ -174,7 +177,7 @@ function ConfigForm({
       </PageHeader>
 
       <form onSubmit={handleSubmit}>
-        <Stack gap="500">
+        <Stack>
           {error && <Alert variant="danger" title="Save failed" description={error} />}
 
           <SectionCard
@@ -353,8 +356,8 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <Stack gap="200">
-      <Stack gap="025" className="border-border border-b-2 pb-3">
+    <Stack>
+      <Stack className="border-border border-b-2 pb-3">
         <span className="text-foreground text-2xl font-semibold tracking-wide">{title}</span>
         <p className="text-muted text-sm">{description}</p>
       </Stack>
@@ -378,7 +381,7 @@ function ActionWeightsEditor({
 
   if (weights.length === 0) {
     return (
-      <Stack gap="100">
+      <Stack>
         <p className="text-foreground-subtle text-sm">No actions configured.</p>
         <Inline justify="end">
           <Button type="button" size="sm" variant="outline" tone="neutral" onClick={addRow}>
@@ -390,7 +393,7 @@ function ActionWeightsEditor({
   }
 
   return (
-    <Stack gap="100">
+    <Stack>
       <TableContainer>
         <Table>
           <TableHeader>

@@ -38,6 +38,7 @@ import {
 import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import NamespaceTag from '@/components/NamespaceTag'
 
 const TAIL_CAP = 1000
 const FLASH_MS = 1500
@@ -91,9 +92,11 @@ export default function EventsPage() {
   return (
     <div className="px-6 py-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
-          <Stack gap="025">
-            <h1 className="text-foreground text-xl font-semibold">Events · {ns}</h1>
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack gap="050">
+            <h1 className="text-foreground text-xl font-semibold">
+              Events · <NamespaceTag name={ns} />
+            </h1>
             <p className="text-foreground-subtle text-sm">Live ingest tail · forward-only</p>
           </Stack>
           <Button size="sm" onClick={() => setInjectOpen(true)}>
@@ -103,7 +106,7 @@ export default function EventsPage() {
       </PageHeader>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
-        <Stack gap="200">
+        <Stack>
           {lastInjectedId != null && (
             <Alert
               variant="success"
@@ -112,7 +115,7 @@ export default function EventsPage() {
             />
           )}
 
-          <Inline gap="100" align="center" wrap>
+          <Inline align="center" wrap>
             <Button
               size="sm"
               variant={action === '' ? 'solid' : 'outline'}
@@ -240,8 +243,8 @@ function LiveTail({
   }
 
   return (
-    <Stack gap="200">
-      <Inline gap="100" align="center" justify="between" wrap>
+    <Stack>
+      <Inline align="center" justify="between" wrap>
         <Badge variant={connected ? 'success' : 'neutral'}>
           {connected ? 'streaming' : 'offline'}
         </Badge>
@@ -346,8 +349,8 @@ function SummarySidebar({ namespace }: { namespace: string }) {
   const summary = useEventsSummary(namespace, window)
 
   return (
-    <Stack gap="200">
-      <Inline gap="050" align="center">
+    <Stack>
+      <Inline align="center">
         {WINDOWS.map((w) => (
           <Button
             key={w}
@@ -361,7 +364,7 @@ function SummarySidebar({ namespace }: { namespace: string }) {
         ))}
       </Inline>
 
-      <Inline gap="100" wrap>
+      <Inline wrap>
         <SummaryTile
           label={`Events · ${window}`}
           value={(summary.data?.total ?? 0).toLocaleString()}
@@ -371,7 +374,7 @@ function SummarySidebar({ namespace }: { namespace: string }) {
 
       <ActionMix data={summary.data} />
 
-      <Stack gap="050">
+      <Stack>
         <span className="text-foreground-subtle text-xs uppercase tracking-wide">Over time</span>
         {summary.data && summary.data.series.length > 0 ? (
           <TimeSeriesChart
@@ -391,7 +394,7 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
     <Card className="flex-1 min-w-30">
       <CardContent>
-        <Stack gap="025">
+        <Stack>
           <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
           <span className="text-foreground text-xl font-semibold tabular-nums">{value}</span>
         </Stack>
@@ -406,14 +409,14 @@ function ActionMix({ data }: { data: EventsSummaryResponse | undefined }) {
   }
   const total = data.total || 1
   return (
-    <Stack gap="050">
+    <Stack>
       <span className="text-foreground-subtle text-xs uppercase tracking-wide">Action mix</span>
-      <Stack gap="050">
+      <Stack>
         {data.by_action.map((a) => {
           const pct = Math.round((a.count / total) * 100)
           return (
-            <Stack key={a.action} gap="025">
-              <Inline gap="100" align="center" justify="between">
+            <Stack key={a.action}>
+              <Inline align="center" justify="between">
                 <span className="text-foreground text-sm">{a.action}</span>
                 <span className="text-foreground-subtle text-xs tabular-nums">
                   {a.count.toLocaleString()} · {pct}%
@@ -460,16 +463,18 @@ function InjectEventForm({
   const canSubmit = !inject.isPending && subjectId.trim() !== '' && objectId.trim() !== ''
 
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
-        <DialogTitle>Inject test event · {namespace}</DialogTitle>
+        <DialogTitle>
+          Inject test event · <NamespaceTag name={namespace} />
+        </DialogTitle>
         <DialogDescription>
           Proxied through the admin event injection endpoint. Lands in the same events table the
           ingest worker writes to, and flashes in the live tail as it arrives.
         </DialogDescription>
       </DialogHeader>
       <DialogContent>
-        <Stack gap="200">
+        <Stack>
           {inject.error && (
             <Alert variant="danger" title="Inject failed" description={inject.error.message} />
           )}
@@ -494,7 +499,7 @@ function InjectEventForm({
         </Stack>
       </DialogContent>
       <DialogFooter>
-        <Inline gap="100" justify="end">
+        <Inline justify="end">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>

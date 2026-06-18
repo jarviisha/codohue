@@ -11,6 +11,7 @@ import {
   Stack,
 } from '@jarviisha/davinci-react-ui'
 import PageHeader from '@/components/shell/PageHeader'
+import NamespaceTag from '@/components/NamespaceTag'
 
 /**
  * SubjectLookupPage is the landing page for /ns/:ns/subjects. The admin
@@ -36,8 +37,10 @@ export default function SubjectLookupPage() {
   return (
     <Container size="md" className="py-6 px-6">
       <PageHeader>
-        <Stack gap="025">
-          <h1 className="text-foreground text-xl font-semibold">Subjects · {ns}</h1>
+        <Stack gap="050">
+          <h1 className="text-foreground text-xl font-semibold">
+            Subjects · <NamespaceTag name={ns} />
+          </h1>
           <p className="text-foreground-subtle text-sm">
             Inspect one subject's profile and recommendations. Paste a subject id below to open it.
           </p>
@@ -47,7 +50,7 @@ export default function SubjectLookupPage() {
       <Card>
         <CardContent>
           <form onSubmit={onSubmit}>
-            <Stack gap="200">
+            <Stack>
               <FormField
                 label="Subject ID"
                 required
@@ -60,7 +63,7 @@ export default function SubjectLookupPage() {
                   autoFocus
                 />
               </FormField>
-              <Inline gap="100" justify="end">
+              <Inline justify="end">
                 <Button type="submit" disabled={id.trim() === ''}>
                   Open subject
                 </Button>

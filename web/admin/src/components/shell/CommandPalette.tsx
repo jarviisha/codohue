@@ -168,7 +168,7 @@ function Palette({ onClose }: { onClose: () => void }) {
 
   return (
     <DialogContent>
-      <Stack gap="100" onKeyDown={onKeyDown}>
+      <Stack onKeyDown={onKeyDown}>
         <Input
           autoFocus
           value={query}
@@ -187,9 +187,9 @@ function Palette({ onClose }: { onClose: () => void }) {
               No matches.
             </p>
           ) : (
-            <Stack gap="100">
+            <Stack>
               {grouped.map(({ group, items }) => (
-                <Stack key={group} gap="025">
+                <Stack key={group}>
                   <span className="text-foreground-subtle text-xs uppercase tracking-wide px-2">
                     {group}
                   </span>
@@ -255,7 +255,7 @@ function buildCommands({
   commands.push(
     { id: 'fleet', title: 'Fleet', subtitle: '/', group: 'Global', run: go('/'), keywords: 'overview home' },
     { id: 'namespaces', title: 'Namespaces', subtitle: '/namespaces', group: 'Global', run: go('/namespaces') },
-    { id: 'namespaces-new', title: 'New namespace', subtitle: '/namespaces/new', group: 'Global', run: go('/namespaces/new'), keywords: 'create' },
+    { id: 'namespaces-new', title: 'New namespace', subtitle: '/namespaces', group: 'Global', run: go('/namespaces?new=1'), keywords: 'create' },
     { id: 'batch-runs', title: 'Batch runs', subtitle: '/batch-runs', group: 'Global', run: go('/batch-runs') },
     { id: 'health', title: 'Health', subtitle: '/health', group: 'Global', run: go('/health') },
     { id: 'demo-data', title: 'Demo data', subtitle: '/demo-data', group: 'Global', run: go('/demo-data'), keywords: 'seed sample bundled' },
@@ -266,13 +266,13 @@ function buildCommands({
   if (currentNs) {
     const ns = encodeURIComponent(currentNs)
     commands.push(
-      { id: `ns-overview`, title: `Overview · ${currentNs}`, subtitle: `/ns/${currentNs}`, group: 'Namespace', run: go(`/ns/${ns}`) },
-      { id: `ns-batch-runs`, title: `Batch runs · ${currentNs}`, subtitle: `/ns/${currentNs}/batch-runs`, group: 'Namespace', run: go(`/ns/${ns}/batch-runs`) },
-      { id: `ns-catalog`, title: `Catalog · ${currentNs}`, subtitle: `/ns/${currentNs}/catalog`, group: 'Namespace', run: go(`/ns/${ns}/catalog`) },
-      { id: `ns-catalog-items`, title: `Catalog items · ${currentNs}`, subtitle: `/ns/${currentNs}/catalog/items`, group: 'Namespace', run: go(`/ns/${ns}/catalog/items`) },
-      { id: `ns-subjects`, title: `Subjects · ${currentNs}`, subtitle: `/ns/${currentNs}/subjects`, group: 'Namespace', run: go(`/ns/${ns}/subjects`), keywords: 'inspector recommend' },
-      { id: `ns-events`, title: `Events · ${currentNs}`, subtitle: `/ns/${currentNs}/events`, group: 'Namespace', run: go(`/ns/${ns}/events`), keywords: 'tail ingest' },
-      { id: `ns-trending`, title: `Trending · ${currentNs}`, subtitle: `/ns/${currentNs}/trending`, group: 'Namespace', run: go(`/ns/${ns}/trending`) },
+      { id: `ns-overview`, title: `Overview · #${currentNs}`, subtitle: `/ns/${currentNs}`, group: 'Namespace', run: go(`/ns/${ns}`) },
+      { id: `ns-batch-runs`, title: `Batch runs · #${currentNs}`, subtitle: `/ns/${currentNs}/batch-runs`, group: 'Namespace', run: go(`/ns/${ns}/batch-runs`) },
+      { id: `ns-catalog`, title: `Catalog · #${currentNs}`, subtitle: `/ns/${currentNs}/catalog`, group: 'Namespace', run: go(`/ns/${ns}/catalog`) },
+      { id: `ns-catalog-items`, title: `Catalog items · #${currentNs}`, subtitle: `/ns/${currentNs}/catalog/items`, group: 'Namespace', run: go(`/ns/${ns}/catalog/items`) },
+      { id: `ns-subjects`, title: `Subjects · #${currentNs}`, subtitle: `/ns/${currentNs}/subjects`, group: 'Namespace', run: go(`/ns/${ns}/subjects`), keywords: 'inspector recommend' },
+      { id: `ns-events`, title: `Events · #${currentNs}`, subtitle: `/ns/${currentNs}/events`, group: 'Namespace', run: go(`/ns/${ns}/events`), keywords: 'tail ingest' },
+      { id: `ns-trending`, title: `Trending · #${currentNs}`, subtitle: `/ns/${currentNs}/trending`, group: 'Namespace', run: go(`/ns/${ns}/trending`) },
     )
   }
 
@@ -282,7 +282,7 @@ function buildCommands({
     if (ns === currentNs) continue
     commands.push({
       id: `recent-${ns}`,
-      title: ns,
+      title: `$${ns}`,
       subtitle: `Jump to /ns/${ns}`,
       group: 'Recent namespaces',
       run: go(`/ns/${encodeURIComponent(ns)}`),

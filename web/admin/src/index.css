@@ -10,3 +10,23 @@
 @import "tailwindcss";
 @import "@jarviisha/davinci-tailwind-preset/theme.css";
 @import "@jarviisha/davinci-react-ui/styles.css";
+
+/*
+ * Radius override: collapse every component down to the `sm` radius step.
+ * Remap the semantic roles (covers button, input, card, dialog, nav, badge)
+ * plus the few component tokens that reference primitives directly
+ * (toast, scrollbar). Must come after the imports above to win the cascade.
+ */
+:root {
+  --davinci-semantic-radius-control: var(--davinci-radius-sm);
+  --davinci-semantic-radius-card: var(--davinci-radius-sm);
+  --davinci-semantic-radius-panel: var(--davinci-radius-sm);
+  --davinci-component-scrollbar-radius: var(--davinci-radius-sm);
+
+  /*
+   * Sans font override: Plus Jakarta Sans (loaded in index.html) replaces the
+   * preset's default Inter. The preset aliases `--font-sans` to this token, so
+   * every `font-sans` utility and the base body font pick it up.
+   */
+  --davinci-font-family-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+}

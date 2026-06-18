@@ -69,9 +69,9 @@ export default function CatalogItemDetailPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full">
-          <Stack gap="025">
-            <Inline gap="100" align="center">
+        <Inline align="center" justify="between" className="w-full">
+          <Stack gap="050">
+            <Inline align="center">
               <h1 className="text-foreground text-xl font-semibold">{item.object_id}</h1>
               <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'}>{item.state}</Badge>
               {item.strategy_id && (
@@ -85,7 +85,7 @@ export default function CatalogItemDetailPage() {
               {new Date(item.updated_at).toLocaleString()}
             </p>
           </Stack>
-          <Inline gap="100">
+          <Inline>
             {canRedrive && (
               <Button
                 size="sm"
@@ -112,7 +112,7 @@ export default function CatalogItemDetailPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         {redrive.error && (
           <Alert variant="danger" title="Redrive failed" description={redrive.error.message} />
         )}
@@ -128,11 +128,11 @@ export default function CatalogItemDetailPage() {
           />
         )}
 
-        <Stack gap="100">
+        <Stack>
           <h2 className="text-foreground text-sm font-semibold">Content</h2>
           <Card>
             <CardContent>
-              <pre className="text-foreground text-sm whitespace-pre-wrap break-words font-mono leading-5">
+              <pre className="text-foreground text-sm whitespace-pre-wrap wrap-break-word font-mono leading-5">
                 {item.content}
               </pre>
             </CardContent>
@@ -140,7 +140,7 @@ export default function CatalogItemDetailPage() {
         </Stack>
 
         {item.metadata && Object.keys(item.metadata).length > 0 && (
-          <Stack gap="100">
+          <Stack>
             <h2 className="text-foreground text-sm font-semibold">Metadata</h2>
             <Card>
               <CardContent>
@@ -153,18 +153,18 @@ export default function CatalogItemDetailPage() {
         )}
 
         {item.vector && (
-          <Stack gap="100">
+          <Stack>
             <h2 className="text-foreground text-sm font-semibold">Embedded vector</h2>
             <Card>
               <CardContent>
-                <Stack gap="100">
-                  <Inline gap="200" align="center">
+                <Stack>
+                  <Inline align="center">
                     <Tile label="Collection" value={item.vector.collection} />
                     <Tile label="Numeric id" value={item.vector.numeric_id.toLocaleString()} />
                     <Tile label="Dim" value={item.vector.dim.toString()} />
                     <Tile label="L2 norm" value={l2norm(item.vector.preview).toFixed(4)} />
                   </Inline>
-                  <Stack gap="025">
+                  <Stack>
                     <span className="text-foreground-subtle text-xs uppercase tracking-wide">
                       Preview (first {item.vector.preview.length} dims)
                     </span>
@@ -178,7 +178,7 @@ export default function CatalogItemDetailPage() {
           </Stack>
         )}
 
-        <Inline gap="100" justify="start">
+        <Inline justify="start">
           <Link to={`/ns/${encodeURIComponent(ns)}/catalog/items`}>
             <Button variant="ghost" tone="neutral" size="sm">
               ← Back to items
@@ -192,7 +192,7 @@ export default function CatalogItemDetailPage() {
 
 function Tile({ label, value }: { label: string; value: string }) {
   return (
-    <Stack gap="025">
+    <Stack>
       <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
       <span className="text-foreground text-sm font-semibold tabular-nums">{value}</span>
     </Stack>

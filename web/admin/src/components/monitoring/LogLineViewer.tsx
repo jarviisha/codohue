@@ -45,9 +45,9 @@ export default function LogLineViewer({ lines, follow = true, height = 360 }: Lo
   }, [filtered.length, follow, paused])
 
   return (
-    <Stack gap="100">
-      <Inline gap="100" align="center" justify="between">
-        <Inline gap="100" align="center">
+    <Stack>
+      <Inline align="center" justify="between">
+        <Inline align="center">
           <Select value={level} onChange={(e) => setLevel(e.target.value as LevelFilter)} size="sm">
             {LEVEL_FILTERS.map((l) => (
               <option key={l} value={l}>
@@ -63,7 +63,7 @@ export default function LogLineViewer({ lines, follow = true, height = 360 }: Lo
             onClear={() => setQuery('')}
           />
         </Inline>
-        <Inline gap="100" align="center">
+        <Inline align="center">
           <span className="text-foreground-subtle text-xs">
             {filtered.length} / {lines.length}
           </span>

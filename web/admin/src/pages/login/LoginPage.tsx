@@ -45,7 +45,7 @@ export default function LoginPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={onSubmit}>
-            <Stack gap="200">
+            <Stack>
               {login.error && (
                 <Alert
                   variant="danger"

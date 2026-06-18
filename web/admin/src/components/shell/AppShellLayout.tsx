@@ -29,6 +29,7 @@ import SidebarNav from '@/components/shell/SidebarNav'
 import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
 import ReembedOverlay from '@/components/shell/ReembedOverlay'
 import RouteErrorBoundary from '@/components/shell/ErrorBoundary'
+import NamespaceTag from '@/components/NamespaceTag'
 import OpsToastBridge from '@/components/shell/OpsToastBridge'
 import CommandPalette from '@/components/shell/CommandPalette'
 
@@ -98,12 +99,12 @@ export default function AppShellLayout() {
       <AppShellTopBar>
         <Link
           to="/"
-          className="text-foreground font-semibold tracking-tight no-underline"
+          className="text-foreground uppercase font-extrabold tracking-tight no-underline"
         >
           codohue
         </Link>
         <PaletteTrigger onOpen={() => setPaletteOpen(true)} />
-        <Inline gap="100" align="center">
+        <Inline align="center">
           <ThemeMenu />
           <AccountMenu
             onSignOut={() =>
@@ -206,14 +207,15 @@ function ThemeMenu() {
  *   - Numeric segments (batch-run id) prefix with "#".
  */
 function RouteBreadcrumbs({ pathname }: { pathname: string }) {
+  const navigate = useNavigate()
   const segments = pathname.split('/').filter(Boolean)
-  type Crumb = { label: string; to?: string }
+  type Crumb = { label: string; to?: string; isNamespace?: boolean }
   const crumbs: Crumb[] = [{ label: 'fleet', to: '/' }]
   for (let i = 0; i < segments.length; i++) {
     const raw = segments[i]
     if (raw === 'ns' && segments[i + 1]) {
       const ns = segments[i + 1]
-      crumbs.push({ label: ns, to: `/ns/${ns}` })
+      crumbs.push({ label: ns, to: `/ns/${ns}`, isNamespace: true })
       i++
       continue
     }
@@ -227,13 +229,25 @@ function RouteBreadcrumbs({ pathname }: { pathname: string }) {
       <BreadcrumbsList>
         {crumbs.map((c, i) => {
           const isLast = i === crumbs.length - 1
+          const label = c.isNamespace ? <NamespaceTag name={c.label} /> : c.label
           return (
             <BreadcrumbsItem key={`${c.label}-${i}`}>
               {isLast || !c.to ? (
-                <BreadcrumbsCurrent>{c.label}</BreadcrumbsCurrent>
+                <BreadcrumbsCurrent>{label}</BreadcrumbsCurrent>
               ) : (
                 <>
-                  <BreadcrumbsLink href={c.to}>{c.label}</BreadcrumbsLink>
+                  <BreadcrumbsLink
+                    href={c.to}
+                    onClick={(e) => {
+                      // Plain left-click → client-side nav (no full reload).
+                      // Let modified clicks / new-tab through to the browser.
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return
+                      e.preventDefault()
+                      navigate(c.to!)
+                    }}
+                  >
+                    {label}
+                  </BreadcrumbsLink>
                   <BreadcrumbsSeparator />
                 </>
               )}

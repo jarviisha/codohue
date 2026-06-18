@@ -11,7 +11,7 @@ import { PageHeaderSlotContext } from './pageHeaderSlot'
  *
  *   <PageHeader>
  *     <Inline justify="between" align="center" className="w-full">
- *       <Stack gap="025">
+ *       <Stack>
  *         <h1>Fleet</h1>
  *         <p>{summary}</p>
  *       </Stack>

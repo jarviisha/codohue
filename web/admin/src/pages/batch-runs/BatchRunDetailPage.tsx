@@ -21,6 +21,7 @@ import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import LogLineViewer from '@/components/monitoring/LogLineViewer'
+import NamespaceTag from '@/components/NamespaceTag'
 
 type LocalState = {
   log: LogLine[]
@@ -77,7 +78,7 @@ function reducer(state: LocalState, action: Action): LocalState {
 }
 
 export default function BatchRunDetailPage() {
-  const { id } = useParams<{ id: string }>()
+  const { id, ns } = useParams<{ id: string; ns?: string }>()
   const navigate = useNavigate()
   const numericID = id != null ? Number(id) : null
   const detail = useBatchRunDetail(numericID)
@@ -147,22 +148,22 @@ export default function BatchRunDetailPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
-          <Stack gap="025">
-            <Inline gap="100" align="center">
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack gap="050">
+            <Inline align="center">
               <h1 className="text-foreground text-xl font-semibold">Run #{run.id}</h1>
               <Badge variant={run.kind === 'reembed' ? 'discovery' : 'neutral'}>{run.kind}</Badge>
               <RunStateBadge state={state} run={run} />
             </Inline>
             <p className="text-foreground-subtle text-sm">
-              <Link to={`/ns/${encodeURIComponent(run.namespace)}`} className="text-foreground">
-                {run.namespace}
+              <Link to={`/ns/${encodeURIComponent(run.namespace)}`}>
+                <NamespaceTag name={run.namespace} />
               </Link>{' '}
               · trigger={run.trigger_source} · started{' '}
               {new Date(run.started_at).toLocaleString()}
             </p>
           </Stack>
-          <Inline gap="100" align="center">
+          <Inline align="center">
             {!state.completed && (
               <Button
                 tone="danger"
@@ -181,7 +182,13 @@ export default function BatchRunDetailPage() {
                   if (numericID == null) return
                   retry.mutate(numericID, {
                     onSuccess: (resp) => {
-                      if (resp.id) navigate(`/batch-runs/${resp.id}`)
+                      if (resp.id) {
+                        navigate(
+                          ns
+                            ? `/ns/${encodeURIComponent(ns)}/batch-runs/${resp.id}`
+                            : `/batch-runs/${resp.id}`,
+                        )
+                      }
                     },
                   })
                 }}
@@ -194,24 +201,24 @@ export default function BatchRunDetailPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         {cancel.error && <Alert variant="danger" title="Cancel failed" description={cancel.error.message} />}
         {retry.error && <Alert variant="danger" title="Retry failed" description={retry.error.message} />}
 
-        <Stack gap="100">
-          <Inline gap="200" align="center" justify="between">
+        <Stack>
+          <Inline align="center" justify="between">
             <h2 className="text-foreground text-sm font-semibold">Phases</h2>
             <PhaseStrip phaseStatus={state.phases.map((p) => phaseToStatus(p))} />
           </Inline>
-          <Stack gap="050">
+          <Stack>
             {state.phases.map((p) => (
               <PhaseRow key={p.n} phase={p} />
             ))}
           </Stack>
         </Stack>
 
-        <Stack gap="100">
-          <Stack gap="025">
+        <Stack>
+          <Stack>
             <h2 className="text-foreground text-sm font-semibold">Log</h2>
             <p className="text-foreground-subtle text-xs">
               {state.completed
@@ -235,8 +242,8 @@ function phaseToStatus(p: PhaseEntry): 'ok' | 'fail' | 'skipped' | null {
 
 function PhaseRow({ phase }: { phase: PhaseEntry }) {
   return (
-    <Inline gap="200" align="center" justify="between">
-      <Inline gap="100" align="center">
+    <Inline align="center" justify="between">
+      <Inline align="center">
         <span className="text-foreground-subtle text-xs uppercase tracking-wide w-16">
           phase {phase.n}
         </span>
@@ -245,7 +252,7 @@ function PhaseRow({ phase }: { phase: PhaseEntry }) {
         {phase.ok === false && <Badge variant="danger">fail</Badge>}
         {phase.ok === null && phase.skipped && <Badge variant="neutral">skipped</Badge>}
       </Inline>
-      <Inline gap="200" align="center">
+      <Inline align="center">
         {phase.subjects != null && (
           <span className="text-foreground-subtle text-sm tabular-nums">
             subjects: <span className="text-foreground">{phase.subjects.toLocaleString()}</span>

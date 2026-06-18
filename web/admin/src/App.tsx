@@ -15,7 +15,6 @@ const DangerZonePage = lazy(() => import('@/pages/danger-zone/DangerZonePage'))
 const DemoDataPage = lazy(() => import('@/pages/demo-data/DemoDataPage'))
 const FleetOverviewPage = lazy(() => import('@/pages/fleet/FleetOverviewPage'))
 const HealthPage = lazy(() => import('@/pages/health/HealthPage'))
-const CreateNamespacePage = lazy(() => import('@/pages/namespaces/CreateNamespacePage'))
 const NamespacesListPage = lazy(() => import('@/pages/namespaces/NamespacesListPage'))
 const CatalogItemDetailPage = lazy(() => import('@/pages/ns/catalog/CatalogItemDetailPage'))
 const CatalogItemsPage = lazy(() => import('@/pages/ns/catalog/CatalogItemsPage'))
@@ -54,7 +53,6 @@ const router = createBrowserRouter([
       { index: true, element: withSuspense(FleetOverviewPage) },
       { path: 'health', element: withSuspense(HealthPage) },
       { path: 'namespaces', element: withSuspense(NamespacesListPage) },
-      { path: 'namespaces/new', element: withSuspense(CreateNamespacePage) },
       { path: 'batch-runs', element: withSuspense(BatchRunsListPage) },
       { path: 'batch-runs/:id', element: withSuspense(BatchRunDetailPage) },
       { path: 'demo-data', element: withSuspense(DemoDataPage) },
@@ -65,6 +63,7 @@ const router = createBrowserRouter([
         children: [
           { index: true, element: withSuspense(NamespaceOverviewPage) },
           { path: 'batch-runs', element: withSuspense(BatchRunsListPage) },
+          { path: 'batch-runs/:id', element: withSuspense(BatchRunDetailPage) },
           { path: 'catalog', element: withSuspense(CatalogStatusPage) },
           { path: 'catalog/items', element: withSuspense(CatalogItemsPage) },
           { path: 'catalog/items/:id', element: withSuspense(CatalogItemDetailPage) },

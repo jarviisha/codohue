@@ -28,6 +28,7 @@ import {
   type CatalogItemSummary,
 } from '@/services/catalog'
 import PageHeader from '@/components/shell/PageHeader'
+import NamespaceTag from '@/components/NamespaceTag'
 
 const PAGE_SIZE = 25
 const STATE_OPTIONS: Array<{ value: CatalogItemState | ''; label: string }> = [
@@ -68,9 +69,11 @@ export default function CatalogItemsPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full">
-          <Stack gap="025">
-            <h1 className="text-foreground text-xl font-semibold">Catalog items · {ns}</h1>
+        <Inline align="center" justify="between" className="w-full">
+          <Stack gap="050">
+            <h1 className="text-foreground text-xl font-semibold">
+              Catalog items · <NamespaceTag name={ns} />
+            </h1>
             <p className="text-foreground-subtle text-sm">
               {items.data?.total ?? 0} matching · click a row to open detail.
             </p>
@@ -83,8 +86,8 @@ export default function CatalogItemsPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
-        <Inline gap="100" align="center" wrap>
+      <Stack>
+        <Inline align="center" wrap>
           <Select
             size="sm"
             value={stateFilter}
@@ -224,7 +227,7 @@ function ItemRow({
         {new Date(item.updated_at).toLocaleString()}
       </TableCell>
       <TableCell align="right">
-        <Inline gap="050" justify="end">
+        <Inline justify="end">
           {canRedrive && (
             <Button size="sm" variant="ghost" onClick={onRedrive} disabled={redriving}>
               {redriving ? 'Redriving…' : 'Redrive'}

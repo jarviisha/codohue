@@ -13,8 +13,8 @@ import {
   Input,
   Select,
   Stack,
-  Switch,
 } from '@jarviisha/davinci-react-ui'
+import NamespaceTag from '@/components/NamespaceTag'
 import {
   useUpdateCatalogConfig,
   type CatalogStrategyDescriptor,
@@ -34,9 +34,12 @@ type Props = {
  * CatalogConfigDialog edits a namespace's catalog auto-embedding config.
  *
  * The form mirrors internal/admin/types.go::NamespaceCatalogUpdateRequest:
- *   - enabled toggle
- *   - strategy_id + strategy_version pickers (required when enabling)
+ *   - strategy_id + strategy_version pickers (required)
  *   - optional max_attempts / max_content_bytes overrides
+ *
+ * Enabling/disabling lives on the catalog page itself, so this form always
+ * submits enabled=true — it is only opened to enable-and-configure or to
+ * reconfigure an already-enabled namespace.
  *
  * The form's local state is owned by the inner ConfigForm component, which
  * only mounts while the dialog is open. That way each open cycle starts
@@ -50,7 +53,7 @@ export default function CatalogConfigDialog({
   strategies,
 }: Props) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="md">
+    <Dialog open={open} onOpenChange={onOpenChange} size="lg">
       {open && (
         <ConfigForm
           namespace={namespace}
@@ -76,7 +79,6 @@ function ConfigForm({
 }) {
   const update = useUpdateCatalogConfig(namespace)
 
-  const [enabled, setEnabled] = useState(config.enabled)
   const [strategyId, setStrategyId] = useState(config.strategy_id)
   const [strategyVersion, setStrategyVersion] = useState(config.strategy_version)
   const [maxAttempts, setMaxAttempts] = useState<string>(
@@ -110,10 +112,10 @@ function ConfigForm({
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    const body: UpdateCatalogConfigRequest = { enabled }
-    if (enabled) {
-      body.strategy_id = strategyId
-      body.strategy_version = strategyVersion
+    const body: UpdateCatalogConfigRequest = {
+      enabled: true,
+      strategy_id: strategyId,
+      strategy_version: strategyVersion,
     }
     if (maxAttempts !== '') {
       const n = Number(maxAttempts)
@@ -128,19 +130,21 @@ function ConfigForm({
     })
   }
 
-  const canSubmit = !enabled || (strategyId !== '' && strategyVersion !== '')
+  const canSubmit = strategyId !== '' && strategyVersion !== ''
 
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
-        <DialogTitle>Catalog auto-embedding · {namespace}</DialogTitle>
+        <DialogTitle>
+          Catalog auto-embedding · <NamespaceTag name={namespace} />
+        </DialogTitle>
         <DialogDescription>
-          Enabling catalog routes ingested content through the embedder worker. Disabling stops new
-          embedding but keeps existing vectors in Qdrant.
+          Saving routes ingested content through the embedder worker with the selected strategy. Use
+          the Disable button on the catalog page to turn auto-embedding off.
         </DialogDescription>
       </DialogHeader>
       <DialogContent>
-        <Stack gap="200">
+        <Stack>
           {update.error && (
             <Alert
               variant="danger"
@@ -150,19 +154,8 @@ function ConfigForm({
           )}
 
           <FormField
-            label="Catalog enabled"
-            helpText="When off, POST /v1/namespaces/{ns}/catalog returns 503 and no auto-embedding runs."
-          >
-            <Switch
-              checked={enabled}
-              onChange={(e) => setEnabled(e.target.checked)}
-              label={enabled ? 'On' : 'Off'}
-            />
-          </FormField>
-
-          <FormField
             label="Strategy"
-            required={enabled}
+            required
             helpText="Identifies the embed strategy (model family). Choose the version below."
           >
             <Select
@@ -173,7 +166,6 @@ function ConfigForm({
                 const firstVersion = strategies.find((s) => s.id === next)?.version ?? ''
                 setStrategyVersion(firstVersion)
               }}
-              disabled={!enabled}
             >
               <option value="">— select strategy —</option>
               {strategyIds.map((id) => (
@@ -186,7 +178,7 @@ function ConfigForm({
 
           <FormField
             label="Strategy version"
-            required={enabled}
+            required
             helpText={
               selectedDescriptor
                 ? `dim ${selectedDescriptor.dim}${selectedDescriptor.description ? ' · ' + selectedDescriptor.description : ''}`
@@ -196,7 +188,7 @@ function ConfigForm({
             <Select
               value={strategyVersion}
               onChange={(e) => setStrategyVersion(e.target.value)}
-              disabled={!enabled || strategyId === ''}
+              disabled={strategyId === ''}
             >
               <option value="">— select version —</option>
               {versionsForStrategy.map((s) => (
@@ -237,7 +229,7 @@ function ConfigForm({
         </Stack>
       </DialogContent>
       <DialogFooter>
-        <Inline gap="100" justify="end">
+        <Inline justify="end">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>

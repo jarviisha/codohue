@@ -30,6 +30,7 @@ import { useNamespaceDashboard } from '@/services/namespaces'
 import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
+import NamespaceTag from '@/components/NamespaceTag'
 
 export default function NamespaceOverviewPage() {
   const { ns } = useParams<{ ns: string }>()
@@ -83,10 +84,12 @@ export default function NamespaceOverviewPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
-          <Stack gap="025">
-            <Inline gap="100" align="center">
-              <h1 className="text-foreground text-xl font-semibold">{data.namespace}</h1>
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack gap="050">
+            <Inline align="center">
+              <h1 className="text-xl font-semibold">
+                <NamespaceTag name={data.namespace} />
+              </h1>
               {config?.catalog_enabled && <Badge variant="success">catalog</Badge>}
             </Inline>
             {config && (
@@ -96,7 +99,7 @@ export default function NamespaceOverviewPage() {
               </p>
             )}
           </Stack>
-          <Inline gap="100" align="center">
+          <Inline align="center">
             <Button
               size="sm"
               variant="outline"
@@ -125,8 +128,8 @@ export default function NamespaceOverviewPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
-        <Inline gap="200" align="start" wrap>
+      <Stack>
+        <Inline align="start" wrap>
           <Tile label="Events (24h)" value={events24h.toLocaleString()} />
           <Tile label="Events / min" value={eventsPerMin.toFixed(1)} />
           <Tile label="Sparse subjects" value={subjectsCount.toLocaleString()} />
@@ -140,8 +143,8 @@ export default function NamespaceOverviewPage() {
           )}
         </Inline>
 
-        <Stack gap="100">
-          <Stack gap="025">
+        <Stack>
+          <Stack>
             <h2 className="text-foreground text-sm font-semibold">Last batch runs</h2>
             <p className="text-foreground-subtle text-xs">
               Twelve most recent runs across CF and re-embed kinds.
@@ -165,7 +168,7 @@ export default function NamespaceOverviewPage() {
                   {lastRuns.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>
-                        <Link to={`/batch-runs/${r.id}`} className="text-foreground font-medium">
+                        <Link to={`/ns/${encodeURIComponent(ns)}/batch-runs/${r.id}`} className="text-foreground font-medium">
                           #{r.id}
                         </Link>
                       </TableCell>
@@ -191,8 +194,8 @@ export default function NamespaceOverviewPage() {
 
         <Card>
           <CardContent>
-            <Inline gap="200" align="center" justify="between" wrap>
-              <Stack gap="025">
+            <Inline align="center" justify="between" wrap>
+              <Stack>
                 <span className="text-foreground-subtle text-xs uppercase tracking-wide">
                   Danger zone
                 </span>
@@ -266,16 +269,18 @@ function DeleteNamespaceForm({
   }
 
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
-        <DialogTitle>Delete namespace · {namespace}</DialogTitle>
+        <DialogTitle>
+          Delete namespace · <NamespaceTag name={namespace} />
+        </DialogTitle>
         <DialogDescription>
           Drops every event, vector, catalog item, and trending entry for this namespace. Cannot be
           undone — type the namespace name to confirm.
         </DialogDescription>
       </DialogHeader>
       <DialogContent>
-        <Stack gap="200">
+        <Stack>
           {del.error && (
             <Alert variant="danger" title="Delete failed" description={del.error.message} />
           )}
@@ -293,7 +298,7 @@ function DeleteNamespaceForm({
         </Stack>
       </DialogContent>
       <DialogFooter>
-        <Inline gap="100" justify="end">
+        <Inline justify="end">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>
@@ -314,9 +319,9 @@ function Tile({ label, value, hint }: { label: string; value: string; hint?: str
   return (
     <Card className="flex-1 min-w-35">
       <CardContent>
-        <Stack gap="025">
+        <Stack>
           <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
-          <Inline gap="050" align="center">
+          <Inline align="center">
             <span className="text-foreground text-xl font-semibold tabular-nums">{value}</span>
             {hint && <span className="text-foreground-subtle text-xs">{hint}</span>}
           </Inline>

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
@@ -18,27 +18,46 @@ import {
 } from '@jarviisha/davinci-react-ui'
 import { useNamespaces } from '@/services/namespaces'
 import PageHeader from '@/components/shell/PageHeader'
+import CreateNamespaceDialog from '@/pages/namespaces/CreateNamespaceDialog'
+import NamespaceTag from '@/components/NamespaceTag'
 
 export default function NamespacesListPage() {
   const q = useNamespaces()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  // The URL is the single source of truth for the dialog: the command palette
+  // deep-links via `/namespaces?new=1`, and opening/closing just sets or clears
+  // the param. No mirrored state, so no effect-based sync.
+  const createOpen = searchParams.get('new') === '1'
+  const setCreateOpen = (open: boolean) => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (open) next.set('new', '1')
+        else next.delete('new')
+        return next
+      },
+      { replace: true },
+    )
+  }
 
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full">
-          <Stack gap="025">
+        <Inline align="center" justify="between" className="w-full">
+          <Stack gap="050">
             <h1 className="text-foreground text-xl font-semibold">Namespaces</h1>
             <p className="text-foreground-subtle text-sm">
               {q.data?.total ?? 0} configured · click a row to open its overview.
             </p>
           </Stack>
-          <Link to="/namespaces/new">
-            <Button>New namespace</Button>
-          </Link>
+          <Button onClick={() => setCreateOpen(true)}>New namespace</Button>
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
+      <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />
+
+      <Stack>
         {q.isLoading && <Skeleton className="h-48 w-full" />}
 
         {q.isError && (
@@ -70,9 +89,9 @@ export default function NamespacesListPage() {
                     <TableCell>
                       <Link
                         to={`/ns/${encodeURIComponent(ns.namespace)}`}
-                        className="text-foreground font-medium"
+                        className="font-medium"
                       >
-                        {ns.namespace}
+                        <NamespaceTag name={ns.namespace} />
                       </Link>
                     </TableCell>
                     <TableCell>
@@ -83,7 +102,7 @@ export default function NamespacesListPage() {
                     </TableCell>
                     <TableCell>
                       {ns.catalog_enabled ? (
-                        <Inline gap="050" align="center">
+                        <Inline align="center">
                           <Badge variant="success">on</Badge>
                           {ns.catalog_strategy_id && (
                             <span className="text-foreground-subtle text-xs">

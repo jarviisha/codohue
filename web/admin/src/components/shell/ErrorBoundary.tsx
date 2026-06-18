@@ -58,7 +58,7 @@ export default class RouteErrorBoundary extends Component<Props, State> {
 
     return (
       <Container size="md" className="py-8">
-        <Stack gap="200">
+        <Stack>
           <Alert
             variant="danger"
             title="This page crashed"
@@ -74,7 +74,7 @@ export default class RouteErrorBoundary extends Component<Props, State> {
               </pre>
             </details>
           )}
-          <Inline gap="100" justify="end">
+          <Inline justify="end">
             <Button variant="ghost" onClick={this.handleHome}>
               Back to fleet
             </Button>

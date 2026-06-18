@@ -26,6 +26,7 @@ import {
   type RecommendDebugItem,
 } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
+import NamespaceTag from '@/components/NamespaceTag'
 
 /**
  * SubjectInspectorPage is the operator's "why did user X get rec Y?" answer.
@@ -52,14 +53,14 @@ export default function SubjectInspectorPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
-          <Stack gap="025">
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack gap="050">
             <h1 className="text-foreground text-xl font-semibold">Subject · {id}</h1>
             <p className="text-foreground-subtle text-sm">
-              namespace <code className="font-mono">{ns}</code>
+              namespace <NamespaceTag name={ns} />
             </p>
           </Stack>
-          <Inline gap="100" align="center">
+          <Inline align="center">
             <Switch
               checked={debug}
               onChange={(e) => setDebug(e.target.checked)}
@@ -74,7 +75,7 @@ export default function SubjectInspectorPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         {profile.data && (profile.data.sparse_vector_nnz < 0 || profile.data.interaction_count === 0) && (
           <Alert
             variant="warning"
@@ -89,7 +90,7 @@ export default function SubjectInspectorPage() {
                 : 'The cron job has not run since this subject\'s first event. Recommendations will use the cold-start path until the next batch run completes.'
             }
             actions={
-              <Inline gap="100">
+              <Inline>
                 <Link
                   to={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
                 >
@@ -116,9 +117,9 @@ export default function SubjectInspectorPage() {
           seenItemsDays={profile.data?.seen_items_days}
         />
 
-        <Stack gap="100">
-          <Inline gap="200" align="center" justify="between">
-            <Stack gap="025">
+        <Stack>
+          <Inline align="center" justify="between">
+            <Stack>
               <h2 className="text-foreground text-sm font-semibold">Recommendations</h2>
               <p className="text-foreground-subtle text-xs">
                 {recs.data
@@ -126,7 +127,7 @@ export default function SubjectInspectorPage() {
                   : 'Live from /v1/subjects/:id/recommendations via the admin proxy.'}
               </p>
             </Stack>
-            <Inline gap="050" align="center">
+            <Inline align="center">
               {[10, 20, 50, 100].map((n) => (
                 <Button
                   key={n}
@@ -150,7 +151,7 @@ export default function SubjectInspectorPage() {
               description={recs.error?.message ?? 'unknown error'}
             />
           ) : (
-            <Stack gap="200">
+            <Stack>
               {debug && recs.data?.debug && <DebugSummary debug={recs.data.debug} />}
               <RecommendationsTable items={recs.data?.items ?? []} />
             </Stack>
@@ -209,16 +210,16 @@ function SubjectProfileCard({
   ]
 
   return (
-    <Stack gap="100">
-      <Inline gap="200" align="start" wrap>
+    <Stack>
+      <Inline align="start" wrap>
         {tiles.map((t) => (
           <Card key={t.label} className="flex-1 min-w-40">
             <CardContent>
-              <Stack gap="025">
+              <Stack>
                 <span className="text-foreground-subtle text-xs uppercase tracking-wide">
                   {t.label}
                 </span>
-                <Inline gap="050" align="center">
+                <Inline align="center">
                   <span className="text-foreground text-xl font-semibold tabular-nums">
                     {t.value}
                   </span>
@@ -233,11 +234,11 @@ function SubjectProfileCard({
       {seenItems.length > 0 && (
         <Card>
           <CardContent>
-            <Stack gap="050">
+            <Stack>
               <span className="text-foreground-subtle text-xs uppercase tracking-wide">
                 Recent seen items
               </span>
-              <Inline gap="050" wrap>
+              <Inline wrap>
                 {seenItems.slice(0, 30).map((oid) => (
                   <code
                     key={oid}
@@ -271,13 +272,13 @@ function DebugSummary({ debug }: { debug: RecommendDebug }) {
   return (
     <Card>
       <CardContent>
-        <Stack gap="050">
+        <Stack>
           <span className="text-foreground-subtle text-xs uppercase tracking-wide">
             Debug · score components
           </span>
-          <Inline gap="200" wrap>
+          <Inline wrap>
             {tiles.map((t) => (
-              <Stack key={t.label} gap="025">
+              <Stack key={t.label}>
                 <span className="text-foreground-subtle text-xs">{t.label}</span>
                 <span className="text-foreground text-sm font-medium tabular-nums">{t.value}</span>
               </Stack>

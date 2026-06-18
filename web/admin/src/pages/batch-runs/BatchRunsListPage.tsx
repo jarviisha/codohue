@@ -24,6 +24,7 @@ import { useBatchRuns, useBatchRunStats, type BatchRunsFilter } from '@/services
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import NamespaceTag from '@/components/NamespaceTag'
 
 const PAGE_SIZE = 25
 
@@ -62,9 +63,17 @@ export default function BatchRunsListPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Stack gap="025">
+        <Stack gap="050">
           <h1 className="text-foreground text-xl font-semibold">
-            Batch runs{ns ? ` · ${ns}` : ''}
+            Batch runs
+            {ns ? (
+              <>
+                {' '}
+                · <NamespaceTag name={ns} />
+              </>
+            ) : (
+              ''
+            )}
           </h1>
           <p className="text-foreground-subtle text-sm">
             cron + manual + admin re-embed runs. Newest first; refreshes every 15 seconds.
@@ -72,7 +81,7 @@ export default function BatchRunsListPage() {
         </Stack>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         <StatsRow stats={list.data?.stats} />
 
         {stats.isLoading ? (
@@ -92,9 +101,9 @@ export default function BatchRunsListPage() {
           />
         )}
 
-        <Stack gap="200">
-          <Inline gap="100" align="center" justify="between" wrap>
-                <Inline gap="100" align="center">
+        <Stack>
+          <Inline align="center" justify="between" wrap>
+                <Inline align="center">
                   <Select
                     size="sm"
                     value={statusFilter}
@@ -160,7 +169,10 @@ export default function BatchRunsListPage() {
                       {list.data.items.map((r) => (
                         <TableRow key={r.id}>
                           <TableCell align="right" className="tabular-nums">
-                            <Link to={`/batch-runs/${r.id}`} className="text-foreground font-medium">
+                            <Link
+                              to={ns ? `/ns/${encodeURIComponent(ns)}/batch-runs/${r.id}` : `/batch-runs/${r.id}`}
+                              className="text-foreground font-medium"
+                            >
                               {r.id}
                             </Link>
                           </TableCell>
@@ -168,9 +180,8 @@ export default function BatchRunsListPage() {
                             <TableCell>
                               <Link
                                 to={`/ns/${encodeURIComponent(r.namespace)}`}
-                                className="text-foreground-subtle"
                               >
-                                {r.namespace}
+                                <NamespaceTag name={r.namespace} />
                               </Link>
                             </TableCell>
                           )}
@@ -220,13 +231,13 @@ function StatsRow({ stats }: { stats?: { total: number; running: number; ok: num
     { label: 'Failed', value: stats?.failed ?? 0, tone: stats?.failed ? ('danger' as const) : ('neutral' as const) },
   ]
   return (
-    <Inline gap="200" align="start" wrap>
+    <Inline align="start" wrap>
       {tiles.map((t) => (
         <Card key={t.label} className="flex-1 min-w-35">
           <CardContent>
-            <Stack gap="025">
+            <Stack>
               <span className="text-foreground-subtle text-xs uppercase tracking-wide">{t.label}</span>
-              <Inline gap="050" align="center">
+              <Inline align="center">
                 <span className="text-foreground text-xl font-semibold tabular-nums">{t.value}</span>
                 <Badge variant={t.tone}>{t.tone}</Badge>
               </Inline>

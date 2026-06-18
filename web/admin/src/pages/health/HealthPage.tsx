@@ -60,9 +60,9 @@ export default function HealthPage() {
   return (
     <Container size="md" className="py-6">
       <PageHeader>
-        <Stack gap="025">
+        <Stack gap="050">
           <h1 className="text-foreground text-xl font-semibold">Service health</h1>
-          <Inline gap="100" align="center">
+          <Inline align="center">
             <span className="text-foreground-subtle text-sm">overall</span>
             <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
             <span className="text-foreground-subtle text-xs">refreshes every 30 seconds</span>
@@ -70,14 +70,14 @@ export default function HealthPage() {
         </Stack>
       </PageHeader>
 
-      <Stack gap="300">
-        <Stack gap="200">
+      <Stack>
+        <Stack>
           {COMPONENTS.map((c) => {
             const s = data[c.key]
             return (
               <Card key={c.key}>
                 <CardHeader>
-                  <Inline gap="100" align="center" justify="between">
+                  <Inline align="center" justify="between">
                     <CardTitle>{c.label}</CardTitle>
                     <Badge variant={statusVariant(s)}>{s}</Badge>
                   </Inline>

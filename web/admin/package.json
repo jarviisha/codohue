@@ -11,10 +11,10 @@
     "test": "node --test tests/urls.test.mjs"
   },
   "dependencies": {
-    "@jarviisha/davinci-react-theme-provider": "0.1.0",
-    "@jarviisha/davinci-react-ui": "0.4.1",
+    "@jarviisha/davinci-react-theme-provider": "0.2.0",
+    "@jarviisha/davinci-react-ui": "0.8.0",
     "@jarviisha/davinci-tailwind-preset": "0.3.0",
-    "@jarviisha/davinci-tokens": "0.4.0",
+    "@jarviisha/davinci-tokens": "0.5.0",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-query": "^5.100.5",
     "react": "^19.2.5",

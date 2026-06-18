@@ -14,6 +14,7 @@ import {
   type DemoDatasetResponse,
 } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
+import NamespaceTag from '@/components/NamespaceTag'
 
 /**
  * DemoDataPage manages the bundled demo dataset — a single fixed namespace plus
@@ -30,7 +31,7 @@ export default function DemoDataPage() {
   return (
     <Container size="md" className="py-6">
       <PageHeader>
-        <Stack gap="025">
+        <Stack gap="050">
           <h1 className="text-foreground text-xl font-semibold">Demo data</h1>
           <p className="text-foreground-subtle text-sm">
             Seed or clear the bundled demo namespace — handy for kicking the tyres on a fresh
@@ -39,7 +40,7 @@ export default function DemoDataPage() {
         </Stack>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         <DemoCard
           title="Seed demo dataset"
           description="Creates the bundled demo namespace plus sample events and catalog items. Idempotent — re-runs reset the dataset back to its baseline state."
@@ -91,7 +92,7 @@ function DemoCard({
   return (
     <Card>
       <CardContent>
-        <Stack gap="100">
+        <Stack>
           <span className="text-foreground-subtle text-xs uppercase tracking-wide">{title}</span>
           <p className="text-foreground-subtle text-sm">{description}</p>
           {error && <Alert variant="danger" title={`${title} failed`} description={error.message} />}
@@ -103,13 +104,13 @@ function DemoCard({
               actions={
                 onOpen && (
                   <Button size="sm" variant="ghost" onClick={() => onOpen(result.namespace)}>
-                    Open {result.namespace}
+                    Open <NamespaceTag name={result.namespace} />
                   </Button>
                 )
               }
             />
           )}
-          <Inline gap="100" justify="end">
+          <Inline justify="end">
             <Button tone={tone === 'danger' ? 'danger' : undefined} onClick={onRun} disabled={loading}>
               {loading ? `${action.replace(/e$/, '')}ing…` : action}
             </Button>

@@ -133,7 +133,7 @@ function NamespaceSidebar({ currentNs }: { currentNs: string }) {
 
   return (
     <Nav className="px-3 py-4">
-      <Stack gap="100">
+      <Stack>
         <NavItem onClick={() => navigate('/')}>← Fleet</NavItem>
         <div className="px-3">
           <Combobox

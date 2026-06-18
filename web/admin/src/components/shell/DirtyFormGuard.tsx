@@ -77,7 +77,7 @@ export default function DirtyFormGuard({
             <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           <DialogContent>
-            <Stack gap="100">
+            <Stack>
               <Alert
                 variant="warning"
                 title="Heads up"
@@ -86,7 +86,7 @@ export default function DirtyFormGuard({
             </Stack>
           </DialogContent>
           <DialogFooter>
-            <Inline gap="100" justify="end">
+            <Inline justify="end">
               <Button variant="ghost" onClick={() => blocker.reset?.()}>
                 Stay on page
               </Button>

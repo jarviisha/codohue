@@ -33,7 +33,7 @@ export default function DangerZonePage() {
   return (
     <Container size="md" className="py-6">
       <PageHeader>
-        <Stack gap="025">
+        <Stack gap="050">
           <h1 className="text-foreground text-xl font-semibold">Danger zone</h1>
           <p className="text-foreground-subtle text-sm">
             Destructive actions. Each runs against production data with no undo.
@@ -41,7 +41,7 @@ export default function DangerZonePage() {
         </Stack>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         {resetResult && (
           <Alert
             variant="success"
@@ -57,7 +57,7 @@ export default function DangerZonePage() {
 
         <Card>
           <CardContent>
-            <Stack gap="100">
+            <Stack>
               <span className="text-foreground-subtle text-xs uppercase tracking-wide">
                 App-wide reset
               </span>
@@ -65,7 +65,7 @@ export default function DangerZonePage() {
                 Drops every namespace plus all data across Postgres, Redis, and Qdrant. Requires
                 typing <code>RESET</code> to confirm.
               </p>
-              <Inline gap="100" justify="end">
+              <Inline justify="end">
                 <Button tone="danger" onClick={() => setResetOpen(true)}>
                   Reset everything…
                 </Button>
@@ -121,7 +121,7 @@ function ResetAppForm({
   }
 
   return (
-    <form onSubmit={onSubmit}>
+    <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
         <DialogTitle>Reset everything</DialogTitle>
         <DialogDescription>
@@ -130,7 +130,7 @@ function ResetAppForm({
         </DialogDescription>
       </DialogHeader>
       <DialogContent>
-        <Stack gap="200">
+        <Stack>
           {reset.error && (
             <Alert variant="danger" title="Reset failed" description={reset.error.message} />
           )}
@@ -149,7 +149,7 @@ function ResetAppForm({
         </Stack>
       </DialogContent>
       <DialogFooter>
-        <Inline gap="100" justify="end">
+        <Inline justify="end">
           <Button type="button" variant="ghost" onClick={onClose}>
             Cancel
           </Button>

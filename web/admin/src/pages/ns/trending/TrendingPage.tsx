@@ -20,6 +20,7 @@ import {
 } from '@jarviisha/davinci-react-ui'
 import { useTrending } from '@/services/trending'
 import PageHeader from '@/components/shell/PageHeader'
+import NamespaceTag from '@/components/NamespaceTag'
 
 const PAGE_SIZE = 50
 const WINDOW_OPTIONS = [
@@ -57,10 +58,12 @@ export default function TrendingPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full" wrap>
-          <Stack gap="025">
-            <Inline gap="100" align="center">
-              <h1 className="text-foreground text-xl font-semibold">Trending · {ns}</h1>
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack gap="050">
+            <Inline align="center">
+              <h1 className="text-foreground text-xl font-semibold">
+                Trending · <NamespaceTag name={ns} />
+              </h1>
               {cacheTTL != null && <CacheTTLBadge ttl={cacheTTL} />}
             </Inline>
             <p className="text-foreground-subtle text-sm">
@@ -68,7 +71,7 @@ export default function TrendingPage() {
               seconds.
             </p>
           </Stack>
-          <Inline gap="050" align="center">
+          <Inline align="center">
             {WINDOW_OPTIONS.map((w) => (
               <Button
                 key={w.value}
@@ -87,7 +90,7 @@ export default function TrendingPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         {trending.isError && (
           <Alert
             variant="danger"
@@ -108,8 +111,8 @@ export default function TrendingPage() {
             }
           />
         ) : (
-          <Stack gap="100">
-            <Inline gap="100" align="center" justify="between" wrap>
+          <Stack>
+            <Inline align="center" justify="between" wrap>
               <span className="text-foreground-subtle text-xs tabular-nums">
                 {total.toLocaleString()} entr{total === 1 ? 'y' : 'ies'} · window{' '}
                 {trending.data?.window_hours

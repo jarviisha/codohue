@@ -24,6 +24,7 @@ import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import NamespaceTag from '@/components/NamespaceTag'
 
 const STATUS_BADGE: Record<NamespaceStatus, { variant: 'success' | 'warning' | 'danger' | 'neutral'; label: string }> = {
   active: { variant: 'success', label: 'active' },
@@ -95,8 +96,8 @@ export default function FleetOverviewPage() {
   return (
     <Container size="full" className="py-6 px-6">
       <PageHeader>
-        <Inline gap="200" align="center" justify="between" className="w-full">
-          <Stack gap="025">
+        <Inline align="center" justify="between" className="w-full">
+          <Stack gap="050">
             <h1 className="text-foreground text-xl font-semibold">Fleet</h1>
             <p className="text-foreground-subtle text-sm">
               {data.namespaces.length} namespace{data.namespaces.length === 1 ? '' : 's'} · stream{' '}
@@ -106,7 +107,7 @@ export default function FleetOverviewPage() {
             </p>
           </Stack>
           {recentRunEvents.length > 0 && (
-            <Inline gap="050" align="center">
+            <Inline align="center">
               <span className="text-foreground-subtle text-xs">recent:</span>
               {recentRunEvents.map((e, i) => (
                 <Badge key={`${e}-${i}`} variant="neutral">
@@ -118,9 +119,9 @@ export default function FleetOverviewPage() {
         </Inline>
       </PageHeader>
 
-      <Stack gap="300">
+      <Stack>
         {data.alerts.length > 0 && (
-          <Stack gap="100">
+          <Stack>
             {data.alerts.map((a, i) => (
               <Alert
                 key={`${a.kind}-${a.namespace ?? 'global'}-${i}`}
@@ -134,8 +135,8 @@ export default function FleetOverviewPage() {
 
         <SummaryRow data={data} />
 
-        <Stack gap="100">
-          <Stack gap="025">
+        <Stack>
+          <Stack>
             <h2 className="text-foreground text-sm font-semibold">Batch runs · last 24h</h2>
             <p className="text-foreground-subtle text-xs">
               OK, failed, and cancelled cron + manual runs aggregated per hour.
@@ -159,7 +160,7 @@ export default function FleetOverviewPage() {
           )}
         </Stack>
 
-        <Stack gap="100">
+        <Stack>
           <h2 className="text-foreground text-sm font-semibold">Namespaces</h2>
           <NamespacesTable namespaces={data.namespaces} />
         </Stack>
@@ -205,13 +206,13 @@ function SummaryRow({ data }: { data: ReturnType<typeof useOverview>['data'] }) 
   ] as const
 
   return (
-    <Inline gap="200" align="start" wrap>
+    <Inline align="start" wrap>
       {tiles.map((t) => (
         <Card key={t.label} className="flex-1 min-w-35">
           <CardContent>
-            <Stack gap="025">
+            <Stack>
               <span className="text-foreground-subtle text-xs uppercase tracking-wide">{t.label}</span>
-              <Inline gap="050" align="center">
+              <Inline align="center">
                 <span className="text-foreground text-xl font-semibold tabular-nums">{t.value}</span>
                 <Badge variant={t.tone}>{t.tone}</Badge>
               </Inline>
@@ -246,8 +247,8 @@ function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
             return (
               <TableRow key={ns.namespace}>
                 <TableCell>
-                  <Link to={`/ns/${encodeURIComponent(ns.namespace)}`} className="text-foreground font-medium">
-                    {ns.namespace}
+                  <Link to={`/ns/${encodeURIComponent(ns.namespace)}`} className="font-medium">
+                    <NamespaceTag name={ns.namespace} />
                   </Link>
                 </TableCell>
                 <TableCell>
@@ -277,7 +278,7 @@ function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
                 </TableCell>
                 <TableCell align="right">
                   {ns.catalog.enabled ? (
-                    <Inline gap="050" align="center" justify="end">
+                    <Inline align="center" justify="end">
                       <Badge variant={ns.catalog.dead_letter > 0 ? 'danger' : 'neutral'}>
                         {ns.catalog.pending} pending
                       </Badge>

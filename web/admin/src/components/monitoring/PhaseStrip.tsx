@@ -40,7 +40,7 @@ export default function PhaseStrip({ phaseStatus, skippedReasons }: PhaseStripPr
   const phases: PhaseStatus[] = Array.isArray(phaseStatus) ? phaseStatus : []
 
   return (
-    <Inline gap="050" align="center">
+    <Inline align="center">
       {PHASE_NAMES.map((name, idx) => {
         const status = phases[idx] ?? null
         if (status == null) {
