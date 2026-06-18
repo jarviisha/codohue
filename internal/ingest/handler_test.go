@@ -87,3 +87,31 @@ func TestHandlerIngestInvalidJSON(t *testing.T) {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
+
+func TestHandlerIngestMissingNamespace(t *testing.T) {
+	h := &Handler{service: &fakeHTTPProcessor{}}
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW"}`, ""))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing namespace, got %d", rec.Code)
+	}
+}
+
+func TestHandlerIngestInternalError(t *testing.T) {
+	h := &Handler{service: &fakeHTTPProcessor{err: fmt.Errorf("db down")}}
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW","occurred_at":"2026-04-21T00:00:00Z"}`, "ns"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for non-client error, got %d", rec.Code)
+	}
+}
+
+func TestNewHandler(t *testing.T) {
+	if NewHandler(nil) == nil {
+		t.Fatal("NewHandler returned nil")
+	}
+}
