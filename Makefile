@@ -58,6 +58,7 @@ MIN_EMBEDSTRATEGY  ?= 90
 	coverage coverage-unit coverage-race coverage-report coverage-html \
 	coverage-check coverage-check-pkg coverage-check-all coverage-clean \
 	test-e2e test-e2e-api test-e2e-heavy \
+	smoke eval \
 	migrate migrate-up migrate-down migrate-version migrate-create \
 	clean
 
@@ -326,6 +327,19 @@ test-e2e-api: build-api
 
 test-e2e-heavy: build
 	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog'
+
+# Black-box smoke test against a RUNNING stack (api + admin must be up).
+# Seeds demo data, triggers a batch run, asserts the full ingest -> compute
+# -> qdrant -> recommend pipeline produces sane output. See scripts/smoke.py.
+smoke:
+	@python3 scripts/smoke.py
+
+# Offline recommendation-QUALITY eval against a RUNNING stack. Generates
+# structured synthetic behaviour, temporal-splits it, ingests train events,
+# runs a batch, then scores recommendations (Precision/Recall/NDCG/MAP) vs
+# popularity + random baselines. See scripts/eval.py for flags.
+eval:
+	@python3 scripts/eval.py $(ARGS)
 
 # Migrations
 
