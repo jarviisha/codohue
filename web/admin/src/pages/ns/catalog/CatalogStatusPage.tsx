@@ -1,0 +1,590 @@
+import { useMemo, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  Container,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  EmptyState,
+  Inline,
+  Skeleton,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@jarviisha/davinci-react-ui'
+import {
+  useBulkRedriveDeadletter,
+  useCatalogBacklogHistory,
+  useCatalogConfig,
+  useCatalogFailuresSummary,
+  useTriggerReEmbed,
+  useUpdateCatalogConfig,
+  type CatalogBacklog,
+} from '@/services/catalog'
+import { useServerStream } from '@/services/stream'
+import PageHeader from '@/components/shell/PageHeader'
+import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import CatalogConfigDialog from './CatalogConfigDialog'
+import NamespaceTag from '@/components/NamespaceTag'
+
+const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
+type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
+
+type ReembedProgress = {
+  batch_run_id: number
+  processed: number
+  total: number
+  at: string
+}
+
+export default function CatalogStatusPage() {
+  const { ns } = useParams<{ ns: string }>()
+  const [window, setWindow] = useState<HistoryWindow>('1h')
+  const [streamEvents, setStreamEvents] = useState(0)
+  const [configDialogOpen, setConfigDialogOpen] = useState(false)
+  const [disableDialogOpen, setDisableDialogOpen] = useState(false)
+
+  const config = useCatalogConfig(ns ?? null)
+  const history = useCatalogBacklogHistory(ns ?? null, window)
+  const failures = useCatalogFailuresSummary(ns ?? null, '24h')
+  const reembed = useTriggerReEmbed(ns ?? null)
+  const bulkRedrive = useBulkRedriveDeadletter(ns ?? null)
+
+  // Live backlog snapshot from SSE — when present we render it on the tiles
+  // so the page tracks the embedder's sample cadence (30s) rather than the
+  // /catalog poll interval (15s). embedded + consumer_lag aren't carried on
+  // the SSE event; they come from the polled config response.
+  const [liveBacklog, setLiveBacklog] = useState<CatalogBacklog | null>(null)
+  const [dlAlert, setDlAlert] = useState<{ namespace: string; new_count: number; delta: number } | null>(null)
+  // Per-batch reembed_progress samples. Keyed by batch_run_id so multiple
+  // concurrent runs each get their own tick — the watcher emits one event
+  // per open run per 5s.
+  const [progressByRun, setProgressByRun] = useState<Record<number, ReembedProgress>>({})
+
+  const { connected: streamConnected } = useServerStream(
+    ns ? `/api/admin/v1/namespaces/${ns}/catalog/stream` : null,
+    useMemo(
+      () => ({
+        item_state_changed: () => setStreamEvents((n) => n + 1),
+        backlog_snapshot: (data: unknown) => {
+          const d = data as Record<string, number | undefined>
+          setLiveBacklog((prev) => ({
+            pending: d.pending ?? 0,
+            in_flight: d.in_flight ?? 0,
+            failed: d.failed ?? 0,
+            dead_letter: d.dead_letter ?? 0,
+            stream_len: d.stream_len ?? 0,
+            embedded: prev?.embedded ?? 0,
+            consumer_lag: prev?.consumer_lag ?? 0,
+          }))
+          setStreamEvents((n) => n + 1)
+        },
+        dead_letter_grew: (data: unknown) => {
+          const d = data as { namespace?: string; new_count?: number; delta?: number }
+          setDlAlert({
+            namespace: d.namespace ?? ns ?? '',
+            new_count: d.new_count ?? 0,
+            delta: d.delta ?? 0,
+          })
+          setStreamEvents((n) => n + 1)
+        },
+        // ReembedWatcher emits one of these per open run per 5s tick. We
+        // keep a small map keyed by batch_run_id so the Last re-embed card
+        // and any later widget can render live processed/total.
+        reembed_progress: (data: unknown) => {
+          const d = data as {
+            batch_run_id?: number
+            processed?: number
+            total?: number
+            at?: string
+          }
+          if (d.batch_run_id == null) return
+          setProgressByRun((m) => ({
+            ...m,
+            [d.batch_run_id!]: {
+              batch_run_id: d.batch_run_id!,
+              processed: d.processed ?? 0,
+              total: d.total ?? 0,
+              at: d.at ?? new Date().toISOString(),
+            },
+          }))
+          setStreamEvents((n) => n + 1)
+        },
+      }),
+      [ns],
+    ),
+  )
+
+  if (!ns) return null
+
+  if (config.isLoading) {
+    return (
+      <Container size="full" className="py-6 px-6">
+        <Skeleton className="h-48 w-full" />
+      </Container>
+    )
+  }
+
+  if (config.isError) {
+    return (
+      <Container size="full" className="py-6 px-6">
+        <Alert
+          variant="danger"
+          title="Could not load catalog config"
+          description={config.error?.message ?? 'unknown error'}
+        />
+      </Container>
+    )
+  }
+
+  const data = config.data
+
+  if (!data || !data.catalog.enabled) {
+    return (
+      <Container size="full" className="py-6 px-6">
+        <PageHeader>
+          <Inline align="center" justify="between" className="w-full" wrap>
+            <Stack gap="050">
+              <h1 className="text-foreground text-xl font-semibold">
+                Catalog · <NamespaceTag name={ns} />
+              </h1>
+              <p className="text-foreground-subtle text-sm">Auto-embedding is currently off.</p>
+            </Stack>
+            <Button size="sm" onClick={() => setConfigDialogOpen(true)}>
+              Enable catalog
+            </Button>
+          </Inline>
+        </PageHeader>
+        <EmptyState
+          title="Catalog auto-embedding is off"
+          description="Enable it in the namespace config to start ingesting raw content for embedding."
+        />
+        {data && (
+          <CatalogConfigDialog
+            namespace={ns}
+            open={configDialogOpen}
+            onOpenChange={setConfigDialogOpen}
+            config={data.catalog}
+            strategies={data.available_strategies}
+          />
+        )}
+      </Container>
+    )
+  }
+
+  // Merge live SSE deltas onto the polled snapshot. SSE only carries the
+  // four backlog states + stream_len, so embedded + consumer_lag come from
+  // the polled response.
+  const backlog: CatalogBacklog = liveBacklog
+    ? {
+        ...liveBacklog,
+        embedded: data.backlog.embedded,
+        consumer_lag: data.backlog.consumer_lag,
+      }
+    : data.backlog
+  const reembedStatus = data.last_re_embed
+  const reembedRunning = reembedStatus?.status === 'running'
+
+  return (
+    <Container size="full" className="py-6 px-6">
+      <PageHeader>
+        <Inline align="center" justify="between" className="w-full" wrap>
+          <Stack>
+            <Inline align="center">
+              <h1 className="text-foreground text-xl font-semibold">
+                Catalog · <NamespaceTag name={ns} />
+              </h1>
+              <Badge variant={streamConnected ? 'success' : 'neutral'}>
+                stream {streamConnected ? 'connected' : 'offline'}
+              </Badge>
+              {streamEvents > 0 && (
+                <span className="text-foreground-subtle text-xs tabular-nums">
+                  {streamEvents} live event{streamEvents === 1 ? '' : 's'}
+                </span>
+              )}
+            </Inline>
+            <p className="text-foreground-subtle text-sm">
+              strategy={data.catalog.strategy_id}@{data.catalog.strategy_version}
+            </p>
+          </Stack>
+          <Inline align="center">
+            <Button
+              size="sm"
+              variant="outline"
+              tone="neutral"
+              onClick={() => setConfigDialogOpen(true)}
+            >
+              Configure
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              tone="danger"
+              onClick={() => setDisableDialogOpen(true)}
+            >
+              Disable
+            </Button>
+            {backlog.dead_letter > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                tone="danger"
+                onClick={() => bulkRedrive.mutate()}
+                disabled={bulkRedrive.isPending}
+              >
+                {bulkRedrive.isPending
+                  ? 'Redriving…'
+                  : `Redrive ${backlog.dead_letter} dead-letter`}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={() => reembed.mutate()}
+              disabled={reembed.isPending || reembedRunning}
+            >
+              {reembedRunning
+                ? 'Re-embed running…'
+                : reembed.isPending
+                  ? 'Starting…'
+                  : 'Trigger re-embed'}
+            </Button>
+          </Inline>
+        </Inline>
+      </PageHeader>
+
+      <Stack>
+        {dlAlert && dlAlert.delta > 0 && (
+          <Alert
+            variant="danger"
+            title={`Dead-letter grew by ${dlAlert.delta}`}
+            description={`Namespace ${dlAlert.namespace} now has ${dlAlert.new_count} dead-letter items. Investigate or bulk-redrive once the root cause is fixed.`}
+            actions={
+              <Button size="sm" variant="ghost" onClick={() => setDlAlert(null)}>
+                Dismiss
+              </Button>
+            }
+          />
+        )}
+        {reembed.error && (
+          <Alert variant="danger" title="Re-embed failed" description={reembed.error.message} />
+        )}
+        {bulkRedrive.error && (
+          <Alert
+            variant="danger"
+            title="Bulk redrive failed"
+            description={bulkRedrive.error.message}
+          />
+        )}
+
+        <BacklogTiles backlog={backlog} />
+
+        {reembedStatus && (
+          <Card>
+            <CardContent>
+              <Stack>
+                <Inline align="center" justify="between">
+                  <Inline align="center">
+                    <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+                      Last re-embed
+                    </span>
+                    <ReembedStatusBadge status={reembedStatus.status} />
+                  </Inline>
+                  <Link
+                    to={`/ns/${encodeURIComponent(ns)}/batch-runs/${reembedStatus.batch_run_id}`}
+                    className="text-foreground text-sm font-medium"
+                  >
+                    #{reembedStatus.batch_run_id} →
+                  </Link>
+                </Inline>
+                <span className="text-foreground-subtle text-xs">
+                  strategy={reembedStatus.strategy_id}@{reembedStatus.strategy_version} · started{' '}
+                  {new Date(reembedStatus.started_at).toLocaleString()}
+                  {reembedStatus.duration_ms != null &&
+                    ` · ${(reembedStatus.duration_ms / 1000).toFixed(1)}s`}
+                  {reembedStatus.processed != null && ` · processed ${reembedStatus.processed.toLocaleString()}`}
+                </span>
+                {reembedStatus.error_message && (
+                  <span className="text-danger text-xs">{reembedStatus.error_message}</span>
+                )}
+                {reembedRunning && progressByRun[reembedStatus.batch_run_id] && (
+                  <ReembedProgressBar progress={progressByRun[reembedStatus.batch_run_id]} />
+                )}
+              </Stack>
+            </CardContent>
+          </Card>
+        )}
+
+        <Stack>
+          <Inline align="center" justify="between">
+            <Stack>
+              <h2 className="text-foreground text-sm font-semibold">Backlog timeline</h2>
+              <p className="text-foreground-subtle text-xs">
+                Persisted samples — survives reload, sampled every 30 seconds.
+              </p>
+            </Stack>
+            <Inline>
+              {HISTORY_WINDOWS.map((w) => (
+                <Button
+                  key={w}
+                  size="sm"
+                  variant={window === w ? 'solid' : 'ghost'}
+                  tone="neutral"
+                  onClick={() => setWindow(w)}
+                >
+                  {w}
+                </Button>
+              ))}
+            </Inline>
+          </Inline>
+          {history.isLoading ? (
+            <Skeleton className="h-40 w-full" />
+          ) : history.data?.samples.length === 0 ? (
+            <p className="text-foreground-subtle text-sm">
+              No samples yet — the sampler writes every 30s.
+            </p>
+          ) : (
+            <TimeSeriesChart
+              data={(history.data?.samples ?? []).map((s) => ({
+                ts: s.sampled_at,
+                pending: s.pending,
+                in_flight: s.in_flight,
+                failed: s.failed,
+                dead_letter: s.dead_letter,
+              }))}
+              series={[
+                {
+                  key: 'pending',
+                  label: 'Pending',
+                  color: 'var(--davinci-semantic-color-foreground-subtle)',
+                },
+                {
+                  key: 'in_flight',
+                  label: 'In flight',
+                  color: 'var(--davinci-color-blue-500)',
+                },
+                { key: 'failed', label: 'Failed', color: 'var(--davinci-semantic-color-warning)' },
+                {
+                  key: 'dead_letter',
+                  label: 'Dead-letter',
+                  color: 'var(--davinci-semantic-color-danger)',
+                },
+              ]}
+              stacked
+              height={240}
+            />
+          )}
+        </Stack>
+
+        <Stack>
+          <Stack>
+            <h2 className="text-foreground text-sm font-semibold">Top failure reasons (24h)</h2>
+            <p className="text-foreground-subtle text-xs">
+              Buckets failed + dead-letter rows by last_error so the dominant cause surfaces first.
+            </p>
+          </Stack>
+          {failures.isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : failures.data?.reasons.length === 0 ? (
+            <p className="text-foreground-subtle text-sm">No failed items in the last 24h.</p>
+          ) : (
+            <TableContainer>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Reason</TableHead>
+                    <TableHead align="right">Count</TableHead>
+                    <TableHead>Sample object</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {failures.data?.reasons.map((r, i) => (
+                    <TableRow key={`${r.reason}-${i}`}>
+                      <TableCell className="text-foreground-subtle text-sm">{r.reason}</TableCell>
+                      <TableCell align="right" className="tabular-nums">
+                        {r.count.toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        {r.sample_object_id ? (
+                          <code className="text-foreground-subtle text-xs">{r.sample_object_id}</code>
+                        ) : (
+                          <span className="text-foreground-subtle text-xs">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          )}
+        </Stack>
+
+        <Inline justify="end">
+          <Link to={`/ns/${encodeURIComponent(ns)}/catalog/items`}>
+            <Button variant="outline" tone="neutral">
+              Browse items →
+            </Button>
+          </Link>
+        </Inline>
+      </Stack>
+
+      <CatalogConfigDialog
+        namespace={ns}
+        open={configDialogOpen}
+        onOpenChange={setConfigDialogOpen}
+        config={data.catalog}
+        strategies={data.available_strategies}
+      />
+
+      <DisableCatalogDialog
+        namespace={ns}
+        open={disableDialogOpen}
+        onOpenChange={setDisableDialogOpen}
+      />
+    </Container>
+  )
+}
+
+function DisableCatalogDialog({
+  namespace,
+  open,
+  onOpenChange,
+}: {
+  namespace: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const update = useUpdateCatalogConfig(namespace)
+
+  const onConfirm = () => {
+    update.mutate(
+      { enabled: false },
+      { onSuccess: () => onOpenChange(false) },
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange} size="md">
+      {open && (
+        <>
+          <DialogHeader>
+            <DialogTitle>
+              Disable catalog · <NamespaceTag name={namespace} />
+            </DialogTitle>
+            <DialogDescription>
+              New content sent to POST /v1/namespaces/{namespace}/catalog will return 503 and no
+              auto-embedding runs. Existing vectors stay in Qdrant — re-enabling resumes embedding
+              with the same strategy.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogContent>
+            {update.error && (
+              <Alert variant="danger" title="Disable failed" description={update.error.message} />
+            )}
+          </DialogContent>
+          <DialogFooter>
+            <Inline justify="end">
+              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="button" tone="danger" onClick={onConfirm} disabled={update.isPending}>
+                {update.isPending ? 'Disabling…' : 'Disable catalog'}
+              </Button>
+            </Inline>
+          </DialogFooter>
+        </>
+      )}
+    </Dialog>
+  )
+}
+
+function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
+  const total = progress.total > 0 ? progress.total : 1
+  const pct = Math.min(100, Math.round((progress.processed / total) * 100))
+  return (
+    <Stack>
+      <Inline align="center" justify="between">
+        <span className="text-foreground-subtle text-xs tabular-nums">
+          {progress.processed.toLocaleString()} / {progress.total.toLocaleString()} · {pct}%
+        </span>
+        <span className="text-foreground-subtle text-xs">
+          updated {new Date(progress.at).toLocaleTimeString()}
+        </span>
+      </Inline>
+      <div className="h-1 w-full bg-surface-sunken rounded overflow-hidden">
+        <div
+          className="h-full bg-primary transition-all duration-300"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </Stack>
+  )
+}
+
+function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
+  const tiles: Array<{ label: string; value: number; tone: 'neutral' | 'warning' | 'danger'; hint?: string }> = [
+    { label: 'Pending', value: backlog.pending, tone: 'neutral' },
+    { label: 'In flight', value: backlog.in_flight, tone: 'neutral' },
+    {
+      label: 'Failed',
+      value: backlog.failed,
+      tone: backlog.failed > 0 ? 'warning' : 'neutral',
+    },
+    {
+      label: 'Dead-letter',
+      value: backlog.dead_letter,
+      tone: backlog.dead_letter > 0 ? 'danger' : 'neutral',
+    },
+    { label: 'Embedded', value: backlog.embedded, tone: 'neutral' },
+    { label: 'Stream length', value: backlog.stream_len, tone: 'neutral', hint: 'XLEN' },
+    {
+      label: 'Consumer lag',
+      value: backlog.consumer_lag,
+      tone: backlog.consumer_lag > 1000 ? 'warning' : 'neutral',
+      hint: 'PEL',
+    },
+  ]
+  return (
+    <Inline align="start" wrap>
+      {tiles.map((t) => (
+        <Card key={t.label} className="flex-1 min-w-35">
+          <CardContent>
+            <Stack>
+              <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+                {t.label}
+              </span>
+              <Inline align="center">
+                <span className="text-foreground text-xl font-semibold tabular-nums">
+                  {t.value.toLocaleString()}
+                </span>
+                {t.tone !== 'neutral' && <Badge variant={t.tone}>!</Badge>}
+                {t.hint && (
+                  <span className="text-foreground-subtle text-xs">{t.hint}</span>
+                )}
+              </Inline>
+            </Stack>
+          </CardContent>
+        </Card>
+      ))}
+    </Inline>
+  )
+}
+
+function ReembedStatusBadge({ status }: { status: string }) {
+  if (status === 'running') return <Badge variant="primary">running</Badge>
+  if (status === 'success') return <Badge variant="success">ok</Badge>
+  if (status === 'failed') return <Badge variant="danger">failed</Badge>
+  return <Badge variant="neutral">{status}</Badge>
+}

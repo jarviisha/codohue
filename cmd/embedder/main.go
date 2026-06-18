@@ -104,6 +104,13 @@ func run() error {
 		idmapSvc,
 		qdrantClient,
 	)
+	// Pub/sub publisher broadcasts item state changes + backlog snapshots
+	// + dead-letter growth alerts to codohue:catalog-events:{ns}; cmd/admin's
+	// catalog bridge subscribes and republishes onto the admin event bus
+	// for SSE fan-out. One publisher is shared by the embed service (per-
+	// item events) and the sampler (snapshot + alert events).
+	catalogPublisher := embedder.NewRedisCatalogEventPublisher(redisClient)
+	embedderSvc.SetEventPublisher(catalogPublisher)
 
 	consumerName := cfg.ReplicaName
 	if consumerName == "" {
@@ -121,7 +128,18 @@ func run() error {
 
 	// Re-embed completion watcher (US3): closes batch_run_logs rows once a
 	// namespace's catalog backlog at the new strategy_version has drained.
+	// Also emits one reembed_progress event per open run per tick so the
+	// SPA overlay can render a live progress bar.
 	reembedWatcher := embedder.NewReembedWatcher(embedder.NewPgReembedRepo(db), 5*time.Second)
+	reembedWatcher.SetEventPublisher(catalogPublisher)
+
+	// Backlog sampler — snapshots per-namespace catalog backlog into
+	// catalog_backlog_samples on a 30s tick. Backs the admin /catalog/
+	// backlog-history endpoint so the timeline survives reload. Wired to
+	// the same publisher so each persisted sample also fans out a live
+	// backlog_snapshot event to the SPA (and dead_letter_grew on rises).
+	backlogSampler := embedder.NewBacklogSampler(embedderRepo, redisClient, nsConfigSvc, embedder.BacklogSamplerConfig{})
+	backlogSampler.SetEventPublisher(catalogPublisher)
 
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.
@@ -146,6 +164,14 @@ func run() error {
 	watcherDone := make(chan error, 1)
 	go func() {
 		watcherDone <- reembedWatcher.Run(ctx)
+	}()
+
+	// Backlog sampler runs as a fire-and-forget goroutine — best-effort
+	// observability writer. Returns when ctx is cancelled.
+	samplerDone := make(chan struct{})
+	go func() {
+		defer close(samplerDone)
+		backlogSampler.Run(ctx)
 	}()
 
 	slog.Info("embedder started",
@@ -188,6 +214,13 @@ func run() error {
 	case <-watcherDone:
 	case <-shutdownCtx.Done():
 		slog.Warn("reembed watcher shutdown timed out")
+	}
+
+	// Wait for the sampler goroutine to drain.
+	select {
+	case <-samplerDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("backlog sampler shutdown timed out")
 	}
 
 	slog.Info("embedder stopped")

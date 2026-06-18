@@ -1,77 +1,75 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ApiError } from '@/services/http'
-import { useLogin } from '@/services/auth'
-import { Button, Field, Form, Input, Notice } from '@/components/ui'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  Alert,
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  Container,
+  FormField,
+  Input,
+  Stack,
+} from '@jarviisha/davinci-react-ui'
+import { useLogin, useSession } from '@/services/auth'
 
 export default function LoginPage() {
   const [apiKey, setApiKey] = useState('')
+  const [searchParams] = useSearchParams()
+  const next = searchParams.get('next') ?? '/'
   const navigate = useNavigate()
-  const [params] = useSearchParams()
-  const next = params.get('next') || '/'
+
+  const session = useSession()
   const login = useLogin()
 
-  const submit = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    if (!apiKey.trim() || login.isPending) return
-    login.mutate(
-      { api_key: apiKey },
-      {
-        onSuccess: () => {
-          navigate(next, { replace: true })
-        },
-      },
-    )
+  // Already logged in → bounce to the redirect target.
+  if (session.isSuccess) {
+    return <Navigate to={next} replace />
+  }
+
+  const onSubmit = (event: FormEvent) => {
+    event.preventDefault()
+    login.mutate(apiKey, {
+      onSuccess: () => navigate(next, { replace: true }),
+    })
   }
 
   return (
-    <main className="min-h-screen bg-base text-primary flex items-center justify-center px-6">
-      <div className="w-90 border border-default rounded-sm bg-surface p-6">
-        <div className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-muted mb-1">
-          codohue
-        </div>
-        <h1 className="text-xl font-semibold text-primary leading-tight mb-4">
-          Sign in
-        </h1>
-
-        {login.isError ? (
-          <div className="mb-3">
-            <Notice tone="fail">{describeLoginError(login.error)}</Notice>
-          </div>
-        ) : null}
-
-        <Form onSubmit={submit}>
-          <Field label="Admin API key" htmlFor="api-key" required>
-            <Input
-              id="api-key"
-              type="password"
-              autoFocus
-              autoComplete="current-password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="CODOHUE_ADMIN_API_KEY"
-            />
-          </Field>
-          <Button
-            type="submit"
-            variant="primary"
-            size="lg"
-            loading={login.isPending}
-            disabled={!apiKey.trim()}
-          >
-            Sign in
-          </Button>
-        </Form>
-      </div>
-    </main>
+    <Container size="sm" className="py-16">
+      <Card>
+        <CardHeader>
+          <CardTitle>codohue admin</CardTitle>
+          <CardDescription>Sign in with the global admin API key.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onSubmit}>
+            <Stack>
+              {login.error && (
+                <Alert
+                  variant="danger"
+                  title="Sign-in failed"
+                  description={login.error.message}
+                />
+              )}
+              <FormField label="API key" required>
+                <Input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  autoFocus
+                  autoComplete="current-password"
+                  required
+                />
+              </FormField>
+              <Button type="submit" disabled={login.isPending || apiKey.length === 0}>
+                {login.isPending ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </Stack>
+          </form>
+        </CardContent>
+      </Card>
+    </Container>
   )
-}
-
-function describeLoginError(err: unknown): string {
-  if (err instanceof ApiError) {
-    if (err.status === 401) return 'Invalid API key.'
-    return err.message
-  }
-  if (err instanceof Error) return err.message
-  return 'Sign-in failed.'
 }

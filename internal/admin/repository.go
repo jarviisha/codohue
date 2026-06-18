@@ -227,7 +227,7 @@ func (r *Repository) GetBatchRunLogs(ctx context.Context, namespace, status, kin
 	args = append(args, limit, offset)
 	const sel = `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       entities_processed, success, error_message, trigger_source, log_lines,
+		       entities_processed, success, error_message, trigger_source, cancel_requested, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
@@ -262,7 +262,7 @@ func scanBatchRunLog(scan func(...any) error) (BatchRunLog, error) {
 	var rawLog json.RawMessage
 	err := scan(
 		&b.ID, &b.Namespace, &b.StartedAt, &b.CompletedAt,
-		&b.DurationMs, &b.EntitiesProcessed, &b.Success, &b.ErrorMessage, &b.TriggerSource, &rawLog,
+		&b.DurationMs, &b.EntitiesProcessed, &b.Success, &b.ErrorMessage, &b.TriggerSource, &b.CancelRequested, &rawLog,
 		&b.Phase1OK, &b.Phase1DurMs, &b.Phase1Subjects, &b.Phase1Objects, &b.Phase1Error,
 		&b.Phase2OK, &b.Phase2DurMs, &b.Phase2Items, &b.Phase2Subjects, &b.Phase2Error,
 		&b.Phase3OK, &b.Phase3DurMs, &b.Phase3Items, &b.Phase3Error,
@@ -282,6 +282,118 @@ func scanBatchRunLog(scan func(...any) error) (BatchRunLog, error) {
 	return b, nil
 }
 
+// GetBatchRunByID fetches one batch run row by id. Returns (nil, nil) when
+// the row does not exist; the service maps that to 404.
+func (r *Repository) GetBatchRunByID(ctx context.Context, id int64) (*BatchRunLog, error) {
+	const sel = `
+		SELECT id, namespace, started_at, completed_at, duration_ms,
+		       entities_processed, success, error_message, trigger_source, cancel_requested, log_lines,
+		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
+		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
+		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
+		       target_strategy_id, target_strategy_version
+		FROM batch_run_logs WHERE id = $1`
+	row := r.db.QueryRow(ctx, sel, id)
+	b, err := scanBatchRunLog(row.Scan)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get batch_run_log %d: %w", id, err)
+	}
+	return &b, nil
+}
+
+// RequestCancelResult is the typed outcome of RequestCancel.
+type RequestCancelResult int
+
+const (
+	// RequestCancelOK means the row was in-flight and is now flagged for cancel.
+	RequestCancelOK RequestCancelResult = iota
+	// RequestCancelAlreadyTerminal means the run is already completed — UI maps to 409.
+	RequestCancelAlreadyTerminal
+	// RequestCancelNotFound means the id does not exist — UI maps to 404.
+	RequestCancelNotFound
+)
+
+// RequestCancel sets cancel_requested on an in-flight batch run row. Cron sees
+// the flag at the next phase boundary and tears down the run.
+func (r *Repository) RequestCancel(ctx context.Context, id int64) (RequestCancelResult, error) {
+	// Disambiguate not-found vs already-terminal so the handler can return
+	// 404 vs 409 with confidence rather than guessing from RowsAffected==0.
+	var completedAt *time.Time
+	if err := r.db.QueryRow(ctx, `SELECT completed_at FROM batch_run_logs WHERE id = $1`, id).Scan(&completedAt); err != nil {
+		if err == pgx.ErrNoRows {
+			return RequestCancelNotFound, nil
+		}
+		return 0, fmt.Errorf("lookup batch run %d: %w", id, err)
+	}
+	if completedAt != nil {
+		return RequestCancelAlreadyTerminal, nil
+	}
+	if _, err := r.db.Exec(ctx, `
+		UPDATE batch_run_logs SET cancel_requested = TRUE
+		WHERE id = $1 AND completed_at IS NULL
+	`, id); err != nil {
+		return 0, fmt.Errorf("update cancel_requested %d: %w", id, err)
+	}
+	return RequestCancelOK, nil
+}
+
+// BatchRunStatsBucket is one time-series row from GetBatchRunStats.
+type BatchRunStatsBucket struct {
+	Ts            time.Time `json:"ts"`
+	OK            int       `json:"ok"`
+	Failed        int       `json:"failed"`
+	Cancelled     int       `json:"cancelled"`
+	AvgDurationMs int       `json:"avg_duration_ms"`
+}
+
+// GetBatchRunStats aggregates terminal batch runs into buckets of bucketSeconds
+// width across the given window ending now. The bucket boundary lives in SQL —
+// using date_trunc would not give us arbitrary widths — so the math is done
+// inline via div + multiplication on epoch seconds.
+func (r *Repository) GetBatchRunStats(ctx context.Context, windowSeconds, bucketSeconds int) ([]BatchRunStatsBucket, error) {
+	if windowSeconds <= 0 || bucketSeconds <= 0 {
+		return nil, fmt.Errorf("invalid window/bucket: %d / %d", windowSeconds, bucketSeconds)
+	}
+	rows, err := r.db.Query(ctx, `
+		SELECT
+		    to_timestamp(floor(extract(epoch FROM started_at)::int / $1) * $1) AS bucket_ts,
+		    COUNT(*) FILTER (WHERE success = TRUE)                              AS ok_count,
+		    COUNT(*) FILTER (WHERE success = FALSE AND error_message = $3)      AS cancelled_count,
+		    COUNT(*) FILTER (WHERE success = FALSE AND error_message IS DISTINCT FROM $3) AS failed_count,
+		    COALESCE(AVG(duration_ms), 0)::int                                  AS avg_duration_ms
+		FROM batch_run_logs
+		WHERE completed_at IS NOT NULL
+		  AND started_at > now() - make_interval(secs => $2)
+		GROUP BY bucket_ts
+		ORDER BY bucket_ts`,
+		bucketSeconds, windowSeconds, operatorCancelledMessage,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query batch_run_stats: %w", err)
+	}
+	defer rows.Close()
+
+	var out []BatchRunStatsBucket
+	for rows.Next() {
+		var b BatchRunStatsBucket
+		if err := rows.Scan(&b.Ts, &b.OK, &b.Cancelled, &b.Failed, &b.AvgDurationMs); err != nil {
+			return nil, fmt.Errorf("scan stats bucket: %w", err)
+		}
+		out = append(out, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate stats: %w", err)
+	}
+	return out, nil
+}
+
+// operatorCancelledMessage is a local alias of [batchrun.OperatorCancelledMessage]
+// so SQL fragments in this file stay terse.
+const operatorCancelledMessage = batchrun.OperatorCancelledMessage
+
 // GetLastBatchRunPerNamespace returns the most recent completed CF batch run
 // per namespace, keyed by namespace name. Re-embed runs (trigger_source=
 // 'admin_reembed') are excluded because they don't populate the per-phase
@@ -291,7 +403,7 @@ func (r *Repository) GetLastBatchRunPerNamespace(ctx context.Context) (map[strin
 	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT ON (namespace)
 		    id, namespace, started_at, completed_at, duration_ms,
-		    entities_processed, success, error_message, trigger_source, log_lines,
+		    entities_processed, success, error_message, trigger_source, cancel_requested, log_lines,
 		    phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		    phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		    phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
@@ -393,6 +505,69 @@ func (r *Repository) GetRecentEvents(ctx context.Context, ns string, limit, offs
 		out = []EventSummary{}
 	}
 	return out, total, nil
+}
+
+// GetEventsSummary aggregates events for ns over the trailing windowSecs. It
+// returns the total count, per-action counts, and a time series with one entry
+// per non-empty bucketSecs bucket (sparse — empty buckets are omitted; the SPA
+// fills gaps). Both queries ride the occurred_at index.
+func (r *Repository) GetEventsSummary(ctx context.Context, ns string, windowSecs, bucketSecs int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error) {
+	byAction = make(map[string]int)
+
+	actionRows, err := r.db.Query(ctx, `
+		SELECT action, COUNT(*) AS cnt
+		FROM events
+		WHERE namespace = $1 AND occurred_at > NOW() - make_interval(secs => $2)
+		GROUP BY action`,
+		ns, windowSecs,
+	)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("query events by action: %w", err)
+	}
+	defer actionRows.Close()
+	for actionRows.Next() {
+		var action string
+		var cnt int
+		if err := actionRows.Scan(&action, &cnt); err != nil {
+			return 0, nil, nil, fmt.Errorf("scan action count: %w", err)
+		}
+		byAction[action] = cnt
+		total += cnt
+	}
+	if err := actionRows.Err(); err != nil {
+		return 0, nil, nil, fmt.Errorf("iterate action counts: %w", err)
+	}
+
+	seriesRows, err := r.db.Query(ctx, `
+		SELECT to_timestamp(floor(extract(epoch FROM occurred_at) / $2) * $2) AS bucket, COUNT(*) AS cnt
+		FROM events
+		WHERE namespace = $1 AND occurred_at > NOW() - make_interval(secs => $3)
+		GROUP BY bucket
+		ORDER BY bucket`,
+		ns, bucketSecs, windowSecs,
+	)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("query events series: %w", err)
+	}
+	defer seriesRows.Close()
+	for seriesRows.Next() {
+		var bucket time.Time
+		var cnt int
+		if err := seriesRows.Scan(&bucket, &cnt); err != nil {
+			return 0, nil, nil, fmt.Errorf("scan series bucket: %w", err)
+		}
+		series = append(series, EventsSummaryBucket{
+			Ts:    bucket.UTC().Format(time.RFC3339),
+			Count: cnt,
+		})
+	}
+	if err := seriesRows.Err(); err != nil {
+		return 0, nil, nil, fmt.Errorf("iterate series: %w", err)
+	}
+	if series == nil {
+		series = []EventsSummaryBucket{}
+	}
+	return total, byAction, series, nil
 }
 
 // SeedDemoEvents replaces the events for the demo namespace with the bundled fixture.

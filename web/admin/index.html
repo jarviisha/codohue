@@ -3,13 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Codohue Admin</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap"
       rel="stylesheet"
     />
-    <title>Codohue Admin</title>
+    <script>
+      // Inlined output of getThemeScript({ defaultTheme: 'system', storageKey: 'codohue-admin-theme' }).
+      // Runs synchronously before paint so the html class is set and there is
+      // no light → dark flash on reload. See web/admin/USAGE.md §Step 3.
+      (function(){try{var s=localStorage.getItem("codohue-admin-theme");var t=(s==="light"||s==="dark"||s==="system")?s:"system";var r=t==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):t;var c=document.documentElement.classList;c.remove("light","dark");c.add(r);}catch(e){}})();
+    </script>
   </head>
   <body>
     <div id="root"></div>

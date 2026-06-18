@@ -1,470 +1,250 @@
-# Codohue Admin Design System
+# Davinci — Design Rationale
 
-Design system for `web/admin`, the Codohue operations console. Companion to [BUILD_PLAN.md](BUILD_PLAN.md) (implementation roadmap).
+This document captures the **why** behind the system: the visual philosophy, the decision rules, and the patterns that hold it together. Read this before adding components, picking variants, or theming a consumer app.
 
-## 1. Product Voice
+> 🇻🇳 Một số quyết định gốc được thảo luận bằng tiếng Việt trong PR / commit history. Tài liệu này là bản tiếng Anh để dễ chia sẻ.
 
-Codohue Admin is an internal operations console for monitoring namespaces, events, batch runs, recommendations, catalog embedding, and service health.
+---
 
-The new design language is **terminal/console-influenced**:
+## Philosophy
 
-- Quiet, dense, professional. Operator-first.
-- Optimized for scan, comparison, and repeated operational use.
-- Data is the hero. Chrome recedes.
-- Numbers, IDs, timestamps, and codes use monospace. Prose uses sans.
-- Borders and dividers do the structural work. Shadows are exceptional, not decorative.
-- Status is expressed by **glyph + color + text**, never color alone.
-- No marketing-style hero content, no nested decorative cards, no oversized surfaces.
-- Readability beats density. If a compact choice makes operators slow down,
-  squint, or re-read, increase contrast, size, or spacing before adding more UI.
+Davinci is a **single-canvas, border-led** design system.
 
-If a design choice would not look at home next to `kubectl`, `htop`, `psql`, or Grafana — reconsider it.
+1. **One canvas, not stacked surfaces.** Sidebar, header, main, default cards all share `background`. The whole app reads as one color.
+2. **Borders do the layering work.** Separation between regions, panels, and cards comes from borders — alpha-based in light, alpha-based in dark — never from background tiers.
+3. **Fills are reserved for intent.** A surface gets a background fill only when its content is deliberately emphasized: a status message, a selected item, a sub-panel, an overlay. Decorative tinting is forbidden.
+4. **Shadow = true elevation only.** Shadows are not visual decoration. They appear only on floating overlays (popover, dropdown, dialog, toast) to signal "this is above the canvas."
 
-## 2. Token System
+This bias toward flat + bordered comes from how Jira, Linear, and GitHub render dense product UI: low visual noise, predictable in dark mode, and the user's content gets the contrast budget — not the chrome.
 
-Tokens live in [src/index.css](src/index.css). Page code consumes them via Tailwind v4 semantic utilities (`bg-base`, `text-primary`, …). **Never introduce raw hex in page-level JSX.** If a new semantic color is needed, add a token first.
+---
 
-### 2.1 Palette
+## Token system
 
-Light theme uses Tailwind **Slate** neutrals with **Meta Blue** accent. Dark theme is aligned to **GitHub Primer** dark tokens — neutrals follow Primer's `bgColor.*` / `borderColor.*` / `fgColor.*` scale, accent follows Primer's `accent` family.
+Three layers, referenced top-down:
 
-| Role | Light | Dark | Reference |
-|------|-------|------|-----------|
-| `bg-base` | `#F8FAFC` | `#0d1117` | app canvas and fixed shell chrome |
-| `bg-subtle` | `#F1F5F9` | `#151b23` | alternate bands and low-emphasis regions |
-| `bg-surface` | `#FFFFFF` | `#161b22` | panels, tables, inputs, modals |
-| `bg-surface-raised` | `#E2E8F0` | `#21262d` | hover, selected-adjacent, raised controls |
-| `border-default` | `#7c8a9e` | `#6e7681` | resting dividers + form-control edges (≥3:1 against bg for WCAG 1.4.11) |
-| `border-strong` | `#5b6877` | `#8b929c` | hover, focus-adjacent, high-importance dividers |
-| `text-primary` | `#0F172A` | `#f0f6fc` | dark = Primer fgColor-default |
-| `text-secondary` | `#334155` | `#d1d7e0` | default body, form labels, table body |
-| `text-muted` | `#475569` | `#aeb6c2` | metadata, hints, secondary timestamps |
-| `text-disabled` | `#94A3B8` | `#6e7681` | disabled controls only |
-| `accent` | `#0866FF` | `#4493f8` | **text on neutral bg** (links, accent labels) |
-| `accent-emphasis` | `#0866FF` | `#1f6feb` | **solid bg with white text** (Button primary) |
-| `accent-subtle` | `#DBEAFE` | `#1b2f4a` | selected / active row bg |
-| `accent-text` | `#FFFFFF` | `#FFFFFF` | text on solid accent (`bg-accent-emphasis`) |
-| `success` | `#0e6c2d` | `#3fb950` | text on canvas + StatusToken; light value darkened so it clears AA on the 20% tint chip |
-| `warning` | `#7a4d00` | `#d29922` | same rationale as success |
-| `danger`  | `#b91c1c` | `#f85149` | text role; dark = Primer fgColor-danger |
-| `danger-emphasis` | `#b91c1c` | `#cf222e` | **solid bg with white text** (Button danger). Dark splits from `danger` because text-color `#f85149` fails white-on contrast |
+| Layer | Examples | Use from app code? |
+|---|---|---|
+| **Primitive** | `color.blue.700`, `spacing.200`, `radius.md` | No — these are raw values, not rebrandable. |
+| **Semantic** | `semantic.color.primary`, `semantic.color.foreground` | Yes — these are the stable API. |
+| **Component** | `component.button.height.md`, `component.card.default.background` | Internal — only `react-ui` components reference these. |
 
-**Palette notes**
+**Rules:**
 
-- **`accent` vs `accent-emphasis`.** Dark theme splits the accent into two values because GitHub does: `accent` `#4493f8` is for accent-colored **text** on a neutral background (6.11:1 vs `bg-base` — passes AA-normal); `accent-emphasis` `#1f6feb` is for solid accent **backgrounds** with white text (4.63:1 — passes AA-normal). Using `accent` itself as a button bg with white text would fail (3.10:1). Light theme uses the same value for both because Meta Blue on white passes either way (4.82:1). Always pair `bg-accent-emphasis` with `text-accent-text`; use `text-accent` only on neutral surfaces.
-- **`danger` vs `danger-emphasis`.** Mirrors the accent pattern. Dark `danger` `#f85149` reads fine as text on canvas (5.65:1) but fails as a button background with white text (3.35:1), so `Button variant="danger"` reads `bg-danger-emphasis` (`#cf222e`, 5.36:1) instead. Light reuses the text value for the button — `#b91c1c` on white is 6.47:1 either way.
-- **Status tokens carry tinted backgrounds.** `success` / `warning` / `danger` are the *text* color inside `StatusToken`, which renders the same color at 20% opacity as the chip background. The light values are darkened from the Tailwind 500-tier defaults so the text-on-chip composite clears 4.5:1 (the chip text is 11px mono — normal-AA target).
-- **Layer pattern.** Both themes use visible surface separation: `bg-base` is the page canvas and fixed shell chrome, `bg-surface` is the content surface, `bg-subtle` is the secondary region, and `bg-surface-raised` is reserved for hover/raised states. Panels and tables use both `bg-surface` and `border-default`; they do not rely on hairline borders alone. This is intentionally less flat than the original border-only pass because the app must stay readable during long operator sessions.
-- **Text contrast tiers.** `text-primary` is for titles, IDs, numbers, and current values. `text-secondary` is the default body/readable UI text. `text-muted` is only for metadata, hints, empty-state detail, and secondary timestamps; it must not carry required form labels, table body values, or primary navigation labels.
-- **`text-muted` still passes WCAG AA-normal, but it is no longer the default small-text color.** Small text (`text-xs`, 11px mono labels, timestamps) should prefer `text-secondary` unless the information is genuinely optional.
-- **No status-bg tokens.** `Notice` uses a left-border pattern, not a tinted background — see §6 (Notice primitive).
+- App code uses **semantic** tokens. Never hardcode hex values, never reference primitive tokens directly.
+- Custom themes override **semantic** tokens. They don't touch primitive values.
+- Component tokens exist for component authors and themers who need to deviate per component.
 
-Light is the primary review target. Dark must preserve contrast, hierarchy, and state meaning.
+---
 
-### 2.1.1 Readability Targets
+## Surfaces — decision tree
 
-Before shipping a page, verify both themes against these targets:
+Davinci ships four surface roles. In the default theme they collapse aggressively onto one canvas; in custom themes consumers can break the aliases to introduce tiers.
 
-- Main body text and table body values use at least `text-sm` with readable line-height (`leading-5` or browser-normal). Avoid `text-xs` for values operators must compare.
-- Required labels, active nav items, table body values, and command names use `text-secondary` or stronger.
-- `text-muted` is allowed for helper text, section metadata, timestamps when adjacent to a primary value, and disabled/empty context only.
-- Adjacent surfaces must differ by either background or a strong enough border. A panel on the app canvas cannot rely on `#E2E8F0`-style hairline contrast alone.
-- Compact controls are scoped to fixed shell chrome, dense toolbars, page-header actions, and table actions. Forms use the default control size.
+| Token | Light default | Dark default | When to use |
+|---|---|---|---|
+| `background` | `#FFFFFF` | `#18191A` | The canvas. Page wrappers, AppShell regions, default cards. **Default to this.** |
+| `surface` | `#FFFFFF` (= background) | `#18191A` (= background) | Alias of `background`. Use when semantic intent is "a generic surface" rather than the page canvas. |
+| `surface-raised` | `#FFFFFF` (= background) | `#303134` (lighter) | True float overlays — popover, dropdown, dialog, toast. **Always pair with `shadow.overlay` or `shadow.raised`.** |
+| `surface-sunken` | `#F0F1F2` (darker) | `#111213` (darker) | Inset wells — code blocks, comparison panes, zebra rows. One step deeper than canvas in both modes. |
 
-### 2.2 Type tokens
+**Anti-pattern:** Using `surface-raised` on a card to make it "stand out". Use a card emphasis variant instead (see below). `surface-raised` is reserved for popovers/menus/dialogs.
 
-Two families. No third.
+---
 
-- **Sans**: `IBM Plex Sans` — prose, labels, button text, navigation, page titles. Humanist neo-grotesque with measurable character; matches the operations engineering tone and reads well at small sizes.
-- **Mono**: `JetBrains Mono` — IDs, timestamps, durations, counts, scores, JSON, code, namespace names, **table column headers**, **table numeric cells**, status brackets, PS1 prompt. Wide latin character coverage, distinct disambiguated glyphs (`0/O`, `1/l/I`), strong identity in dev/ops contexts.
+## Card emphasis ladder
 
-Both fonts are open-source and Google Fonts hosted. Load via `<link>` in `index.html` and reference in `@theme`.
+When picking a Card variant, **start at `default` and escalate only if intent demands it.**
 
-System fallback chain: `JetBrains Mono` → `ui-monospace` → `SFMono-Regular` → `Menlo` → `Courier New`; `IBM Plex Sans` → `ui-sans-serif` → `-apple-system` → `system-ui`.
+| Variant | Background | Border | When to use |
+|---|---|---|---|
+| `default` | canvas (no fill) | `border` | The baseline. Most grouped content — sections, lists, settings groups. |
+| `outlined` | transparent | `border` (subtle/default/bold weight) | Same as default but lets you tune border emphasis explicitly. |
+| `filled` | `backgroundSubtle` | none | Mild emphasis. Sub-panels nested inside another container; neutral callouts. |
+| `flat` | transparent | none | When the surrounding context already provides the frame (e.g., inside another bordered region). |
+| `floating` | `surface-raised` + `shadow.raised` | `border` | True overlays — popover, menu, command palette. |
+| `tone="info|success|warning|danger"` | 8% color-mix on canvas | tinted border | **Status IS the message.** Build failed, deployment succeeded, action requires attention. |
+| `selected` | 8% primary mix on canvas | `border-focused` | Current selection in a list/grid/picker. Composes with any variant. |
+| `interactive` | unchanged | bumps to `border-bold` on hover | Hover/focus signal. Composes with any variant. |
 
-### 2.3 Radius scale
+**Anti-pattern:** Using `tone="info"` to "make a card blue" because it looks nice. Tones encode meaning — if the user doesn't need to know it's informational, use `default`.
 
-Terminal feel = sharper corners.
+---
 
-| Token | Value | Where |
-|-------|-------|-------|
-| `rounded-none` | 0px | Tables, table cells, sidebar items, top-bar |
-| `rounded-sm` | 2px | **Default for inputs, selects, buttons, panels** |
-| `rounded` | 4px | Modals, dropdown menus, tooltips |
-| `rounded-full` | full | Only the avatar/status dot — nothing else |
+## Color tones — status semantics
 
-Default is `rounded-sm`. **No `rounded-lg` or `rounded-md` anywhere.**
+Tone tokens (`success`, `warning`, `danger`, `info`, `discovery`) communicate **state of the underlying thing**, not visual flavor.
 
-### 2.4 Shadows
+| Tone | Meaning |
+|---|---|
+| `success` | Operation completed; system is healthy. |
+| `warning` | Caution needed; partial degradation; non-blocking issue. |
+| `danger` | Destructive action; error state; blocking failure. |
+| `info` | Neutral notification; passive information. |
+| `discovery` | New / experimental feature surface. |
 
-Shadows live in `@theme` as `--shadow-raised`, `--shadow-floating`, `--shadow-overlay`, `--shadow-focus`.
+**Anti-pattern:** A "neutral" badge or alert tinted blue or purple "for branding". Use `neutral` variant or rely on layout/typography hierarchy instead.
 
-- `shadow-overlay` — modals, popovers, dropdowns. **Only** these.
-- `shadow-focus` — focus ring on interactive controls.
-- `shadow-raised` / `shadow-floating` — avoid in page content. Border + background hierarchy first.
+---
 
-### 2.5 Status indicator
+## Borders — ladder
 
-Status uses **bracketed dmesg-style tokens**, not pill badges. Fixed 6-character width (`[XXXX]`), mono font, color token carries the semantic. Self-aligns in tables and column views, scans like `journalctl`/`dmesg` output.
+| Token | Use |
+|---|---|
+| `border-subtle` | Dividers between rows in dense tables; faint separators inside cards. Alpha-based — survives over tinted surfaces. |
+| `border` | The default. Card outlines, input borders, panel edges. |
+| `border-bold` | Emphasized borders — hovered interactive cards, prominent dividers. |
+| `border-boldest` | Strong dividers between major sections; rarely used in product UI. |
+| `border-hovered` | Input fields on hover. Solid color (not alpha) for crispness. |
+| `border-focused` | The focus ring and the `selected` card border. Always primary blue. |
 
-| State | Token | Color token | Example use |
-|-------|-------|-------------|-------------|
-| ok / healthy / success | `[ OK ]` | `text-success` | health probe, completed batch run, cache present |
-| running / active | `[ RUN]` | `text-accent` | in-progress batch run, live tail |
-| idle / unknown | `[IDLE]` | `text-muted` | namespace with no events, no data yet |
-| warn / degraded / manual | `[WARN]` | `text-warning` | degraded health, manual run trigger, partial result |
-| fail / error | `[FAIL]` | `text-danger` | failed run, unreachable infra, dead-letter |
-| pending / queued | `[PEND]` | `text-muted` | catalog item queued, scheduled run |
+**Rule:** Border-subtle and border are alpha-based so they render predictably over any background. Bold/boldest/hovered are solid greys — only use them where the surface beneath is known to be canvas.
 
-Rules:
+---
 
-- Token is always followed by a descriptive label outside the brackets: `[ OK ]  cron heartbeat 2m ago`. Never use the token alone except inside a dedicated single-column "status" cell.
-- Brackets are part of the token. Do not render as background fill or pill. The whole token is `text-{token-color} font-mono`.
-- One state per row. No combined `[OK ][WARN]`.
-- Hover tooltip on the token gives the verbose state phrase ("degraded since 14:02 — qdrant heartbeat missed").
+## Spacing — rhythm
 
-This is the single signature operational element. Every status surface in the app — sidebar health dot, health page, batch run list, catalog item state, namespace card, namespace picker — uses the same token.
+The scale revolves around an **8px grid** for layout, with 2/4px fine-tuning for in-control nudges and three half-steps (6, 12, 20) for compact controls that fall between grid steps.
 
-## 3. Layout & Information Architecture
+| Step | Pixels | Use |
+|---|---|---|
+| `025` | 2px | Icon-text nudges, tight inline gaps. |
+| `050` | 4px | Icon-label gap, focus-ring offset. |
+| `075` | 6px | Compact button inline gap. |
+| `100` | 8px | Default form gap, dense list gap. |
+| `150` | 12px | Form field internal gap, button gap. |
+| `200` | 16px | Card padding, section gap. |
+| `250` | 20px | Larger card padding. |
+| `300` | 24px | Page gutter, large card padding. |
+| `400` | 32px | Major section gap. |
+| `500` | 40px | Page-section separation. |
+| `600+` | 48, 64, 80px | Page-level padding, vertical rhythm. |
 
-### 3.1 App shell
+**Rule:** Pick the smallest step that satisfies the design. Never introduce arbitrary values outside this set.
 
-```
-┌──────────────────┬──────────────────────────────────────────────┐
-│ codohue          │ codohue@prod:~/events $   [Cmd+K] [theme] [user]│
-├──────────────────┼──────────────────────────────────────────────┤
-│ GLOBAL           │                                              │
-│   Health   [ OK ]│  Page title                                  │
-│   Namespaces     │                                              │
-│                  │  Page content                                │
-│ prod             │                                              │
-│   Overview       │  (active row has bg-accent-subtle)           │
-│   Config         │                                              │
-│   Catalog        │                                              │
-│   Events         │                                              │
-│   Trending       │                                              │
-│   Batch Runs     │                                              │
-│   Debug          │                                              │
-│   Demo Data      │                                              │
-└──────────────────┴──────────────────────────────────────────────┘
+---
+
+## Canonical patterns
+
+### App shell (Pulseboard-style dashboard)
+
+```tsx
+<AppShell>
+  <AppShellTopBar>{/* logo, search, avatar */}</AppShellTopBar>
+  <AppShellSidebar>{/* primary nav */}</AppShellSidebar>
+  <AppShellHeader>{/* page title, page actions */}</AppShellHeader>
+  <AppShellMain>{/* page content */}</AppShellMain>
+  <AppShellAside>{/* metadata, recent activity */}</AppShellAside>
+</AppShell>
 ```
 
-- **Sidebar**: fixed, ~240px wide, always expanded on desktop, `bg-base` with `border-r border-default`. Two sections: **GLOBAL** and **{namespace name}** (when selected). Sidebar `Health` item carries an inline status token `[ OK ]` / `[WARN]` / `[FAIL]` — health is always-on awareness.
-- **Top bar**: fixed, `bg-base` with `border-b border-default`. Holds the **PS1 prompt** (§3.1.1), the command palette trigger (label `Cmd+K`), the theme toggle, and the user menu. Namespace picker is invoked through the PS1 prompt or `Cmd+K` — not a dropdown chip.
-- **Section labels** in sidebar use mono uppercase, slightly larger tracking (`tracking-[0.12em]`).
-- **Active nav item**: `bg-accent-subtle` background + `text-accent`. No bold weight change — the bg and color carry the active signal. A leading glyph/icon marker is deferred until the icon system is in place (see §15).
-- **Inactive nav item**: same row height, no decoration — `text-secondary` until hover.
-- Mobile is not the primary target. Pages must not visually break under 1024px, but the sidebar may stay desktop-first until a dedicated nav pass.
+All regions share `background`. Border lines between grid areas provide separation. Sidebar, main, and aside scroll independently; top-bar/header are pinned.
 
-### 3.1.1 PS1 prompt
+### Detail page (issue, settings page)
 
-The top bar's primary element is a **shell-style location prompt** that replaces both the namespace picker chip and the breadcrumb:
-
-```
-codohue@prod:~/events $
-codohue@prod:~/catalog/items $
-codohue@prod:~/catalog/items/sku_42 $
-codohue@(no-ns):~/health $
-codohue@~:~/namespaces $        ← when no namespace is selected
+```tsx
+<DetailLayout asideSticky>
+  <DetailLayoutMain>{/* primary content */}</DetailLayoutMain>
+  <DetailLayoutAside>{/* meta rail — labels, assignees, dates */}</DetailLayoutAside>
+</DetailLayout>
 ```
 
-Format: `codohue@{namespace}:~/{path-segments} $`, mono `JetBrains Mono`, no background fill, `text-primary` weight regular. The `@{namespace}` segment is **clickable** — opens an inline namespace picker (popover). The `~/path` segments are **clickable** — each segment navigates back to that level.
+Two columns above 1024px, single column below. `asideSticky` keeps the rail in view as main scrolls.
 
-This is one of three memorability anchors (§16). It encodes the entire location state in one scannable line and lets the user click any token. Operators learn the format on day 1 and never lose context.
+### Form
 
-### 3.2 Routing map
-
-Namespace-scoped routes share an `<NamespaceLayout>` that reads `:name` from the URL via `useParams<{ name: string }>()`. **There is no `NamespaceContext`** — the route is the only source of truth for the active namespace (see [BUILD_PLAN.md §4.3](BUILD_PLAN.md)).
-
-**Global routes**
-
-| Path | Page |
-|------|------|
-| `/login` | Login |
-| `/` | Health (default landing) |
-| `/namespaces` | All namespaces list |
-| `/namespaces/new` | Namespace create form |
-
-**Namespace-scoped routes** (under `<NamespaceLayout>`)
-
-| Path | Page |
-|------|------|
-| `/ns/:name` | Overview |
-| `/ns/:name/config` | Config (action weights, decay, dense hybrid, scoring, trending, gamma, seen-items) |
-| `/ns/:name/catalog` | Catalog config + status + ops |
-| `/ns/:name/catalog/items` | Catalog items browse |
-| `/ns/:name/catalog/items/:id` | Catalog item detail (modal route) |
-| `/ns/:name/events` | Events table + inject event |
-| `/ns/:name/trending` | Trending |
-| `/ns/:name/batch-runs` | Batch runs |
-| `/ns/:name/debug` | Recommend debug |
-| `/ns/:name/demo-data` | Demo data seeder |
-
-The namespace picker writes to `:name` in the URL (replace, not push). Deep links survive page reload.
-
-### 3.3 Page frame
-
-Every page wraps its content in `<PageShell>` and starts with `<PageHeader>`. Location is encoded by the PS1 prompt in the top bar (§3.1.1) — there is **no separate breadcrumb component** inside the page frame.
-
-```
-PageShell (vertical rhythm, px-6 py-6)
-├── PageHeader        (title · meta · actions)
-├── Page-level Notice (error or status, optional)
-├── Loading / Empty state (when applicable)
-└── Main content      (Panels, Tables, Toolbars)
+```tsx
+<Stack gap="200">
+  <FormField>
+    <Label required>Project name</Label>
+    <Input />
+    <FormHelpText>Must be unique within the workspace.</FormHelpText>
+  </FormField>
+  <FormField>
+    <Label>Owner</Label>
+    <Combobox options={people} />
+  </FormField>
+  <Inline gap="100" justify="end">
+    <Button tone="neutral" variant="ghost">Cancel</Button>
+    <Button>Create</Button>
+  </Inline>
+</Stack>
 ```
 
-Width: full app shell width after the sidebar. Constrain only pages with a clear form-reading reason (login card, narrow config form) using `max-w-140` token.
+Use `FormField` for label + input + help/error grouping. Inline action rows for buttons.
 
-`PageHeader` itself stays compact and light: sticky at the top of the scrollable page body, `bg-base border-b border-default`, `px-6 py-4`, bracketed title + optional actions. No duplicated location chips; page metadata belongs in the body below the header.
+### Status callout (when status IS the message)
 
-### 3.4 Grids
-
-- Metric rows: `grid-cols-1 sm:grid-cols-2 xl:grid-cols-4`
-- Two-column panels: `grid-cols-1 xl:grid-cols-2`
-- Cards / repeated items: responsive, never fixed desktop-only columns
-
-## 4. Typography
-
-| Role | Class | Notes |
-|------|-------|-------|
-| Page title | `font-mono text-2xl text-primary leading-6 lowercase` | console-style page label, rendered as `[title]` |
-| Panel title | `text-sm font-semibold text-primary` | sans |
-| Section / meta label | `text-xs font-mono uppercase tracking-[0.04em] text-secondary` | mono uppercase; use `text-muted` only for low-importance labels |
-| Body | `text-sm text-secondary leading-5` | sans |
-| Muted body | `text-sm text-muted leading-5` | sans; avoid for required content |
-| Numeric value | `font-mono tabular-nums text-primary` | always mono |
-| ID / code inline | `font-mono text-xs bg-surface-raised px-1.5 py-0.5 rounded-sm` | use `CodeBadge` |
-| Timestamp / duration | `font-mono tabular-nums` | always mono |
-| Table column header | `font-mono text-xs uppercase text-secondary` | mono |
-
-No negative letter spacing in admin content. Uppercase is reserved for metadata, section labels, and table headers.
-
-Small text rule: 11px mono is allowed only for sidebar section labels, status-adjacent metadata, and extremely compact table headers. If the text is a value or an action, use `text-xs` minimum; if it is a paragraph, use `text-sm`.
-
-## 5. Spacing & Shape
-
-| Surface | Rule |
-|---------|------|
-| Panel padding | `p-5` default; `p-4` only for dense repeated panels |
-| Compact table cell | `px-3 py-2.5` (sans label cells), `px-3 py-2.5 font-mono tabular-nums` (numeric) |
-| Form field vertical spacing | `gap-2` inside field, `gap-4` between form rows |
-| Default control height | `h-9` |
-| Compact toolbar / filter control | `h-8` |
-| Default radius | `rounded-sm` (see §2.3) |
-| Panel border | `border border-default` |
-| Panel divider (in-panel sections) | `border-t border-default` |
-
-Vertical rhythm between major sections: prefer `gap-5` or `mb-5`; dense dashboards may use `gap-4` when the page remains easy to scan.
-
-**Hard rules**:
-- No `rounded-lg`, no `rounded-md`. Only `rounded-none`, `rounded-sm`, `rounded`, `rounded-full`.
-- No nested decorative cards. A panel can contain rows, tables, forms, inline metric tiles. Not another panel shell.
-- No shadow on resting page content. Shadow only on overlays (modal, popover, dropdown) and focus.
-
-## 6. Shared UI Primitives
-
-Page files compose primitives. Don't repeat Tailwind class strings.
-
-**Layout & structure**
-
-- `AppShell` — top-level layout primitive that composes `Sidebar` + `TopBar` + content slot
-- `Sidebar`, `SidebarNavGroup`, `SidebarNavItem` — match §3.1 visual rules. `SidebarNavItem` accepts an optional inline `StatusToken` (used by Health item).
-- `TopBar`, `Ps1Prompt` (location prompt — reads `:name` and current route from React Router, renders `codohue@{ns}:~/{path} $`, makes `@ns` and each path segment clickable), `ThemeToggle`, `UserMenu`
-- `PageShell`, `PageHeader`
-
-**Content**
-
-- `Panel` (bordered surface, optional title / actions / footer; an optional `busy` prop renders a small pulsing accent dot next to the title so pages without a manual Refresh button still surface stale-while-refetch state — pass `query.isFetching && !query.isLoading`). Use for **card semantics** — a distinct content block standing on the canvas.
-- `Section` (borderless content group, optional mono-uppercase title / actions). Use for **grouping under a heading** without nesting a bordered card — pick this for form sections so a page doesn't become a stack of rectangles.
-- `Toolbar` (filter and action rows)
-- `Table`, `Thead`, `Th`, `Tbody`, `Tr`, `Td`
-- `MetricTile`, `Badge`, `KeyValueList`, `CodeBadge` (mono inline IDs)
-- `EmptyState`, `LoadingState`, `Notice`
-
-**Forms**
-
-- `Field`, `Input`, `Select`, `NumberInput`, `Form`, `FormGrid`
-
-**Overlays & interaction**
-
-- `Modal`, `ConfirmDialog`, `Dropdown`
-- `Button` (primary / secondary / ghost / danger; `xs` `sm` `md` `lg`). Top-bar controls (`Cmd+K`, theme, user) use shared `Button size="xs"` rather than bespoke button classes.
-- `CommandPalette` — global modal triggered by `Cmd+K` / `Ctrl+K`. **Primary action interface** (§16). Index includes:
-  - Namespace switching (`prod`, `staging`, `demo`)
-  - Page navigation (jump to any route in §3.2)
-  - Recent items (last viewed catalog item, last batch run)
-  - Quick actions (`Run batch now`, `Inject test event`, `Redrive deadletter`, `Toggle theme`, `Logout`)
-
-**Status & signals**
-
-- `StatusToken` — renders the 6-char `[XXXX]` bracketed status per §2.5.
-- `Kbd` — terminal-style key cap for shortcut hints (`Cmd+K`).
-
-### 6.1 Notice rendering
-
-`Notice` and any status-bearing surface use a **4px left border + status border color + no background fill**, not a tinted bg pill. The pattern is terminal/Unix-DNA (vim error highlights, `notify-send`, dmenu) and avoids the dark-mode problem where tinted backgrounds sit ~1:1 against `bg-base`.
-
-```
-|  [WARN]  qdrant heartbeat missed at 14:02:38 UTC
-|  Embedder ran with degraded latency — investigating.
-
-| = border-l-4 border-warning, transparent background
+```tsx
+<Alert variant="danger">
+  <p><strong>Deploy failed.</strong> Migration 0042 timed out at 14:32.</p>
+</Alert>
 ```
 
-Tailwind composition:
+Or as a card when there's more structure:
 
-```jsx
-<aside className="border-l-4 border-warning bg-transparent pl-4 py-3">
-  <StatusToken state="warn" />
-  <p className="text-sm text-primary">…</p>
-</aside>
+```tsx
+<Card tone="warning" variant="outlined">
+  <CardHeader>
+    <CardTitle>Approaching quota</CardTitle>
+    <CardDescription>You've used 89% of your monthly API budget.</CardDescription>
+  </CardHeader>
+  <CardContent>{/* details */}</CardContent>
+</Card>
 ```
 
-Border-color utility maps to status:
+---
 
-- `border-l-4 border-success` for `[ OK ]` notices
-- `border-l-4 border-warning` for `[WARN]`
-- `border-l-4 border-danger`  for `[FAIL]`
-- `border-l-4 border-accent`  for informational notices
+## Anti-patterns — explicit list
 
-Body text always uses `text-primary` so the message is fully legible; the status color appears in the border + the leading `StatusToken`. Notice may optionally include a dismiss action on the right (rendered as a text button — see §15 on icons).
+| Don't | Do instead | Why |
+|---|---|---|
+| Hardcode hex (`#3B82F6`) | `semantic.color.primary` token | Breaks theme switching, breaks rebranding. |
+| Use `tone="info"` on a card for visual variety | `variant="default"` or `variant="filled"` | Tones encode status meaning. Decorative use trains users to ignore them. |
+| Add `box-shadow` to grouped content cards | Use border + (optional) `variant="filled"` | Shadow signals true z-axis lift. Page-level cards stay flat. |
+| Set `background: white` on a panel | Token-driven `background` | Breaks dark mode. |
+| Override `--davinci-semantic-color-surface` to bring back tiered chrome | Wrap your AppShell in a custom class, override only there | Global override breaks the single-canvas contract everywhere else. |
+| Use `border-bold` for routine card outlines | `border` (the default) | `border-bold` is for hover/emphasis — overuse flattens its meaning. |
+| Use arbitrary spacing (`gap-[18px]`) | Pick the closest spacing token | Arbitrary values fragment vertical rhythm. |
+| Wrap every section in `Card variant="filled"` | `variant="default"` for the baseline; escalate per-section | Filled-everywhere produces a "Bootstrap card soup" look that contradicts the flat philosophy. |
 
-Everything else — typography, spacing, radius, shadow, motion — composes Tailwind utilities backed by the tokens declared in `@theme` (§2). No component writes its own CSS rules; every visual is reachable through utility classes or a shared primitive.
+---
 
-Domain-specific components may live under page folders, but they must use shared primitives for visual structure.
+## Adding a new component
 
-## 7. Buttons & Actions
+1. **Check tokens first.** If your component needs a color/shadow/radius that doesn't exist as a semantic token, the right move is usually adding the token, not hardcoding.
+2. **Component tokens for component-specific decisions.** If your component has its own size variants or paddings, define `component.<name>.*` tokens — don't reach into primitives.
+3. **Reference semantic tokens for color/border/shadow.** Never primitives.
+4. **Use the `.davinci-<component>` BEM-ish class convention** so consumers can override via the layer mechanism.
+5. **Mirror the variant naming conventions:** `variant`, `tone`, `size` props with the value vocab already used by Card/Button/Badge.
+6. **Add JSDoc to the variant/tone union types** explaining intent — that's what AI assistants and IDE tooltips read.
 
-Use buttons only for commands. Links must be real navigation links.
+---
 
-| Variant | Use | Visual |
-|---------|-----|--------|
-| Primary | one main page or panel action | `bg-accent-emphasis text-accent-text` |
-| Secondary | standard non-destructive action | `bg-surface border border-default text-primary` |
-| Ghost | low-emphasis inline action, table-row action | transparent, `text-secondary`, hover `bg-surface-raised` |
-| Danger | destructive action (delete, drop) | `bg-danger text-white`, requires `ConfirmDialog` |
+## Migration / theming hooks
 
-Rules:
-- Button sizes: `xs` = `h-6 px-2 text-xs` for fixed shell chrome; `sm` = `h-8 px-2.5 text-sm` for page-header actions, compact toolbars, and table actions; `md` = `h-9 px-3.5 text-sm` as the default form/content action size; `lg` = `h-10 px-4 text-sm` for rare prominent actions.
-- Page-header primary create actions may use a leading ASCII `+` in the label, for example `+ Create namespace`, until the icon system lands.
-- Stable dimensions on loading. Spinner replaces leading glyph; label may change but width must not jump.
-- Icons only when they improve scan speed. Don't introduce a new icon source — use [components/icons.tsx](src/components/icons.tsx).
+Consumers who need to deviate from the flat single-canvas defaults override semantic tokens after importing Davinci's CSS:
 
-## 8. Forms
+```css
+@import "@jarviisha/davinci-tokens/css/variables.css";
+@import "@jarviisha/davinci-tokens/css/light.css";
 
-- Compact, aligned, predictable.
-- Inline label/value rows for dense settings (use `KeyValueList`).
-- Top labels for filter bars and short input groups.
-- Numeric inputs are narrow + `tabular-nums` + mono.
-- Inputs and selects share height, radius, border, focus, disabled.
-- Long forms grouped by section header (mono uppercase per §4), not by extra card shells.
-- Validation and save errors appear at the form top via `Notice`.
+:root {
+  /* Re-introduce a tiered chrome layer */
+  --davinci-semantic-color-surface: #F8F8F8;
+}
+```
 
-## 9. Tables
+Override scopes:
+- **Global** (`:root`) — affects the whole app.
+- **Subtree** (scoped class) — affects only the wrapped region.
+- **Custom theme class** — pair with `<ThemeProvider>` to switch dynamically.
 
-Tables are the default presentation for events, batch runs, recommendations, catalog items, trending.
+Never patch primitive (`--davinci-color-*`) variables — those are the palette source of truth.
 
-- Column headers: mono uppercase per §4.
-- Table wrapper: `border border-default rounded-sm overflow-x-auto bg-surface`.
-- Row borders subtle. Optional hover `bg-surface-raised`.
-- Numeric columns right-aligned, mono, `tabular-nums`.
-- Timestamps mono.
-- Table actions visually lightweight (ghost buttons or icon-only ghost).
-- Never replace dense tabular operational data with card grids.
-- Horizontal overflow wrapper when columns may exceed viewport.
+---
 
-## 10. Metrics, Status, and Density
+## See also
 
-- Use `MetricTile` for dashboard counts and summary values. Value in mono, label in mono uppercase.
-- Use `StatusToken` for any operational state (the bracketed dmesg token defined in §2.5).
-- Use `Badge` for non-status tags (run trigger source `cron`/`admin`, TTL `5m`, source `cf`/`trending`).
-- Never mix multiple status formats for the same state across pages.
-
-## 11. Motion
-
-Terminals snap, they don't slide. The system should feel **immediate**.
-
-- Page transitions: none.
-- Hover transitions: 100ms color/background only.
-- Modal / Dropdown / CommandPalette enter: **80ms opacity, no translate**. Snap, not slide.
-- Loading: shimmer skeleton via `LoadingState`. No full-page spinner where shimmer fits.
-- Spinner allowed inline in buttons / row actions.
-- **Pulse on `[ RUN]` status only** — 1s breathing opacity (1.0 → 0.55 → 1.0). Functional signal that the run is live, not decoration. No other state pulses. Implemented via CSS `@keyframes`, respects `prefers-reduced-motion`.
-- No type-on, no number tick-up, no caret blink on titles. Decoration is rejected — this is an operations console.
-
-## 12. Accessibility
-
-- Semantic elements: `button`, `a`, `table`, `form`, `label`.
-- Every input has a visible or programmatic label.
-- Focus state must be visible in both themes — use `shadow-focus`.
-- Color is never the only status signal. Pair with glyph + text.
-- Interactive controls have a practical hit area. Sidebar items min `h-8`; fixed shell buttons may use `Button size="xs"` (`h-6`) because they sit in the persistent top bar; page-header and toolbar controls use at least `Button size="sm"` (`h-8`).
-- Keyboard nav: tab order matches visual order. `Esc` closes modals/dropdowns. `Enter` submits forms.
-- `Modal`, `Dropdown`, `ConfirmDialog` trap focus and restore on close.
-- `AppShell` mounts a skip-to-content link as its first tab stop and a global error boundary around the route Outlet. The first focusable inside a Modal receives focus on open (skipping the header Close button); focus is restored to the element that opened the modal.
-- `CommandPalette` is keyboard-first: open with `Cmd+K` / `Ctrl+K`, arrow keys move the highlight inside the input, `Enter` runs the highlighted command, `Esc` closes. The TopBar Cmd+K button dispatches the same toggle so mouse operators have parity.
-
-## 13. State Patterns
-
-Same ordering and placement on every page:
-
-1. `PageHeader` (location is in the top-bar PS1 prompt, not here)
-2. Page-level `Notice` (error or status)
-3. `LoadingState` if no data yet
-4. `EmptyState` if loaded data is empty
-5. Main content
-6. Pagination or footer actions
-
-No custom paragraph-only loading states in new code.
-
-## 14. Per-page Checklist
-
-Use this for every page built:
-
-- [ ] Uses `<PageShell>` + `<PageHeader>`. No standalone breadcrumb component.
-- [ ] Sections use `Panel`, `Toolbar`, `MetricTile`, or table primitives.
-- [ ] No one-off raw colors in page JSX (only token utilities).
-- [ ] No `rounded-lg` / `rounded-md` anywhere.
-- [ ] No nested decorative cards.
-- [ ] No `font-bold` on numeric values — use mono instead.
-- [ ] Numeric values, IDs, timestamps, durations use mono per §4.
-- [ ] All status surfaces use `StatusToken` (`[ OK ]` / `[ RUN]` / `[IDLE]` / `[WARN]` / `[FAIL]` / `[PEND]`).
-- [ ] Loading, empty, error states use shared patterns.
-- [ ] Grids are responsive.
-- [ ] Tables have overflow wrapper.
-- [ ] Page-header actions use shared `Button size="sm"`; fixed top-bar actions use shared `Button size="xs"`.
-- [ ] Both themes legible; focus visible in both.
-- [ ] Routes follow §3.2; route is the source of truth for namespace (`useParams`), not context state.
-- [ ] All quick actions reachable via `CommandPalette` (`Cmd+K`). Adding a new action means registering it in the palette index.
-- [ ] `npm run lint`, `npm run build`, and `tests/urls.test.mjs` pass from `web/admin`.
-
-## 15. Out of Scope
-
-Decisions deliberately deferred:
-
-- Mobile/responsive sidebar (drawer pattern).
-- Internationalization. UI text stays English.
-- RBAC / multi-user. Session model stays single global key per current backend.
-- Theming beyond light/dark (no system-themed variants).
-- Customizable density toggle (default density is the only density).
-- Decorative atmosphere effects (grain overlays, scanlines, vignettes). Operational tools earn identity through ergonomics, not texture.
-- **Icon system.** Every spot that would normally take an icon (sidebar active-row marker, button glyphs, theme/user/menu/close affordances, dropdown chevrons) uses a **plain text label** for now. No SVG drawing, no decorative Unicode glyphs. An `Icon` primitive lands in a separate change once the icon set is supplied; status tokens such as `[ OK ]` / `[FAIL]` stay text (brackets + letters are the designed status format, not icons).
-- **In-app dirty-state navigation guard.** `NamespaceConfigPage` and `CatalogConfigPage` show a `beforeunload` prompt on browser reload/close, but a sidebar/topbar click inside the SPA does not trigger a guard. React Router v7's `useBlocker` requires the data-router (`createBrowserRouter`) and the SPA still uses the legacy `<BrowserRouter>` + `<Routes>` pattern; the migration is deferred to a later phase.
-
-## 16. Memorability Anchors
-
-Three signature elements give the admin a recognizable identity. Every page reinforces all three; none is optional.
-
-1. **PS1 prompt in top bar** (§3.1.1) — `codohue@prod:~/events $`. Location is shell context, not breadcrumb chips. Clickable segments.
-2. **Bracketed dmesg status tokens** (§2.5) — `[ OK ]` `[ RUN]` `[IDLE]` `[WARN]` `[FAIL]` `[PEND]`. Same 6-char token everywhere, color carries semantic, table-aligns naturally.
-3. **Command palette as primary action interface** (§6) — `Cmd+K` opens a fuzzy palette indexing every route, every quick action, every recently-viewed item. Mouse paths exist (sidebar, page buttons), but keyboard is the **intended** path. Every new action must register in the palette.
-
-These earn the product's memorability the way operations tools should: by making the operator faster, not by visual surprise. A new hire learns all three on day one and stops needing the sidebar by week two.
-
-Anti-anchors (deliberately not chosen so the three above stay clean):
-
-- No type-on title, no caret blink — decoration, not function.
-- No giant hero metric tile — operators want uniform scan.
-- No grain / scanlines / vignettes — fights data display.
-- No staggered page-load reveal — annoying on the 50th visit.
+- [USAGE.md](./USAGE.md) — installation, framework integration, troubleshooting.
+- Per-package READMEs — quick API surface for each package.

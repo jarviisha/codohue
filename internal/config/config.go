@@ -31,6 +31,13 @@ type AppConfig struct {
 	BatchIntervalMinutes int
 	LogFormat            string // "json" | "text" (default: "text")
 	APIPort              string // HTTP listen port (default: "2001")
+
+	// Retention windows for observability tables that grow unbounded under
+	// steady-state operation. Zero or negative disables the prune for the
+	// matching table. Read by cmd/cron only.
+	BatchRunRetentionDays       int           // default 30
+	BacklogSamplesRetentionDays int           // default 7
+	RetentionInterval           time.Duration // default 1h
 }
 
 // LoadAPI reads and validates configuration for the API binary.
@@ -83,19 +90,41 @@ func loadBase() (*AppConfig, error) {
 	}
 	cfg.BatchIntervalMinutes = batchInterval
 
+	batchRetention, err := strconv.Atoi(getEnv("CODOHUE_BATCH_RUN_RETENTION_DAYS", "30"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_BATCH_RUN_RETENTION_DAYS: %w", err)
+	}
+	cfg.BatchRunRetentionDays = batchRetention
+
+	backlogRetention, err := strconv.Atoi(getEnv("CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS", "7"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS: %w", err)
+	}
+	cfg.BacklogSamplesRetentionDays = backlogRetention
+
+	retentionInterval, err := time.ParseDuration(getEnv("CODOHUE_RETENTION_INTERVAL", "1h"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_RETENTION_INTERVAL: %w", err)
+	}
+	if retentionInterval <= 0 {
+		return nil, fmt.Errorf("CODOHUE_RETENTION_INTERVAL must be positive, got %s", retentionInterval)
+	}
+	cfg.RetentionInterval = retentionInterval
+
 	return cfg, nil
 }
 
 // AdminConfig holds configuration for the admin dashboard binary.
 type AdminConfig struct {
-	DatabaseURL string
-	RedisURL    string
-	AdminAPIKey string
-	APIURL      string // internal URL of cmd/api for proxying
-	AdminPort   string // HTTP listen port (default: "2002")
-	LogFormat   string // "json" | "text" (default: "text")
-	QdrantHost  string
-	QdrantPort  int
+	DatabaseURL    string
+	RedisURL       string
+	AdminAPIKey    string
+	APIURL         string // internal URL of cmd/api for proxying
+	AdminPort      string // HTTP listen port (default: "2002")
+	LogFormat      string // "json" | "text" (default: "text")
+	QdrantHost     string
+	QdrantPort     int
+	AllowDevOrigin string // CORS allow-origin for the Vite dev server; empty in prod (same-origin embed)
 }
 
 // LoadAdmin reads and validates configuration for the admin binary.
@@ -103,13 +132,14 @@ func LoadAdmin() (*AdminConfig, error) {
 	loadDotenv()
 
 	cfg := &AdminConfig{
-		DatabaseURL: getEnv("DATABASE_URL", ""),
-		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379"),
-		AdminAPIKey: getEnv("CODOHUE_ADMIN_API_KEY", ""),
-		APIURL:      getEnv("CODOHUE_API_URL", "http://localhost:2001"),
-		AdminPort:   getEnv("CODOHUE_ADMIN_PORT", "2002"),
-		LogFormat:   getEnv("CODOHUE_LOG_FORMAT", "text"),
-		QdrantHost:  getEnv("QDRANT_HOST", "localhost"),
+		DatabaseURL:    getEnv("DATABASE_URL", ""),
+		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
+		AdminAPIKey:    getEnv("CODOHUE_ADMIN_API_KEY", ""),
+		APIURL:         getEnv("CODOHUE_API_URL", "http://localhost:2001"),
+		AdminPort:      getEnv("CODOHUE_ADMIN_PORT", "2002"),
+		LogFormat:      getEnv("CODOHUE_LOG_FORMAT", "text"),
+		QdrantHost:     getEnv("QDRANT_HOST", "localhost"),
+		AllowDevOrigin: getEnv("CODOHUE_ALLOW_DEV_ORIGIN", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

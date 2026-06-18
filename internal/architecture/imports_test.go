@@ -66,6 +66,13 @@ func allowedInternalImport(importer, imported string) bool {
 		return true
 	}
 
+	// A domain may import its own subpackages — they are not peers, they are
+	// internal helpers of the domain (e.g. internal/admin uses
+	// internal/admin/sse + internal/admin/eventbus for SSE plumbing).
+	if strings.HasPrefix(imported, importer+"/") {
+		return true
+	}
+
 	rel := strings.TrimPrefix(imported, modulePath+"/internal/")
 	switch {
 	case rel == "config":

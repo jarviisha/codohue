@@ -56,6 +56,23 @@ var (
 		Help: "Total GET /v1/trending requests by namespace.",
 	}, []string{"namespace"})
 
+	// EventsIngestedTotal counts behavioral events successfully persisted,
+	// sliced by namespace + action. Lives in cmd/api's process; the admin
+	// plane derives ingest rates from its own event-tail counter, not from
+	// this metric (the two run in separate processes).
+	EventsIngestedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_events_ingested_total",
+		Help: "Total behavioral events successfully ingested, by namespace + action.",
+	}, []string{"namespace", "action"})
+
+	// IngestErrorsTotal counts events rejected or failed during ingest, by
+	// reason. `reason` is one of: "invalid_payload", "unknown_action",
+	// "insert" (DB write failed), "decode" (malformed request body).
+	IngestErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_ingest_errors_total",
+		Help: "Total ingest errors by namespace + reason.",
+	}, []string{"namespace", "reason"})
+
 	// Catalog auto-embedding metrics (feature 004-catalog-embedder).
 
 	// CatalogItemsEmbeddedTotal counts catalog items successfully embedded
@@ -95,6 +112,62 @@ var (
 		Name: "codohue_catalog_strategy_work_volume_total",
 		Help: "Total strategy-specific work volume (units depend on strategy: items, billed_tokens, billed_cost_micro_usd, etc.).",
 	}, []string{"namespace", "strategy_id", "strategy_version", "unit"})
+
+	// CatalogPendingItems is the live count of catalog_items in non-embedded
+	// state (pending + in_flight + failed + dead_letter) per namespace.
+	// Updated by cmd/embedder's backlog sampler each tick. Operators wire
+	// this in alerts ("backlog > 1000 for 5 min").
+	CatalogPendingItems = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_catalog_pending_items",
+		Help: "Live count of catalog_items still awaiting (pending+in_flight) or failed (failed+dead_letter), per namespace.",
+	}, []string{"namespace", "state"})
+
+	// CatalogConsumerLag is the Redis consumer group pending-entry-list size
+	// for catalog:embed:{ns} — the number of XREADGROUP-delivered items the
+	// embedder consumer hasn't ACKed yet. Spikes mean the worker is choking
+	// or crashed mid-batch.
+	CatalogConsumerLag = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_catalog_consumer_lag",
+		Help: "Redis consumer-group PEL depth on catalog:embed:{ns} per namespace.",
+	}, []string{"namespace"})
+
+	// Admin-plane self-observability metrics. Live in their own
+	// `codohue_admin_*` namespace so dashboards can split operator-facing
+	// data-plane metrics from admin-process health (BUILD_PLAN §12.3).
+
+	// AdminSSEConnectionsActive tracks how many SSE handlers are currently
+	// streaming per stream kind. `stream` label values: "ops" (global ops
+	// bus), "batch_run" (per-run lifecycle stream), "catalog" (per-ns
+	// catalog stream), "ping" (foundation health-check stream).
+	AdminSSEConnectionsActive = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_admin_sse_connections_active",
+		Help: "Active SSE connections by stream kind on the admin plane.",
+	}, []string{"stream"})
+
+	// AdminSSEDroppedTotal counts events dropped on an SSE connection.
+	// `reason` is either "backpressure" (subscriber buffer full — bus drops
+	// oldest) or "client_slow" (Send failed writing to the client socket;
+	// the handler closes the stream after the failure).
+	AdminSSEDroppedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_admin_sse_dropped_total",
+		Help: "Total dropped events on admin SSE streams by stream + reason.",
+	}, []string{"stream", "reason"})
+
+	// AdminEventbusPublishTotal counts every event the in-process admin bus
+	// fans out, by kind. Mirrors the bus's Publish call site exactly.
+	AdminEventbusPublishTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_admin_eventbus_publish_total",
+		Help: "Total events published on the admin event bus by kind.",
+	}, []string{"kind"})
+
+	// AdminEventbusSubscribersActive tracks how many subscribers are
+	// currently attached to the admin event bus. One SSE connection = one
+	// subscriber. A subscriber may filter to multiple kinds — we don't
+	// label by kind because that would double-count.
+	AdminEventbusSubscribersActive = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "codohue_admin_eventbus_subscribers_active",
+		Help: "Active subscriber count on the admin event bus.",
+	})
 )
 
 // Register registers all Codohue metrics with the default Prometheus registry.
@@ -108,9 +181,17 @@ func Register() {
 		IDMappingErrors,
 		TrendingItemsTotal,
 		TrendingRequestsTotal,
+		EventsIngestedTotal,
+		IngestErrorsTotal,
 		CatalogItemsEmbeddedTotal,
 		CatalogEmbedDuration,
 		CatalogEmbedFailuresTotal,
 		CatalogStrategyWorkVolumeTotal,
+		CatalogPendingItems,
+		CatalogConsumerLag,
+		AdminSSEConnectionsActive,
+		AdminSSEDroppedTotal,
+		AdminEventbusPublishTotal,
+		AdminEventbusSubscribersActive,
 	)
 }

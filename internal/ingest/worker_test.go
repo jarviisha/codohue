@@ -17,10 +17,10 @@ type fakeProcessor struct {
 	lastPayload   *EventPayload
 }
 
-func (f *fakeProcessor) Process(_ context.Context, p *EventPayload) error {
+func (f *fakeProcessor) Process(_ context.Context, p *EventPayload) (int64, error) {
 	f.processCalled = true
 	f.lastPayload = p
-	return f.processErr
+	return 0, f.processErr
 }
 
 func TestWorkerHandleMessage_MissingPayload(t *testing.T) {

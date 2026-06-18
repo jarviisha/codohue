@@ -15,9 +15,12 @@ import (
 // extracted from main.run() so cmd/admin/main_test.go can assert that all
 // expected paths are registered without spinning up the full binary.
 //
-// apiKey is forwarded to the session-cookie middleware.
-func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
+// apiKey is forwarded to the session-cookie middleware. allowDevOrigin enables
+// credentialed CORS for the Vite dev server when non-empty (dev mode); empty
+// in production where the SPA is embedded same-origin.
+func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router {
 	r := chi.NewRouter()
+	r.Use(admin.CORSMiddleware(allowDevOrigin))
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
@@ -38,11 +41,25 @@ func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
 
 		r.Get("/api/admin/v1/health", h.GetHealth)
 
+		// SSE smoke endpoint — kept around as a low-cost end-to-end probe for
+		// the streaming pipeline. Removeable once the SPA settles on real
+		// stream sources.
+		r.Get("/api/admin/v1/ping/stream", admin.PingStream)
+
+		// Fleet aggregate — drives the Fleet overview page in one round-trip.
+		r.Get("/api/admin/v1/overview", h.GetOverview)
+
+		// Global ops bus — sidebar badges, toast notifications, etc.
+		r.Get("/api/admin/v1/stream", h.StreamOps)
+
 		// Namespaces
 		r.Get("/api/admin/v1/namespaces", h.ListNamespaces)
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
 		r.Delete("/api/admin/v1/namespaces/{ns}", h.DeleteNamespace)
+
+		// Per-namespace dashboard aggregate.
+		r.Get("/api/admin/v1/namespaces/{ns}/dashboard", h.GetNamespaceDashboard)
 
 		// App-wide reset (danger zone).
 		r.Post("/api/admin/v1/reset", h.ResetApp)
@@ -53,6 +70,9 @@ func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
 
 		// Catalog auto-embedding — operator lifecycle endpoints (US3).
 		r.Post("/api/admin/v1/namespaces/{ns}/catalog/re-embed", h.TriggerReEmbed)
+		r.Get("/api/admin/v1/namespaces/{ns}/catalog/backlog-history", h.GetCatalogBacklogHistory)
+		r.Get("/api/admin/v1/namespaces/{ns}/catalog/failures-summary", h.GetCatalogFailuresSummary)
+		r.Get("/api/admin/v1/namespaces/{ns}/catalog/stream", h.StreamCatalog)
 		r.Get("/api/admin/v1/namespaces/{ns}/catalog/items", h.ListCatalogItems)
 		// Note: bulk redrive must be registered BEFORE the {id} variants so
 		// chi does not parse "redrive-deadletter" as the id parameter.
@@ -61,8 +81,16 @@ func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
 		r.Post("/api/admin/v1/namespaces/{ns}/catalog/items/{id}/redrive", h.RedriveCatalogItem)
 		r.Delete("/api/admin/v1/namespaces/{ns}/catalog/items/{id}", h.DeleteCatalogItem)
 
-		// Batch runs
+		// Batch runs — list / stats / detail / lifecycle / stream.
+		// stats and {id} are siblings under /batch-runs; chi parses the static
+		// "stats" before the {id} parameter, so registering order does not
+		// matter, but keeping them together aids readability.
 		r.Get("/api/admin/v1/batch-runs", h.GetBatchRuns)
+		r.Get("/api/admin/v1/batch-runs/stats", h.GetBatchRunStats)
+		r.Get("/api/admin/v1/batch-runs/{id}", h.GetBatchRunDetail)
+		r.Get("/api/admin/v1/batch-runs/{id}/stream", h.StreamBatchRun)
+		r.Post("/api/admin/v1/batch-runs/{id}/cancel", h.CancelBatchRun)
+		r.Post("/api/admin/v1/batch-runs/{id}/retry", h.RetryBatchRun)
 		r.Get("/api/admin/v1/namespaces/{ns}/batch-runs", h.GetBatchRuns)
 		r.Post("/api/admin/v1/namespaces/{ns}/batch-runs", h.CreateBatchRun)
 
@@ -76,9 +104,16 @@ func newAdminRouter(h *admin.Handler, apiKey string) chi.Router {
 		// Trending
 		r.Get("/api/admin/v1/namespaces/{ns}/trending", h.GetTrending)
 
-		// Events
+		// Events — list / live tail (SSE) / server-side summary / inject.
+		// "stream" and "summary" are static siblings of the list path; chi
+		// resolves them before any parameterised segment.
 		r.Get("/api/admin/v1/namespaces/{ns}/events", h.GetRecentEvents)
+		r.Get("/api/admin/v1/namespaces/{ns}/events/stream", h.StreamEvents)
+		r.Get("/api/admin/v1/namespaces/{ns}/events/summary", h.GetEventsSummary)
 		r.Post("/api/admin/v1/namespaces/{ns}/events", h.InjectEvent)
+
+		// Curated rolling-window metrics for the fleet dashboard.
+		r.Get("/api/admin/v1/metrics/summary", h.GetMetricsSummary)
 
 		// Demo data
 		r.Post("/api/admin/v1/demo-data", h.CreateDemoData)

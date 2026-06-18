@@ -66,6 +66,49 @@ type CatalogBacklog struct {
 	Failed     int `json:"failed"`
 	DeadLetter int `json:"dead_letter"`
 	StreamLen  int `json:"stream_len"`
+	// ConsumerLag is the embedder consumer-group PEL depth on
+	// catalog:embed:{ns} — how many delivered-but-unacked items the worker
+	// is still processing or crashed mid-batch on. 0 when Redis is
+	// unreachable or the group doesn't exist yet.
+	ConsumerLag int `json:"consumer_lag"`
+}
+
+// CatalogBacklogSample is one row of catalog_backlog_samples — written by
+// cmd/embedder's sampler, read by GET /catalog/backlog-history. Embedded is
+// deliberately omitted (the sampler doesn't track it: the timeline is about
+// work-still-to-do, not throughput history).
+type CatalogBacklogSample struct {
+	SampledAt  time.Time `json:"sampled_at"`
+	Pending    int       `json:"pending"`
+	InFlight   int       `json:"in_flight"`
+	Failed     int       `json:"failed"`
+	DeadLetter int       `json:"dead_letter"`
+	StreamLen  int       `json:"stream_len"`
+}
+
+// CatalogBacklogHistoryResponse is the body of
+// GET /api/admin/v1/namespaces/{ns}/catalog/backlog-history.
+type CatalogBacklogHistoryResponse struct {
+	Namespace     string                 `json:"namespace"`
+	WindowSeconds int                    `json:"window_seconds"`
+	Samples       []CatalogBacklogSample `json:"samples"`
+}
+
+// CatalogFailureReason is one bucket of "items that failed for this reason
+// in the requested window" — used by the catalog Status page to surface the
+// top causes operators should investigate first.
+type CatalogFailureReason struct {
+	Reason         string `json:"reason"`
+	Count          int    `json:"count"`
+	SampleObjectID string `json:"sample_object_id,omitempty"`
+}
+
+// CatalogFailuresSummaryResponse is the body of
+// GET /api/admin/v1/namespaces/{ns}/catalog/failures-summary.
+type CatalogFailuresSummaryResponse struct {
+	Namespace     string                 `json:"namespace"`
+	WindowSeconds int                    `json:"window_seconds"`
+	Reasons       []CatalogFailureReason `json:"reasons"`
 }
 
 // NamespaceCatalogResponse is the body of GET /api/admin/v1/namespaces/{ns}/catalog.
@@ -230,6 +273,7 @@ type BatchRunLog struct {
 	Success           bool       `json:"success"`
 	ErrorMessage      *string    `json:"error_message"`
 	TriggerSource     string     `json:"trigger_source"`
+	CancelRequested   bool       `json:"cancel_requested"`
 	LogLines          []LogEntry `json:"log_lines"`
 
 	// Per-phase breakdown (nil when the phase was skipped or the row predates migration 007).
@@ -335,11 +379,13 @@ type BatchRunStats struct {
 }
 
 // BatchRunsResponse is the response for GET /api/admin/v1/batch-runs.
+// Items are summaries (no log_lines / no full per-phase blob); operators
+// click into a row to fetch the BatchRunDetail via /batch-runs/{id}.
 type BatchRunsResponse struct {
-	Items  []BatchRunLog `json:"items"`
-	Total  int           `json:"total"`
-	Offset int           `json:"offset"`
-	Stats  BatchRunStats `json:"stats"`
+	Items  []BatchRunSummary `json:"items"`
+	Total  int               `json:"total"`
+	Offset int               `json:"offset"`
+	Stats  BatchRunStats     `json:"stats"`
 }
 
 // TrendingAdminResponse is the response for GET /api/admin/v1/namespaces/{ns}/trending.
@@ -448,6 +494,61 @@ type InjectEventRequest struct {
 	OccurredAt *string `json:"occurred_at,omitempty"`
 }
 
+// InjectEventResponse is returned by POST /api/admin/v1/namespaces/{ns}/events.
+// event_id is the id of the freshly-persisted row so the SPA can highlight it
+// in the live tail.
+type InjectEventResponse struct {
+	OK      bool  `json:"ok"`
+	EventID int64 `json:"event_id"`
+}
+
+// EventsSummaryAction is one action's share of ingest within the summary window.
+type EventsSummaryAction struct {
+	Action string  `json:"action"`
+	Count  int     `json:"count"`
+	Rate   float64 `json:"rate"`
+}
+
+// EventsSummaryBucket is one time-bucket of the events-over-time series.
+type EventsSummaryBucket struct {
+	Ts    string `json:"ts"`
+	Count int    `json:"count"`
+}
+
+// EventsSummaryResponse is the server-side aggregation backing the events tail
+// sidebar (GET /api/admin/v1/namespaces/{ns}/events/summary).
+type EventsSummaryResponse struct {
+	WindowSeconds int                   `json:"window_seconds"`
+	BucketSeconds int                   `json:"bucket_seconds"`
+	Total         int                   `json:"total"`
+	RatePerSecond float64               `json:"rate_per_second"`
+	ByAction      []EventsSummaryAction `json:"by_action"`
+	Series        []EventsSummaryBucket `json:"series"`
+}
+
+// MetricsSummaryIngest is the ingest slice of /metrics/summary — per-namespace
+// events-per-second derived from the admin-plane rate tracker (not a cross-
+// process Prometheus scrape).
+type MetricsSummaryIngest struct {
+	EventsPerSec1m map[string]float64 `json:"events_per_sec_1m"`
+	EventsPerSec5m map[string]float64 `json:"events_per_sec_5m"`
+}
+
+// MetricsSummaryCron is the cron slice — current batch-job lag.
+type MetricsSummaryCron struct {
+	BatchLagSeconds float64 `json:"batch_lag_seconds"`
+}
+
+// MetricsSummaryResponse is the curated rolling-window metrics view
+// (GET /api/admin/v1/metrics/summary). Recommend/embedder slices are omitted:
+// those counters live in separate processes (cmd/api, cmd/embedder) and are
+// scraped by Prometheus/Grafana directly rather than proxied here.
+type MetricsSummaryResponse struct {
+	GeneratedAt string               `json:"generated_at"`
+	Ingest      MetricsSummaryIngest `json:"ingest"`
+	Cron        MetricsSummaryCron   `json:"cron"`
+}
+
 // DemoDatasetResponse is returned after seeding or clearing the bundled demo dataset.
 type DemoDatasetResponse struct {
 	Namespace           string `json:"namespace"`
@@ -476,6 +577,150 @@ type ResetAppResponse struct {
 	NamespacesDeleted int      `json:"namespaces_deleted"`
 	EventsDeleted     int      `json:"events_deleted"`
 	Namespaces        []string `json:"namespaces"`
+}
+
+// ----------------------------------------------------------------------------
+// Phase 0 schema for the redesigned admin API.
+//
+// These types back the new aggregate + lifecycle endpoints introduced in
+// BUILD_PLAN_WEB_ADMIN_V2.md §3. Existing types above remain in use by the
+// v1 handlers; the new types are wired up as their handlers land per phase.
+// ----------------------------------------------------------------------------
+
+// PhaseEntry is one phase result inside a BatchRunDetail. The mapping of OK
+// + Skipped follows BUILD_PLAN §3.2:
+//
+//	OK = true,  Skipped = nil          → phase ran and succeeded.
+//	OK = false, Error    != nil        → phase ran and failed.
+//	OK = nil,   Skipped  != nil        → phase was skipped (reason in Skipped).
+//
+// Per-phase metric fields (Subjects/Objects/Items) use pointer + omitempty so
+// JSON only carries the metrics that apply to the named phase.
+type PhaseEntry struct {
+	N          int     `json:"n"`
+	Name       string  `json:"name"`
+	OK         *bool   `json:"ok"`
+	Skipped    *string `json:"skipped"`
+	DurationMs int     `json:"duration_ms"`
+	Subjects   *int    `json:"subjects,omitempty"`
+	Objects    *int    `json:"objects,omitempty"`
+	Items      *int    `json:"items,omitempty"`
+	Error      *string `json:"error"`
+}
+
+// TargetStrategy identifies the embed strategy a re-embed batch run was kicked
+// off against. Nil on cron / manual CF runs.
+type TargetStrategy struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+}
+
+// BatchRunSummary is the lightweight row returned in batch-run list endpoints.
+// PhaseStatus[i] ∈ "ok" | "fail" | "skipped" | nil (nil = phase not yet run /
+// run still in flight). UI renders it as three Badge tones (Davinci).
+type BatchRunSummary struct {
+	ID                int64      `json:"id"`
+	Namespace         string     `json:"namespace"`
+	Kind              string     `json:"kind"` // "cf" | "reembed"
+	TriggerSource     string     `json:"trigger_source"`
+	StartedAt         time.Time  `json:"started_at"`
+	CompletedAt       *time.Time `json:"completed_at"`
+	DurationMs        *int       `json:"duration_ms"`
+	Success           bool       `json:"success"`
+	CancelRequested   bool       `json:"cancel_requested"`
+	EntitiesProcessed int        `json:"entities_processed"`
+	PhaseStatus       [3]*string `json:"phase_status"`
+	ErrorMessage      *string    `json:"error_message"`
+}
+
+// BatchRunDetail is the full payload for the single run detail page. Embeds
+// BatchRunSummary and adds the full per-phase breakdown, captured log lines,
+// and target strategy (re-embed only).
+type BatchRunDetail struct {
+	BatchRunSummary
+	Phases         []PhaseEntry    `json:"phases"`
+	LogLines       []LogEntry      `json:"log_lines"`
+	TargetStrategy *TargetStrategy `json:"target_strategy"`
+}
+
+// Alert is one entry on OverviewResponse.Alerts. Levels: "warn" | "error".
+// Kinds match the generation rules in BUILD_PLAN §3.1.
+type Alert struct {
+	Level     string `json:"level"`
+	Namespace string `json:"namespace,omitempty"`
+	Kind      string `json:"kind"`
+	Message   string `json:"message"`
+}
+
+// CronHeartbeat reports cron liveness on /overview.
+type CronHeartbeat struct {
+	LastRunAt  *time.Time `json:"last_run_at"`
+	LagSeconds int        `json:"lag_seconds"`
+	OK         bool       `json:"ok"`
+}
+
+// EmbedderHeartbeat reports embedder liveness on /overview.
+type EmbedderHeartbeat struct {
+	LastSeenAt *time.Time `json:"last_seen_at"`
+	OK         bool       `json:"ok"`
+}
+
+// NamespaceOverviewRun is the compact last-run snapshot inside NamespaceOverview.
+type NamespaceOverviewRun struct {
+	ID          int64      `json:"id"`
+	StartedAt   time.Time  `json:"started_at"`
+	Success     bool       `json:"success"`
+	PhaseStatus [3]*string `json:"phase_status"`
+}
+
+// NamespaceOverviewCatalog is the catalog summary inside NamespaceOverview.
+type NamespaceOverviewCatalog struct {
+	Enabled    bool `json:"enabled"`
+	Pending    int  `json:"pending"`
+	DeadLetter int  `json:"dead_letter"`
+}
+
+// NamespaceOverviewQdrant is the Qdrant point-count summary inside NamespaceOverview.
+type NamespaceOverviewQdrant struct {
+	Subjects uint64 `json:"subjects"`
+	Objects  uint64 `json:"objects"`
+}
+
+// NamespaceOverview is one row in OverviewResponse.Namespaces.
+type NamespaceOverview struct {
+	Namespace       string                   `json:"namespace"`
+	Status          NamespaceStatus          `json:"status"`
+	LastRun         *NamespaceOverviewRun    `json:"last_run"`
+	Events24h       int                      `json:"events_24h"`
+	EventsPerMinNow float64                  `json:"events_per_min_now"`
+	Catalog         NamespaceOverviewCatalog `json:"catalog"`
+	Qdrant          NamespaceOverviewQdrant  `json:"qdrant"`
+}
+
+// OverviewResponse is the body of GET /api/admin/v1/overview — a single
+// payload that drives the Fleet overview page.
+type OverviewResponse struct {
+	GeneratedAt       time.Time           `json:"generated_at"`
+	Health            HealthResponse      `json:"health"`
+	CronHeartbeat     CronHeartbeat       `json:"cron_heartbeat"`
+	EmbedderHeartbeat EmbedderHeartbeat   `json:"embedder_heartbeat"`
+	Alerts            []Alert             `json:"alerts"`
+	Namespaces        []NamespaceOverview `json:"namespaces"`
+}
+
+// NamespaceDashboardResponse is the body of
+// GET /api/admin/v1/namespaces/{ns}/dashboard — everything the /ns/:ns page
+// needs in one round-trip.
+type NamespaceDashboardResponse struct {
+	Namespace       string                `json:"namespace"`
+	GeneratedAt     time.Time             `json:"generated_at"`
+	Config          NamespaceConfig       `json:"config"`
+	LastRuns        []BatchRunSummary     `json:"last_runs"` // up to 12 most recent
+	Catalog         CatalogBacklog        `json:"catalog"`
+	Events24h       int                   `json:"events_24h"`
+	EventsPerMinNow float64               `json:"events_per_min_now"`
+	Qdrant          QdrantInspectResponse `json:"qdrant"`
+	TrendingTTLSec  int                   `json:"trending_ttl_sec"`
 }
 
 // SubjectStats holds raw DB data for a subject used internally by Service.

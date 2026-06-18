@@ -17,6 +17,7 @@ import (
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	"github.com/jarviisha/codohue/internal/nsconfig"
+	"github.com/jarviisha/codohue/internal/retention"
 )
 
 var (
@@ -75,6 +76,20 @@ func run() error {
 	job := newComputeJobFn(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, cfg.BatchIntervalMinutes)
 
 	go job.Run(ctx)
+
+	// Retention: prune batch_run_logs + catalog_backlog_samples on a
+	// configurable interval. Both windows can be disabled by setting their
+	// *_RETENTION_DAYS env var to 0; the job stays alive but only logs.
+	retentionJob := retention.NewJob(retention.NewPgRepository(db), retention.Config{
+		BatchRunRetentionDays:       cfg.BatchRunRetentionDays,
+		BacklogSamplesRetentionDays: cfg.BacklogSamplesRetentionDays,
+		Interval:                    cfg.RetentionInterval,
+	})
+	go func() {
+		if err := retentionJob.Run(ctx); err != nil {
+			slog.Error("retention job exited with error", "error", err)
+		}
+	}()
 
 	quit := make(chan os.Signal, 1)
 	signalNotifyFn(quit, syscall.SIGINT, syscall.SIGTERM)

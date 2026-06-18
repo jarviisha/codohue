@@ -17,7 +17,7 @@ import (
 // route is asserted with a 400 on missing body.
 func TestNewAdminRouter_RegistersCatalogRoutes(t *testing.T) {
 	apiKey := "test-key"
-	r := newAdminRouter(admin.NewHandler(nil, apiKey), apiKey)
+	r := newAdminRouter(admin.NewHandler(nil, apiKey), apiKey, "")
 
 	cases := []struct {
 		method string
@@ -54,7 +54,7 @@ func TestNewAdminRouter_RegistersCatalogRoutes(t *testing.T) {
 
 func TestNewAdminRouter_AuthEndpointReachable(t *testing.T) {
 	apiKey := "test-key"
-	r := newAdminRouter(admin.NewHandler(nil, apiKey), apiKey)
+	r := newAdminRouter(admin.NewHandler(nil, apiKey), apiKey, "")
 
 	// Empty body — handler returns 400 invalid_request, proving the route is wired.
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions", http.NoBody)
@@ -72,7 +72,7 @@ func TestNewAdminRouter_AuthEndpointReachable(t *testing.T) {
 // parsed as the {id} URL parameter.
 func TestNewAdminRouter_BulkRedriveBeforeIDRoute(t *testing.T) {
 	apiKey := "test-key"
-	r := newAdminRouter(admin.NewHandler(nil, apiKey), apiKey)
+	r := newAdminRouter(admin.NewHandler(nil, apiKey), apiKey, "")
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
 		"/api/admin/v1/namespaces/ns/catalog/items/redrive-deadletter", http.NoBody)

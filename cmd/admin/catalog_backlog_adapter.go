@@ -49,7 +49,9 @@ func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string) (adm
 	}
 
 	if a.redis != nil {
-		n, err := a.redis.XLen(ctx, "catalog:embed:"+namespace).Result()
+		stream := "catalog:embed:" + namespace
+
+		n, err := a.redis.XLen(ctx, stream).Result()
 		switch {
 		case err == nil:
 			out.StreamLen = int(n)
@@ -59,6 +61,20 @@ func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string) (adm
 			// Non-fatal: log and leave StreamLen=0 so the rest of the
 			// panel still renders.
 			slog.Debug("catalog backlog xlen failed", "namespace", namespace, "error", err)
+		}
+
+		// ConsumerLag = PEL depth of the embedder consumer group on this
+		// stream. Same non-fatal envelope as XLEN — missing stream/group
+		// is normal during cold start.
+		if groups, err := a.redis.XInfoGroups(ctx, stream).Result(); err == nil {
+			for _, g := range groups {
+				if g.Name == "embedder" {
+					out.ConsumerLag = int(g.Pending)
+					break
+				}
+			}
+		} else if !errors.Is(err, goredis.Nil) {
+			slog.Debug("catalog backlog xinfo groups failed", "namespace", namespace, "error", err)
 		}
 	}
 

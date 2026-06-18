@@ -1,157 +1,180 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { http } from './http'
-import { namespaceKeys } from './namespaces'
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from '@tanstack/react-query'
+import { apiFetch } from './http'
+import { queryKeys } from './queryKeys'
+import type { HealthResponse } from './health'
 
-// ────────────────────────────────────────────────────────────────────────────
-// Wire types — mirror internal/admin/types.go
-// ────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Wire types — mirror Go shapes from internal/admin/types.go. Hand-maintained
+// for now; TypeScript codegen (BUILD_PLAN D7) lands when shape churn slows.
+// ---------------------------------------------------------------------------
 
-export type BatchRunKind = 'cf' | 'reembed'
-export type BatchRunStatusFilter = '' | 'running' | 'ok' | 'failed'
+export type PhaseStatus = 'ok' | 'fail' | 'skipped' | null
 
-export interface BatchRunCreateResponse {
-  id: number
-  namespace: string
+export type PhaseEntry = {
+  n: number
+  name: 'sparse' | 'dense' | 'trending' | string
+  ok: boolean | null
+  skipped: string | null
+  duration_ms: number
+  subjects?: number
+  objects?: number
+  items?: number
+  error: string | null
 }
 
-export interface BatchRunLogEntry {
+export type TargetStrategy = {
+  id: string
+  version: string
+}
+
+export type BatchRunSummary = {
+  id: number
+  namespace: string
+  kind: 'cf' | 'reembed' | string
+  trigger_source: 'cron' | 'manual' | 'admin_reembed' | string
+  started_at: string
+  completed_at: string | null
+  duration_ms: number | null
+  success: boolean
+  cancel_requested: boolean
+  entities_processed: number
+  phase_status: PhaseStatus[]
+  error_message: string | null
+}
+
+export type BatchRunDetail = BatchRunSummary & {
+  phases: PhaseEntry[]
+  log_lines: LogLine[]
+  target_strategy: TargetStrategy | null
+}
+
+export type LogLine = {
   ts: string
-  level: string
+  level: 'info' | 'warn' | 'error' | string
   msg: string
 }
 
-export interface BatchRunLog {
-  id: number
-  namespace: string
-  started_at: string
-  completed_at?: string | null
-  duration_ms?: number | null
-  entities_processed: number
-  success: boolean
-  error_message?: string | null
-  trigger_source: string
-  log_lines?: BatchRunLogEntry[] | null
-
-  phase1_ok?: boolean | null
-  phase1_duration_ms?: number | null
-  phase1_subjects?: number | null
-  phase1_objects?: number | null
-  phase1_error?: string | null
-
-  phase2_ok?: boolean | null
-  phase2_duration_ms?: number | null
-  phase2_items?: number | null
-  phase2_subjects?: number | null
-  phase2_error?: string | null
-
-  phase3_ok?: boolean | null
-  phase3_duration_ms?: number | null
-  phase3_items?: number | null
-  phase3_error?: string | null
-
-  // Catalog re-embed runs only. Records which (strategy_id, strategy_version)
-  // pair the run was kicked off against; null for cron / manual CF rows.
-  target_strategy_id?: string | null
-  target_strategy_version?: string | null
-}
-
-export interface BatchRunStats {
+export type BatchRunStats = {
   total: number
   running: number
   ok: number
   failed: number
 }
 
-export interface BatchRunsListResponse {
-  items: BatchRunLog[]
+export type BatchRunsResponse = {
+  items: BatchRunSummary[]
   total: number
   offset: number
   stats: BatchRunStats
 }
 
-export interface BatchRunsListParams {
-  namespace: string
-  kind?: BatchRunKind
-  status?: BatchRunStatusFilter
+export type BatchRunStatsBucket = {
+  ts: string
+  ok: number
+  failed: number
+  cancelled: number
+  avg_duration_ms: number
+}
+
+export type BatchRunStatsResponse = {
+  window_seconds: number
+  bucket_seconds: number
+  series: BatchRunStatsBucket[]
+}
+
+export type BatchRunsFilter = {
+  namespace?: string
+  status?: 'running' | 'ok' | 'failed' | ''
+  kind?: 'cf' | 'reembed' | ''
   limit?: number
   offset?: number
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Query keys
-// ────────────────────────────────────────────────────────────────────────────
-
-export const batchRunKeys = {
-  all: ['batchRuns'] as const,
-  list: (namespace: string, params?: Omit<BatchRunsListParams, 'namespace'>) =>
-    [
-      'batchRuns',
-      'list',
-      namespace,
-      {
-        kind: params?.kind ?? '',
-        status: params?.status ?? '',
-        limit: params?.limit ?? 20,
-        offset: params?.offset ?? 0,
-      },
-    ] as const,
+export type CreateBatchRunResponse = {
+  id?: number
+  namespace: string
+  status: string
+  started_at: string
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Request functions
-// ────────────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
 
-function queryString(params: Record<string, string | number | undefined>) {
-  const q = new URLSearchParams()
-  for (const [key, value] of Object.entries(params)) {
-    if (value === undefined || value === '') continue
-    q.set(key, String(value))
-  }
-  const encoded = q.toString()
-  return encoded ? `?${encoded}` : ''
+function batchRunsQueryParams(f: BatchRunsFilter): string {
+  const params = new URLSearchParams()
+  if (f.namespace) params.set('namespace', f.namespace)
+  if (f.status) params.set('status', f.status)
+  if (f.kind) params.set('kind', f.kind)
+  if (f.limit != null) params.set('limit', String(f.limit))
+  if (f.offset != null) params.set('offset', String(f.offset))
+  const q = params.toString()
+  return q ? `?${q}` : ''
 }
 
-export function triggerBatchRun(namespace: string) {
-  return http.post<BatchRunCreateResponse>(
-    `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}/batch-runs`,
-    {},
-  )
-}
-
-export function listBatchRuns(params: BatchRunsListParams, signal?: AbortSignal) {
-  const qs = queryString({
-    kind: params.kind,
-    status: params.status,
-    limit: params.limit,
-    offset: params.offset,
+export function useBatchRuns(filter: BatchRunsFilter = {}, opts?: { refetchInterval?: number | false }) {
+  return useQuery({
+    queryKey: queryKeys.batchRuns(filter as Record<string, unknown>),
+    queryFn: () =>
+      apiFetch<BatchRunsResponse>(`/api/admin/v1/batch-runs${batchRunsQueryParams(filter)}`),
+    refetchInterval: opts?.refetchInterval ?? 30_000,
   })
-  return http.get<BatchRunsListResponse>(
-    `/api/admin/v1/namespaces/${encodeURIComponent(params.namespace)}/batch-runs${qs}`,
-    { signal },
-  )
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Hooks
-// ────────────────────────────────────────────────────────────────────────────
+export function useBatchRunDetail(
+  id: number | string | null,
+  options?: Omit<UseQueryOptions<BatchRunDetail>, 'queryKey' | 'queryFn'>,
+) {
+  return useQuery({
+    queryKey: queryKeys.batchRunDetail(id ?? 'unknown'),
+    queryFn: () => apiFetch<BatchRunDetail>(`/api/admin/v1/batch-runs/${id}`),
+    enabled: id != null,
+    ...options,
+  })
+}
 
-export function useTriggerBatchRun() {
+export function useBatchRunStats(window: string = '24h', bucket: string = '1h') {
+  return useQuery({
+    queryKey: queryKeys.batchRunStats(window, bucket),
+    queryFn: () =>
+      apiFetch<BatchRunStatsResponse>(
+        `/api/admin/v1/batch-runs/stats?window=${encodeURIComponent(window)}&bucket=${encodeURIComponent(bucket)}`,
+      ),
+    refetchInterval: 60_000,
+  })
+}
+
+export function useCancelBatchRun() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: triggerBatchRun,
-    onSuccess: (_data, namespace) => {
-      qc.invalidateQueries({ queryKey: namespaceKeys.overview() })
-      qc.invalidateQueries({ queryKey: namespaceKeys.byName(namespace) })
-      qc.invalidateQueries({ queryKey: ['batchRuns', 'list', namespace] })
+    mutationFn: (id: number) =>
+      apiFetch<BatchRunSummary>(`/api/admin/v1/batch-runs/${id}/cancel`, {
+        method: 'POST',
+      }),
+    onSuccess: (_data, id) => {
+      qc.invalidateQueries({ queryKey: queryKeys.batchRunDetail(id) })
+      qc.invalidateQueries({ queryKey: ['batch-runs'] })
     },
   })
 }
 
-export function useBatchRunsList(params: BatchRunsListParams) {
-  return useQuery({
-    queryKey: batchRunKeys.list(params.namespace, params),
-    queryFn: ({ signal }) => listBatchRuns(params, signal),
-    enabled: Boolean(params.namespace),
-    staleTime: 10_000,
+export function useRetryBatchRun() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: number) =>
+      apiFetch<CreateBatchRunResponse>(`/api/admin/v1/batch-runs/${id}/retry`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['batch-runs'] })
+    },
   })
 }
+
+// Local re-export so pages don't have to import from two places.
+export type { HealthResponse }

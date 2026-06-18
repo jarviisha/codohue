@@ -217,6 +217,33 @@ func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedA
 	return nil
 }
 
+// GetCancelRequested reads the cancel_requested flag for a batch run row.
+// Returns false if the row doesn't exist; callers treat ErrNoRows as a soft no.
+func (r *Repository) GetCancelRequested(ctx context.Context, id int64) (bool, error) {
+	var requested bool
+	err := r.db.QueryRow(ctx, `
+		SELECT cancel_requested FROM batch_run_logs WHERE id = $1
+	`, id).Scan(&requested)
+	if err != nil {
+		return false, fmt.Errorf("get cancel_requested %d: %w", id, err)
+	}
+	return requested, nil
+}
+
+// RequestCancel marks the run as cancel-requested. Cron sees the flag at the
+// next phase boundary and tears down the run. The UPDATE is a no-op when the
+// row is already completed.
+func (r *Repository) RequestCancel(ctx context.Context, id int64) (bool, error) {
+	cmd, err := r.db.Exec(ctx, `
+		UPDATE batch_run_logs SET cancel_requested = TRUE
+		WHERE id = $1 AND completed_at IS NULL AND cancel_requested = FALSE
+	`, id)
+	if err != nil {
+		return false, fmt.Errorf("request cancel %d: %w", id, err)
+	}
+	return cmd.RowsAffected() > 0, nil
+}
+
 // UpdateBatchRunPhases writes per-phase metrics into an existing batch_run_logs row.
 func (r *Repository) UpdateBatchRunPhases(ctx context.Context, id int64, phases PhaseResults) error {
 	nullStr := func(s string) *string {

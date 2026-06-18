@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -25,8 +27,18 @@ type adminSvc interface {
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
 	GetQdrant(ctx context.Context, namespace string) (*QdrantInspectResponse, error)
 	CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreateResponse, error)
+	GetBatchRunDetail(ctx context.Context, id int64) (*BatchRunDetail, error)
+	CancelBatchRun(ctx context.Context, id int64) (*BatchRunSummary, int, error)
+	RetryBatchRun(ctx context.Context, id int64) (*BatchRunCreateResponse, int, error)
+	GetBatchRunStats(ctx context.Context, window, bucket time.Duration) ([]BatchRunStatsBucket, error)
+	GetOverview(ctx context.Context) (*OverviewResponse, error)
+	GetNamespaceDashboard(ctx context.Context, namespace string) (*NamespaceDashboardResponse, error)
+	GetCatalogBacklogHistory(ctx context.Context, namespace string, window time.Duration) (*CatalogBacklogHistoryResponse, error)
+	GetCatalogFailuresSummary(ctx context.Context, namespace string, window time.Duration, limit int) (*CatalogFailuresSummaryResponse, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
-	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error
+	GetEventsSummary(ctx context.Context, ns string, window, bucket time.Duration) (*EventsSummaryResponse, error)
+	GetMetricsSummary(ctx context.Context) (*MetricsSummaryResponse, error)
+	InjectEvent(ctx context.Context, ns string, req InjectEventRequest) (int64, error)
 	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteNamespace(ctx context.Context, namespace string) (*NamespaceDeleteResponse, error)
@@ -45,12 +57,18 @@ type adminSvc interface {
 type Handler struct {
 	svc    adminSvc
 	apiKey string
+	bus    *eventbus.Bus // optional; SSE handlers return 503 when nil
 }
 
 // NewHandler creates a new Handler.
 func NewHandler(svc adminSvc, apiKey string) *Handler {
 	return &Handler{svc: svc, apiKey: apiKey}
 }
+
+// SetEventBus wires the in-process event bus into the handler so SSE
+// endpoints can subscribe. The wiring layer (cmd/admin) is expected to call
+// this once at startup. When unset, SSE endpoints return 503.
+func (h *Handler) SetEventBus(b *eventbus.Bus) { h.bus = b }
 
 // CreateSession handles POST /api/v1/auth/sessions — validates the admin API
 // key and issues a session cookie. Returns 201 Created with body
@@ -114,13 +132,10 @@ func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, health)
 }
 
-// ListNamespaces handles GET /api/admin/v1/namespaces.
+// ListNamespaces handles GET /api/admin/v1/namespaces. The legacy
+// ?include=overview branch is gone — the dedicated /api/admin/v1/overview
+// endpoint replaces it.
 func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("include") == "overview" {
-		h.GetNamespacesOverview(w, r)
-		return
-	}
-
 	namespaces, err := h.svc.ListNamespaces(r.Context())
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not list namespaces")
@@ -311,10 +326,11 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get batch runs")
 		return
 	}
-	if runs == nil {
-		runs = []BatchRunLog{}
+	summaries := make([]BatchRunSummary, 0, len(runs))
+	for _, r := range runs {
+		summaries = append(summaries, BatchRunSummaryFromLog(r))
 	}
-	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Items: runs, Total: total, Offset: offset, Stats: stats})
+	httpapi.WriteJSON(w, http.StatusOK, BatchRunsResponse{Items: summaries, Total: total, Offset: offset, Stats: stats})
 }
 
 // GetSubjectRecommendations handles
@@ -500,11 +516,58 @@ func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.InjectEvent(r.Context(), ns, req); err != nil {
+	eventID, err := h.svc.InjectEvent(r.Context(), ns, req)
+	if err != nil {
 		httpapi.WriteError(w, http.StatusBadGateway, "upstream_error", "upstream event API unavailable")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	httpapi.WriteJSON(w, http.StatusAccepted, InjectEventResponse{OK: true, EventID: eventID})
+}
+
+// windowParam maps the ?window= query string (1m|5m|1h) to a duration,
+// defaulting to 1m. Used by the events summary endpoint.
+func windowParam(raw string) time.Duration {
+	switch raw {
+	case "5m":
+		return 5 * time.Minute
+	case "1h":
+		return time.Hour
+	default:
+		return time.Minute
+	}
+}
+
+// GetEventsSummary handles GET /api/admin/v1/namespaces/{ns}/events/summary.
+// The bucket is auto-derived as window/60 (≈60 points), floored at 1s.
+func (h *Handler) GetEventsSummary(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
+		return
+	}
+	window := windowParam(r.URL.Query().Get("window"))
+	bucket := window / 60
+	if bucket < time.Second {
+		bucket = time.Second
+	}
+
+	result, err := h.svc.GetEventsSummary(r.Context(), ns, window, bucket)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not aggregate events")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
+}
+
+// GetMetricsSummary handles GET /api/admin/v1/metrics/summary — curated
+// rolling-window metrics for the fleet dashboard.
+func (h *Handler) GetMetricsSummary(w http.ResponseWriter, r *http.Request) {
+	result, err := h.svc.GetMetricsSummary(r.Context())
+	if err != nil {
+		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not build metrics summary")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
 // CreateDemoData handles POST /api/admin/v1/demo-data — seeds the bundled

@@ -36,10 +36,14 @@ type ReembedWatcherRepo interface {
 //
 // The watcher polls every Interval until ctx is cancelled. It tolerates
 // transient repository errors by logging and retrying on the next tick.
+// When SetEventPublisher has been called, every tick also emits one
+// reembed_progress event per still-open run so the SPA overlay can render
+// a live progress bar.
 type ReembedWatcher struct {
-	repo     ReembedWatcherRepo
-	interval time.Duration
-	clock    func() time.Time
+	repo      ReembedWatcherRepo
+	interval  time.Duration
+	clock     func() time.Time
+	publisher CatalogEventPublisher // optional; nil = no progress events
 }
 
 // NewReembedWatcher creates a new watcher with sane defaults. interval=0
@@ -54,6 +58,10 @@ func NewReembedWatcher(repo ReembedWatcherRepo, interval time.Duration) *Reembed
 		clock:    time.Now,
 	}
 }
+
+// SetEventPublisher wires the publisher used to emit reembed_progress events.
+// Safe to call before Run.
+func (w *ReembedWatcher) SetEventPublisher(p CatalogEventPublisher) { w.publisher = p }
 
 // Run blocks until ctx is cancelled, polling the repo every Interval.
 // Returns nil on graceful shutdown (context.Canceled / DeadlineExceeded
@@ -95,10 +103,10 @@ func (w *ReembedWatcher) tick(ctx context.Context) {
 				slog.String("error", err.Error()))
 			continue
 		}
-		if stale > 0 {
-			continue
-		}
 
+		// Emit progress every tick (even when stale > 0) so the SPA
+		// overlay updates while the run is still in flight. embedded =
+		// processed; embedded + stale = total expected.
 		processed, err := w.repo.CountEmbeddedCatalogItems(ctx, run.Namespace)
 		if err != nil {
 			slog.WarnContext(ctx, "reembed watcher: count embedded items failed",
@@ -106,6 +114,19 @@ func (w *ReembedWatcher) tick(ctx context.Context) {
 				slog.String("namespace", run.Namespace),
 				slog.String("error", err.Error()))
 			processed = 0
+		}
+		if w.publisher != nil {
+			w.publisher.PublishReembedProgress(ctx, CatalogReembedProgressEvent{
+				Namespace:  run.Namespace,
+				BatchRunID: run.ID,
+				Processed:  processed,
+				Total:      processed + stale,
+				At:         w.clock().UTC(),
+			})
+		}
+
+		if stale > 0 {
+			continue
 		}
 
 		now := w.clock().UTC()

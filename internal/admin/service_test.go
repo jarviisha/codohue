@@ -30,6 +30,10 @@ type fakeRepo struct {
 	events                 []EventSummary
 	eventsTotal            int
 	eventsErr              error
+	eventsSummaryTotal     int
+	eventsSummaryByAction  map[string]int
+	eventsSummarySeries    []EventsSummaryBucket
+	eventsSummaryErr       error
 	seededEvents           []demoEvent
 	seededNamespace        string
 	seedErr                error
@@ -93,6 +97,42 @@ type fakeRepo struct {
 	numericObjectID    uint64
 	numericObjectFound bool
 	numericObjectErr   error
+
+	// Phase 1 batch-run lifecycle endpoints
+	batchRunByID            *BatchRunLog
+	batchRunByIDErr         error
+	requestCancelResult     RequestCancelResult
+	requestCancelErr        error
+	requestCancelCalledWith int64
+	batchRunStats           []BatchRunStatsBucket
+	batchRunStatsErr        error
+
+	// Phase 2 catalog backlog history + failures summary
+	backlogHistory     []CatalogBacklogSample
+	backlogHistoryErr  error
+	failuresSummary    []CatalogFailureReason
+	failuresSummaryErr error
+}
+
+func (f *fakeRepo) GetBatchRunByID(_ context.Context, _ int64) (*BatchRunLog, error) {
+	return f.batchRunByID, f.batchRunByIDErr
+}
+
+func (f *fakeRepo) RequestCancel(_ context.Context, id int64) (RequestCancelResult, error) {
+	f.requestCancelCalledWith = id
+	return f.requestCancelResult, f.requestCancelErr
+}
+
+func (f *fakeRepo) GetBatchRunStats(_ context.Context, _, _ int) ([]BatchRunStatsBucket, error) {
+	return f.batchRunStats, f.batchRunStatsErr
+}
+
+func (f *fakeRepo) GetCatalogBacklogHistory(_ context.Context, _ string, _ int) ([]CatalogBacklogSample, error) {
+	return f.backlogHistory, f.backlogHistoryErr
+}
+
+func (f *fakeRepo) GetCatalogFailuresSummary(_ context.Context, _ string, _, _ int) ([]CatalogFailureReason, error) {
+	return f.failuresSummary, f.failuresSummaryErr
 }
 
 func (f *fakeRepo) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
@@ -127,6 +167,10 @@ func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*Subj
 
 func (f *fakeRepo) GetRecentEvents(_ context.Context, _ string, _, _ int, _ string) ([]EventSummary, int, error) {
 	return f.events, f.eventsTotal, f.eventsErr
+}
+
+func (f *fakeRepo) GetEventsSummary(_ context.Context, _ string, _, _ int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error) {
+	return f.eventsSummaryTotal, f.eventsSummaryByAction, f.eventsSummarySeries, f.eventsSummaryErr
 }
 
 func (f *fakeRepo) SeedDemoEvents(_ context.Context, namespace string, events []demoEvent, _ time.Time) (int, error) {
@@ -651,18 +695,21 @@ func TestInjectEvent_Proxy202(t *testing.T) {
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
-		w.Write([]byte(`{"ok":true}`)) //nolint:errcheck // test helper; encoding errors are not meaningful here
+		w.Write([]byte(`{"event_id":99}`)) //nolint:errcheck // test helper; encoding errors are not meaningful here
 	}))
 	defer fake.Close()
 
 	svc := newTestService(&fakeRepo{}, fake.URL, "test-key")
-	err := svc.InjectEvent(context.Background(), "ns1", InjectEventRequest{
+	id, err := svc.InjectEvent(context.Background(), "ns1", InjectEventRequest{
 		SubjectID: "user-1",
 		ObjectID:  "item-1",
 		Action:    "VIEW",
 	})
 	if err != nil {
 		t.Fatalf("expected nil error on 202, got %v", err)
+	}
+	if id != 99 {
+		t.Errorf("event id: got %d, want 99", id)
 	}
 }
 
@@ -674,7 +721,7 @@ func TestInjectEvent_ProxyError(t *testing.T) {
 	defer fake.Close()
 
 	svc := newTestService(&fakeRepo{}, fake.URL, "test-key")
-	err := svc.InjectEvent(context.Background(), "ns1", InjectEventRequest{
+	_, err := svc.InjectEvent(context.Background(), "ns1", InjectEventRequest{
 		SubjectID: "user-1",
 		ObjectID:  "item-1",
 		Action:    "VIEW",

@@ -34,3 +34,10 @@ func All() []TriggerSource {
 // String satisfies fmt.Stringer for ergonomic logging and SQL parameter
 // passing — pgx accepts string-kind values directly.
 func (t TriggerSource) String() string { return string(t) }
+
+// OperatorCancelledMessage is the canonical batch_run_logs.error_message
+// written by cron when it observes cancel_requested. Lives in core/batchrun
+// so the admin handler (which filters / labels cancelled rows) and the
+// compute job (which writes the row) reference one literal — peer-domain
+// imports are forbidden so a shared constant is the only drift-proof option.
+const OperatorCancelledMessage = "operator_cancelled"

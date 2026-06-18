@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 var (
@@ -25,8 +26,9 @@ type nsConfigGetter interface {
 
 // Service processes and persists behavioral events received from Redis Streams.
 type Service struct {
-	repo        eventInserter
-	nsConfigSvc nsConfigGetter
+	repo          eventInserter
+	nsConfigSvc   nsConfigGetter
+	tailPublisher EventTailPublisher
 }
 
 // NewService creates a new Service with the given repository and namespace config service.
@@ -34,15 +36,26 @@ func NewService(repo *Repository, nsConfigSvc nsConfigGetter) *Service {
 	return &Service{repo: repo, nsConfigSvc: nsConfigSvc}
 }
 
-// Process validates the payload, resolves the action weight, and stores the event.
-func (s *Service) Process(ctx context.Context, payload *EventPayload) error {
+// SetTailPublisher wires the live-tail publisher. Optional: a nil publisher
+// (the default) disables the tail fan-out without affecting ingest.
+func (s *Service) SetTailPublisher(p EventTailPublisher) {
+	s.tailPublisher = p
+}
+
+// Process validates the payload, resolves the action weight, and stores the
+// event. On success it returns the generated event id, increments the ingest
+// counter, and publishes the event to the live tail. Failures increment
+// codohue_ingest_errors_total with a reason label.
+func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, error) {
 	if payload.Namespace == "" || payload.SubjectID == "" || payload.ObjectID == "" {
-		return fmt.Errorf("%w: namespace, subject_id, object_id are required", ErrInvalidPayload)
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "invalid_payload").Inc()
+		return 0, fmt.Errorf("%w: namespace, subject_id, object_id are required", ErrInvalidPayload)
 	}
 
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)
 	if err != nil {
-		return fmt.Errorf("resolve weight: %w", err)
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "unknown_action").Inc()
+		return 0, fmt.Errorf("resolve weight: %w", err)
 	}
 
 	event := &Event{
@@ -56,9 +69,23 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) error {
 	}
 
 	if err := s.repo.Insert(ctx, event); err != nil {
-		return fmt.Errorf("insert event: %w", err)
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "insert").Inc()
+		return 0, fmt.Errorf("insert event: %w", err)
 	}
-	return nil
+
+	metrics.EventsIngestedTotal.WithLabelValues(event.Namespace, string(event.Action)).Inc()
+	if s.tailPublisher != nil {
+		s.tailPublisher.Publish(EventTailMessage{
+			ID:         event.ID,
+			Namespace:  event.Namespace,
+			SubjectID:  event.SubjectID,
+			ObjectID:   event.ObjectID,
+			Action:     string(event.Action),
+			Weight:     event.Weight,
+			OccurredAt: event.OccurredAt,
+		})
+	}
+	return event.ID, nil
 }
 
 func (s *Service) resolveWeight(ctx context.Context, ns string, action Action) (float64, error) {

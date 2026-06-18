@@ -25,10 +25,16 @@ type adminRepo interface {
 	ListNamespaces(ctx context.Context) ([]NamespaceConfig, error)
 	GetNamespace(ctx context.Context, namespace string) (*NamespaceConfig, error)
 	GetBatchRunLogs(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
+	GetBatchRunByID(ctx context.Context, id int64) (*BatchRunLog, error)
+	RequestCancel(ctx context.Context, id int64) (RequestCancelResult, error)
+	GetBatchRunStats(ctx context.Context, windowSeconds, bucketSeconds int) ([]BatchRunStatsBucket, error)
+	GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds int) ([]CatalogBacklogSample, error)
+	GetCatalogFailuresSummary(ctx context.Context, namespace string, windowSeconds, limit int) ([]CatalogFailureReason, error)
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
+	GetEventsSummary(ctx context.Context, ns string, windowSecs, bucketSecs int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error)
 	SeedDemoEvents(ctx context.Context, namespace string, events []demoEvent, now time.Time) (int, error)
 	SeedDemoCatalogItems(ctx context.Context, namespace string, items []demoCatalogItem, now time.Time) (int, error)
 	ClearNamespaceData(ctx context.Context, namespace string) (int, error)
@@ -85,6 +91,14 @@ type catalogBacklogReader interface {
 	Read(ctx context.Context, namespace string) (CatalogBacklog, error)
 }
 
+// eventRateReader exposes the admin-plane per-namespace ingest rate, fed by
+// the events-tail bridge. Wired by cmd/admin; *eventsrate.Tracker satisfies
+// it. When nil, ingest rates surface as zero.
+type eventRateReader interface {
+	RatePerSec(namespace string, window time.Duration) float64
+	RatesPerSec(window time.Duration) map[string]float64
+}
+
 type batchRunner interface {
 	RunNamespace(ctx context.Context, namespace string, triggerSource batchrun.TriggerSource)
 }
@@ -126,6 +140,7 @@ type Service struct {
 	catalogPicker   catalogStrategyPicker
 	streamPublisher streamPublisher
 	qdrantDeleter   qdrantPointDeleter
+	eventRate       eventRateReader
 	nowFn           func() time.Time
 	runningBatch    sync.Map // keyed by namespace name; prevents concurrent batch triggers
 	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
@@ -174,6 +189,12 @@ func (s *Service) SetCatalogBacklogReader(r catalogBacklogReader) {
 // re-embed handler returns 503 Service Unavailable.
 func (s *Service) SetCatalogStrategyPicker(p catalogStrategyPicker) {
 	s.catalogPicker = p
+}
+
+// SetEventRateTracker wires the per-namespace ingest-rate tracker. Optional —
+// when nil, ingest rates (fleet events/min, /metrics/summary) surface as zero.
+func (s *Service) SetEventRateTracker(t eventRateReader) {
+	s.eventRate = t
 }
 
 // SetStreamPublisher overrides the default Redis-backed XAdd publisher.
@@ -274,18 +295,28 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 		AvailableStrategies: s.catalogConfig.AvailableStrategies(cfg.EmbeddingDim),
 	}
 	if s.catalogBacklog != nil {
-		// Backlog read failures are non-fatal; surface zero counts so the
-		// admin UI still renders. The error is logged at DEBUG via the
-		// caller's choice, not from inside the service.
+		// Backlog read failures are non-fatal; surface zero counts so the admin
+		// UI still renders, but log so a persistent failure stays visible.
 		if backlog, err := s.catalogBacklog.Read(ctx, namespace); err == nil {
 			resp.Backlog = backlog
+		} else {
+			slog.WarnContext(ctx, "catalog backlog read failed",
+				slog.String("namespace", namespace), slog.String("error", err.Error()))
 		}
 	}
-	// Liveness signals — best-effort, both rows surface as nil when read fails.
+	// Liveness signals — best-effort: each row surfaces as nil when its read
+	// fails, but log the error so a real regression (e.g. a query/scan mismatch)
+	// is not silently swallowed.
 	if t, err := s.repo.GetLastCatalogEmbeddedAt(ctx, namespace); err == nil {
 		resp.LastEmbeddedAt = t
+	} else {
+		slog.WarnContext(ctx, "catalog last-embedded-at read failed",
+			slog.String("namespace", namespace), slog.String("error", err.Error()))
 	}
-	if run, err := s.repo.FindLatestReembedRun(ctx, namespace); err == nil && run != nil {
+	if run, err := s.repo.FindLatestReembedRun(ctx, namespace); err != nil {
+		slog.WarnContext(ctx, "latest reembed run read failed",
+			slog.String("namespace", namespace), slog.String("error", err.Error()))
+	} else if run != nil {
 		resp.LastReEmbed = summarizeReembedRun(run)
 	}
 	return resp, nil
@@ -710,8 +741,9 @@ func (s *Service) GetRecentEvents(ctx context.Context, ns string, limit, offset 
 	}, nil
 }
 
-// InjectEvent proxies a test event injection to cmd/api.
-func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventRequest) error {
+// InjectEvent proxies a test event injection to cmd/api and returns the id of
+// the persisted event so the SPA can highlight it in the live tail.
+func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventRequest) (int64, error) {
 	if req.OccurredAt == nil {
 		now := time.Now().UTC().Format(time.RFC3339)
 		req.OccurredAt = &now
@@ -719,28 +751,35 @@ func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventReq
 
 	payload, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("marshal inject event: %w", err)
+		return 0, fmt.Errorf("marshal inject event: %w", err)
 	}
 
 	url := s.apiURL + "/v1/namespaces/" + ns + "/events"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("build inject event request: %w", err)
+		return 0, fmt.Errorf("build inject event request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.apiKey)
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
-		return fmt.Errorf("inject event proxy: %w", err)
+		return 0, fmt.Errorf("inject event proxy: %w", err)
 	}
 	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body) //nolint:errcheck // best-effort read for error context
-		return fmt.Errorf("inject event upstream returned %d: %s", resp.StatusCode, string(body))
+		return 0, fmt.Errorf("inject event upstream returned %d: %s", resp.StatusCode, string(body))
 	}
-	return nil
+
+	// cmd/api returns {"event_id": N}. Best-effort decode — a missing/garbled
+	// body still means the event landed (202), so we return id=0, not an error.
+	var upstream struct {
+		EventID int64 `json:"event_id"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&upstream) //nolint:errcheck // id is a nice-to-have; absence is non-fatal
+	return upstream.EventID, nil
 }
 
 // CreateDemoData creates the bundled demo namespace and loads deterministic sample events.
