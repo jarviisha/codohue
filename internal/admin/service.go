@@ -295,18 +295,28 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 		AvailableStrategies: s.catalogConfig.AvailableStrategies(cfg.EmbeddingDim),
 	}
 	if s.catalogBacklog != nil {
-		// Backlog read failures are non-fatal; surface zero counts so the
-		// admin UI still renders. The error is logged at DEBUG via the
-		// caller's choice, not from inside the service.
+		// Backlog read failures are non-fatal; surface zero counts so the admin
+		// UI still renders, but log so a persistent failure stays visible.
 		if backlog, err := s.catalogBacklog.Read(ctx, namespace); err == nil {
 			resp.Backlog = backlog
+		} else {
+			slog.WarnContext(ctx, "catalog backlog read failed",
+				slog.String("namespace", namespace), slog.String("error", err.Error()))
 		}
 	}
-	// Liveness signals — best-effort, both rows surface as nil when read fails.
+	// Liveness signals — best-effort: each row surfaces as nil when its read
+	// fails, but log the error so a real regression (e.g. a query/scan mismatch)
+	// is not silently swallowed.
 	if t, err := s.repo.GetLastCatalogEmbeddedAt(ctx, namespace); err == nil {
 		resp.LastEmbeddedAt = t
+	} else {
+		slog.WarnContext(ctx, "catalog last-embedded-at read failed",
+			slog.String("namespace", namespace), slog.String("error", err.Error()))
 	}
-	if run, err := s.repo.FindLatestReembedRun(ctx, namespace); err == nil && run != nil {
+	if run, err := s.repo.FindLatestReembedRun(ctx, namespace); err != nil {
+		slog.WarnContext(ctx, "latest reembed run read failed",
+			slog.String("namespace", namespace), slog.String("error", err.Error()))
+	} else if run != nil {
 		resp.LastReEmbed = summarizeReembedRun(run)
 	}
 	return resp, nil
