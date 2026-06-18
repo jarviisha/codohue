@@ -19,7 +19,7 @@ import (
 func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       entities_processed, success, error_message, trigger_source, log_lines,
+		       entities_processed, success, error_message, trigger_source, cancel_requested, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
@@ -49,7 +49,7 @@ func (r *Repository) FindRunningReembedRun(ctx context.Context, namespace string
 func (r *Repository) FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error) {
 	row := r.db.QueryRow(ctx, `
 		SELECT id, namespace, started_at, completed_at, duration_ms,
-		       entities_processed, success, error_message, trigger_source, log_lines,
+		       entities_processed, success, error_message, trigger_source, cancel_requested, log_lines,
 		       phase1_ok, phase1_duration_ms, phase1_subjects, phase1_objects, phase1_error,
 		       phase2_ok, phase2_duration_ms, phase2_items,    phase2_subjects, phase2_error,
 		       phase3_ok, phase3_duration_ms, phase3_items,    phase3_error,
