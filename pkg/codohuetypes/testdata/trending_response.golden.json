@@ -1,0 +1,14 @@
+{
+  "namespace": "feed",
+  "items": [
+    {
+      "object_id": "obj-1",
+      "score": 12.5
+    }
+  ],
+  "window_hours": 24,
+  "limit": 20,
+  "offset": 0,
+  "total": 1,
+  "generated_at": "2026-01-02T03:04:05Z"
+}
