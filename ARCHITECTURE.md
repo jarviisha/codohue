@@ -341,6 +341,10 @@ Sessions are modeled as a resource: login = create, logout = delete current.
 }
 ```
 
+### 10.4 Strict request decoding
+
+Client-facing mutation endpoints (`events`, `rankings`, `catalog`, embedding) decode their JSON body with `httpapi.DecodeStrict`: unknown fields and trailing data are rejected with `400 invalid_request` rather than silently dropped. A body that carries a field not declared on the wire type (including a redundant `namespace` on `rankings`/`catalog`, where the path is authoritative) is refused. `events` still accepts a body `namespace` because `EventPayload` declares it (the Redis-stream transport needs it); it is overwritten by the path on the HTTP route. The Redis-stream ingest path and the admin plane keep lenient decoding.
+
 ## 11. Event ingestion
 
 Two transports, same worker, same `events` table.
