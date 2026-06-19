@@ -165,9 +165,9 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("load namespace config: %w", err)
 	}
-	if cfg == nil || !cfg.CatalogEnabled {
-		// Namespace was disabled (or deleted) between enqueue and processing.
-		// ACK the entry; do not touch the row.
+	if cfg == nil || cfg.DenseSource != "catalog" {
+		// Namespace was switched off catalog (or deleted) between enqueue and
+		// processing. ACK the entry; do not touch the row.
 		return OutcomeSkipped, nil
 	}
 

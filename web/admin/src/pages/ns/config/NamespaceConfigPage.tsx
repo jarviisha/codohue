@@ -31,11 +31,12 @@ import PageHeader from '@/components/shell/PageHeader'
 import DirtyFormGuard from '@/components/shell/DirtyFormGuard'
 import NamespaceTag from '@/components/NamespaceTag'
 
-const DENSE_STRATEGIES = [
+const DENSE_SOURCES = [
   { value: 'disabled', label: 'disabled — sparse only' },
   { value: 'byoe', label: 'byoe — bring your own embeddings' },
   { value: 'item2vec', label: 'item2vec — cron retrains from events' },
   { value: 'svd', label: 'svd — cron retrains via matrix factorisation' },
+  { value: 'catalog', label: 'catalog — auto-embed from ingested content' },
 ]
 
 const DENSE_DISTANCES = [
@@ -186,7 +187,7 @@ function ConfigForm({
           >
             <FormField
               label="Alpha (sparse weight)"
-              helpText="0 = dense only, 1 = sparse only. Hybrid only kicks in when alpha < 1 AND dense_strategy ≠ disabled."
+              helpText="0 = dense only, 1 = sparse only. Hybrid only kicks in when alpha < 1 AND dense_source ≠ disabled."
             >
               <Input
                 type="number"
@@ -251,14 +252,14 @@ function ConfigForm({
             description="Source + shape of dense embeddings used in the hybrid blend."
           >
             <FormField
-              label="Dense strategy"
-              helpText="How dense vectors are produced: disabled (sparse only), byoe (you push embeddings), or item2vec / svd (cron retrains from events)."
+              label="Dense source"
+              helpText="Single producer of object dense vectors: disabled (sparse only), byoe (you push embeddings), item2vec / svd (cron retrains from events), or catalog (auto-embed ingested content — set the strategy in the Catalog tab)."
             >
               <Select
-                value={draft.dense_strategy}
-                onChange={(e) => setDraft({ ...draft, dense_strategy: e.target.value })}
+                value={draft.dense_source}
+                onChange={(e) => setDraft({ ...draft, dense_source: e.target.value })}
               >
-                {DENSE_STRATEGIES.map((s) => (
+                {DENSE_SOURCES.map((s) => (
                   <option key={s.value} value={s.value}>
                     {s.label}
                   </option>
@@ -461,7 +462,7 @@ function diffConfig(
     { key: 'alpha', initial: initial.alpha, draft: draft.alpha },
     { key: 'max_results', initial: initial.max_results, draft: draft.max_results },
     { key: 'seen_items_days', initial: initial.seen_items_days, draft: draft.seen_items_days },
-    { key: 'dense_strategy', initial: initial.dense_strategy, draft: draft.dense_strategy },
+    { key: 'dense_source', initial: initial.dense_source, draft: draft.dense_source },
     { key: 'embedding_dim', initial: initial.embedding_dim, draft: draft.embedding_dim },
     { key: 'dense_distance', initial: initial.dense_distance, draft: draft.dense_distance },
     { key: 'trending_window', initial: initial.trending_window, draft: draft.trending_window },

@@ -46,7 +46,7 @@ var demoNamespaceConfig = NamespaceUpsertRequest{
 	Alpha:          floatPtr(0.65),
 	MaxResults:     intPtr(20),
 	SeenItemsDays:  intPtr(30),
-	DenseStrategy:  stringPtr("disabled"),
+	DenseSource:    stringPtr("disabled"),
 	EmbeddingDim:   intPtr(demoCatalogStrategyDim),
 	DenseDistance:  stringPtr("cosine"),
 	TrendingWindow: intPtr(72),

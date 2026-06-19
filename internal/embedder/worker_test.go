@@ -113,7 +113,7 @@ type fakeNSLister struct {
 	err  error
 }
 
-func (f *fakeNSLister) ListCatalogEnabled(_ context.Context) ([]*namespace.Config, error) {
+func (f *fakeNSLister) ListCatalogNamespaces(_ context.Context) ([]*namespace.Config, error) {
 	return f.cfgs, f.err
 }
 
@@ -267,8 +267,8 @@ func TestWorker_RefreshNamespaces_StartsConsumersForEnabled(t *testing.T) {
 	}
 
 	lister := &fakeNSLister{cfgs: []*namespace.Config{
-		{Namespace: "ns-a", CatalogEnabled: true},
-		{Namespace: "ns-b", CatalogEnabled: true},
+		{Namespace: "ns-a", DenseSource: "catalog"},
+		{Namespace: "ns-b", DenseSource: "catalog"},
 	}}
 	w := newTestWorker(client, &fakeProcessor{}, lister)
 
@@ -297,7 +297,7 @@ func TestWorker_RefreshNamespaces_StopsDisabledConsumers(t *testing.T) {
 		return nil, ctx.Err()
 	}
 
-	lister := &fakeNSLister{cfgs: []*namespace.Config{{Namespace: "ns-a", CatalogEnabled: true}}}
+	lister := &fakeNSLister{cfgs: []*namespace.Config{{Namespace: "ns-a", DenseSource: "catalog"}}}
 	w := newTestWorker(client, &fakeProcessor{}, lister)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -335,7 +335,7 @@ func TestWorker_RefreshNamespaces_DoubleStartIsNoOp(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	lister := &fakeNSLister{cfgs: []*namespace.Config{{Namespace: "ns-a", CatalogEnabled: true}}}
+	lister := &fakeNSLister{cfgs: []*namespace.Config{{Namespace: "ns-a", DenseSource: "catalog"}}}
 	w := newTestWorker(client, &fakeProcessor{}, lister)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -370,7 +370,7 @@ func TestWorker_Run_ShutsDownOnContextCancel(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}
-	lister := &fakeNSLister{cfgs: []*namespace.Config{{Namespace: "ns-a", CatalogEnabled: true}}}
+	lister := &fakeNSLister{cfgs: []*namespace.Config{{Namespace: "ns-a", DenseSource: "catalog"}}}
 	w := newTestWorker(client, &fakeProcessor{}, lister)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

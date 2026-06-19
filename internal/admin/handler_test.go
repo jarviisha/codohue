@@ -480,39 +480,6 @@ func TestUpsertNamespace_NewKey(t *testing.T) {
 	}
 }
 
-func TestUpsertNamespace_DenseStrategyConflict_400(t *testing.T) {
-	// Service surfaces *CatalogStrategyConflict when the operator tries to
-	// flip dense_strategy to a cron-trained value while catalog is enabled.
-	// The handler must emit 400 with the typed body (not the default 500
-	// "internal_error" the pre-fix handler returned for every error).
-	h := newTestHandler(&fakeSvc{
-		upsertErr: &CatalogStrategyConflict{DenseStrategy: "svd", CatalogEnabled: true},
-	})
-	rec := httptest.NewRecorder()
-	body := `{"dense_strategy":"svd","lambda":0.05}`
-	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/ns", map[string]string{"ns": "ns"}, body)
-	h.UpsertNamespace(rec, r)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	var parsed struct {
-		Code           string `json:"code"`
-		DenseStrategy  string `json:"dense_strategy"`
-		CatalogEnabled bool   `json:"catalog_enabled"`
-	}
-	assertJSON(t, rec, &parsed)
-	if parsed.Code != "dense_strategy_conflict" {
-		t.Errorf("code = %q, want dense_strategy_conflict", parsed.Code)
-	}
-	if parsed.DenseStrategy != "svd" {
-		t.Errorf("dense_strategy = %q, want svd", parsed.DenseStrategy)
-	}
-	if !parsed.CatalogEnabled {
-		t.Errorf("catalog_enabled = false, want true")
-	}
-}
-
 func TestUpsertNamespace_OtherError_500(t *testing.T) {
 	// Sanity: errors that aren't typed conflicts still surface as 500. This
 	// pins the handler's behavior so a future change to the conflict branch
@@ -1099,41 +1066,6 @@ func TestUpdateCatalogConfig_DimensionMismatch_400(t *testing.T) {
 	if !bytes.Contains([]byte(got), []byte(`"strategy_dim":64`)) ||
 		!bytes.Contains([]byte(got), []byte(`"namespace_embedding_dim":128`)) {
 		t.Errorf("body missing dim fields: %s", got)
-	}
-}
-
-func TestUpdateCatalogConfig_DenseStrategyConflict_400(t *testing.T) {
-	svc := &fakeSvc{catalogUpdateErr: &CatalogStrategyConflict{DenseStrategy: "item2vec", CatalogEnabled: true}}
-	h := newTestHandler(svc)
-	rec := httptest.NewRecorder()
-	body := `{"enabled":true,"strategy_id":"hash","strategy_version":"v1"}`
-	r := newChiRequest(http.MethodPut, "/api/admin/v1/namespaces/ns/catalog", map[string]string{"ns": "ns"}, body)
-
-	h.UpdateCatalogConfig(rec, r)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
-	}
-	// Body must include the conflict code + both offending fields so the
-	// admin UI can render an actionable message without parsing free text.
-	var parsed struct {
-		Error          string `json:"error"`
-		Code           string `json:"code"`
-		DenseStrategy  string `json:"dense_strategy"`
-		CatalogEnabled bool   `json:"catalog_enabled"`
-	}
-	assertJSON(t, rec, &parsed)
-	if parsed.Code != "dense_strategy_conflict" {
-		t.Errorf("code = %q, want dense_strategy_conflict", parsed.Code)
-	}
-	if parsed.DenseStrategy != "item2vec" {
-		t.Errorf("dense_strategy = %q, want item2vec", parsed.DenseStrategy)
-	}
-	if !parsed.CatalogEnabled {
-		t.Errorf("catalog_enabled = false, want true")
-	}
-	if parsed.Error == "" {
-		t.Errorf("error string missing in body")
 	}
 }
 

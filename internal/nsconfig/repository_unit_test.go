@@ -72,14 +72,15 @@ func setTime(dest any, value time.Time) error {
 	return nil
 }
 
-// fillScanRow populates the 22-field scan row used by Repository.Upsert,
+// fillScanRow populates the 23-field scan row used by Repository.Upsert,
 // Repository.Get, and Repository.UpsertCatalogConfig. weightsRaw is the
 // JSON-encoded action_weights bytes; paramsRaw is the JSON-encoded
 // catalog_strategy_params bytes. Field positions match the scan order in
-// repository.go; tests that need to inject a malformed value at a specific
-// position can call this helper and then overwrite the field they care about.
+// repository.go (dense_source follows dense_strategy during the dual-write
+// window); tests that need to inject a malformed value at a specific position
+// can call this helper and then overwrite the field they care about.
 func fillScanRow(dest []any, weightsRaw, paramsRaw []byte, now time.Time) error {
-	if len(dest) < 22 {
+	if len(dest) < 23 {
 		return errors.New("scan dest too short")
 	}
 	if err := setString(dest[0], "ns"); err != nil {
@@ -109,43 +110,46 @@ func fillScanRow(dest []any, weightsRaw, paramsRaw []byte, now time.Time) error 
 	if err := setString(dest[8], "disabled"); err != nil {
 		return err
 	}
-	if err := setInt(dest[9], 64); err != nil {
+	if err := setString(dest[9], "disabled"); err != nil {
 		return err
 	}
-	if err := setString(dest[10], "cosine"); err != nil {
+	if err := setInt(dest[10], 64); err != nil {
 		return err
 	}
-	if err := setInt(dest[11], 24); err != nil {
+	if err := setString(dest[11], "cosine"); err != nil {
 		return err
 	}
-	if err := setInt(dest[12], 600); err != nil {
+	if err := setInt(dest[12], 24); err != nil {
 		return err
 	}
-	if err := setFloat64(dest[13], 0.1); err != nil {
+	if err := setInt(dest[13], 600); err != nil {
 		return err
 	}
-	if err := setBool(dest[14], false); err != nil {
+	if err := setFloat64(dest[14], 0.1); err != nil {
 		return err
 	}
-	if err := setString(dest[15], ""); err != nil {
+	if err := setBool(dest[15], false); err != nil {
 		return err
 	}
 	if err := setString(dest[16], ""); err != nil {
 		return err
 	}
-	if err := setBytes(dest[17], paramsRaw); err != nil {
+	if err := setString(dest[17], ""); err != nil {
 		return err
 	}
-	if err := setInt(dest[18], 5); err != nil {
+	if err := setBytes(dest[18], paramsRaw); err != nil {
 		return err
 	}
-	if err := setInt(dest[19], 32768); err != nil {
+	if err := setInt(dest[19], 5); err != nil {
 		return err
 	}
-	if err := setTime(dest[20], now); err != nil {
+	if err := setInt(dest[20], 32768); err != nil {
 		return err
 	}
-	return setTime(dest[21], now)
+	if err := setTime(dest[21], now); err != nil {
+		return err
+	}
+	return setTime(dest[22], now)
 }
 
 func TestNewRepository(t *testing.T) {
@@ -271,13 +275,13 @@ func TestRepositoryGet_PopulatesCatalogFields(t *testing.T) {
 				}
 				// Override the catalog defaults set by fillScanRow with an
 				// enabled/v1 strategy so we can assert population.
-				if err := setBool(dest[14], true); err != nil {
+				if err := setBool(dest[15], true); err != nil {
 					return err
 				}
-				if err := setString(dest[15], "internal-hashing-ngrams"); err != nil {
+				if err := setString(dest[16], "internal-hashing-ngrams"); err != nil {
 					return err
 				}
-				return setString(dest[16], "v1")
+				return setString(dest[17], "v1")
 			}}
 		},
 	}

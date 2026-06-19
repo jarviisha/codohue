@@ -18,11 +18,12 @@ import {
 } from '@jarviisha/davinci-react-ui'
 import { useUpsertNamespace } from '@/services/namespaces'
 
-const DENSE_STRATEGIES = [
+const DENSE_SOURCES = [
   { value: 'disabled', label: 'disabled — sparse only' },
   { value: 'byoe', label: 'byoe — bring your own embeddings' },
   { value: 'item2vec', label: 'item2vec — cron retrains from events' },
   { value: 'svd', label: 'svd — cron retrains via matrix factorisation' },
+  { value: 'catalog', label: 'catalog — auto-embed from ingested content' },
 ]
 
 type Props = {
@@ -48,7 +49,7 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
   const upsert = useUpsertNamespace()
 
   const [namespace, setNamespace] = useState('')
-  const [denseStrategy, setDenseStrategy] = useState('disabled')
+  const [denseSource, setDenseSource] = useState('disabled')
   const [embeddingDim, setEmbeddingDim] = useState(64)
   const [apiKeyShown, setApiKeyShown] = useState<string | null>(null)
 
@@ -58,7 +59,7 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
       {
         namespace,
         body: {
-          dense_strategy: denseStrategy,
+          dense_source: denseSource,
           embedding_dim: embeddingDim,
         },
       },
@@ -137,9 +138,9 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
                 />
               </FormField>
 
-              <FormField label="Dense strategy" required>
-                <Select value={denseStrategy} onChange={(e) => setDenseStrategy(e.target.value)}>
-                  {DENSE_STRATEGIES.map((s) => (
+              <FormField label="Dense source" required>
+                <Select value={denseSource} onChange={(e) => setDenseSource(e.target.value)}>
+                  {DENSE_SOURCES.map((s) => (
                     <option key={s.value} value={s.value}>
                       {s.label}
                     </option>

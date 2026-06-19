@@ -81,7 +81,7 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 	if cfg == nil {
 		return nil, ErrNamespaceNotFound
 	}
-	if !cfg.CatalogEnabled {
+	if cfg.DenseSource != "catalog" {
 		return nil, ErrNamespaceNotEnabled
 	}
 

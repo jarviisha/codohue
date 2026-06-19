@@ -141,7 +141,7 @@ The cron binary runs three phases per namespace on each tick:
 | Phase | Name     | Description                                                                           |
 | ----- | -------- | ------------------------------------------------------------------------------------- |
 | 1     | Sparse   | Recomputes CF sparse vectors and upserts to `{ns}_subjects` / `{ns}_objects` Qdrant collections |
-| 2     | Dense    | Trains item embeddings via `item2vec` or `svd` strategy; derives user embeddings via mean pooling; upserts to `{ns}_subjects_dense` / `{ns}_objects_dense`. Skipped when `dense_strategy` is `"byoe"` or `"disabled"` |
+| 2     | Dense    | Trains item embeddings via `item2vec` or `svd` strategy; derives user embeddings via mean pooling; upserts to `{ns}_subjects_dense` / `{ns}_objects_dense`. Runs only when `dense_source` is `"item2vec"` or `"svd"` (skipped for `"byoe"`, `"catalog"`, `"disabled"`) |
 | 3     | Trending | Computes time-decayed trending scores from recent events and caches them in Redis ZSET. Skipped when Redis is unavailable |
 
 ### Key Design Decisions
@@ -149,7 +149,7 @@ The cron binary runs three phases per namespace on each tick:
 - **Full recompute strategy**: The cron job recalculates all vectors from scratch each run to avoid incremental update race conditions. No get→merge→upsert pattern. Item2Vec retrains fully each run — incremental online Word2Vec is deliberately avoided because it causes catastrophic forgetting.
 - **ID mapping via DB**: String IDs map to numeric Qdrant point IDs through the `id_mappings` table (BIGSERIAL), avoiding hash collisions.
 - **Sparse vectors**: `{ns}_subjects` and `{ns}_objects` Qdrant collections hold sparse interaction vectors (dot product similarity).
-- **Dense hybrid (BYOE)**: `{ns}_subjects_dense` and `{ns}_objects_dense` hold externally-provided dense embeddings. When `alpha < 1.0` and `dense_strategy != "disabled"`, the recommend service blends sparse CF scores (weight=`alpha`) with dense scores (weight=`1-alpha`) using min-max normalization before merging.
+- **Dense source (unified)**: a single `dense_source` enum names the producer of object dense vectors — `disabled` | `item2vec` | `svd` | `byoe` | `catalog`. It supersedes the old `dense_strategy` + `catalog_enabled` pair (those two columns remain during the migration-016 dual-write window and are dropped in 017). `{ns}_subjects_dense` / `{ns}_objects_dense` hold the dense embeddings. When `alpha < 1.0` and `dense_source != "disabled"`, the recommend service blends sparse CF scores (weight=`alpha`) with dense scores (weight=`1-alpha`) using min-max normalization before merging. Selecting `catalog` is how catalog auto-embedding is enabled — there is no separate boolean, so the old dense_strategy↔catalog conflict is structurally impossible.
 - **Time decay**: Events older than 90 days excluded. Freshness multiplier `e^(-λ × days_since)` applied during vector build; γ-based object freshness applied at rerank time.
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
@@ -173,11 +173,11 @@ Every business capability is reachable from exactly one canonical path. Legacy d
 | Method   | Path                                                                    | Description                                                            |
 | -------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `POST`   | `/v1/namespaces/{ns}/events`                                            | Ingest a behavioral event (202 Accepted + `{"event_id":N}`; namespace in body is ignored). Also fans the event onto the `codohue:events-tail:{ns}` pub/sub channel for the admin live tail. |
-| `POST`   | `/v1/namespaces/{ns}/catalog`                                           | Ingest raw content for catalog auto-embedding (202; only when `catalog_enabled`; embedder consumer asynchronously upserts the dense vector) |
+| `POST`   | `/v1/namespaces/{ns}/catalog`                                           | Ingest raw content for catalog auto-embedding (202; only when `dense_source="catalog"`; embedder consumer asynchronously upserts the dense vector) |
 | `GET`    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`                     | CF recommendations for a subject (`?limit=&offset=`)                   |
 | `POST`   | `/v1/namespaces/{ns}/rankings`                                          | Score and rank up to 500 candidate items for a subject (200, computed) |
 | `GET`    | `/v1/namespaces/{ns}/trending`                                          | Trending items from Redis ZSET (`?limit=&offset=&window_hours=`)       |
-| `PUT`    | `/v1/namespaces/{ns}/objects/{id}/embedding`                            | Store/replace BYOE dense vector for an object (idempotent, 204). Returns **409 Conflict** when the namespace has `catalog_enabled=true` (catalog auto-embedding is the source of truth in that mode). |
+| `PUT`    | `/v1/namespaces/{ns}/objects/{id}/embedding`                            | Store/replace BYOE dense vector for an object (idempotent, 204). Returns **409 Conflict** when the namespace has `dense_source="catalog"` (catalog auto-embedding is the source of truth in that mode). |
 | `PUT`    | `/v1/namespaces/{ns}/subjects/{id}/embedding`                           | Store/replace BYOE dense vector for a subject (idempotent, 204). NOT guarded by catalog mode — subject vectors continue through `cmd/cron` mean-pooling regardless. |
 | `DELETE` | `/v1/namespaces/{ns}/objects/{id}`                                      | Remove an object from all Qdrant collections (idempotent, 204)         |
 
@@ -257,6 +257,7 @@ Key columns added by later migrations:
 - **013** — `cancel_requested` on `batch_run_logs` + partial index `idx_batch_run_logs_running_cancel` for operator-initiated cancel between phases
 - **014** — `catalog_backlog_samples` table for the persisted backlog timeline (one row per ns per 30s sampler tick, skip-on-unchanged)
 - **015** — indexes on `batch_run_logs.started_at` + `catalog_backlog_samples.sampled_at` to support the cron retention prune (`CODOHUE_BATCH_RUN_RETENTION_DAYS` / `CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS`)
+- **016** — `dense_source` on namespace_configs (single producer enum: `disabled`/`item2vec`/`svd`/`byoe`/`catalog`), backfilled from `catalog_enabled`/`dense_strategy` + CHECK constraint; legacy columns kept for the dual-write window (dropped in 017)
 
 ## Environment Variables
 
@@ -340,5 +341,5 @@ Rules:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/004-catalog-embedder/plan.md
+at specs/005-dense-source-unification/plan.md
 <!-- SPECKIT END -->

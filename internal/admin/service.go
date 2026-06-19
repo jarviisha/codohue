@@ -256,10 +256,6 @@ func (s *Service) GetNamespace(ctx context.Context, namespace string) (*Namespac
 func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error) {
 	resp, err := s.nsConfigSvc.Upsert(ctx, namespace, req)
 	if err != nil {
-		var conflictErr *CatalogStrategyConflict
-		if errors.As(err, &conflictErr) {
-			return nil, http.StatusBadRequest, err
-		}
 		return nil, http.StatusInternalServerError, fmt.Errorf("upsert namespace: %w", err)
 	}
 	status := http.StatusOK

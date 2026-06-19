@@ -475,7 +475,7 @@ func TestStoreObjectEmbedding_CatalogEnabled_ReturnsErrCatalogActive(t *testing.
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{
 			EmbeddingDim:           4,
-			CatalogEnabled:         true,
+			DenseSource:            "catalog",
 			CatalogStrategyID:      "internal-hashing-ngrams",
 			CatalogStrategyVersion: "v1",
 		},
@@ -495,7 +495,7 @@ func TestStoreSubjectEmbedding_CatalogEnabled_NotGuarded(t *testing.T) {
 		cfg: &namespace.Config{
 			EmbeddingDim:           4,
 			DenseDistance:          "cosine",
-			CatalogEnabled:         true,
+			DenseSource:            "catalog",
 			CatalogStrategyID:      "internal-hashing-ngrams",
 			CatalogStrategyVersion: "v1",
 		},

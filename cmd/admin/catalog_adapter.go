@@ -45,7 +45,7 @@ func (a *catalogConfigAdapter) GetCatalog(ctx context.Context, ns string) (*admi
 	}
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
-		Enabled:         cfg.CatalogEnabled,
+		Enabled:         cfg.DenseSource == "catalog",
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,
 		Params:          cfg.CatalogStrategyParams,
@@ -83,7 +83,6 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req
 	cfg, err := a.nsSvc.UpdateCatalogConfig(ctx, ns, nsReq)
 	if err != nil {
 		var dimErr *nsconfig.DimensionMismatchError
-		var conflictErr *nsconfig.DenseStrategyConflictError
 		switch {
 		case errors.Is(err, nsconfig.ErrNamespaceNotFound):
 			return nil, nil
@@ -92,11 +91,6 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req
 				StrategyDim:           dimErr.StrategyDim,
 				NamespaceEmbeddingDim: dimErr.NamespaceEmbeddingDim,
 			}
-		case errors.As(err, &conflictErr):
-			return nil, &admin.CatalogStrategyConflict{
-				DenseStrategy:  conflictErr.DenseStrategy,
-				CatalogEnabled: conflictErr.CatalogEnabled,
-			}
 		default:
 			return nil, err
 		}
@@ -104,7 +98,7 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req
 
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
-		Enabled:         cfg.CatalogEnabled,
+		Enabled:         cfg.DenseSource == "catalog",
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,
 		Params:          cfg.CatalogStrategyParams,
@@ -124,7 +118,7 @@ func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, ns string
 	if err != nil {
 		return "", "", false, fmt.Errorf("get namespace: %w", err)
 	}
-	if cfg == nil || !cfg.CatalogEnabled {
+	if cfg == nil || cfg.DenseSource != "catalog" {
 		return "", "", false, nil
 	}
 	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil

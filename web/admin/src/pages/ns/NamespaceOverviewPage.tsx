@@ -92,11 +92,11 @@ export default function NamespaceOverviewPage() {
               <h1 className="text-xl font-semibold">
                 <NamespaceTag name={data.namespace} />
               </h1>
-              {config?.catalog_enabled && <Badge variant="success">catalog</Badge>}
+              {config?.dense_source === 'catalog' && <Badge variant="success">catalog</Badge>}
             </Inline>
             {config && (
               <p className="text-foreground-subtle text-sm">
-                dense_strategy={config.dense_strategy} · embedding_dim={config.embedding_dim} ·
+                dense_source={config.dense_source} · embedding_dim={config.embedding_dim} ·
                 alpha={config.alpha} · λ={config.lambda}
               </p>
             )}
@@ -136,7 +136,7 @@ export default function NamespaceOverviewPage() {
           <Tile label="Events / min" value={eventsPerMin.toFixed(1)} />
           <Tile label="Sparse subjects" value={subjectsCount.toLocaleString()} />
           <Tile label="Sparse objects" value={objectsCount.toLocaleString()} />
-          {config?.catalog_enabled && (
+          {config?.dense_source === 'catalog' && (
             <Tile
               label="Catalog backlog"
               value={catalog.pending.toLocaleString()}
