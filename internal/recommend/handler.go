@@ -102,7 +102,7 @@ func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RankRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
 		return
 	}
@@ -207,7 +207,7 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	}
 
 	var req EmbeddingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Vector) == 0 {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil || len(req.Vector) == 0 {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body: vector required")
 		return
 	}

@@ -41,7 +41,7 @@ make test-race                             # run tests with -race detector
 
 make test-e2e         # build binaries and run e2e suite (./e2e/..., -tags=e2e)
 make test-e2e-api     # e2e subset that exercises only cmd/api
-make test-e2e-heavy   # e2e subset for ingest + cron + recompute flows
+make test-e2e-heavy   # e2e subset for ingest + cron + recompute + catalog + admin-plane flows
 
 make coverage             # generate ./tmp/coverage/unit.out and print total
 make coverage-html        # open HTML coverage report
@@ -154,6 +154,7 @@ The cron binary runs three phases per namespace on each tick:
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
 - **Two-tier auth**: Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and is **not** accepted by the data plane for mutations — namespace configuration lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate data-plane requests, with fallback to the global key when a namespace has no key provisioned.
+- **Locked client wire contract**: The client-facing JSON types live once in `pkg/codohuetypes` and are re-exported into the server domains via type aliases (e.g. `type Response = codohuetypes.Response`), so the server marshals the exact struct the SDK unmarshals. Request bodies are decoded with `httpapi.DecodeStrict` (rejects unknown fields + trailing data → 400), so client typos fail loudly instead of being silently dropped — a redundant `namespace` in the rankings/catalog body is rejected (the URL path is authoritative; `events` still carries `namespace` because the Redis-stream transport needs it). The marshaled shape of every wire type is pinned by golden snapshots in `pkg/codohuetypes/testdata/` (see the wire-contract convention below).
 
 ### REST API — `cmd/api` (port 2001)
 
@@ -305,6 +306,16 @@ All code comments (inline comments, doc comments, TODO notes) must be written in
 ### Test files
 
 Every file that contains business logic (`service.go`, `repository.go`, `job.go`, `worker.go`) must have a corresponding `_test.go` file. Handler tests live in `handler_test.go`. Files that only declare types (`types.go`) or wire dependencies (`docs.go`) do not require test files.
+
+### Wire contract (`pkg/codohuetypes`)
+
+The client-facing JSON types are the public contract — treat changes to them as breaking. Any rename, removal, retype, or json-tag change is caught by the golden snapshots in [pkg/codohuetypes/golden_test.go](pkg/codohuetypes/golden_test.go) (one `testdata/*.golden.json` per type). After a **deliberate** contract change, regenerate and commit the snapshots so the diff is reviewed:
+
+```bash
+go test ./pkg/codohuetypes/... -run Golden -update
+```
+
+When adding a new client-facing wire type, add a case to that test (the orphan guard fails if a snapshot has no matching case). New request fields on existing types must be added to the struct in `codohuetypes` — `httpapi.DecodeStrict` rejects anything not declared there.
 
 ### Commit messages
 

@@ -105,6 +105,7 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+	stopAdminServer()
 	cleanupNamespaceData(testNS)
 
 	// Kill the subprocess and wait for it to exit cleanly before os.Exit so that

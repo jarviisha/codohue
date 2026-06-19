@@ -1,0 +1,16 @@
+{
+  "subject_id": "subj-1",
+  "namespace": "feed",
+  "items": [
+    {
+      "object_id": "obj-1",
+      "score": 0.875,
+      "rank": 1
+    }
+  ],
+  "source": "collaborative_filtering",
+  "limit": 20,
+  "offset": 0,
+  "total": 1,
+  "generated_at": "2026-01-02T03:04:05Z"
+}
