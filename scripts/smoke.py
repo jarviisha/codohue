@@ -61,8 +61,13 @@ def _conf(name: str, default: str = "") -> str:
 
 # API_URL / ADMIN_URL win if set; otherwise build from the (env/.env) ports so
 # the test follows whatever ports the stack actually runs on.
-API_URL = (os.environ.get("API_URL") or f"http://localhost:{_conf('CODOHUE_API_PORT', '2001')}").rstrip("/")
-ADMIN_URL = (os.environ.get("ADMIN_URL") or f"http://localhost:{_conf('CODOHUE_ADMIN_PORT', '2002')}").rstrip("/")
+API_URL = (
+    os.environ.get("API_URL") or f"http://localhost:{_conf('CODOHUE_API_PORT', '2001')}"
+).rstrip("/")
+ADMIN_URL = (
+    os.environ.get("ADMIN_URL")
+    or f"http://localhost:{_conf('CODOHUE_ADMIN_PORT', '2002')}"
+).rstrip("/")
 
 # --- output helpers ---------------------------------------------------------
 
@@ -159,7 +164,9 @@ def main() -> int:
     # 1. data-plane liveness + health
     section(f"1. Data-plane health ({API_URL})")
     code, _, _ = request("GET", f"{API_URL}/ping")
-    ok("GET /ping -> 200") if code == 200 else bad(f"GET /ping -> {code} (is cmd/api running?)")
+    ok("GET /ping -> 200") if code == 200 else bad(
+        f"GET /ping -> {code} (is cmd/api running?)"
+    )
 
     code, body, _ = request("GET", f"{API_URL}/healthz")
     if code == 200 and isinstance(body, dict):
@@ -171,16 +178,22 @@ def main() -> int:
 
     # 2. admin session
     section(f"2. Admin session ({ADMIN_URL})")
-    code, body, _ = request("POST", f"{ADMIN_URL}/api/v1/auth/sessions", {"api_key": admin_key})
+    code, body, _ = request(
+        "POST", f"{ADMIN_URL}/api/v1/auth/sessions", {"api_key": admin_key}
+    )
     if code == 201:
         ok("POST /api/v1/auth/sessions -> 201")
     else:
-        bad(f"POST /api/v1/auth/sessions -> {code} (check CODOHUE_ADMIN_API_KEY / is cmd/admin running?)")
+        bad(
+            f"POST /api/v1/auth/sessions -> {code} (check CODOHUE_ADMIN_API_KEY / is cmd/admin running?)"
+        )
         print(f"\n{RED}Cannot continue without an admin session.{RESET}")
         return 1
 
     code, _, _ = request("GET", f"{ADMIN_URL}/api/admin/v1/health")
-    ok("GET /api/admin/v1/health -> 200") if code == 200 else bad(f"GET /api/admin/v1/health -> {code}")
+    ok("GET /api/admin/v1/health -> 200") if code == 200 else bad(
+        f"GET /api/admin/v1/health -> {code}"
+    )
 
     # 3. seed demo data
     section("3. Seed demo dataset")
@@ -191,13 +204,17 @@ def main() -> int:
         if events > 0:
             ok(f"demo-data seeded ({events} events, {items} catalog items)")
         else:
-            warn(f"demo-data returned {code} but events_created={events} (already seeded?)")
+            warn(
+                f"demo-data returned {code} but events_created={events} (already seeded?)"
+            )
     else:
         bad(f"POST /api/admin/v1/demo-data -> {code}")
 
     # 4. trigger batch run (compute phases)
     section("4. Batch recompute (sparse + dense + trending)")
-    code, body, _ = request("POST", f"{ADMIN_URL}/api/admin/v1/namespaces/{DEMO_NS}/batch-runs")
+    code, body, _ = request(
+        "POST", f"{ADMIN_URL}/api/admin/v1/namespaces/{DEMO_NS}/batch-runs"
+    )
     if code not in (200, 202):
         bad(f"POST batch-runs -> {code}")
     else:
@@ -209,7 +226,8 @@ def main() -> int:
             time.sleep(1)
             tries += 1
             _, lst, _ = request(
-                "GET", f"{ADMIN_URL}/api/admin/v1/namespaces/{DEMO_NS}/batch-runs?limit=1"
+                "GET",
+                f"{ADMIN_URL}/api/admin/v1/namespaces/{DEMO_NS}/batch-runs?limit=1",
             )
             items = (lst or {}).get("items") or [{}]
             status = items[0].get("status", "unknown")
@@ -219,7 +237,9 @@ def main() -> int:
 
     # 5. qdrant collections populated
     section("5. Qdrant vectors built")
-    code, body, _ = request("GET", f"{ADMIN_URL}/api/admin/v1/namespaces/{DEMO_NS}/qdrant")
+    code, body, _ = request(
+        "GET", f"{ADMIN_URL}/api/admin/v1/namespaces/{DEMO_NS}/qdrant"
+    )
     if code == 200 and isinstance(body, dict):
         subj = body.get("subjects", {}).get("points_count", 0)
         obj = body.get("objects", {}).get("points_count", 0)
@@ -227,7 +247,9 @@ def main() -> int:
         ok(f"sparse subjects = {subj} points") if subj > 0 else bad(
             f"sparse subjects = {subj} (expected > 0)"
         )
-        ok(f"sparse objects = {obj} points") if obj > 0 else bad(f"sparse objects = {obj} (expected > 0)")
+        ok(f"sparse objects = {obj} points") if obj > 0 else bad(
+            f"sparse objects = {obj} (expected > 0)"
+        )
         note(f"dense objects = {objd} points")
     else:
         bad(f"GET .../qdrant -> {code}")
@@ -244,7 +266,10 @@ def main() -> int:
         src = body.get("source", "?")
         if items:
             ok(f"{len(items)} recommendations returned (source={src})")
-            top = [{"object_id": i.get("object_id"), "score": round(i.get("score", 0), 4)} for i in items[:3]]
+            top = [
+                {"object_id": i.get("object_id"), "score": round(i.get("score", 0), 4)}
+                for i in items[:3]
+            ]
             note(f"top: {json.dumps(top)}")
         else:
             bad(f"0 recommendations returned (source={src})")
@@ -253,7 +278,12 @@ def main() -> int:
 
     # 7. rankings
     section(f"7. Rank candidates for {DEMO_SUBJECT}")
-    candidates = ["item_wireless_mouse", "item_desk_lamp", "item_monitor_arm", "item_usb_c_hub"]
+    candidates = [
+        "item_wireless_mouse",
+        "item_desk_lamp",
+        "item_monitor_arm",
+        "item_usb_c_hub",
+    ]
     code, body, _ = request(
         "POST",
         f"{API_URL}/v1/namespaces/{DEMO_NS}/rankings",
@@ -263,7 +293,9 @@ def main() -> int:
     if code == 200 and isinstance(body, dict):
         items = body.get("items") or []
         src = body.get("source", "?")
-        ok(f"{len(items)} candidates ranked (source={src})") if items else bad("0 candidates ranked")
+        ok(f"{len(items)} candidates ranked (source={src})") if items else bad(
+            "0 candidates ranked"
+        )
     else:
         bad(f"POST rankings -> {code}")
 
@@ -279,7 +311,9 @@ def main() -> int:
         if items:
             ok(f"{len(items)} trending items returned")
         else:
-            warn("trending returned 0 items (redis ZSET empty — ok if trending phase was skipped)")
+            warn(
+                "trending returned 0 items (redis ZSET empty — ok if trending phase was skipped)"
+            )
     else:
         bad(f"GET trending -> {code}")
 

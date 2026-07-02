@@ -117,7 +117,9 @@ def _conf(name: str, default: str = "") -> str:
 # --- http -------------------------------------------------------------------
 
 _cookies = http.cookiejar.CookieJar()
-_admin_opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(_cookies))
+_admin_opener = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(_cookies)
+)
 
 
 def _do(method, url, body=None, token=None, opener=None, timeout=600):
@@ -132,7 +134,11 @@ def _do(method, url, body=None, token=None, opener=None, timeout=600):
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         # opener=None uses urlopen (no shared state) — safe for threaded calls.
-        resp = opener.open(req, timeout=timeout) if opener else urllib.request.urlopen(req, timeout=timeout)
+        resp = (
+            opener.open(req, timeout=timeout)
+            if opener
+            else urllib.request.urlopen(req, timeout=timeout)
+        )
         raw = resp.read().decode("utf-8", "replace")
         code = resp.getcode()
     except urllib.error.HTTPError as e:
@@ -214,7 +220,7 @@ def split(logs, holdout):
     train, test = {}, {}
     for sid, events in logs.items():
         last_seen = {}
-        for (ts, it, _) in events:  # ascending → last write is the last occurrence
+        for ts, it, _ in events:  # ascending → last write is the last occurrence
             last_seen[it] = ts
         if len(last_seen) <= holdout:
             continue  # too few distinct items to both train and evaluate
@@ -283,7 +289,7 @@ def popularity_recs(train, k):
     """Most globally-interacted train items, minus each user's seen items."""
     pop = {}
     for events in train.values():
-        for (_, it, _) in events:
+        for _, it, _ in events:
             pop[it] = pop.get(it, 0) + 1
     ranked = [it for it, _ in sorted(pop.items(), key=lambda x: -x[1])]
     out = {}
@@ -310,7 +316,7 @@ def ingest_all(train, admin_key):
     """POST every train event over HTTP (threaded). Returns (ok, failed)."""
     jobs = []
     for sid, events in train.items():
-        for (ts, it, action) in events:
+        for ts, it, action in events:
             jobs.append(
                 {
                     "subject_id": sid,
@@ -324,7 +330,9 @@ def ingest_all(train, admin_key):
     failed = 0
 
     def post(ev):
-        code, _, _ = api("POST", f"/v1/namespaces/{EVAL_NS}/events", body=ev, token=admin_key)
+        code, _, _ = api(
+            "POST", f"/v1/namespaces/{EVAL_NS}/events", body=ev, token=admin_key
+        )
         return code == 202
 
     with ThreadPoolExecutor(max_workers=16) as pool:
@@ -437,28 +445,58 @@ def main() -> int:
         help="evaluate REAL events replayed from this namespace instead of synthetic data "
         "(its events are read, temporal-split, and replayed into a separate eval namespace)",
     )
-    p.add_argument("--max-events", type=int, default=100000, help="cap events pulled in --from-namespace mode")
-    p.add_argument("--eval-namespace", default=None, help="replay/eval namespace name (must differ from source)")
+    p.add_argument(
+        "--max-events",
+        type=int,
+        default=100000,
+        help="cap events pulled in --from-namespace mode",
+    )
+    p.add_argument(
+        "--eval-namespace",
+        default=None,
+        help="replay/eval namespace name (must differ from source)",
+    )
     # Synthetic-data knobs (ignored in --from-namespace mode).
     p.add_argument("--users", type=int, default=200)
     p.add_argument("--items", type=int, default=200)
     p.add_argument("--clusters", type=int, default=10)
-    p.add_argument("--min-inter", type=int, default=12, help="min interactions per user")
-    p.add_argument("--max-inter", type=int, default=22, help="max interactions per user")
-    p.add_argument("--noise", type=float, default=0.15, help="prob. an interaction is out-of-cluster")
+    p.add_argument(
+        "--min-inter", type=int, default=12, help="min interactions per user"
+    )
+    p.add_argument(
+        "--max-inter", type=int, default=22, help="max interactions per user"
+    )
+    p.add_argument(
+        "--noise",
+        type=float,
+        default=0.15,
+        help="prob. an interaction is out-of-cluster",
+    )
     # Shared knobs.
-    p.add_argument("--holdout", type=int, default=4, help="most-recent distinct items held out as test")
+    p.add_argument(
+        "--holdout",
+        type=int,
+        default=4,
+        help="most-recent distinct items held out as test",
+    )
     p.add_argument("--k", type=int, default=10, help="cutoff for @K metrics")
     p.add_argument("--seed", type=int, default=42)
     # Config — default None means "inherit" (synthetic: built-in defaults; real: source namespace config).
-    p.add_argument("--alpha", type=float, default=None, help="sparse weight; 1.0=pure CF, <1.0 enables dense hybrid")
+    p.add_argument(
+        "--alpha",
+        type=float,
+        default=None,
+        help="sparse weight; 1.0=pure CF, <1.0 enables dense hybrid",
+    )
     p.add_argument(
         "--dense-strategy",
         default=None,
         choices=["disabled", "item2vec", "svd"],
         help="dense strategy trained during the batch run (needs alpha<1.0 to actually blend)",
     )
-    p.add_argument("--embedding-dim", type=int, default=None, help="dense vector dimension")
+    p.add_argument(
+        "--embedding-dim", type=int, default=None, help="dense vector dimension"
+    )
     args = p.parse_args()
 
     admin_key = _conf("CODOHUE_ADMIN_API_KEY")
@@ -490,7 +528,9 @@ def main() -> int:
         logs, total = read_namespace_events(args.from_namespace, args.max_events)
         if not logs:
             die(f"namespace '{args.from_namespace}' has no events to evaluate")
-        note(f"pulled {sum(len(v) for v in logs.values())}/{total} events, {len(logs)} subjects")
+        note(
+            f"pulled {sum(len(v) for v in logs.values())}/{total} events, {len(logs)} subjects"
+        )
         # Inherit source config; CLI flags override. BYOE can't be replayed (no
         # external vectors) so it degrades to pure sparse.
         action_weights = scfg.get("action_weights") or ACTION_WEIGHTS
@@ -498,8 +538,14 @@ def main() -> int:
         if src_dense not in ("item2vec", "svd"):
             src_dense = "disabled"
         alpha = args.alpha if args.alpha is not None else scfg.get("alpha", 1.0)
-        dense_strategy = args.dense_strategy if args.dense_strategy is not None else src_dense
-        embedding_dim = args.embedding_dim if args.embedding_dim is not None else scfg.get("embedding_dim", 64)
+        dense_strategy = (
+            args.dense_strategy if args.dense_strategy is not None else src_dense
+        )
+        embedding_dim = (
+            args.embedding_dim
+            if args.embedding_dim is not None
+            else scfg.get("embedding_dim", 64)
+        )
         lam = scfg.get("lambda", 0.05)
     else:
         section("Generate structured dataset")
@@ -508,11 +554,19 @@ def main() -> int:
             f"noise={args.noise} seed={args.seed}"
         )
         logs, _ = generate(
-            rng, args.users, args.items, args.clusters, args.min_inter, args.max_inter, args.noise
+            rng,
+            args.users,
+            args.items,
+            args.clusters,
+            args.min_inter,
+            args.max_inter,
+            args.noise,
         )
         action_weights = ACTION_WEIGHTS
         alpha = args.alpha if args.alpha is not None else 1.0
-        dense_strategy = args.dense_strategy if args.dense_strategy is not None else "disabled"
+        dense_strategy = (
+            args.dense_strategy if args.dense_strategy is not None else "disabled"
+        )
         embedding_dim = args.embedding_dim if args.embedding_dim is not None else 64
         lam = 0.01
 
@@ -530,14 +584,20 @@ def main() -> int:
     dense_active = dense_strategy not in ("disabled", "byoe", "")
     hybrid = dense_active and alpha < 1.0
     if dense_active and alpha >= 1.0:
-        print(f"{YELLOW}note:{RESET} dense_strategy={dense_strategy} but alpha>=1.0 — dense trained but unused (pure CF). Pass --alpha<1.0.")
+        print(
+            f"{YELLOW}note:{RESET} dense_strategy={dense_strategy} but alpha>=1.0 — dense trained but unused (pure CF). Pass --alpha<1.0."
+        )
     if not dense_active and alpha is not None and alpha < 1.0:
-        print(f"{YELLOW}note:{RESET} alpha={alpha} but no dense strategy — nothing to blend (pure CF).")
+        print(
+            f"{YELLOW}note:{RESET} alpha={alpha} but no dense strategy — nothing to blend (pure CF)."
+        )
 
     mode = "hybrid (sparse+dense)" if hybrid else "pure sparse CF"
     n_events_train = sum(len(v) for v in train.values())
     note(f"mode={mode}  alpha={alpha}  dense_strategy={dense_strategy}")
-    note(f"{len(train)} eligible users, {n_events_train} train events, {len(test)} test users, {n_items} items")
+    note(
+        f"{len(train)} eligible users, {n_events_train} train events, {len(test)} test users, {n_items} items"
+    )
 
     # 2. fresh eval namespace (wipe clears events + qdrant + rec cache)
     section(f"Provision eval namespace ({mode}: alpha={alpha}, dense={dense_strategy})")
@@ -560,7 +620,7 @@ def main() -> int:
     section("Ingest train events")
     t0 = time.time()
     ok, failed = ingest_all(train, admin_key)
-    note(f"ingested {ok} events ({failed} failed) in {time.time()-t0:.1f}s")
+    note(f"ingested {ok} events ({failed} failed) in {time.time() - t0:.1f}s")
     if failed:
         print(f"  {YELLOW}WARN{RESET} {failed} events failed to ingest")
 
@@ -574,7 +634,9 @@ def main() -> int:
     while status == "running" and tries < 60:
         time.sleep(1)
         tries += 1
-        _, lst, _ = admin("GET", f"/api/admin/v1/namespaces/{EVAL_NS}/batch-runs?limit=1")
+        _, lst, _ = admin(
+            "GET", f"/api/admin/v1/namespaces/{EVAL_NS}/batch-runs?limit=1"
+        )
         status = ((lst or {}).get("items") or [{}])[0].get("status", "unknown")
     if status != "succeeded":
         die(f"batch run #{run_id} -> {status}")
@@ -584,7 +646,9 @@ def main() -> int:
     section("Query recommendations")
     subjects = list(test.keys())
     cf_recs, sources = fetch_recs(subjects, admin_key, args.k)
-    src_str = ", ".join(f"{s}={c}" for s, c in sorted(sources.items(), key=lambda x: -x[1]))
+    src_str = ", ".join(
+        f"{s}={c}" for s, c in sorted(sources.items(), key=lambda x: -x[1])
+    )
     note(f"sources: {src_str}")
     expected_source = "hybrid" if hybrid else "collaborative_filtering"
     cold = sum(c for s, c in sources.items() if s != expected_source)
@@ -602,7 +666,9 @@ def main() -> int:
     if not (cf and pop and rnd):
         die("no scoreable users — check holdout / data")
 
-    print(f"  {DIM}metric  P=Precision R=Recall NDCG MAP Hit=HitRate Cov=Coverage  (all @{args.k}){RESET}\n")
+    print(
+        f"  {DIM}metric  P=Precision R=Recall NDCG MAP Hit=HitRate Cov=Coverage  (all @{args.k}){RESET}\n"
+    )
     cf_label = "Codohue Hyb" if hybrid else "Codohue CF"
     print(fmt_row(cf_label, cf, GREEN))
     print(fmt_row("Popularity", pop, CYAN))
@@ -613,7 +679,9 @@ def main() -> int:
     lift = (cf["ndcg"] / pop["ndcg"]) if pop["ndcg"] > 0 else float("inf")
     if cf["ndcg"] <= rnd["ndcg"]:
         # Genuinely bad in any mode: the model adds nothing over chance.
-        print(f"{RED}Codohue is no better than random — recommender or pipeline is broken.{RESET}")
+        print(
+            f"{RED}Codohue is no better than random — recommender or pipeline is broken.{RESET}"
+        )
         rc = 1
     elif cf["ndcg"] > pop["ndcg"]:
         print(
@@ -638,16 +706,25 @@ def main() -> int:
         )
         rc = 1
 
-    tip = "vary --alpha / --dense-strategy on the SAME source to compare configs" if real else \
-        "tune action_weights / alpha / lambda and re-run to compare"
+    tip = (
+        "vary --alpha / --dense-strategy on the SAME source to compare configs"
+        if real
+        else "tune action_weights / alpha / lambda and re-run to compare"
+    )
     note(tip)
     return rc
 
 
 if __name__ == "__main__":
     # Resolve URLs after .env parse (allow API_URL/ADMIN_URL override).
-    API_URL = (os.environ.get("API_URL") or f"http://localhost:{_conf('CODOHUE_API_PORT', '2001')}").rstrip("/")
-    ADMIN_URL = (os.environ.get("ADMIN_URL") or f"http://localhost:{_conf('CODOHUE_ADMIN_PORT', '2002')}").rstrip("/")
+    API_URL = (
+        os.environ.get("API_URL")
+        or f"http://localhost:{_conf('CODOHUE_API_PORT', '2001')}"
+    ).rstrip("/")
+    ADMIN_URL = (
+        os.environ.get("ADMIN_URL")
+        or f"http://localhost:{_conf('CODOHUE_ADMIN_PORT', '2002')}"
+    ).rstrip("/")
     rc = 1
     try:
         rc = main()
