@@ -77,7 +77,7 @@ export default function NamespacesListPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Namespace</TableHead>
-                  <TableHead>Dense strategy</TableHead>
+                  <TableHead>Dense source</TableHead>
                   <TableHead align="right">Embedding dim</TableHead>
                   <TableHead>Catalog</TableHead>
                   <TableHead>Updated</TableHead>
@@ -95,13 +95,13 @@ export default function NamespacesListPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="neutral">{ns.dense_strategy || '—'}</Badge>
+                      <Badge variant="neutral">{ns.dense_source || '—'}</Badge>
                     </TableCell>
                     <TableCell align="right" className="tabular-nums">
                       {ns.embedding_dim}
                     </TableCell>
                     <TableCell>
-                      {ns.catalog_enabled ? (
+                      {ns.dense_source === 'catalog' ? (
                         <Inline align="center">
                           <Badge variant="success">on</Badge>
                           {ns.catalog_strategy_id && (

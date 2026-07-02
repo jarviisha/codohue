@@ -124,7 +124,7 @@ func enabledCfg(dim int) *namespace.Config {
 	return &namespace.Config{
 		Namespace:              "ns",
 		EmbeddingDim:           dim,
-		CatalogEnabled:         true,
+		DenseSource:            "catalog",
 		CatalogStrategyID:      "internal-hashing-ngrams",
 		CatalogStrategyVersion: "v1",
 		CatalogMaxAttempts:     5,
@@ -227,7 +227,7 @@ func TestServiceProcessItem_ItemNotFound_Skipped(t *testing.T) {
 func TestServiceProcessItem_NamespaceDisabled_Skipped(t *testing.T) {
 	svc, repo, nsCfg, _, _, _ := newSvc(t)
 	cfg := enabledCfg(128)
-	cfg.CatalogEnabled = false
+	cfg.DenseSource = "disabled"
 	nsCfg.cfg = cfg
 
 	out, err := svc.ProcessItem(context.Background(), 7)

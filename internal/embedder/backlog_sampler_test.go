@@ -101,7 +101,7 @@ type fakeNsLister struct {
 	err     error
 }
 
-func (f *fakeNsLister) ListCatalogEnabled(_ context.Context) ([]*namespace.Config, error) {
+func (f *fakeNsLister) ListCatalogNamespaces(_ context.Context) ([]*namespace.Config, error) {
 	return f.configs, f.err
 }
 

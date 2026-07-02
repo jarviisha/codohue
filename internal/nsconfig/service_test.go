@@ -42,7 +42,7 @@ func (f *fakeRepo) UpsertCatalogConfig(_ context.Context, _ string, req *UpdateC
 	return f.upsertCatalogCfg, f.upsertCatalogErr
 }
 
-func (f *fakeRepo) ListCatalogEnabled(_ context.Context) ([]*namespace.Config, error) {
+func (f *fakeRepo) ListCatalogNamespaces(_ context.Context) ([]*namespace.Config, error) {
 	return f.listCfgs, f.listErr
 }
 
@@ -327,69 +327,17 @@ func TestServiceUpdateCatalogConfig_RepoUpsertReturnsNil(t *testing.T) {
 	}
 }
 
-func TestServiceUpdateCatalogConfig_DenseStrategyConflict(t *testing.T) {
-	// Trying to enable catalog while dense_strategy is item2vec/svd must be
-	// rejected — both pipelines would write to {ns}_objects_dense.
-	cases := []string{"item2vec", "svd", "", "unknown_value"}
-	for _, ds := range cases {
-		t.Run(ds, func(t *testing.T) {
-			repo := &fakeRepo{getCfg: &namespace.Config{
-				Namespace:     "ns",
-				EmbeddingDim:  128,
-				DenseStrategy: ds,
-			}}
-			svc, _ := newServiceWithRegistry(repo)
-			_, err := svc.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{
-				Enabled: true, StrategyID: "hash", StrategyVersion: "v1",
-			})
-			var conflictErr *DenseStrategyConflictError
-			if !errors.As(err, &conflictErr) {
-				t.Fatalf("expected *DenseStrategyConflictError, got %v", err)
-			}
-			if conflictErr.DenseStrategy != ds {
-				t.Errorf("DenseStrategy = %q, want %q", conflictErr.DenseStrategy, ds)
-			}
-			if repo.upsertCatalogCalledWith != nil {
-				t.Error("expected UpsertCatalogConfig NOT to be called on conflict")
-			}
-		})
-	}
-}
+// --- ListCatalogNamespaces -------------------------------------------------
 
-func TestServiceUpsert_BlocksWhenCatalogEnabledAndStrategyIsCronTrained(t *testing.T) {
-	// Once catalog is on, the operator cannot flip dense_strategy back to a
-	// value that has cron train Phase 2 — the embedder would lose to cron's
-	// next tick.
-	repo := &fakeRepo{getCfg: &namespace.Config{
-		Namespace:      "ns",
-		EmbeddingDim:   128,
-		DenseStrategy:  "byoe",
-		CatalogEnabled: true,
-	}}
-	svc, _ := newServiceWithRegistry(repo)
-	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
-		DenseStrategy: "item2vec",
-	})
-	var conflictErr *DenseStrategyConflictError
-	if !errors.As(err, &conflictErr) {
-		t.Fatalf("expected *DenseStrategyConflictError, got %v", err)
-	}
-	if !conflictErr.CatalogEnabled {
-		t.Error("expected CatalogEnabled=true on the error")
-	}
-}
-
-// --- ListCatalogEnabled ----------------------------------------------------
-
-func TestServiceListCatalogEnabled_PassThrough(t *testing.T) {
+func TestServiceListCatalogNamespaces_PassThrough(t *testing.T) {
 	want := []*namespace.Config{
-		{Namespace: "a", CatalogEnabled: true},
-		{Namespace: "b", CatalogEnabled: true},
+		{Namespace: "a", DenseSource: "catalog"},
+		{Namespace: "b", DenseSource: "catalog"},
 	}
 	repo := &fakeRepo{listCfgs: want}
 	svc, _ := newServiceWithRegistry(repo)
 
-	got, err := svc.ListCatalogEnabled(context.Background())
+	got, err := svc.ListCatalogNamespaces(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -398,19 +346,19 @@ func TestServiceListCatalogEnabled_PassThrough(t *testing.T) {
 	}
 }
 
-func TestServiceListCatalogEnabled_RepoError(t *testing.T) {
+func TestServiceListCatalogNamespaces_RepoError(t *testing.T) {
 	repo := &fakeRepo{listErr: errors.New("db down")}
 	svc, _ := newServiceWithRegistry(repo)
-	if _, err := svc.ListCatalogEnabled(context.Background()); err == nil {
-		t.Fatal("expected error from repo.ListCatalogEnabled, got nil")
+	if _, err := svc.ListCatalogNamespaces(context.Background()); err == nil {
+		t.Fatal("expected error from repo.ListCatalogNamespaces, got nil")
 	}
 }
 
-func TestServiceListCatalogEnabled_EmptyResult(t *testing.T) {
+func TestServiceListCatalogNamespaces_EmptyResult(t *testing.T) {
 	repo := &fakeRepo{listCfgs: nil}
 	svc, _ := newServiceWithRegistry(repo)
 
-	got, err := svc.ListCatalogEnabled(context.Background())
+	got, err := svc.ListCatalogNamespaces(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

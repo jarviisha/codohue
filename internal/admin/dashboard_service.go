@@ -48,7 +48,7 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 			Events24h:       eventCounts[ns.Namespace],
 			EventsPerMinNow: s.eventsPerMin(ns.Namespace),
 			Catalog: NamespaceOverviewCatalog{
-				Enabled: ns.CatalogEnabled,
+				Enabled: ns.DenseSource == "catalog",
 				// Pending / DeadLetter populated by the catalog stream once
 				// Phase 2 lands; Phase 1 leaves zeros so the shape stays stable.
 			},

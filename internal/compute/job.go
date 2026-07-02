@@ -204,7 +204,7 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 		capture.Error(fmt.Sprintf("config load failed: %v", err))
 		runErr = err
 	} else if cfg != nil {
-		capture.Info(fmt.Sprintf("config loaded — strategy: %s, lambda: %.3f", cfg.DenseStrategy, cfg.Lambda))
+		capture.Info(fmt.Sprintf("config loaded — dense_source: %s, lambda: %.3f", cfg.DenseSource, cfg.Lambda))
 	}
 
 	if runErr == nil {
@@ -220,14 +220,14 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 		cancelled = true
 	}
 
-	if !cancelled && runErr == nil && cfg != nil && cfg.DenseStrategy != "" && cfg.DenseStrategy != "byoe" && cfg.DenseStrategy != "disabled" {
-		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseStrategy), capture, func() (int, int, error) {
+	if !cancelled && runErr == nil && cfg != nil && (cfg.DenseSource == "item2vec" || cfg.DenseSource == "svd") {
+		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseSource), capture, func() (int, int, error) {
 			return j.runPhase2Dense(ctx, ns, cfg, capture)
 		})
 		// Phase 2 failure is logged but does not abort the run — phase 3 still
 		// runs because trending and dense are independent surfaces.
-	} else if !cancelled && cfg != nil && (cfg.DenseStrategy == "byoe" || cfg.DenseStrategy == "disabled") {
-		capture.Info(fmt.Sprintf("phase 2 · dense skipped (strategy: %s)", cfg.DenseStrategy))
+	} else if !cancelled && cfg != nil {
+		capture.Info(fmt.Sprintf("phase 2 · dense skipped (dense_source: %s)", cfg.DenseSource))
 	}
 
 	if !cancelled && j.checkCancelBetweenPhases(ctx, logID, 2, capture) {
@@ -422,7 +422,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 
 	var itemVecs map[string][]float32
 
-	switch cfg.DenseStrategy {
+	switch cfg.DenseSource {
 	case "item2vec":
 		if len(events) > item2vecLargeEventThreshold {
 			slog.Warn("phase 2 item2vec: large event corpus — full retrain may be slow; consider increasing CODOHUE_BATCH_INTERVAL_MINUTES or switching to SVD",
@@ -441,19 +441,19 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	}
 
 	if len(itemVecs) == 0 {
-		slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseStrategy)
+		slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseSource)
 		capture.Warn("no item vectors produced")
 		return 0, 0, nil
 	}
 	capture.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
 
-	if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseStrategy, itemVecs); err != nil {
+	if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseSource, itemVecs); err != nil {
 		return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
 	}
 
 	subjectVecs := UserDenseVectors(events, itemVecs)
 	if len(subjectVecs) > 0 {
-		if err := j.upsertSubjectDenseFn(ctx, ns, cfg.DenseStrategy, subjectVecs); err != nil {
+		if err := j.upsertSubjectDenseFn(ctx, ns, cfg.DenseSource, subjectVecs); err != nil {
 			return 0, 0, fmt.Errorf("upsert subject dense vectors: %w", err)
 		}
 	}
@@ -461,7 +461,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 
 	slog.Info("phase 2 dense complete",
 		"namespace", ns,
-		"strategy", cfg.DenseStrategy,
+		"strategy", cfg.DenseSource,
 		"items", len(itemVecs),
 		"subjects", len(subjectVecs),
 		"duration_ms", time.Since(start).Milliseconds(),

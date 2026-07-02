@@ -158,10 +158,10 @@ func TestRepositorySetAPIKeyHash_IsNoOpIfAlreadySet(t *testing.T) {
 	}
 }
 
-// TestRepositoryListCatalogEnabled covers the embedder-facing discovery
-// query: only namespaces with catalog_enabled=true must appear, ordered by
+// TestRepositoryListCatalogNamespaces covers the embedder-facing discovery
+// query: only namespaces with dense_source='catalog' must appear, ordered by
 // namespace ASC, and the catalog_strategy_params JSONB must round-trip.
-func TestRepositoryListCatalogEnabled(t *testing.T) {
+func TestRepositoryListCatalogNamespaces(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -202,9 +202,9 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListCatalogEnabled(ctx)
+	got, err := repo.ListCatalogNamespaces(ctx)
 	if err != nil {
-		t.Fatalf("ListCatalogEnabled: %v", err)
+		t.Fatalf("ListCatalogNamespaces: %v", err)
 	}
 
 	// We must see both enabled namespaces and not the disabled one. Filter the
@@ -215,8 +215,8 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 		switch c.Namespace {
 		case nsEnabledA, nsEnabledB:
 			owned[c.Namespace] = true
-			if !c.CatalogEnabled {
-				t.Errorf("ns %q: CatalogEnabled=false in result", c.Namespace)
+			if c.DenseSource != "catalog" {
+				t.Errorf("ns %q: dense_source=%q want catalog", c.Namespace, c.DenseSource)
 			}
 			if c.CatalogStrategyID != "internal-hashing-ngrams" {
 				t.Errorf("ns %q: strategy_id=%q", c.Namespace, c.CatalogStrategyID)
@@ -225,7 +225,7 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 				t.Errorf("ns %q: params[dim]=%v want 128", c.Namespace, v)
 			}
 		case nsDisabled:
-			t.Errorf("disabled namespace %q must NOT appear in ListCatalogEnabled", c.Namespace)
+			t.Errorf("disabled namespace %q must NOT appear in ListCatalogNamespaces", c.Namespace)
 		}
 	}
 	if !owned[nsEnabledA] || !owned[nsEnabledB] {
@@ -248,9 +248,9 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 	}
 }
 
-func TestRepositoryListCatalogEnabled_NilDB(t *testing.T) {
+func TestRepositoryListCatalogNamespaces_NilDB(t *testing.T) {
 	repo := &Repository{}
-	if _, err := repo.ListCatalogEnabled(context.Background()); err == nil {
+	if _, err := repo.ListCatalogNamespaces(context.Background()); err == nil {
 		t.Fatal("expected error when db is nil")
 	}
 }
