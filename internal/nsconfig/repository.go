@@ -52,6 +52,15 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		return nil, fmt.Errorf("marshal action weights: %w", err)
 	}
 
+	// An omitted dense_source arrives as "". Persist it as "disabled" — the
+	// same rule migration 016 uses for its backfill — so dense_source_chk
+	// never sees an empty string. Invalid non-empty values still fail the
+	// CHECK on purpose.
+	denseSource := req.DenseStrategy
+	if denseSource == "" {
+		denseSource = "disabled"
+	}
+
 	var cfg namespace.Config
 	var weightsRaw []byte
 	var paramsRaw []byte
@@ -88,7 +97,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
-		req.Alpha, req.DenseStrategy, req.EmbeddingDim, req.DenseDistance,
+		req.Alpha, denseSource, req.EmbeddingDim, req.DenseDistance,
 		req.TrendingWindow, req.TrendingTTL, req.LambdaTrending,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
@@ -276,7 +285,11 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 	err = r.queryRowFn(ctx, `
 		UPDATE namespace_configs
 		SET catalog_enabled            = $2,
-		    dense_source               = CASE WHEN $2 THEN 'catalog' ELSE dense_strategy END,
+		    dense_source               = CASE
+		        WHEN $2 THEN 'catalog'
+		        WHEN dense_strategy IN ('disabled', 'item2vec', 'svd', 'byoe') THEN dense_strategy
+		        ELSE 'disabled'
+		    END,
 		    catalog_strategy_id        = $3,
 		    catalog_strategy_version   = $4,
 		    catalog_strategy_params    = $5,

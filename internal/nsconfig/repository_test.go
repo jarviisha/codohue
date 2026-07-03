@@ -58,6 +58,52 @@ func TestRepositoryUpsert_Create(t *testing.T) {
 	}
 }
 
+// TestRepositoryUpsert_EmptyDenseSource_NormalizedToDisabled locks the
+// normalization rule: an omitted dense_source ("") must be persisted as
+// "disabled" (same mapping as the migration-016 backfill), never tripping
+// the dense_source_chk constraint.
+func TestRepositoryUpsert_EmptyDenseSource_NormalizedToDisabled(t *testing.T) {
+	db := openTestDB(t)
+	cleanupNS(t, db, "nsconfig_test_empty_source")
+
+	repo := NewRepository(db)
+	cfg, err := repo.Upsert(context.Background(), "nsconfig_test_empty_source", &UpsertRequest{})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if cfg.DenseSource != "disabled" {
+		t.Errorf("DenseSource: got %q, want %q", cfg.DenseSource, "disabled")
+	}
+}
+
+// TestRepositoryUpsertCatalogConfig_DisableOnLegacyEmptyStrategy covers the
+// disable path when the row still carries a pre-normalization empty
+// dense_strategy: dense_source must fall back to "disabled", not the empty string.
+func TestRepositoryUpsertCatalogConfig_DisableOnLegacyEmptyStrategy(t *testing.T) {
+	db := openTestDB(t)
+	cleanupNS(t, db, "nsconfig_test_legacy_empty")
+	ctx := context.Background()
+
+	repo := NewRepository(db)
+	if _, err := repo.Upsert(ctx, "nsconfig_test_legacy_empty", &UpsertRequest{}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	// Simulate a legacy row written before empty-input normalization.
+	if _, err := db.Exec(ctx,
+		`UPDATE namespace_configs SET dense_strategy = '' WHERE namespace = $1`,
+		"nsconfig_test_legacy_empty"); err != nil {
+		t.Fatalf("plant legacy empty dense_strategy: %v", err)
+	}
+
+	cfg, err := repo.UpsertCatalogConfig(ctx, "nsconfig_test_legacy_empty", &UpdateCatalogRequest{Enabled: false})
+	if err != nil {
+		t.Fatalf("UpsertCatalogConfig: %v", err)
+	}
+	if cfg.DenseSource != "disabled" {
+		t.Errorf("DenseSource: got %q, want %q", cfg.DenseSource, "disabled")
+	}
+}
+
 func TestRepositoryUpsert_Update_PreservesAPIKeyHash(t *testing.T) {
 	db := openTestDB(t)
 	cleanupNS(t, db, "nsconfig_test_preserve")
