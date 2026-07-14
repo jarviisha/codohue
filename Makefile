@@ -47,7 +47,7 @@ MIN_EMBEDSTRATEGY  ?= 90
 .PHONY: \
 	build build-api build-cron build-admin build-admin-embed build-embedder \
 	web-admin-deps web-admin-lint web-admin-test web-admin-build \
-	run run-cron run-admin run-embedder dev dev-admin dev-embedder dev-all \
+	run run-cron run-admin run-embedder run-loadgen dev dev-admin dev-embedder dev-all \
 	up up-all up-build up-d up-build-d \
 	up-infra up-infra-build up-infra-d up-infra-build-d \
 	up-app up-app-build up-app-d up-app-build-d down down-v down-app \
@@ -115,6 +115,12 @@ run-admin:
 
 run-embedder:
 	go run ./cmd/embedder
+
+# Example load generator: provisions a namespace + catalog and continuously
+# pumps realistic behavioral events. Requires the full stack to be up.
+# Override knobs with ARGS, e.g. make run-loadgen ARGS="-rate 20 -ns demo2".
+run-loadgen:
+	go run ./examples/loadgen $(ARGS)
 
 dev:
 	air

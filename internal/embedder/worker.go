@@ -40,9 +40,9 @@ type itemProcessor interface {
 	ProcessItem(ctx context.Context, catalogItemID int64) (ProcessOutcome, error)
 }
 
-// nsLister abstracts nsconfig.Service.ListCatalogEnabled for tests.
+// nsLister abstracts nsconfig.Service.ListCatalogNamespaces for tests.
 type nsLister interface {
-	ListCatalogEnabled(ctx context.Context) ([]*namespace.Config, error)
+	ListCatalogNamespaces(ctx context.Context) ([]*namespace.Config, error)
 }
 
 // WorkerConfig bundles the per-replica runtime knobs.
@@ -159,7 +159,7 @@ func (w *Worker) Run(ctx context.Context) error {
 // Newly-enabled namespaces gain a consumer + reaper pair; newly-disabled
 // namespaces have theirs cancelled.
 func (w *Worker) refreshNamespaces(ctx context.Context) error {
-	cfgs, err := w.nsLister.ListCatalogEnabled(ctx)
+	cfgs, err := w.nsLister.ListCatalogNamespaces(ctx)
 	if err != nil {
 		return fmt.Errorf("list catalog-enabled namespaces: %w", err)
 	}

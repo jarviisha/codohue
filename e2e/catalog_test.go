@@ -96,6 +96,7 @@ func enableCatalogForNamespace(t testing.TB, namespace string, dim int) {
 	_, err := testDB.Exec(context.Background(), `
 		UPDATE namespace_configs
 		SET catalog_enabled = TRUE,
+		    dense_source = 'catalog',
 		    catalog_strategy_id = 'internal-hashing-ngrams',
 		    catalog_strategy_version = 'v1',
 		    catalog_strategy_params = $2::jsonb,

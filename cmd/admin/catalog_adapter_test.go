@@ -32,32 +32,6 @@ func newTestCatalogAdapter(svc nsCatalogConfigSvc) *catalogConfigAdapter {
 	return newCatalogConfigAdapter(svc, embedstrategy.NewRegistry())
 }
 
-// TestCatalogConfigAdapter_UpdateCatalog_MapsDenseStrategyConflict pins the
-// bridge from the domain-level *nsconfig.DenseStrategyConflictError to
-// admin.CatalogStrategyConflict so the catalog handler can render the
-// dense_strategy_conflict body.
-func TestCatalogConfigAdapter_UpdateCatalog_MapsDenseStrategyConflict(t *testing.T) {
-	a := newTestCatalogAdapter(&fakeNsCatalogSvc{
-		updateErr: &nsconfig.DenseStrategyConflictError{
-			DenseStrategy:  "svd",
-			CatalogEnabled: true,
-		},
-	})
-
-	_, err := a.UpdateCatalog(context.Background(), "ns", &admin.NamespaceCatalogUpdateRequest{Enabled: true})
-
-	var conflictErr *admin.CatalogStrategyConflict
-	if !errors.As(err, &conflictErr) {
-		t.Fatalf("expected *admin.CatalogStrategyConflict, got %v (%T)", err, err)
-	}
-	if conflictErr.DenseStrategy != "svd" {
-		t.Errorf("DenseStrategy = %q, want svd", conflictErr.DenseStrategy)
-	}
-	if !conflictErr.CatalogEnabled {
-		t.Errorf("CatalogEnabled = false, want true")
-	}
-}
-
 // TestCatalogConfigAdapter_UpdateCatalog_MapsDimensionMismatch makes sure the
 // existing dim-mismatch mapping survived the addition of the conflict branch.
 func TestCatalogConfigAdapter_UpdateCatalog_MapsDimensionMismatch(t *testing.T) {

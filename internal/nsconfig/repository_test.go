@@ -58,6 +58,52 @@ func TestRepositoryUpsert_Create(t *testing.T) {
 	}
 }
 
+// TestRepositoryUpsert_EmptyDenseSource_NormalizedToDisabled locks the
+// normalization rule: an omitted dense_source ("") must be persisted as
+// "disabled" (same mapping as the migration-016 backfill), never tripping
+// the dense_source_chk constraint.
+func TestRepositoryUpsert_EmptyDenseSource_NormalizedToDisabled(t *testing.T) {
+	db := openTestDB(t)
+	cleanupNS(t, db, "nsconfig_test_empty_source")
+
+	repo := NewRepository(db)
+	cfg, err := repo.Upsert(context.Background(), "nsconfig_test_empty_source", &UpsertRequest{})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if cfg.DenseSource != "disabled" {
+		t.Errorf("DenseSource: got %q, want %q", cfg.DenseSource, "disabled")
+	}
+}
+
+// TestRepositoryUpsertCatalogConfig_DisableOnLegacyEmptyStrategy covers the
+// disable path when the row still carries a pre-normalization empty
+// dense_strategy: dense_source must fall back to "disabled", not the empty string.
+func TestRepositoryUpsertCatalogConfig_DisableOnLegacyEmptyStrategy(t *testing.T) {
+	db := openTestDB(t)
+	cleanupNS(t, db, "nsconfig_test_legacy_empty")
+	ctx := context.Background()
+
+	repo := NewRepository(db)
+	if _, err := repo.Upsert(ctx, "nsconfig_test_legacy_empty", &UpsertRequest{}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	// Simulate a legacy row written before empty-input normalization.
+	if _, err := db.Exec(ctx,
+		`UPDATE namespace_configs SET dense_strategy = '' WHERE namespace = $1`,
+		"nsconfig_test_legacy_empty"); err != nil {
+		t.Fatalf("plant legacy empty dense_strategy: %v", err)
+	}
+
+	cfg, err := repo.UpsertCatalogConfig(ctx, "nsconfig_test_legacy_empty", &UpdateCatalogRequest{Enabled: false})
+	if err != nil {
+		t.Fatalf("UpsertCatalogConfig: %v", err)
+	}
+	if cfg.DenseSource != "disabled" {
+		t.Errorf("DenseSource: got %q, want %q", cfg.DenseSource, "disabled")
+	}
+}
+
 func TestRepositoryUpsert_Update_PreservesAPIKeyHash(t *testing.T) {
 	db := openTestDB(t)
 	cleanupNS(t, db, "nsconfig_test_preserve")
@@ -158,10 +204,10 @@ func TestRepositorySetAPIKeyHash_IsNoOpIfAlreadySet(t *testing.T) {
 	}
 }
 
-// TestRepositoryListCatalogEnabled covers the embedder-facing discovery
-// query: only namespaces with catalog_enabled=true must appear, ordered by
+// TestRepositoryListCatalogNamespaces covers the embedder-facing discovery
+// query: only namespaces with dense_source='catalog' must appear, ordered by
 // namespace ASC, and the catalog_strategy_params JSONB must round-trip.
-func TestRepositoryListCatalogEnabled(t *testing.T) {
+func TestRepositoryListCatalogNamespaces(t *testing.T) {
 	db := openTestDB(t)
 	ctx := context.Background()
 
@@ -202,9 +248,9 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 		}
 	}
 
-	got, err := repo.ListCatalogEnabled(ctx)
+	got, err := repo.ListCatalogNamespaces(ctx)
 	if err != nil {
-		t.Fatalf("ListCatalogEnabled: %v", err)
+		t.Fatalf("ListCatalogNamespaces: %v", err)
 	}
 
 	// We must see both enabled namespaces and not the disabled one. Filter the
@@ -215,8 +261,8 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 		switch c.Namespace {
 		case nsEnabledA, nsEnabledB:
 			owned[c.Namespace] = true
-			if !c.CatalogEnabled {
-				t.Errorf("ns %q: CatalogEnabled=false in result", c.Namespace)
+			if c.DenseSource != "catalog" {
+				t.Errorf("ns %q: dense_source=%q want catalog", c.Namespace, c.DenseSource)
 			}
 			if c.CatalogStrategyID != "internal-hashing-ngrams" {
 				t.Errorf("ns %q: strategy_id=%q", c.Namespace, c.CatalogStrategyID)
@@ -225,7 +271,7 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 				t.Errorf("ns %q: params[dim]=%v want 128", c.Namespace, v)
 			}
 		case nsDisabled:
-			t.Errorf("disabled namespace %q must NOT appear in ListCatalogEnabled", c.Namespace)
+			t.Errorf("disabled namespace %q must NOT appear in ListCatalogNamespaces", c.Namespace)
 		}
 	}
 	if !owned[nsEnabledA] || !owned[nsEnabledB] {
@@ -248,9 +294,9 @@ func TestRepositoryListCatalogEnabled(t *testing.T) {
 	}
 }
 
-func TestRepositoryListCatalogEnabled_NilDB(t *testing.T) {
+func TestRepositoryListCatalogNamespaces_NilDB(t *testing.T) {
 	repo := &Repository{}
-	if _, err := repo.ListCatalogEnabled(context.Background()); err == nil {
+	if _, err := repo.ListCatalogNamespaces(context.Background()); err == nil {
 		t.Fatal("expected error when db is nil")
 	}
 }

@@ -116,11 +116,11 @@ func (s *BacklogSampler) Run(ctx context.Context) {
 	}
 }
 
-// tick iterates every catalog-enabled namespace and records one snapshot per
+// tick iterates every catalog namespace and records one snapshot per
 // namespace subject to the skip rule. Per-namespace errors are logged and
 // the loop continues — one bad namespace doesn't stall the whole sweep.
 func (s *BacklogSampler) tick(ctx context.Context) {
-	cfgs, err := s.nsLister.ListCatalogEnabled(ctx)
+	cfgs, err := s.nsLister.ListCatalogNamespaces(ctx)
 	if err != nil {
 		slog.Warn("backlog sampler: list namespaces failed", "error", err)
 		return

@@ -131,7 +131,7 @@ func TestRunOnce_Phase2_SkippedForBYOE(t *testing.T) {
 	phase2Called := false
 	job := newTestJob(
 		&fakeRecomputer{},
-		&fakeNsConfigReader{cfg: &namespace.Config{DenseStrategy: "byoe"}},
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "byoe"}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
 	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
@@ -150,7 +150,7 @@ func TestRunOnce_Phase2_SkippedForDisabled(t *testing.T) {
 	phase2Called := false
 	job := newTestJob(
 		&fakeRecomputer{},
-		&fakeNsConfigReader{cfg: &namespace.Config{DenseStrategy: "disabled"}},
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "disabled"}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
 	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
@@ -162,6 +162,25 @@ func TestRunOnce_Phase2_SkippedForDisabled(t *testing.T) {
 
 	if phase2Called {
 		t.Error("phase 2 should be skipped for strategy=disabled")
+	}
+}
+
+func TestRunOnce_Phase2_SkippedForCatalog(t *testing.T) {
+	phase2Called := false
+	job := newTestJob(
+		&fakeRecomputer{},
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "catalog"}},
+		&fakeJobRepo{namespaces: []string{"ns1"}},
+	)
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+		phase2Called = true
+		return nil
+	}
+
+	job.runOnce(context.Background())
+
+	if phase2Called {
+		t.Error("phase 2 should be skipped for dense_source=catalog (embedder owns object dense)")
 	}
 }
 
@@ -267,7 +286,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 	}
 
 	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{
-		DenseStrategy: "item2vec",
+		DenseSource:   "item2vec",
 		EmbeddingDim:  8,
 		DenseDistance: "dot",
 	}, nil)
@@ -308,7 +327,7 @@ func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
 	}
 
 	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{
-		DenseStrategy: "svd",
+		DenseSource:   "svd",
 		EmbeddingDim:  4,
 		DenseDistance: "dot",
 	}, nil)
@@ -336,7 +355,7 @@ func TestRunPhase2Dense_NoEvents_SkipsUpserts(t *testing.T) {
 		return nil
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseStrategy: "item2vec"}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -351,7 +370,7 @@ func TestRunPhase2Dense_EnsureDenseCollectionsFailure(t *testing.T) {
 		return errors.New("ensure failed")
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseStrategy: "item2vec"}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec"}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -375,7 +394,7 @@ func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
 		return errors.New("item upsert failed")
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseStrategy: "item2vec", EmbeddingDim: 8}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 8}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -399,7 +418,7 @@ func TestRunPhase2Dense_SubjectUpsertFailure(t *testing.T) {
 		return errors.New("subject upsert failed")
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseStrategy: "item2vec", EmbeddingDim: 8}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 8}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

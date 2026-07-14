@@ -16,10 +16,15 @@ type Config struct {
 	APIKeyHash string `json:"-"`
 
 	// Dense hybrid.
-	Alpha         float64 `json:"alpha"`
-	DenseStrategy string  `json:"dense_strategy"`
-	EmbeddingDim  int     `json:"embedding_dim"`
-	DenseDistance string  `json:"dense_distance"`
+	Alpha float64 `json:"alpha"`
+	// DenseSource names the single producer of object dense vectors:
+	// disabled | item2vec | svd | byoe | catalog. It supersedes the legacy
+	// DenseStrategy + CatalogEnabled pair, which are kept during the dual-write
+	// window (migration 016) and dropped in 017.
+	DenseSource   string `json:"dense_source"`
+	DenseStrategy string `json:"dense_strategy"`
+	EmbeddingDim  int    `json:"embedding_dim"`
+	DenseDistance string `json:"dense_distance"`
 
 	// Trending.
 	TrendingWindow int     `json:"trending_window"`

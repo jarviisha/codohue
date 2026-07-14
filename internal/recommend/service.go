@@ -156,12 +156,11 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 		return fmt.Errorf("get ns config: %w", err)
 	}
 
-	// FR-018 / R8 source-of-truth precedence: when catalog auto-embedding
-	// is enabled for this namespace, BYOE writes for OBJECT dense vectors
-	// are rejected so the catalog stays the single source of truth. Subject
-	// embeddings are NOT guarded — the spec assumption keeps subject vectors
-	// flowing through the cron mean-pool path even under catalog mode.
-	if cfg != nil && cfg.CatalogEnabled && entityType == "object" {
+	// FR-018 / R8 source-of-truth precedence: when dense_source is "catalog",
+	// BYOE writes for OBJECT dense vectors are rejected so the catalog stays
+	// the single source of truth. Subject embeddings are NOT guarded — subject
+	// vectors keep flowing through the cron mean-pool / BYOE path regardless.
+	if cfg != nil && cfg.DenseSource == "catalog" && entityType == "object" {
 		return ErrCatalogActive
 	}
 
@@ -312,7 +311,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	// in the dense component. The sparse CF component is unaffected — it queries Qdrant
 	// against vectors recomputed in the same batch. To reduce staleness, decrease
 	// CODOHUE_BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
-	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseStrategy != "" && cfg.DenseStrategy != "disabled" {
+	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != "disabled" {
 		denseVec, err := s.fetchSubjectDenseVecFn(ctx, req.Namespace, subjectNumID)
 		if err == nil && denseVec != nil {
 			return s.hybridRecommend(ctx, req, limit, cfg, subjectVec, denseVec, seenFilter)

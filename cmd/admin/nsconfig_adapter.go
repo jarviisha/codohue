@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/nsconfig"
@@ -42,8 +41,14 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 	if req.SeenItemsDays != nil {
 		nsReq.SeenItemsDays = *req.SeenItemsDays
 	}
+	// dense_source is authoritative; it maps onto the legacy dense_strategy
+	// column during the dual-write window. dense_strategy stays as a fallback
+	// for older clients.
 	if req.DenseStrategy != nil {
 		nsReq.DenseStrategy = *req.DenseStrategy
+	}
+	if req.DenseSource != nil {
+		nsReq.DenseStrategy = *req.DenseSource
 	}
 	if req.EmbeddingDim != nil {
 		nsReq.EmbeddingDim = *req.EmbeddingDim
@@ -63,13 +68,6 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 
 	resp, err := a.svc.Upsert(ctx, namespace, nsReq)
 	if err != nil {
-		var conflictErr *nsconfig.DenseStrategyConflictError
-		if errors.As(err, &conflictErr) {
-			return nil, &admin.CatalogStrategyConflict{
-				DenseStrategy:  conflictErr.DenseStrategy,
-				CatalogEnabled: conflictErr.CatalogEnabled,
-			}
-		}
 		return nil, err
 	}
 

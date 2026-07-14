@@ -11,14 +11,13 @@ export type NamespaceConfig = {
   alpha: number
   max_results: number
   seen_items_days: number
-  dense_strategy: string
+  dense_source: string
   embedding_dim: number
   dense_distance: string
   trending_window: number
   trending_ttl: number
   lambda_trending: number
   has_api_key: boolean
-  catalog_enabled: boolean
   catalog_strategy_id?: string
   catalog_strategy_version?: string
   updated_at: string
@@ -36,7 +35,7 @@ export type NamespaceUpsertRequest = {
   alpha?: number
   max_results?: number
   seen_items_days?: number
-  dense_strategy?: string
+  dense_source?: string
   embedding_dim?: number
   dense_distance?: string
   trending_window?: number

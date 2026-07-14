@@ -62,7 +62,7 @@ func (f *fakeXAdder) XAdd(_ context.Context, args *redis.XAddArgs) *redis.String
 func enabledCfg() *namespace.Config {
 	return &namespace.Config{
 		Namespace:              "ns",
-		CatalogEnabled:         true,
+		DenseSource:            "catalog",
 		CatalogStrategyID:      "internal-hashing-ngrams",
 		CatalogStrategyVersion: "v1",
 		CatalogMaxContentBytes: 32768,
@@ -125,7 +125,7 @@ func TestServiceIngest_NamespaceNotFound(t *testing.T) {
 
 func TestServiceIngest_NamespaceNotEnabled(t *testing.T) {
 	cfg := enabledCfg()
-	cfg.CatalogEnabled = false
+	cfg.DenseSource = "disabled"
 	svc := newSvc(&fakeRepo{}, &fakeNSConfig{cfg: cfg}, &fakeXAdder{})
 	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hi"})
 	if !errors.Is(err, ErrNamespaceNotEnabled) {
