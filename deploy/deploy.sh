@@ -15,7 +15,20 @@ COMPOSE=(docker compose -f docker-compose.prod.yml)
 
 echo "Deploying image tag: ${IMAGE_TAG}"
 "${COMPOSE[@]}" pull
-"${COMPOSE[@]}" up -d --remove-orphans
+
+# depends_on conditions make `up -d` block until migrate completes and
+# healthchecks pass; a crash-looping service would hang it forever
+# (restart: on-failure retries indefinitely). Bound the wait and dump
+# diagnostics instead of dying silently to the ssh-action timeout.
+if ! timeout 600 "${COMPOSE[@]}" up -d --remove-orphans; then
+  echo "ERROR: compose up did not converge within 10 minutes. Status:" >&2
+  "${COMPOSE[@]}" ps -a >&2
+  echo "--- migrate logs ---" >&2
+  "${COMPOSE[@]}" logs --tail=30 migrate >&2
+  echo "--- api logs ---" >&2
+  "${COMPOSE[@]}" logs --tail=30 api >&2
+  exit 1
+fi
 
 echo "Waiting for API to become healthy..."
 for _ in $(seq 1 30); do
