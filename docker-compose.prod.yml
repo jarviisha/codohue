@@ -1,11 +1,11 @@
 services:
   api:
-    image: ghcr.io/jarviisha/codohue/api:latest
+    image: ghcr.io/jarviisha/codohue/api:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "2001:2001"
     environment:
-      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
@@ -16,20 +16,21 @@ services:
       migrate:
         condition: service_completed_successfully
       redis:
-        condition: service_started
+        condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:2001/healthz"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 15s
 
   cron:
-    image: ghcr.io/jarviisha/codohue/cron:latest
+    image: ghcr.io/jarviisha/codohue/cron:${IMAGE_TAG:-latest}
     restart: unless-stopped
     environment:
-      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
@@ -39,17 +40,42 @@ services:
       migrate:
         condition: service_completed_successfully
       redis:
-        condition: service_started
+        condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
+
+  embedder:
+    image: ghcr.io/jarviisha/codohue/embedder:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2003:2003"
+    environment:
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
+      - REDIS_URL=redis://redis:6379
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6334
+      - CODOHUE_LOG_FORMAT=json
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:2003/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   admin:
-    image: ghcr.io/jarviisha/codohue/admin:latest
+    image: ghcr.io/jarviisha/codohue/admin:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
       - "2002:2002"
     environment:
-      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
       - REDIS_URL=redis://redis:6379
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
@@ -57,26 +83,72 @@ services:
       - CODOHUE_API_URL=http://api:2001
       - CODOHUE_ADMIN_PORT=2002
       - CODOHUE_LOG_FORMAT=json
+    healthcheck:
+      # cmd/admin has no unauthenticated /healthz; the embedded SPA index
+      # doubles as the liveness probe.
+      test: ["CMD", "wget", "-qO-", "http://localhost:2002/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     depends_on:
       api:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       qdrant:
-        condition: service_started
+        condition: service_healthy
 
   migrate:
-    image: ghcr.io/jarviisha/codohue/migrate:latest
+    image: ghcr.io/jarviisha/codohue/migrate:${IMAGE_TAG:-latest}
     restart: on-failure
     environment:
-      - DATABASE_URL=${CODOHUE_DATABASE_URL:?set CODOHUE_DATABASE_URL to the production Postgres URL}
+      - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        # Ignored when the local-db profile is off (external Postgres mode).
+        required: false
+
+  # Optional in-compose Postgres. Two modes, chosen via .env:
+  #   external DB (default): set CODOHUE_DATABASE_URL to the managed Postgres URL.
+  #   in-compose DB:         set COMPOSE_PROFILES=local-db and
+  #                          CODOHUE_POSTGRES_PASSWORD=<secret>; DATABASE_URL
+  #                          then defaults to this postgres service.
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["local-db"]
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=codohue
+      - POSTGRES_PASSWORD=${CODOHUE_POSTGRES_PASSWORD:-}
+      - POSTGRES_DB=codohue
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codohue -d codohue"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # volatile-lru evicts only TTL'd keys (recommendation cache, trending
+    # ZSETs) under memory pressure. Stream keys (codohue:events ingest
+    # transport, catalog:embed:{ns} queues) carry no TTL and are never
+    # evicted — once caches are exhausted, writes fail loudly instead of
+    # queue data disappearing silently (which allkeys-lru allowed).
+    command: redis-server --appendonly yes --maxmemory ${CODOHUE_REDIS_MAXMEMORY:-256mb} --maxmemory-policy volatile-lru
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   qdrant:
     image: qdrant/qdrant:v1.17.1
@@ -86,7 +158,15 @@ services:
       - "127.0.0.1:6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      # The qdrant image ships neither curl nor wget; probe the REST port
+      # with bash's /dev/tcp instead.
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
 volumes:
   redis_data:
   qdrant_data:
+  postgres_data:
