@@ -1,4 +1,5 @@
-name: Release
+# Builds images and deploys after CI: main pushes -> dev, v* tags -> production.
+name: CD
 
 on:
   workflow_run:
