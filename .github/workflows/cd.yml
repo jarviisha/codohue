@@ -34,8 +34,10 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      # main   → version=dev-<sha7>, alias=dev    (rolling dev channel)
-      # v* tag → version=<tag>,      alias=latest (release channel)
+      # main   → version=dev-<sha7>, alias=dev,    GHCR only
+      # v* tag → version=<tag>,      alias=latest, GHCR + Docker Hub
+      # Emits one <image>_tags output per image with the full tag list so the
+      # build steps stay registry-agnostic.
       - name: Compute image tags
         id: meta
         env:
@@ -43,12 +45,27 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if [ "$HEAD_BRANCH" = "main" ]; then
-            echo "version=dev-${HEAD_SHA:0:7}" >> "$GITHUB_OUTPUT"
-            echo "alias=dev" >> "$GITHUB_OUTPUT"
+            version="dev-${HEAD_SHA:0:7}" alias="dev" release=false
           else
-            echo "version=$HEAD_BRANCH" >> "$GITHUB_OUTPUT"
-            echo "alias=latest" >> "$GITHUB_OUTPUT"
+            version="$HEAD_BRANCH" alias="latest" release=true
           fi
+          {
+            echo "version=$version"
+            echo "alias=$alias"
+            echo "release=$release"
+          } >> "$GITHUB_OUTPUT"
+          for img in api cron embedder admin migrate; do
+            tags="${REGISTRY}/${IMAGE_NAME}/${img}:${alias}"$'\n'"${REGISTRY}/${IMAGE_NAME}/${img}:${version}"
+            if [ "$release" = "true" ]; then
+              tags+=$'\n'"${DOCKERHUB_NAMESPACE}/${DOCKERHUB_REPO}-${img}:${alias}"
+              tags+=$'\n'"${DOCKERHUB_NAMESPACE}/${DOCKERHUB_REPO}-${img}:${version}"
+            fi
+            {
+              echo "${img}_tags<<EOF"
+              echo "$tags"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          done
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,6 +78,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
+        if: steps.meta.outputs.release == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -74,11 +92,7 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ steps.meta.outputs.alias }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ steps.meta.outputs.version }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ steps.meta.outputs.alias }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.api_tags }}
 
       - name: Build and push Cron image
         uses: docker/build-push-action@v6
@@ -88,11 +102,7 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ steps.meta.outputs.alias }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ steps.meta.outputs.version }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ steps.meta.outputs.alias }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.cron_tags }}
 
       - name: Build and push Embedder image
         uses: docker/build-push-action@v6
@@ -102,11 +112,7 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:${{ steps.meta.outputs.alias }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:${{ steps.meta.outputs.version }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:${{ steps.meta.outputs.alias }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.embedder_tags }}
 
       - name: Build and push Admin image
         uses: docker/build-push-action@v6
@@ -116,11 +122,7 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:${{ steps.meta.outputs.alias }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:${{ steps.meta.outputs.version }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:${{ steps.meta.outputs.alias }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.admin_tags }}
 
       - name: Build and push Migrate image
         uses: docker/build-push-action@v6
@@ -130,11 +132,7 @@ jobs:
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ steps.meta.outputs.alias }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ steps.meta.outputs.version }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ steps.meta.outputs.alias }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.migrate_tags }}
 
   deploy:
     needs: build-push
