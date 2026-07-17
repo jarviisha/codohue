@@ -7,9 +7,15 @@
 .vscode
 .idea
 
+# Patterns without a leading **/ only match at the context root, so nested
+# env files (e.g. web/admin/.env, which Vite would bake into the SPA bundle)
+# need their own globs.
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
 
 tmp
 dist
