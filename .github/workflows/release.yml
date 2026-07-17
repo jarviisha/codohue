@@ -13,21 +13,41 @@ env:
 
 jobs:
   build-push:
-    # event == 'push' pins this to the tag-push CI run — without it a PR from
-    # any branch whose name starts with "v" would also build and deploy.
+    # event == 'push' pins this to push-triggered CI runs — without it a PR
+    # from any branch whose name starts with "v" would also build and deploy.
+    # main pushes produce dev images; v* tag pushes produce release images.
     if: |
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+      (github.event.workflow_run.head_branch == 'main' ||
+       startsWith(github.event.workflow_run.head_branch, 'v'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+
+      # main   → version=dev-<sha7>, alias=dev    (rolling dev channel)
+      # v* tag → version=<tag>,      alias=latest (release channel)
+      - name: Compute image tags
+        id: meta
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ "$HEAD_BRANCH" = "main" ]; then
+            echo "version=dev-${HEAD_SHA:0:7}" >> "$GITHUB_OUTPUT"
+            echo "alias=dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$HEAD_BRANCH" >> "$GITHUB_OUTPUT"
+            echo "alias=latest" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -54,10 +74,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ github.event.workflow_run.head_branch }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ github.event.workflow_run.head_branch }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ steps.meta.outputs.alias }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ steps.meta.outputs.alias }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-api:${{ steps.meta.outputs.version }}
 
       - name: Build and push Cron image
         uses: docker/build-push-action@v6
@@ -68,10 +88,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ github.event.workflow_run.head_branch }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ github.event.workflow_run.head_branch }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ steps.meta.outputs.alias }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/cron:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ steps.meta.outputs.alias }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-cron:${{ steps.meta.outputs.version }}
 
       - name: Build and push Embedder image
         uses: docker/build-push-action@v6
@@ -82,10 +102,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:${{ github.event.workflow_run.head_branch }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:${{ github.event.workflow_run.head_branch }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:${{ steps.meta.outputs.alias }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/embedder:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:${{ steps.meta.outputs.alias }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-embedder:${{ steps.meta.outputs.version }}
 
       - name: Build and push Admin image
         uses: docker/build-push-action@v6
@@ -96,10 +116,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:${{ github.event.workflow_run.head_branch }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:${{ github.event.workflow_run.head_branch }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:${{ steps.meta.outputs.alias }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/admin:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:${{ steps.meta.outputs.alias }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-admin:${{ steps.meta.outputs.version }}
 
       - name: Build and push Migrate image
         uses: docker/build-push-action@v6
@@ -110,15 +130,21 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:latest
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ github.event.workflow_run.head_branch }}
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:latest
-            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ github.event.workflow_run.head_branch }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ steps.meta.outputs.alias }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/migrate:${{ steps.meta.outputs.version }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ steps.meta.outputs.alias }}
+            ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ steps.meta.outputs.version }}
 
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
-    environment: production
+    # main deploys to the dev environment, v* tags to production. VPS_* secrets
+    # are environment-scoped; both environments may point at the same host, so
+    # each stack gets its own directory (compose derives the project name from
+    # the directory, keeping containers/volumes/networks separate).
+    environment: ${{ github.event.workflow_run.head_branch == 'main' && 'dev' || 'production' }}
+    env:
+      DEPLOY_DIR: ${{ github.event.workflow_run.head_branch == 'main' && '/opt/codohue-dev' || '/opt/codohue-prod' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -132,7 +158,7 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           source: "docker-compose.prod.yml,deploy/deploy.sh"
-          target: /opt/codohue/
+          target: ${{ env.DEPLOY_DIR }}/
           overwrite: true
 
       - name: Deploy to VPS
@@ -145,5 +171,5 @@ jobs:
           script: |
             set -euo pipefail
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            IMAGE_TAG="${{ github.event.workflow_run.head_branch }}" bash /opt/codohue/deploy/deploy.sh
+            IMAGE_TAG="${{ needs.build-push.outputs.image_tag }}" bash ${{ env.DEPLOY_DIR }}/deploy/deploy.sh
             docker logout ghcr.io
