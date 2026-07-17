@@ -13,8 +13,11 @@ env:
 
 jobs:
   build-push:
+    # event == 'push' pins this to the tag-push CI run — without it a PR from
+    # any branch whose name starts with "v" would also build and deploy.
     if: |
       github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
       startsWith(github.event.workflow_run.head_branch, 'v')
     runs-on: ubuntu-latest
     permissions:
@@ -113,14 +116,34 @@ jobs:
             ${{ env.DOCKERHUB_NAMESPACE }}/${{ env.DOCKERHUB_REPO }}-migrate:${{ github.event.workflow_run.head_branch }}
 
   deploy:
-    if: false # TODO: enable when VPS is ready
     needs: build-push
     runs-on: ubuntu-latest
+    environment: production
     steps:
-      - name: Deploy to EC2
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Copy compose file and deploy script to VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "docker-compose.prod.yml,deploy/deploy.sh"
+          target: /opt/codohue/
+          overwrite: true
+
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ec2-user
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: /opt/codohue/deploy.sh
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -euo pipefail
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            IMAGE_TAG="${{ github.event.workflow_run.head_branch }}" bash /opt/codohue/deploy/deploy.sh
+            docker logout ghcr.io
