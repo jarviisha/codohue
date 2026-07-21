@@ -1,7 +1,6 @@
 package sse
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -110,26 +109,4 @@ func (sw *Writer) sendRaw(event, id string, data []byte) error {
 	}
 	sw.f.Flush()
 	return nil
-}
-
-// RunHeartbeat blocks sending Ping every interval until ctx is cancelled or
-// the client disconnects. Spawn it from the handler goroutine after primary
-// event sources are wired:
-//
-//	go sse.RunHeartbeat(ctx, writer, 15*time.Second)
-func RunHeartbeat(ctx context.Context, w *Writer, interval time.Duration) {
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-w.Done():
-			return
-		case <-t.C:
-			if err := w.Ping(); err != nil {
-				return
-			}
-		}
-	}
 }

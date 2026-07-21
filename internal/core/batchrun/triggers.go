@@ -24,13 +24,6 @@ const (
 	TriggerReembed TriggerSource = "admin_reembed"
 )
 
-// All returns every defined TriggerSource. Used by the DB CHECK migration
-// generator (if/when added) and by tests that want to round-trip every
-// allowed value.
-func All() []TriggerSource {
-	return []TriggerSource{TriggerCron, TriggerManual, TriggerReembed}
-}
-
 // String satisfies fmt.Stringer for ergonomic logging and SQL parameter
 // passing — pgx accepts string-kind values directly.
 func (t TriggerSource) String() string { return string(t) }

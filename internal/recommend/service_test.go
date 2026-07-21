@@ -657,12 +657,12 @@ func TestRerank(t *testing.T) {
 		}},
 	}
 
-	result := rerank(points, 0.02, 10)
+	result := rerankScored(points, 0.02, 10)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(result))
 	}
-	if result[0] != "obj-recent" {
-		t.Errorf("expected obj-recent first, got %q", result[0])
+	if result[0].objectID != "obj-recent" {
+		t.Errorf("expected obj-recent first, got %q", result[0].objectID)
 	}
 }
 
@@ -674,7 +674,7 @@ func TestRerankLimit(t *testing.T) {
 			Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj")},
 		}
 	}
-	if len(rerank(points, 0, 3)) != 3 {
+	if len(rerankScored(points, 0, 3)) != 3 {
 		t.Error("expected 3 results with limit=3")
 	}
 }
@@ -685,8 +685,8 @@ func TestRerankNoCreatedAt(t *testing.T) {
 			"object_id": qdrant.NewValueString("obj-no-time"),
 		}},
 	}
-	result := rerank(points, 0.02, 10)
-	if len(result) != 1 || result[0] != "obj-no-time" {
+	result := rerankScored(points, 0.02, 10)
+	if len(result) != 1 || result[0].objectID != "obj-no-time" {
 		t.Errorf("expected [obj-no-time], got %v", result)
 	}
 }

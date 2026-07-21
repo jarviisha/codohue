@@ -98,49 +98,6 @@ func TestValidateNamespaceKey(t *testing.T) {
 	})
 }
 
-func TestRequireAdmin(t *testing.T) {
-	adminKey := "super-secret"
-	handler := RequireAdmin(adminKey)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	t.Run("valid admin key", func(t *testing.T) {
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/", http.NoBody)
-		r.Header.Set("Authorization", "Bearer "+adminKey)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, r)
-		if rec.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", rec.Code)
-		}
-	})
-
-	t.Run("wrong key", func(t *testing.T) {
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/", http.NoBody)
-		r.Header.Set("Authorization", "Bearer wrong")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, r)
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rec.Code)
-		}
-		var got httpapi.ErrorResponse
-		if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-			t.Fatalf("decode error response: %v", err)
-		}
-		if got.Error.Code != "unauthorized" {
-			t.Fatalf("unexpected error code: %+v", got)
-		}
-	})
-
-	t.Run("missing header", func(t *testing.T) {
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/", http.NoBody)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, r)
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rec.Code)
-		}
-	})
-}
-
 func TestRequireNamespace(t *testing.T) {
 	adminKey := "admin-secret"
 	namespaceToken := "ns-token"

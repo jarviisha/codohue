@@ -97,45 +97,6 @@ func TestDoneSignalsOnRequestContextCancel(t *testing.T) {
 	}
 }
 
-func TestRunHeartbeatPingsEveryInterval(t *testing.T) {
-	rec := httptest.NewRecorder()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	req := httptest.NewRequestWithContext(ctx, "GET", "/", http.NoBody)
-	w, _ := NewWriter(rec, req)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		RunHeartbeat(ctx, w, 30*time.Millisecond)
-	}()
-	time.Sleep(120 * time.Millisecond)
-	cancel()
-	wg.Wait()
-	pings := strings.Count(rec.Body.String(), "event: ping")
-	if pings < 2 {
-		t.Fatalf("pings=%d, want >= 2; body=%q", pings, rec.Body.String())
-	}
-}
-
-func TestRunHeartbeatExitsOnContextCancel(t *testing.T) {
-	rec := httptest.NewRecorder()
-	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/", http.NoBody)
-	w, _ := NewWriter(rec, req)
-	done := make(chan struct{})
-	go func() {
-		RunHeartbeat(ctx, w, time.Second)
-		close(done)
-	}()
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("RunHeartbeat did not exit on ctx cancel")
-	}
-}
-
 // deadlineRecorder wraps httptest.ResponseRecorder with a Flush + a
 // SetWriteDeadline implementation so http.NewResponseController surfaces it.
 // The recorder captures whatever deadline NewWriter sets.

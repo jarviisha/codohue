@@ -24,8 +24,6 @@ type fakeSvc struct {
 	nsListErr          error
 	nsGetResp          *NamespaceConfig
 	nsGetErr           error
-	nsOverviewResp     *NamespacesOverviewResponse
-	nsOverviewErr      error
 	upsertResp         *NamespaceUpsertResponse
 	upsertStatus       int
 	upsertErr          error
@@ -154,10 +152,6 @@ func (f *fakeSvc) ListNamespaces(_ context.Context) ([]NamespaceConfig, error) {
 
 func (f *fakeSvc) GetNamespace(_ context.Context, _ string) (*NamespaceConfig, error) {
 	return f.nsGetResp, f.nsGetErr
-}
-
-func (f *fakeSvc) GetNamespacesOverview(_ context.Context) (*NamespacesOverviewResponse, error) {
-	return f.nsOverviewResp, f.nsOverviewErr
 }
 
 func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ *NamespaceUpsertRequest) (*NamespaceUpsertResponse, int, error) {

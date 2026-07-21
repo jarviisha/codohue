@@ -6,7 +6,6 @@ import {
 } from '@tanstack/react-query'
 import { apiFetch } from './http'
 import { queryKeys } from './queryKeys'
-import type { HealthResponse } from './health'
 
 // ---------------------------------------------------------------------------
 // Wire types — mirror Go shapes from internal/admin/types.go. Hand-maintained
@@ -27,7 +26,7 @@ export type PhaseEntry = {
   error: string | null
 }
 
-export type TargetStrategy = {
+type TargetStrategy = {
   id: string
   version: string
 }
@@ -59,7 +58,7 @@ export type LogLine = {
   msg: string
 }
 
-export type BatchRunStats = {
+type BatchRunStats = {
   total: number
   running: number
   ok: number
@@ -73,7 +72,7 @@ export type BatchRunsResponse = {
   stats: BatchRunStats
 }
 
-export type BatchRunStatsBucket = {
+type BatchRunStatsBucket = {
   ts: string
   ok: number
   failed: number
@@ -176,5 +175,3 @@ export function useRetryBatchRun() {
   })
 }
 
-// Local re-export so pages don't have to import from two places.
-export type { HealthResponse }

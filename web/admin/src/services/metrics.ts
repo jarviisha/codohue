@@ -7,12 +7,12 @@ import { apiFetch } from './http'
 // separate processes and are scraped by Prometheus directly.
 // ---------------------------------------------------------------------------
 
-export type MetricsSummaryIngest = {
+type MetricsSummaryIngest = {
   events_per_sec_1m: Record<string, number>
   events_per_sec_5m: Record<string, number>
 }
 
-export type MetricsSummaryCron = {
+type MetricsSummaryCron = {
   batch_lag_seconds: number
 }
 
@@ -22,7 +22,7 @@ export type MetricsSummaryResponse = {
   cron: MetricsSummaryCron
 }
 
-export const metricsKeys = {
+const metricsKeys = {
   summary: ['metrics', 'summary'] as const,
 }
 

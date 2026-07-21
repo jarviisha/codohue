@@ -8,14 +8,6 @@ type SubjectVector struct {
 	Values    []float32
 }
 
-// ObjectVector represents the sparse interaction vector of an object.
-type ObjectVector struct {
-	ObjectID  string
-	NumericID uint64
-	Indices   []uint32
-	Values    []float32
-}
-
 // RawEvent is an event record fetched from Postgres for vector computation.
 type RawEvent struct {
 	SubjectID       string

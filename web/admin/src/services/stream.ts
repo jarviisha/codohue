@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from './http'
 
-export type StreamHandler = (data: unknown) => void
+type StreamHandler = (data: unknown) => void
 export type StreamHandlers = Record<string, StreamHandler>
 
 export type UseServerStreamOptions = {
