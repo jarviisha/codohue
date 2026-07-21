@@ -40,7 +40,7 @@ func TestRepositoryUpsert_Create(t *testing.T) {
 		Lambda:        0.05,
 		Gamma:         0.02,
 		MaxResults:    20,
-		DenseStrategy: "disabled",
+		DenseSource:   "disabled",
 	}
 
 	cfg, err := repo.Upsert(context.Background(), "nsconfig_test", req)
@@ -76,31 +76,37 @@ func TestRepositoryUpsert_EmptyDenseSource_NormalizedToDisabled(t *testing.T) {
 	}
 }
 
-// TestRepositoryUpsertCatalogConfig_DisableOnLegacyEmptyStrategy covers the
-// disable path when the row still carries a pre-normalization empty
-// dense_strategy: dense_source must fall back to "disabled", not the empty string.
-func TestRepositoryUpsertCatalogConfig_DisableOnLegacyEmptyStrategy(t *testing.T) {
+// TestRepositoryUpsertCatalogConfig_DisableSemantics covers the disable path:
+// a catalog-mode namespace lands on "disabled", while disabling against a
+// namespace that never entered catalog mode leaves dense_source untouched.
+func TestRepositoryUpsertCatalogConfig_DisableSemantics(t *testing.T) {
 	db := openTestDB(t)
-	cleanupNS(t, db, "nsconfig_test_legacy_empty")
+	cleanupNS(t, db, "nsconfig_test_disable")
 	ctx := context.Background()
 
 	repo := NewRepository(db)
-	if _, err := repo.Upsert(ctx, "nsconfig_test_legacy_empty", &UpsertRequest{}); err != nil {
+	if _, err := repo.Upsert(ctx, "nsconfig_test_disable", &UpsertRequest{DenseSource: "item2vec"}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	// Simulate a legacy row written before empty-input normalization.
-	if _, err := db.Exec(ctx,
-		`UPDATE namespace_configs SET dense_strategy = '' WHERE namespace = $1`,
-		"nsconfig_test_legacy_empty"); err != nil {
-		t.Fatalf("plant legacy empty dense_strategy: %v", err)
+
+	cfg, err := repo.UpsertCatalogConfig(ctx, "nsconfig_test_disable", &UpdateCatalogRequest{Enabled: false})
+	if err != nil {
+		t.Fatalf("UpsertCatalogConfig (non-catalog disable): %v", err)
+	}
+	if cfg.DenseSource != "item2vec" {
+		t.Errorf("DenseSource after no-op disable: got %q, want %q", cfg.DenseSource, "item2vec")
 	}
 
-	cfg, err := repo.UpsertCatalogConfig(ctx, "nsconfig_test_legacy_empty", &UpdateCatalogRequest{Enabled: false})
+	if _, err := repo.UpsertCatalogConfig(ctx, "nsconfig_test_disable",
+		&UpdateCatalogRequest{Enabled: true, StrategyID: "hash", StrategyVersion: "v1"}); err != nil {
+		t.Fatalf("UpsertCatalogConfig (enable): %v", err)
+	}
+	cfg, err = repo.UpsertCatalogConfig(ctx, "nsconfig_test_disable", &UpdateCatalogRequest{Enabled: false})
 	if err != nil {
-		t.Fatalf("UpsertCatalogConfig: %v", err)
+		t.Fatalf("UpsertCatalogConfig (disable): %v", err)
 	}
 	if cfg.DenseSource != "disabled" {
-		t.Errorf("DenseSource: got %q, want %q", cfg.DenseSource, "disabled")
+		t.Errorf("DenseSource after disable: got %q, want %q", cfg.DenseSource, "disabled")
 	}
 }
 

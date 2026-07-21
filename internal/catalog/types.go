@@ -72,7 +72,7 @@ var (
 	ErrContentTooLarge = errors.New("catalog: content exceeds catalog_max_content_bytes")
 
 	// ErrNamespaceNotEnabled fires when the namespace exists but its
-	// catalog_enabled is false (handler maps to 404 to avoid leaking
+	// dense_source is not "catalog" (handler maps to 404 to avoid leaking
 	// namespace existence to unauthenticated probes).
 	ErrNamespaceNotEnabled = errors.New("catalog: namespace not enabled for auto-embedding")
 

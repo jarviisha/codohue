@@ -284,11 +284,11 @@ func TestAdmin_PingStreamEmitsTickFrame(t *testing.T) {
 
 func TestAdmin_BatchRunLifecycleCreatesAndExposesRun(t *testing.T) {
 	namespace, _ := createIsolatedNamespace(t, "admin_batch_run", map[string]any{
-		"action_weights": map[string]float64{"VIEW": 1.0, "LIKE": 4.0},
-		"lambda":         0.01,
-		"gamma":          0.5,
-		"max_results":    20,
-		"dense_strategy": "disabled",
+		"action_weights":  map[string]float64{"VIEW": 1.0, "LIKE": 4.0},
+		"lambda":          0.01,
+		"gamma":           0.5,
+		"max_results":     20,
+		"dense_source":    "disabled",
 		"seen_items_days": 30,
 	})
 

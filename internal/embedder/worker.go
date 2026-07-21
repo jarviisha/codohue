@@ -155,7 +155,7 @@ func (w *Worker) Run(ctx context.Context) error {
 }
 
 // refreshNamespaces brings the set of running per-namespace consumers in
-// line with the current namespace_configs WHERE catalog_enabled=true.
+// line with the current namespace_configs WHERE dense_source='catalog'.
 // Newly-enabled namespaces gain a consumer + reaper pair; newly-disabled
 // namespaces have theirs cancelled.
 func (w *Worker) refreshNamespaces(ctx context.Context) error {

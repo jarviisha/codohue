@@ -29,7 +29,7 @@ func TestDataPlaneNamespaceMutationRouteRemoved_AdminKey(t *testing.T) {
 		map[string]any{
 			"action_weights": map[string]float64{"click": 1.0, "like": 3.0},
 			"max_results":    25,
-			"dense_strategy": "byoe",
+			"dense_source":   "byoe",
 			"embedding_dim":  4,
 			"alpha":          0.7,
 		})

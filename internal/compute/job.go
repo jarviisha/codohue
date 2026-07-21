@@ -391,7 +391,7 @@ const item2vecLargeEventThreshold = 500_000
 // guarantees consistent vectors at the cost of higher per-run CPU.
 //
 // For corpora beyond ~500K events, consider: (a) increasing CODOHUE_BATCH_INTERVAL_MINUTES so
-// fewer retrains happen per hour, (b) switching dense_strategy to "svd" (cheaper full
+// fewer retrains happen per hour, (b) switching dense_source to "svd" (cheaper full
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
 func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items, subjectCount int, err error) {
 	start := time.Now()

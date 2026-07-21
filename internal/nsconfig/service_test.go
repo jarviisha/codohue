@@ -205,7 +205,7 @@ func TestServiceUpdateCatalogConfig_GetError(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_EnableRequiresStrategy(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "byoe"}}
 	svc, _ := newServiceWithRegistry(repo)
 
 	_, err := svc.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{Enabled: true})
@@ -215,7 +215,7 @@ func TestServiceUpdateCatalogConfig_EnableRequiresStrategy(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_UnknownStrategy(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "byoe"}}
 	svc, _ := newServiceWithRegistry(repo)
 
 	_, err := svc.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{
@@ -227,7 +227,7 @@ func TestServiceUpdateCatalogConfig_UnknownStrategy(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_DimensionMismatch(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "byoe"}}
 	svc, reg := newServiceWithRegistry(repo)
 	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
 		return &stubStrategyT{id: "hash", version: "v1", dim: 64}, nil
@@ -249,9 +249,9 @@ func TestServiceUpdateCatalogConfig_DimensionMismatch(t *testing.T) {
 }
 
 func TestServiceUpdateCatalogConfig_EnableSuccess(t *testing.T) {
-	want := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, CatalogEnabled: true, CatalogStrategyID: "hash", CatalogStrategyVersion: "v1"}
+	want := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "catalog", CatalogStrategyID: "hash", CatalogStrategyVersion: "v1"}
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "byoe"},
 		upsertCatalogCfg: want,
 	}
 	svc, reg := newServiceWithRegistry(repo)
@@ -275,8 +275,8 @@ func TestServiceUpdateCatalogConfig_EnableSuccess(t *testing.T) {
 
 func TestServiceUpdateCatalogConfig_DisableSkipsValidation(t *testing.T) {
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, CatalogEnabled: true},
-		upsertCatalogCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, CatalogEnabled: false},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "catalog"},
+		upsertCatalogCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "disabled"},
 	}
 	svc, _ := newServiceWithRegistry(repo)
 	// No strategy registered — should still succeed because disable skips
@@ -286,14 +286,14 @@ func TestServiceUpdateCatalogConfig_DisableSkipsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.CatalogEnabled {
-		t.Error("expected CatalogEnabled = false after disable")
+	if cfg.DenseSource == "catalog" {
+		t.Error("expected dense_source to leave catalog mode after disable")
 	}
 }
 
 func TestServiceUpdateCatalogConfig_RepoUpsertError(t *testing.T) {
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "byoe"},
 		upsertCatalogErr: errors.New("db error"),
 	}
 	svc, reg := newServiceWithRegistry(repo)
@@ -311,7 +311,7 @@ func TestServiceUpdateCatalogConfig_RepoUpsertError(t *testing.T) {
 
 func TestServiceUpdateCatalogConfig_RepoUpsertReturnsNil(t *testing.T) {
 	repo := &fakeRepo{
-		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseStrategy: "byoe"},
+		getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "byoe"},
 		upsertCatalogCfg: nil, // simulates no rows updated despite Get success
 	}
 	svc, reg := newServiceWithRegistry(repo)

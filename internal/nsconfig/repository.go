@@ -46,6 +46,9 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // Catalog auto-embedding columns (catalog_*) are also excluded from the
 // UPDATE clause: they are owned by the separate UpsertCatalogConfig path.
 // On INSERT they fall back to the column defaults declared in migration 011.
+// For the same reason an UPDATE never moves dense_source away from "catalog" —
+// leaving catalog mode goes through UpsertCatalogConfig (disable), which owns
+// that transition.
 func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*namespace.Config, error) {
 	weightsJSON, err := json.Marshal(req.ActionWeights)
 	if err != nil {
@@ -56,7 +59,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	// same rule migration 016 uses for its backfill — so dense_source_chk
 	// never sees an empty string. Invalid non-empty values still fail the
 	// CHECK on purpose.
-	denseSource := req.DenseStrategy
+	denseSource := req.DenseSource
 	if denseSource == "" {
 		denseSource = "disabled"
 	}
@@ -68,11 +71,11 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	err = r.queryRowFn(ctx, `
 		INSERT INTO namespace_configs (
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
-			alpha, dense_strategy, dense_source, embedding_dim, dense_distance,
+			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, $13, NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
 		ON CONFLICT (namespace) DO UPDATE
 		  SET action_weights    = EXCLUDED.action_weights,
 		      time_decay_factor = EXCLUDED.time_decay_factor,
@@ -80,8 +83,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		      max_results       = EXCLUDED.max_results,
 		      seen_items_days   = EXCLUDED.seen_items_days,
 		      alpha             = EXCLUDED.alpha,
-		      dense_strategy    = EXCLUDED.dense_strategy,
-		      dense_source      = CASE WHEN namespace_configs.catalog_enabled THEN 'catalog' ELSE EXCLUDED.dense_strategy END,
+		      dense_source      = CASE WHEN namespace_configs.dense_source = 'catalog' THEN 'catalog' ELSE EXCLUDED.dense_source END,
 		      embedding_dim     = EXCLUDED.embedding_dim,
 		      dense_distance    = EXCLUDED.dense_distance,
 		      trending_window   = EXCLUDED.trending_window,
@@ -91,9 +93,9 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		RETURNING
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
 			COALESCE(api_key_hash, ''),
-			alpha, dense_strategy, dense_source, embedding_dim, dense_distance,
+			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
-			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
@@ -102,9 +104,9 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
 		&cfg.APIKeyHash,
-		&cfg.Alpha, &cfg.DenseStrategy, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
+		&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
-		&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
 		&cfg.CreatedAt, &cfg.UpdatedAt,
 	)
@@ -149,9 +151,9 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 		SELECT
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
 			COALESCE(api_key_hash, ''),
-			alpha, dense_strategy, dense_source, embedding_dim, dense_distance,
+			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
-			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at
 		FROM namespace_configs
@@ -160,9 +162,9 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
 		&cfg.APIKeyHash,
-		&cfg.Alpha, &cfg.DenseStrategy, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
+		&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
-		&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
 		&cfg.CreatedAt, &cfg.UpdatedAt,
 	)
@@ -200,9 +202,9 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 		SELECT
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
 			COALESCE(api_key_hash, ''),
-			alpha, dense_strategy, dense_source, embedding_dim, dense_distance,
+			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
-			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at
 		FROM namespace_configs
@@ -222,9 +224,9 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 		err := rows.Scan(
 			&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
 			&cfg.APIKeyHash,
-			&cfg.Alpha, &cfg.DenseStrategy, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
+			&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 			&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
-			&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+			&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 			&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
 			&cfg.CreatedAt, &cfg.UpdatedAt,
 		)
@@ -282,13 +284,16 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 	var weightsRaw []byte
 	var paramsRaw []byte
 
+	// Enable flips dense_source to 'catalog'. Disable only takes effect when
+	// the namespace is actually in catalog mode — it lands on 'disabled'
+	// (the pre-catalog producer is deliberately not remembered); a disable
+	// against a non-catalog namespace leaves dense_source untouched.
 	err = r.queryRowFn(ctx, `
 		UPDATE namespace_configs
-		SET catalog_enabled            = $2,
-		    dense_source               = CASE
+		SET dense_source               = CASE
 		        WHEN $2 THEN 'catalog'
-		        WHEN dense_strategy IN ('disabled', 'item2vec', 'svd', 'byoe') THEN dense_strategy
-		        ELSE 'disabled'
+		        WHEN dense_source = 'catalog' THEN 'disabled'
+		        ELSE dense_source
 		    END,
 		    catalog_strategy_id        = $3,
 		    catalog_strategy_version   = $4,
@@ -300,18 +305,18 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		RETURNING
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
 			COALESCE(api_key_hash, ''),
-			alpha, dense_strategy, dense_source, embedding_dim, dense_distance,
+			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
-			catalog_enabled, COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
+			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at`,
 		ns, req.Enabled, strategyID, strategyVer, paramsJSON, maxAttempts, maxBytes,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
 		&cfg.APIKeyHash,
-		&cfg.Alpha, &cfg.DenseStrategy, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
+		&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
-		&cfg.CatalogEnabled, &cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
+		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
 		&cfg.CreatedAt, &cfg.UpdatedAt,
 	)

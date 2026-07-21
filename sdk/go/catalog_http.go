@@ -15,7 +15,7 @@ import (
 // success — the dense vector is upserted asynchronously by the embedder
 // worker.
 //
-// The namespace's catalog_enabled flag must be true; otherwise the server
+// The namespace's dense_source must be "catalog"; otherwise the server
 // returns 404 with code "namespace_not_enabled" (mapped to ErrNotFound).
 func (n *Namespace) IngestCatalog(ctx context.Context, req codohuetypes.CatalogIngestRequest) error {
 	if req.ObjectID == "" {
