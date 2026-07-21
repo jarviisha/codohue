@@ -30,6 +30,10 @@ var (
 	ErrCatalogStrategyPickerUnavailable = errors.New("admin: catalog strategy picker not wired")
 )
 
+// catalogVectorPreviewDims bounds how many leading dims of a catalog item's
+// dense vector are sent to the admin UI.
+const catalogVectorPreviewDims = 16
+
 // qdrantClientPointDeleter wraps *qdrant.Client to satisfy qdrantPointDeleter.
 type qdrantClientPointDeleter struct {
 	c *qdrant.Client
@@ -253,11 +257,15 @@ func (s *Service) attachCatalogVector(ctx context.Context, item *CatalogItemDeta
 		return
 	}
 	values := vec.GetDense().GetData()
+	preview := values
+	if len(preview) > catalogVectorPreviewDims {
+		preview = preview[:catalogVectorPreviewDims]
+	}
 	item.Vector = &CatalogVector{
 		Collection: collection,
 		NumericID:  numericID,
 		Dim:        len(values),
-		Values:     values,
+		Preview:    preview,
 	}
 }
 

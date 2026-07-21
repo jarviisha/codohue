@@ -152,7 +152,7 @@ export default function CatalogItemDetailPage() {
           </Stack>
         )}
 
-        {item.vector && (
+        {item.vector?.preview && (
           <Stack>
             <h2 className="text-foreground text-sm font-semibold">Embedded vector</h2>
             <Card>

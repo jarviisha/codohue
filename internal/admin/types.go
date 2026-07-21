@@ -213,11 +213,14 @@ type CatalogItemDetail struct {
 }
 
 // CatalogVector is the dense object vector stored in Qdrant for a catalog item.
+// Preview carries only the leading dims (Dim reports the true dimensionality) —
+// operators eyeball it to spot degenerate vectors, so shipping all 768 floats
+// to the browser would be pure waste.
 type CatalogVector struct {
 	Collection string    `json:"collection"`
 	NumericID  uint64    `json:"numeric_id"`
 	Dim        int       `json:"dim"`
-	Values     []float32 `json:"values"`
+	Preview    []float32 `json:"preview"`
 }
 
 // CatalogItemsListResponse paginates a list of catalog items.
