@@ -20,6 +20,7 @@ ENV GOCACHE=/root/.cache/go-build \
 
 COPY go.work go.work.sum ./
 COPY go.mod go.sum ./
+COPY examples/geminipump/go.mod ./examples/geminipump/
 COPY examples/loadgen/go.mod ./examples/loadgen/
 COPY pkg/codohuetypes/go.mod ./pkg/codohuetypes/
 COPY sdk/go/go.mod sdk/go/go.sum ./sdk/go/

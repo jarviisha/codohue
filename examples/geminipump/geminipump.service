@@ -1,0 +1,54 @@
+# systemd unit template for running the Gemini data-pump bot on a VPS.
+#
+# The bot is not part of the deployed compose stack and is not published as an
+# image — copy the static binary and this unit to the host, then enable it.
+#
+#   make build-geminipump
+#   scp tmp/geminipump      VPS:/usr/local/bin/geminipump
+#   scp examples/geminipump/geminipump.service VPS:/etc/systemd/system/
+#   ssh VPS 'install -m 600 /dev/stdin /etc/codohue-geminipump.env' <<'EOF'
+#   GEMINI_API_KEY=your-gemini-key
+#   CODOHUE_ADMIN_API_KEY=your-production-admin-key
+#   EOF
+#   ssh VPS 'systemctl daemon-reload && systemctl enable --now geminipump'
+#
+# Logs: journalctl -u geminipump -f
+#
+# api (2001) and admin (2002) are published to the host by
+# docker-compose.prod.yml, so the bot reaches them over localhost without
+# joining the compose network.
+
+[Unit]
+Description=Codohue Gemini data-pump bot
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# Secrets live in a root-only env file, never on the command line (arguments
+# are world-readable via /proc). Required keys: GEMINI_API_KEY and
+# CODOHUE_ADMIN_API_KEY.
+EnvironmentFile=/etc/codohue-geminipump.env
+Environment=CODOHUE_API_URL=http://127.0.0.1:2001
+Environment=CODOHUE_ADMIN_URL=http://127.0.0.1:2002
+
+ExecStart=/usr/local/bin/geminipump \
+    -ns=demo \
+    -rate=3 \
+    -users=50 \
+    -gen-every=5m \
+    -max-items=200
+
+Restart=on-failure
+RestartSec=15s
+
+# The bot only talks to the network; deny it everything else.
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

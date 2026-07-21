@@ -2,6 +2,7 @@ go 1.26.1
 
 use (
 	.
+	./examples/geminipump
 	./examples/loadgen
 	./pkg/codohuetypes
 	./sdk/go
