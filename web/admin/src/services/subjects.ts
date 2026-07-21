@@ -45,7 +45,7 @@ export type RecommendResponse = {
 // Query keys
 // ---------------------------------------------------------------------------
 
-export const subjectKeys = {
+const subjectKeys = {
   profile: (ns: string, id: string) => ['ns', ns, 'subject', id, 'profile'] as const,
   recommendations: (ns: string, id: string, opts: Record<string, unknown>) =>
     ['ns', ns, 'subject', id, 'recommendations', opts] as const,

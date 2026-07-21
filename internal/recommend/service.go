@@ -841,17 +841,6 @@ func rerankScored(points []*qdrant.ScoredPoint, gamma float64, limit int) []scor
 	return scored
 }
 
-// rerank is a convenience wrapper around rerankScored that returns only object IDs.
-// Used by tests that verify ordering without needing per-item scores.
-func rerank(points []*qdrant.ScoredPoint, gamma float64, limit int) []string {
-	scored := rerankScored(points, gamma, limit)
-	result := make([]string, len(scored))
-	for i, s := range scored {
-		result[i] = s.objectID
-	}
-	return result
-}
-
 // pageItems slices a scored list to [offset : offset+limit] and builds RecommendedItem
 // values with 1-based global rank. The caller is responsible for ensuring that
 // len(scored) reflects the total candidate count before slicing.
@@ -1037,7 +1026,7 @@ func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
 		return err
 	}
 
-	// Dense collection is optional — it may not exist when dense_strategy is "disabled"
+	// Dense collection is optional — it may not exist when dense_source is "disabled"
 	// or no embeddings have been pushed yet. Treat cleanup errors as best-effort.
 	if err := s.deleteFromCollectionFn(ctx, ns+"_objects_dense", pointIDs); err != nil {
 		slog.Debug("delete object: dense collection cleanup skipped", "namespace", ns, "object_id", objectID, "error", err)

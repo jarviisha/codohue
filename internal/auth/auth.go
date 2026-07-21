@@ -46,19 +46,6 @@ func ValidateNamespaceKey(ctx context.Context, token, adminKey string, getHash K
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil
 }
 
-// RequireAdmin returns middleware that allows only requests carrying the global admin key.
-func RequireAdmin(adminKey string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ExtractBearerToken(r) != adminKey {
-				httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // RequireNamespace returns middleware that validates a namespace-scoped API key.
 // extractNamespace is called to obtain the namespace from the incoming request
 // (e.g. from a URL path parameter or query string).

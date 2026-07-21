@@ -15,7 +15,7 @@ func TestRankComputed_WarmSubjectRanksConnectedCandidateFirst(t *testing.T) {
 		"gamma":           0.5,
 		"max_results":     10,
 		"seen_items_days": 30,
-		"dense_strategy":  "disabled",
+		"dense_source":    "disabled",
 	})
 
 	now := time.Now().UTC().Truncate(time.Second)

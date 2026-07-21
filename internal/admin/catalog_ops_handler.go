@@ -15,7 +15,7 @@ import (
 //
 //	202 Accepted              — re-embed orchestration kicked off; Location
 //	                            header points at the batch run record.
-//	404 Not Found             — namespace does not exist OR catalog_enabled=false
+//	404 Not Found             — namespace does not exist OR dense_source is not "catalog"
 //	                            (same body — see FR-008).
 //	409 Conflict              — a re-embed is already in progress.
 //	500 Internal Server Error — unexpected DB / Redis error.

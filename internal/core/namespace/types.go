@@ -18,11 +18,10 @@ type Config struct {
 	// Dense hybrid.
 	Alpha float64 `json:"alpha"`
 	// DenseSource names the single producer of object dense vectors:
-	// disabled | item2vec | svd | byoe | catalog. It supersedes the legacy
-	// DenseStrategy + CatalogEnabled pair, which are kept during the dual-write
-	// window (migration 016) and dropped in 017.
+	// disabled | item2vec | svd | byoe | catalog. "catalog" doubles as the
+	// catalog auto-embedding toggle — the namespace then accepts catalog
+	// ingest and rejects BYOE writes for object dense vectors.
 	DenseSource   string `json:"dense_source"`
-	DenseStrategy string `json:"dense_strategy"`
 	EmbeddingDim  int    `json:"embedding_dim"`
 	DenseDistance string `json:"dense_distance"`
 
@@ -32,12 +31,9 @@ type Config struct {
 	LambdaTrending float64 `json:"lambda_trending"`
 
 	// Catalog auto-embedding (feature 004-catalog-embedder).
-	// CatalogEnabled toggles whether this namespace accepts catalog ingest and
-	// rejects BYOE writes for object dense vectors.
-	CatalogEnabled bool `json:"catalog_enabled"`
 	// CatalogStrategyID and CatalogStrategyVersion identify the active embedding
 	// strategy registered in internal/core/embedstrategy. Both are empty when
-	// CatalogEnabled is false.
+	// DenseSource is not "catalog".
 	CatalogStrategyID      string         `json:"catalog_strategy_id,omitempty"`
 	CatalogStrategyVersion string         `json:"catalog_strategy_version,omitempty"`
 	CatalogStrategyParams  map[string]any `json:"catalog_strategy_params,omitempty"`

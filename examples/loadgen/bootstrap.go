@@ -46,7 +46,7 @@ func (a *adminClient) upsertNamespace(ctx context.Context, ns string, dim int) e
 	alpha := 0.7
 	lambda := 0.92
 	gamma := 0.12
-	denseStrategy := "byoe" // catalog auto-embedding supplies the object dense vectors
+	denseSource := "byoe" // catalog auto-embedding supplies the object dense vectors
 	distance := "cosine"
 	maxResults := 20
 	seenItemsDays := 30
@@ -61,7 +61,7 @@ func (a *adminClient) upsertNamespace(ctx context.Context, ns string, dim int) e
 		"alpha":           &alpha,
 		"max_results":     &maxResults,
 		"seen_items_days": &seenItemsDays,
-		"dense_strategy":  &denseStrategy,
+		"dense_source":    &denseSource,
 		"embedding_dim":   &dim,
 		"dense_distance":  &distance,
 		"trending_window": &trendingWindow,

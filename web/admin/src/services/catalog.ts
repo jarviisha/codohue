@@ -47,7 +47,7 @@ export type NamespaceCatalogConfig = {
   max_attempts?: number
 }
 
-export type CatalogReEmbedSummary = {
+type CatalogReEmbedSummary = {
   batch_run_id: number
   strategy_id: string
   strategy_version: string
@@ -67,7 +67,7 @@ export type NamespaceCatalogResponse = {
   last_re_embed?: CatalogReEmbedSummary
 }
 
-export type CatalogBacklogSample = {
+type CatalogBacklogSample = {
   sampled_at: string
   pending: number
   in_flight: number
@@ -82,7 +82,7 @@ export type CatalogBacklogHistoryResponse = {
   samples: CatalogBacklogSample[]
 }
 
-export type CatalogFailureReason = {
+type CatalogFailureReason = {
   reason: string
   count: number
   sample_object_id?: string
@@ -145,7 +145,7 @@ export type CatalogReEmbedResponse = {
 // Query keys
 // ---------------------------------------------------------------------------
 
-export const catalogKeys = {
+const catalogKeys = {
   config: (ns: string) => ['catalog', ns, 'config'] as const,
   backlogHistory: (ns: string, window: string) =>
     ['catalog', ns, 'backlog-history', window] as const,

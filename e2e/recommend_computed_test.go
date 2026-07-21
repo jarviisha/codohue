@@ -15,7 +15,7 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 		"gamma":           0.5,
 		"max_results":     10,
 		"seen_items_days": 30,
-		"dense_strategy":  "disabled",
+		"dense_source":    "disabled",
 	})
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -89,7 +89,7 @@ func TestRecommendComputed_ColdStartFallsBackToTrendingOrPopular(t *testing.T) {
 		"gamma":           0.5,
 		"max_results":     10,
 		"seen_items_days": 30,
-		"dense_strategy":  "disabled",
+		"dense_source":    "disabled",
 		"trending_window": 24,
 		"trending_ttl":    120,
 	})

@@ -5,7 +5,7 @@ import { apiFetch } from './http'
 // Wire types — mirror internal/admin/types.go::TrendingAdminResponse.
 // ---------------------------------------------------------------------------
 
-export type TrendingAdminEntry = {
+type TrendingAdminEntry = {
   object_id: string
   score: number
   /** -1 means no TTL (key persists), -2 means key missing from Redis. */
@@ -27,7 +27,7 @@ export type TrendingAdminResponse = {
 // Query keys
 // ---------------------------------------------------------------------------
 
-export const trendingKeys = {
+const trendingKeys = {
   list: (ns: string, filter: Record<string, unknown>) =>
     ['ns', ns, 'trending', filter] as const,
 }

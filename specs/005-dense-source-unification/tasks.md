@@ -112,8 +112,8 @@ item2vec, svd, byoe, disabled) yields identical recommendation/embedding behavio
 > dual-write build has shipped and no deployed binary still reads `dense_strategy`/`catalog_enabled`.
 > The branch is fully functional and behavior-preserving in the dual-write state without them.
 
-- [ ] T027 Create `migrations/017_drop_legacy_dense_fields.up.sql` / `.down.sql`: `DROP COLUMN catalog_enabled` and `DROP COLUMN dense_strategy` (down recreates both and backfills from `dense_source`)
-- [ ] T028 Remove `DenseStrategy` and `CatalogEnabled` from `namespace.Config` (`internal/core/namespace/types.go`) and from `internal/nsconfig/types.go`; delete the dual-write code in `internal/nsconfig/repository.go` and `internal/admin/repository.go`
+- [X] T027 Create `migrations/017_drop_legacy_dense_fields.up.sql` / `.down.sql`: `DROP COLUMN catalog_enabled` and `DROP COLUMN dense_strategy` (down recreates both and backfills from `dense_source`)
+- [X] T028 Remove `DenseStrategy` and `CatalogEnabled` from `namespace.Config` (`internal/core/namespace/types.go`) and from `internal/nsconfig/types.go`; delete the dual-write code in `internal/nsconfig/repository.go` and `internal/admin/repository.go`
 - [X] T029 [P] Update `CLAUDE.md` "Key Design Decisions" + nsconfig/admin notes and the REST notes wording: `dense_strategy` + `catalog_enabled` → single `dense_source` enum; document that `catalog` = object auto-embed, subject vectors external/none
 - [X] T030 [P] Update admin contract/golden tests under `internal/admin` per `contracts/namespace-config.md` (assert `dense_source`, drop the two legacy fields); confirm `pkg/codohuetypes` golden suite is untouched
 - [X] T031 Full gate: `make migrate-up && make lint && make test && make test-e2e && (cd web/admin && npm run build)`

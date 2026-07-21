@@ -9,7 +9,7 @@ import "time"
 // backend (see CatalogStrategyConflict and CatalogDimensionMismatch). The
 // authoritative catalog configuration still lives behind the dedicated
 // /catalog endpoint — these fields are read-only mirrors used to drive UX
-// decisions (which dense_strategy options to disable, whether to surface
+// decisions (which dense_source options to disable, whether to surface
 // the "managed by catalog" hint on embedding_dim, etc.).
 type NamespaceConfig struct {
 	Namespace              string             `json:"namespace"`
@@ -20,14 +20,12 @@ type NamespaceConfig struct {
 	MaxResults             int                `json:"max_results"`
 	SeenItemsDays          int                `json:"seen_items_days"`
 	DenseSource            string             `json:"dense_source"`
-	DenseStrategy          string             `json:"dense_strategy"`
 	EmbeddingDim           int                `json:"embedding_dim"`
 	DenseDistance          string             `json:"dense_distance"`
 	TrendingWindow         int                `json:"trending_window"`
 	TrendingTTL            int                `json:"trending_ttl"`
 	LambdaTrending         float64            `json:"lambda_trending"`
 	HasAPIKey              bool               `json:"has_api_key"`
-	CatalogEnabled         bool               `json:"catalog_enabled"`
 	CatalogStrategyID      string             `json:"catalog_strategy_id,omitempty"`
 	CatalogStrategyVersion string             `json:"catalog_strategy_version,omitempty"`
 	UpdatedAt              time.Time          `json:"updated_at"`
@@ -315,7 +313,6 @@ type NamespaceUpsertRequest struct {
 	MaxResults     *int               `json:"max_results"`
 	SeenItemsDays  *int               `json:"seen_items_days"`
 	DenseSource    *string            `json:"dense_source"`
-	DenseStrategy  *string            `json:"dense_strategy"`
 	EmbeddingDim   *int               `json:"embedding_dim"`
 	DenseDistance  *string            `json:"dense_distance"`
 	TrendingWindow *int               `json:"trending_window"`
@@ -411,21 +408,6 @@ const (
 	NSStatusDegraded NamespaceStatus = "degraded"
 	NSStatusCold     NamespaceStatus = "cold"
 )
-
-// NamespaceHealth combines config, last batch run, and recent activity into a
-// single health record for the overview dashboard.
-type NamespaceHealth struct {
-	Config          NamespaceConfig `json:"config"`
-	Status          NamespaceStatus `json:"status"`
-	ActiveEvents24h int             `json:"active_events_24h"`
-	LastRun         *BatchRunLog    `json:"last_run"`
-}
-
-// NamespacesOverviewResponse is the response for GET /api/admin/v1/namespaces?include=overview.
-type NamespacesOverviewResponse struct {
-	Items []NamespaceHealth `json:"items"`
-	Total int               `json:"total"`
-}
 
 // HealthResponse is the response for GET /api/admin/v1/health.
 type HealthResponse struct {

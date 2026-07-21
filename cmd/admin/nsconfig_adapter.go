@@ -41,14 +41,8 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 	if req.SeenItemsDays != nil {
 		nsReq.SeenItemsDays = *req.SeenItemsDays
 	}
-	// dense_source is authoritative; it maps onto the legacy dense_strategy
-	// column during the dual-write window. dense_strategy stays as a fallback
-	// for older clients.
-	if req.DenseStrategy != nil {
-		nsReq.DenseStrategy = *req.DenseStrategy
-	}
 	if req.DenseSource != nil {
-		nsReq.DenseStrategy = *req.DenseSource
+		nsReq.DenseSource = *req.DenseSource
 	}
 	if req.EmbeddingDim != nil {
 		nsReq.EmbeddingDim = *req.EmbeddingDim

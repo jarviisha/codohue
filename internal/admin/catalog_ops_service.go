@@ -19,11 +19,6 @@ var (
 	// row exists for the namespace. Handler maps to 409 Conflict.
 	ErrReembedAlreadyRunning = errors.New("admin: re-embed already in progress for namespace")
 
-	// ErrCatalogNotEnabled indicates the namespace's catalog_enabled flag is
-	// false. Handler maps to 404 (same body as namespace-not-found per FR-008
-	// to avoid leaking namespace existence to unauthenticated probes).
-	ErrCatalogNotEnabled = errors.New("admin: namespace catalog auto-embedding not enabled")
-
 	// ErrCatalogStrategyPickerUnavailable indicates the wiring layer did not
 	// install a catalogStrategyPicker — the catalog feature is not enabled in
 	// this deployment. Handler maps to 503.
@@ -101,8 +96,8 @@ func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, target C
 // TriggerReEmbed kicks off a namespace-wide re-embed under the namespace's
 // currently active (strategy_id, strategy_version). Behavior:
 //
-//   - 404 path  : namespace does not exist OR catalog_enabled=false. Returns
-//     (nil, nil) — handler maps to 404.
+//   - 404 path  : namespace does not exist OR dense_source is not "catalog".
+//     Returns (nil, nil) — handler maps to 404.
 //   - 409 path  : a running re-embed already exists for this namespace.
 //     Returns ErrReembedAlreadyRunning.
 //   - 503 path  : catalog strategy picker not wired. Returns
@@ -132,7 +127,7 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace string) (*Catalo
 	if strategyVersion == "" {
 		// Defensive: enabled=true with no version is a misconfiguration —
 		// surface as 400 via the picker error path.
-		return nil, fmt.Errorf("namespace %q has catalog_enabled but no strategy_version", namespace)
+		return nil, fmt.Errorf("namespace %q has catalog mode enabled but no strategy_version", namespace)
 	}
 
 	if _, busy := s.runningReembed.LoadOrStore(namespace, true); busy {

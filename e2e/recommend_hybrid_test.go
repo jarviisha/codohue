@@ -15,7 +15,7 @@ func TestRecommendHybrid_UsesSparseAndDenseArtifacts(t *testing.T) {
 		"gamma":           0.2,
 		"max_results":     10,
 		"seen_items_days": 30,
-		"dense_strategy":  "byoe",
+		"dense_source":    "byoe",
 		"embedding_dim":   4,
 		"alpha":           0.5,
 		"dense_distance":  "cosine",

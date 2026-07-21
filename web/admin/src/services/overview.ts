@@ -6,40 +6,40 @@ import type { PhaseStatus } from './batchRuns'
 
 export type NamespaceStatus = 'active' | 'idle' | 'degraded' | 'cold' | string
 
-export type CronHeartbeat = {
+type CronHeartbeat = {
   last_run_at: string | null
   lag_seconds: number
   ok: boolean
 }
 
-export type EmbedderHeartbeat = {
+type EmbedderHeartbeat = {
   last_seen_at: string | null
   ok: boolean
 }
 
-export type AlertLevel = 'warn' | 'error'
+type AlertLevel = 'warn' | 'error'
 
-export type Alert = {
+type Alert = {
   level: AlertLevel
   namespace?: string
   kind: string
   message: string
 }
 
-export type NamespaceOverviewRun = {
+type NamespaceOverviewRun = {
   id: number
   started_at: string
   success: boolean
   phase_status: PhaseStatus[]
 }
 
-export type NamespaceOverviewCatalog = {
+type NamespaceOverviewCatalog = {
   enabled: boolean
   pending: number
   dead_letter: number
 }
 
-export type NamespaceOverviewQdrant = {
+type NamespaceOverviewQdrant = {
   subjects: number
   objects: number
 }

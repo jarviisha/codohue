@@ -378,51 +378,6 @@ func (s *Service) GetBatchRuns(ctx context.Context, namespace, status, kind stri
 	return s.repo.GetBatchRunLogs(ctx, namespace, status, kind, limit, offset)
 }
 
-// GetNamespacesOverview returns all namespaces with computed health status.
-func (s *Service) GetNamespacesOverview(ctx context.Context) (*NamespacesOverviewResponse, error) {
-	namespaces, err := s.repo.ListNamespaces(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list namespaces: %w", err)
-	}
-
-	lastRuns, err := s.repo.GetLastBatchRunPerNamespace(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get last batch runs: %w", err)
-	}
-
-	eventCounts, err := s.repo.GetRecentEventCounts(ctx, 24)
-	if err != nil {
-		return nil, fmt.Errorf("get recent event counts: %w", err)
-	}
-
-	out := make([]NamespaceHealth, 0, len(namespaces))
-	for _, ns := range namespaces {
-		h := NamespaceHealth{
-			Config:          ns,
-			ActiveEvents24h: eventCounts[ns.Namespace],
-		}
-
-		if run, ok := lastRuns[ns.Namespace]; ok {
-			r := run
-			h.LastRun = &r
-			switch {
-			case !run.Success:
-				h.Status = NSStatusDegraded
-			case h.ActiveEvents24h > 0:
-				h.Status = NSStatusActive
-			default:
-				h.Status = NSStatusIdle
-			}
-		} else {
-			h.Status = NSStatusCold
-		}
-
-		out = append(out, h)
-	}
-
-	return &NamespacesOverviewResponse{Items: out, Total: len(out)}, nil
-}
-
 // GetSubjectRecommendations proxies a sub-resource recommendation request to
 // cmd/api and returns the typed admin recommendation response.
 func (s *Service) GetSubjectRecommendations(ctx context.Context, namespace, subjectID string, limit, offset int, debug bool) (*RecommendResponse, int, error) {

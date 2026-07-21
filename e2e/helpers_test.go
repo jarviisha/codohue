@@ -152,7 +152,7 @@ func defaultNamespaceConfig() map[string]any {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  4,
 		"alpha":          0.7,
 		"dense_distance": "cosine",

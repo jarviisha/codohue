@@ -49,19 +49,19 @@ export type NamespaceUpsertResponse = {
   api_key?: string
 }
 
-export type QdrantCollection = {
+type QdrantCollection = {
   exists: boolean
   points_count: number
 }
 
-export type QdrantInspectResponse = {
+type QdrantInspectResponse = {
   subjects: QdrantCollection
   objects: QdrantCollection
   subjects_dense: QdrantCollection
   objects_dense: QdrantCollection
 }
 
-export type CatalogBacklog = {
+type CatalogBacklog = {
   pending: number
   in_flight: number
   embedded: number

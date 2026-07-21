@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from './http'
 
 // ---------------------------------------------------------------------------
-// Wire types — mirror internal/admin/types.go::EventSummary / EventsListResponse
-// / InjectEventRequest. Hand-maintained.
+// Wire types — mirror internal/admin/types.go::EventSummary /
+// InjectEventRequest. Hand-maintained.
 // ---------------------------------------------------------------------------
 
 export type EventSummary = {
@@ -14,13 +14,6 @@ export type EventSummary = {
   action: string
   weight: number
   occurred_at: string
-}
-
-export type EventsListResponse = {
-  items: EventSummary[]
-  total: number
-  limit: number
-  offset: number
 }
 
 export type InjectEventRequest = {
@@ -39,13 +32,13 @@ export type InjectEventResponse = {
 // Shape mirrors EventSummary so tail rows and list rows render identically.
 export type EventStreamMessage = EventSummary
 
-export type EventsSummaryAction = {
+type EventsSummaryAction = {
   action: string
   count: number
   rate: number
 }
 
-export type EventsSummaryBucket = {
+type EventsSummaryBucket = {
   ts: string
   count: number
 }
@@ -65,9 +58,7 @@ export type EventsSummaryWindow = '1m' | '5m' | '1h'
 // Query keys
 // ---------------------------------------------------------------------------
 
-export const eventKeys = {
-  list: (ns: string, filter: Record<string, unknown>) =>
-    ['ns', ns, 'events', filter] as const,
+const eventKeys = {
   summary: (ns: string, window: string) =>
     ['ns', ns, 'events', 'summary', window] as const,
 }
@@ -92,35 +83,6 @@ export function eventsStreamPath(
 // ---------------------------------------------------------------------------
 // Hooks
 // ---------------------------------------------------------------------------
-
-export type EventsFilter = {
-  subjectId?: string
-  limit?: number
-  offset?: number
-}
-
-function eventsQueryString(f: EventsFilter): string {
-  const p = new URLSearchParams()
-  if (f.subjectId) p.set('subject_id', f.subjectId)
-  if (f.limit != null) p.set('limit', String(f.limit))
-  if (f.offset != null) p.set('offset', String(f.offset))
-  const q = p.toString()
-  return q ? `?${q}` : ''
-}
-
-export function useRecentEvents(ns: string | null, filter: EventsFilter = {}) {
-  return useQuery({
-    queryKey: ns
-      ? eventKeys.list(ns, filter as Record<string, unknown>)
-      : ['ns', 'unknown', 'events'],
-    queryFn: () =>
-      apiFetch<EventsListResponse>(
-        `/api/admin/v1/namespaces/${ns}/events${eventsQueryString(filter)}`,
-      ),
-    enabled: !!ns,
-    refetchInterval: 10_000,
-  })
-}
 
 export function useInjectEvent(ns: string | null) {
   const qc = useQueryClient()

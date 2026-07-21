@@ -77,7 +77,7 @@ func TestJSONRoundtripPhaseEntry(t *testing.T) {
 			DurationMs: 3120, Subjects: intp(5120), Objects: intp(28700),
 		},
 		"skipped_dense": {
-			N: 2, Name: "dense", OK: nil, Skipped: strp("dense_strategy=byoe"),
+			N: 2, Name: "dense", OK: nil, Skipped: strp("dense_source=byoe"),
 			Items: intp(0), Subjects: intp(0),
 		},
 		"failed_trending": {
@@ -194,7 +194,7 @@ func TestJSONRoundtripNamespaceDashboardResponse(t *testing.T) {
 			Alpha:         0.7,
 			MaxResults:    100,
 			SeenItemsDays: 7,
-			DenseStrategy: "byoe",
+			DenseSource:   "byoe",
 			EmbeddingDim:  768,
 			DenseDistance: "cosine",
 			HasAPIKey:     true,

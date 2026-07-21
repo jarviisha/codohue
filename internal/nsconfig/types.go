@@ -15,7 +15,7 @@ type UpsertRequest struct {
 
 	// Dense hybrid
 	Alpha         float64 `json:"alpha"`
-	DenseStrategy string  `json:"dense_strategy"`
+	DenseSource   string  `json:"dense_source"`
 	EmbeddingDim  int     `json:"embedding_dim"`
 	DenseDistance string  `json:"dense_distance"`
 

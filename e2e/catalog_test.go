@@ -95,8 +95,7 @@ func enableCatalogForNamespace(t testing.TB, namespace string, dim int) {
 
 	_, err := testDB.Exec(context.Background(), `
 		UPDATE namespace_configs
-		SET catalog_enabled = TRUE,
-		    dense_source = 'catalog',
+		SET dense_source = 'catalog',
 		    catalog_strategy_id = 'internal-hashing-ngrams',
 		    catalog_strategy_version = 'v1',
 		    catalog_strategy_params = $2::jsonb,
@@ -135,13 +134,13 @@ func waitForCatalogState(t testing.TB, namespace, objectID string, want string, 
 func TestCatalogE2E_HappyPath_IngestEmbedDiscoverable(t *testing.T) {
 	// Namespace must exist with embedding_dim BEFORE catalog enable;
 	// otherwise the strategy dim-mismatch check would fail. We bootstrap
-	// with byoe @ dim=128, then flip catalog_enabled.
+	// with byoe @ dim=128, then flip dense_source to catalog.
 	namespace, apiKey := createIsolatedNamespace(t, "catalog_happy", map[string]any{
 		"action_weights": map[string]float64{"VIEW": 1.0, "LIKE": 2.0},
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -229,7 +228,7 @@ func TestCatalogE2E_IdempotentReingest_DoesNotDoubleEmbed(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -264,7 +263,7 @@ func TestCatalogE2E_NewContent_RetriggersEmbed(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -316,7 +315,7 @@ func TestCatalogE2E_NamespaceNotEnabled_404(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -350,7 +349,7 @@ func TestCatalogE2E_EmptyContent_422(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -373,7 +372,7 @@ func TestCatalogE2E_OversizedContent_413(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -407,7 +406,7 @@ func TestCatalogE2E_MultiTenant_StrategyIsolation(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -419,7 +418,7 @@ func TestCatalogE2E_MultiTenant_StrategyIsolation(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  256,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -486,13 +485,13 @@ func TestCatalogE2E_MultiTenant_StrategyIsolation(t *testing.T) {
 // when the namespace has catalog auto-embedding enabled. Subject BYOE
 // writes remain accepted (per Assumption "Subject embeddings continue
 // through cron mean-pool"); this test asserts both.
-func TestCatalogE2E_BYOEObjectWrite_Returns409_WhenCatalogEnabled(t *testing.T) {
+func TestCatalogE2E_BYOEObjectWrite_Returns409_InCatalogMode(t *testing.T) {
 	namespace, apiKey := createIsolatedNamespace(t, "catalog_byoe_409", map[string]any{
 		"action_weights": map[string]float64{"VIEW": 1.0},
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -523,7 +522,7 @@ func TestCatalogE2E_BYOEObjectWrite_Returns409_WhenCatalogEnabled(t *testing.T) 
 }
 
 // FR-018: when catalog is DISABLED, BYOE object writes work as before
-// (the 409 guard is gated on catalog_enabled=true, not on catalog
+// (the 409 guard is gated on dense_source=catalog, not on catalog
 // being in the codebase).
 func TestCatalogE2E_BYOEObjectWrite_StillWorksWhenCatalogDisabled(t *testing.T) {
 	namespace, apiKey := createIsolatedNamespace(t, "catalog_byoe_ok", map[string]any{
@@ -531,7 +530,7 @@ func TestCatalogE2E_BYOEObjectWrite_StillWorksWhenCatalogDisabled(t *testing.T) 
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -612,7 +611,7 @@ func (c *catalogConfigShim) GetCatalog(ctx context.Context, ns string) (*admin.N
 	}
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
-		Enabled:         cfg.CatalogEnabled,
+		Enabled:         cfg.DenseSource == "catalog",
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,
 		Params:          cfg.CatalogStrategyParams,
@@ -642,7 +641,7 @@ func (a *nsAdapterShim) Upsert(_ context.Context, _ string, _ *admin.NamespaceUp
 
 // strategyPickerShim mirrors cmd/admin/catalog_adapter.go's
 // GetCatalogStrategy method, but in-process. Returns enabled=false when the
-// namespace doesn't exist OR catalog_enabled is false (FR-008 single 404).
+// namespace doesn't exist OR dense_source is not catalog (FR-008 single 404).
 type strategyPickerShim struct{ svc *nsconfig.Service }
 
 func (s *strategyPickerShim) GetCatalogStrategy(ctx context.Context, ns string) (string, string, bool, error) {
@@ -650,7 +649,7 @@ func (s *strategyPickerShim) GetCatalogStrategy(ctx context.Context, ns string) 
 	if err != nil {
 		return "", "", false, err
 	}
-	if cfg == nil || !cfg.CatalogEnabled {
+	if cfg == nil || cfg.DenseSource != "catalog" {
 		return "", "", false, nil
 	}
 	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil
@@ -708,7 +707,7 @@ func TestCatalogE2E_ReEmbed_DrainAndComplete(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -817,7 +816,7 @@ func TestCatalogE2E_BulkRedriveDeadletter(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",
@@ -868,7 +867,7 @@ func TestCatalogE2E_DeleteCatalogItem(t *testing.T) {
 		"lambda":         0.01,
 		"gamma":          0.5,
 		"max_results":    20,
-		"dense_strategy": "byoe",
+		"dense_source":   "byoe",
 		"embedding_dim":  128,
 		"alpha":          0.7,
 		"dense_distance": "cosine",

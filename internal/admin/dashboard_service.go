@@ -170,9 +170,8 @@ func deriveCronHeartbeat(lastRuns map[string]BatchRunLog, now time.Time) CronHea
 	}
 }
 
-// deriveNamespaceStatus mirrors GetNamespacesOverview's existing logic so the
-// new /overview endpoint stays bug-compatible with the legacy ?include=overview
-// view. UI keys per-row indicators off this string.
+// deriveNamespaceStatus computes the per-namespace health status shown on the
+// /overview endpoint. UI keys per-row indicators off this string.
 func deriveNamespaceStatus(lastRuns map[string]BatchRunLog, eventCounts map[string]int, ns string) NamespaceStatus {
 	run, ok := lastRuns[ns]
 	if !ok {

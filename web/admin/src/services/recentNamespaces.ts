@@ -52,18 +52,8 @@ export function recordRecentNamespace(namespace: string) {
 }
 
 /**
- * Forget a namespace — used by the namespace delete action so a deleted name
- * doesn't linger as a stale "Recent" entry pointing at a 404.
- */
-export function forgetRecentNamespace(namespace: string) {
-  if (!snapshot.includes(namespace)) return
-  write(snapshot.filter((n) => n !== namespace))
-}
-
-/**
  * useRecentNamespaces returns the recent-namespace list, ordered newest first.
- * Re-renders subscribers when recordRecentNamespace / forgetRecentNamespace
- * runs anywhere in the tree.
+ * Re-renders subscribers when recordRecentNamespace runs anywhere in the tree.
  */
 export function useRecentNamespaces(): string[] {
   return useSyncExternalStore(
