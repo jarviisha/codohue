@@ -30,6 +30,7 @@ import { useNamespaceDashboard } from '@/services/namespaces'
 import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
+import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 
 export default function NamespaceOverviewPage() {
@@ -89,16 +90,18 @@ export default function NamespaceOverviewPage() {
         <Inline align="center" justify="between" className="w-full" wrap>
           <Stack gap="050">
             <Inline align="center">
-              <h1 className="text-xl font-semibold">
-                <NamespaceTag name={data.namespace} />
-              </h1>
+              <h1 className="text-foreground text-xl font-semibold">Overview</h1>
               {config?.dense_source === 'catalog' && <Badge variant="success">catalog</Badge>}
             </Inline>
             {config && (
-              <p className="text-foreground-subtle text-sm">
-                dense_source={config.dense_source} · embedding_dim={config.embedding_dim} ·
-                alpha={config.alpha} · λ={config.lambda}
-              </p>
+              <MetaLine
+                items={[
+                  `dense_source=${config.dense_source}`,
+                  `embedding_dim=${config.embedding_dim}`,
+                  `alpha=${config.alpha}`,
+                  `λ=${config.lambda}`,
+                ]}
+              />
             )}
           </Stack>
           <Inline align="center">
@@ -274,7 +277,7 @@ function DeleteNamespaceForm({
     <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
         <DialogTitle>
-          Delete namespace · <NamespaceTag name={namespace} />
+          Delete namespace <NamespaceTag name={namespace} />
         </DialogTitle>
         <DialogDescription>
           Drops every event, vector, catalog item, and trending entry for this namespace. Cannot be

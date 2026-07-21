@@ -92,7 +92,7 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
             <Stack>
               <Alert
                 variant="success"
-                title={`#${namespace}`}
+                title={namespace}
                 description="API key (per-namespace data plane)"
               />
               <code className="font-mono text-sm break-all block">{apiKeyShown}</code>

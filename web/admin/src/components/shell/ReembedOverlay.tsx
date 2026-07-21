@@ -143,7 +143,7 @@ function ProgressChip({ run }: { run: RunningReembed }) {
           </span>
           {hasProgress && (
             <span className="text-foreground-subtle text-xs tabular-nums">
-              {run.processed!.toLocaleString()} / {run.total!.toLocaleString()} · {pct}%
+              {run.processed!.toLocaleString()} / {run.total!.toLocaleString()} ({pct}%)
             </span>
           )}
         </Inline>

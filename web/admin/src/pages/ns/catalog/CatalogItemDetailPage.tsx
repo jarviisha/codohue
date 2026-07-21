@@ -15,6 +15,7 @@ import {
   useDeleteCatalogItem,
   useRedriveCatalogItem,
 } from '@/services/catalog'
+import MetaLine from '@/components/MetaLine'
 import PageHeader from '@/components/shell/PageHeader'
 
 const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'primary'> = {
@@ -80,10 +81,12 @@ export default function CatalogItemDetailPage() {
                 </span>
               )}
             </Inline>
-            <p className="text-foreground-subtle text-sm">
-              {item.attempt_count} attempt{item.attempt_count === 1 ? '' : 's'} · updated{' '}
-              {new Date(item.updated_at).toLocaleString()}
-            </p>
+            <MetaLine
+              items={[
+                `${item.attempt_count} attempt${item.attempt_count === 1 ? '' : 's'}`,
+                `updated ${new Date(item.updated_at).toLocaleString()}`,
+              ]}
+            />
           </Stack>
           <Inline>
             {canRedrive && (

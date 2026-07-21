@@ -128,5 +128,5 @@ function describeDemoResult(r: DemoDatasetResponse): string {
   if (r.catalog_items_created)
     bits.push(`${r.catalog_items_created.toLocaleString()} catalog items created`)
   if (r.api_key) bits.push('new api_key issued — copy from the response if you need it')
-  return bits.join(' · ')
+  return bits.join(', ')
 }

@@ -24,6 +24,7 @@ import { useBatchRuns, useBatchRunStats, type BatchRunsFilter } from '@/services
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 
 const PAGE_SIZE = 25
@@ -64,17 +65,7 @@ export default function BatchRunsListPage() {
     <Container size="full" className="py-6 px-6">
       <PageHeader>
         <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">
-            Batch runs
-            {ns ? (
-              <>
-                {' '}
-                · <NamespaceTag name={ns} />
-              </>
-            ) : (
-              ''
-            )}
-          </h1>
+          <h1 className="text-foreground text-xl font-semibold">Batch runs</h1>
           <p className="text-foreground-subtle text-sm">
             cron + manual + admin re-embed runs. Newest first; refreshes every 15 seconds.
           </p>
@@ -131,9 +122,7 @@ export default function BatchRunsListPage() {
                   </Select>
                 </Inline>
                 {list.data && (
-                  <span className="text-foreground-subtle text-sm">
-                    {list.data.total} matching · page {page + 1}
-                  </span>
+                  <MetaLine items={[`${list.data.total} matching`, `page ${page + 1}`]} />
                 )}
               </Inline>
 

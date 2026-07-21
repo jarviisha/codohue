@@ -26,7 +26,7 @@ import {
   type RecommendDebugItem,
 } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
-import NamespaceTag from '@/components/NamespaceTag'
+import MetaLine from '@/components/MetaLine'
 
 /**
  * SubjectInspectorPage is the operator's "why did user X get rec Y?" answer.
@@ -55,10 +55,7 @@ export default function SubjectInspectorPage() {
       <PageHeader>
         <Inline align="center" justify="between" className="w-full" wrap>
           <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">Subject · {id}</h1>
-            <p className="text-foreground-subtle text-sm">
-              namespace <NamespaceTag name={ns} />
-            </p>
+            <h1 className="text-foreground text-xl font-semibold">Subject {id}</h1>
           </Stack>
           <Inline align="center">
             <Switch
@@ -121,11 +118,20 @@ export default function SubjectInspectorPage() {
           <Inline align="center" justify="between">
             <Stack>
               <h2 className="text-foreground text-sm font-semibold">Recommendations</h2>
-              <p className="text-foreground-subtle text-xs">
-                {recs.data
-                  ? `source=${recs.data.source} · ${recs.data.total.toLocaleString()} total · generated ${new Date(recs.data.generated_at).toLocaleTimeString()}`
-                  : 'Live from /v1/subjects/:id/recommendations via the admin proxy.'}
-              </p>
+              {recs.data ? (
+                <MetaLine
+                  size="xs"
+                  items={[
+                    `source=${recs.data.source}`,
+                    `${recs.data.total.toLocaleString()} total`,
+                    `generated ${new Date(recs.data.generated_at).toLocaleTimeString()}`,
+                  ]}
+                />
+              ) : (
+                <p className="text-foreground-subtle text-xs">
+                  Live from /v1/subjects/:id/recommendations via the admin proxy.
+                </p>
+              )}
             </Stack>
             <Inline align="center">
               {[10, 20, 50, 100].map((n) => (
@@ -205,7 +211,7 @@ function SubjectProfileCard({
     },
     {
       label: 'Seen items',
-      value: `${seenItems.length.toLocaleString()}${seenItemsDays != null ? ` · last ${seenItemsDays}d` : ''}`,
+      value: `${seenItems.length.toLocaleString()}${seenItemsDays != null ? ` (last ${seenItemsDays}d)` : ''}`,
     },
   ]
 
@@ -274,7 +280,7 @@ function DebugSummary({ debug }: { debug: RecommendDebug }) {
       <CardContent>
         <Stack>
           <span className="text-foreground-subtle text-xs uppercase tracking-wide">
-            Debug · score components
+            Debug score components
           </span>
           <Inline wrap>
             {tiles.map((t) => (

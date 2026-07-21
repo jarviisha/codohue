@@ -38,6 +38,7 @@ import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import CatalogConfigDialog from './CatalogConfigDialog'
+import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 
 const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
@@ -158,9 +159,7 @@ export default function CatalogStatusPage() {
         <PageHeader>
           <Inline align="center" justify="between" className="w-full" wrap>
             <Stack gap="050">
-              <h1 className="text-foreground text-xl font-semibold">
-                Catalog · <NamespaceTag name={ns} />
-              </h1>
+              <h1 className="text-foreground text-xl font-semibold">Catalog</h1>
               <p className="text-foreground-subtle text-sm">Auto-embedding is currently off.</p>
             </Stack>
             <Button size="sm" onClick={() => setConfigDialogOpen(true)}>
@@ -204,9 +203,7 @@ export default function CatalogStatusPage() {
         <Inline align="center" justify="between" className="w-full" wrap>
           <Stack>
             <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">
-                Catalog · <NamespaceTag name={ns} />
-              </h1>
+              <h1 className="text-foreground text-xl font-semibold">Catalog</h1>
               <Badge variant={streamConnected ? 'success' : 'neutral'}>
                 stream {streamConnected ? 'connected' : 'offline'}
               </Badge>
@@ -309,13 +306,17 @@ export default function CatalogStatusPage() {
                     #{reembedStatus.batch_run_id} →
                   </Link>
                 </Inline>
-                <span className="text-foreground-subtle text-xs">
-                  strategy={reembedStatus.strategy_id}@{reembedStatus.strategy_version} · started{' '}
-                  {new Date(reembedStatus.started_at).toLocaleString()}
-                  {reembedStatus.duration_ms != null &&
-                    ` · ${(reembedStatus.duration_ms / 1000).toFixed(1)}s`}
-                  {reembedStatus.processed != null && ` · processed ${reembedStatus.processed.toLocaleString()}`}
-                </span>
+                <MetaLine
+                  size="xs"
+                  items={[
+                    `strategy=${reembedStatus.strategy_id}@${reembedStatus.strategy_version}`,
+                    `started ${new Date(reembedStatus.started_at).toLocaleString()}`,
+                    reembedStatus.duration_ms != null &&
+                      `${(reembedStatus.duration_ms / 1000).toFixed(1)}s`,
+                    reembedStatus.processed != null &&
+                      `processed ${reembedStatus.processed.toLocaleString()}`,
+                  ]}
+                />
                 {reembedStatus.error_message && (
                   <span className="text-danger text-xs">{reembedStatus.error_message}</span>
                 )}
@@ -481,7 +482,7 @@ function DisableCatalogDialog({
         <>
           <DialogHeader>
             <DialogTitle>
-              Disable catalog · <NamespaceTag name={namespace} />
+              Disable catalog for <NamespaceTag name={namespace} />
             </DialogTitle>
             <DialogDescription>
               New content sent to POST /v1/namespaces/{namespace}/catalog will return 503 and no
@@ -517,7 +518,7 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
     <Stack>
       <Inline align="center" justify="between">
         <span className="text-foreground-subtle text-xs tabular-nums">
-          {progress.processed.toLocaleString()} / {progress.total.toLocaleString()} · {pct}%
+          {progress.processed.toLocaleString()} / {progress.total.toLocaleString()} ({pct}%)
         </span>
         <span className="text-foreground-subtle text-xs">
           updated {new Date(progress.at).toLocaleTimeString()}

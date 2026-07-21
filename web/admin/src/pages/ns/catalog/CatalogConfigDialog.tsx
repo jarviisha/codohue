@@ -136,7 +136,7 @@ function ConfigForm({
     <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
         <DialogTitle>
-          Catalog auto-embedding · <NamespaceTag name={namespace} />
+          Catalog auto-embedding for <NamespaceTag name={namespace} />
         </DialogTitle>
         <DialogDescription>
           Saving routes ingested content through the embedder worker with the selected strategy. Use
@@ -181,7 +181,7 @@ function ConfigForm({
             required
             helpText={
               selectedDescriptor
-                ? `dim ${selectedDescriptor.dim}${selectedDescriptor.description ? ' · ' + selectedDescriptor.description : ''}`
+                ? `dim ${selectedDescriptor.dim}${selectedDescriptor.description ? ` — ${selectedDescriptor.description}` : ''}`
                 : 'Pick a strategy first.'
             }
           >

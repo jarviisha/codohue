@@ -48,7 +48,7 @@ export default function NamespacesListPage() {
           <Stack gap="050">
             <h1 className="text-foreground text-xl font-semibold">Namespaces</h1>
             <p className="text-foreground-subtle text-sm">
-              {q.data?.total ?? 0} configured · click a row to open its overview.
+              {q.data?.total ?? 0} configured. Click a row to open its overview.
             </p>
           </Stack>
           <Button onClick={() => setCreateOpen(true)}>New namespace</Button>

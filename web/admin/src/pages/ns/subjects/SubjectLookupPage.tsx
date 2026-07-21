@@ -11,7 +11,6 @@ import {
   Stack,
 } from '@jarviisha/davinci-react-ui'
 import PageHeader from '@/components/shell/PageHeader'
-import NamespaceTag from '@/components/NamespaceTag'
 
 /**
  * SubjectLookupPage is the landing page for /ns/:ns/subjects. The admin
@@ -38,9 +37,7 @@ export default function SubjectLookupPage() {
     <Container size="md" className="py-6 px-6">
       <PageHeader>
         <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">
-            Subjects · <NamespaceTag name={ns} />
-          </h1>
+          <h1 className="text-foreground text-xl font-semibold">Subjects</h1>
           <p className="text-foreground-subtle text-sm">
             Inspect one subject's profile and recommendations. Paste a subject id below to open it.
           </p>

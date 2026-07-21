@@ -94,10 +94,8 @@ export default function EventsPage() {
       <PageHeader>
         <Inline align="center" justify="between" className="w-full" wrap>
           <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">
-              Events · <NamespaceTag name={ns} />
-            </h1>
-            <p className="text-foreground-subtle text-sm">Live ingest tail · forward-only</p>
+            <h1 className="text-foreground text-xl font-semibold">Events</h1>
+            <p className="text-foreground-subtle text-sm">Live ingest tail, forward-only</p>
           </Stack>
           <Button size="sm" onClick={() => setInjectOpen(true)}>
             Inject test event
@@ -366,7 +364,7 @@ function SummarySidebar({ namespace }: { namespace: string }) {
 
       <Inline wrap>
         <SummaryTile
-          label={`Events · ${window}`}
+          label={`Events (${window})`}
           value={(summary.data?.total ?? 0).toLocaleString()}
         />
         <SummaryTile label="Rate / s" value={(summary.data?.rate_per_second ?? 0).toFixed(2)} />
@@ -419,7 +417,7 @@ function ActionMix({ data }: { data: EventsSummaryResponse | undefined }) {
               <Inline align="center" justify="between">
                 <span className="text-foreground text-sm">{a.action}</span>
                 <span className="text-foreground-subtle text-xs tabular-nums">
-                  {a.count.toLocaleString()} · {pct}%
+                  {a.count.toLocaleString()} ({pct}%)
                 </span>
               </Inline>
               <div className="h-1.5 w-full rounded-full bg-surface-sunken">
@@ -466,7 +464,7 @@ function InjectEventForm({
     <form onSubmit={onSubmit} className="contents">
       <DialogHeader>
         <DialogTitle>
-          Inject test event · <NamespaceTag name={namespace} />
+          Inject test event into <NamespaceTag name={namespace} />
         </DialogTitle>
         <DialogDescription>
           Proxied through the admin event injection endpoint. Lands in the same events table the

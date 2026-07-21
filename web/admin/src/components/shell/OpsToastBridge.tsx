@@ -36,7 +36,7 @@ export default function OpsToastBridge() {
           toast.danger(
             d.kind === 'reembed' ? 'Re-embed run failed' : 'Batch run failed',
             {
-              description: `${d.namespace ? `#${d.namespace}` : '?'} · run #${d.id ?? '?'}`,
+              description: `run #${d.id ?? '?'} in ${d.namespace ?? '?'}`,
               action:
                 d.id != null
                   ? {
@@ -50,7 +50,7 @@ export default function OpsToastBridge() {
         cancelled: (data: unknown) => {
           const d = data as { id?: number; namespace?: string }
           toast.warning('Batch run cancelled', {
-            description: `${d.namespace ?? '?'} · run #${d.id ?? '?'}`,
+            description: `run #${d.id ?? '?'} in ${d.namespace ?? '?'}`,
             action:
               d.id != null
                 ? {
@@ -64,7 +64,7 @@ export default function OpsToastBridge() {
           const d = data as { namespace?: string; new_count?: number; delta?: number }
           if (!d.namespace || !d.delta) return
           toast.warning(`Dead-letter grew by ${d.delta}`, {
-            description: `#${d.namespace} now has ${d.new_count ?? 0} dead-letter item(s).`,
+            description: `${d.namespace} now has ${d.new_count ?? 0} dead-letter item(s).`,
             action: {
               label: 'Open catalog',
               onClick: () => navigate(`/ns/${encodeURIComponent(d.namespace!)}/catalog`),

@@ -29,7 +29,6 @@ import {
 } from '@/services/namespaces'
 import PageHeader from '@/components/shell/PageHeader'
 import DirtyFormGuard from '@/components/shell/DirtyFormGuard'
-import NamespaceTag from '@/components/NamespaceTag'
 
 const DENSE_SOURCES = [
   { value: 'disabled', label: 'disabled — sparse only' },
@@ -94,7 +93,7 @@ export default function NamespaceConfigPage() {
           {
             onSuccess: () => {
               toast.success('Configuration saved', {
-                description: `#${ns} updated.`,
+                description: `${ns} updated.`,
               })
               onReset()
             },
@@ -157,9 +156,7 @@ function ConfigForm({
         <Inline align="center" justify="between" className="w-full" wrap>
           <Stack gap="050">
             <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">
-                Configuration · <NamespaceTag name={ns} />
-              </h1>
+              <h1 className="text-foreground text-xl font-semibold">Configuration</h1>
               {dirty && <Badge variant="warning">unsaved</Badge>}
             </Inline>
             <p className="text-foreground-subtle text-sm">

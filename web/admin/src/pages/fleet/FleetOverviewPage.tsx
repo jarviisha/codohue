@@ -24,6 +24,7 @@ import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 
 const STATUS_BADGE: Record<NamespaceStatus, { variant: 'success' | 'warning' | 'danger' | 'neutral'; label: string }> = {
@@ -99,12 +100,14 @@ export default function FleetOverviewPage() {
         <Inline align="center" justify="between" className="w-full">
           <Stack gap="050">
             <h1 className="text-foreground text-xl font-semibold">Fleet</h1>
-            <p className="text-foreground-subtle text-sm">
-              {data.namespaces.length} namespace{data.namespaces.length === 1 ? '' : 's'} · stream{' '}
-              <Badge variant={streamConnected ? 'success' : 'neutral'}>
-                {streamConnected ? 'connected' : 'offline'}
-              </Badge>
-            </p>
+            <MetaLine
+              items={[
+                `${data.namespaces.length} namespace${data.namespaces.length === 1 ? '' : 's'}`,
+                <Badge variant={streamConnected ? 'success' : 'neutral'}>
+                  stream {streamConnected ? 'connected' : 'offline'}
+                </Badge>,
+              ]}
+            />
           </Stack>
           {recentRunEvents.length > 0 && (
             <Inline align="center">
@@ -137,7 +140,7 @@ export default function FleetOverviewPage() {
 
         <Stack>
           <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Batch runs · last 24h</h2>
+            <h2 className="text-foreground text-sm font-semibold">Batch runs (last 24h)</h2>
             <p className="text-foreground-subtle text-xs">
               OK, failed, and cancelled cron + manual runs aggregated per hour.
             </p>

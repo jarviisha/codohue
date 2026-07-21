@@ -28,7 +28,6 @@ import {
   type CatalogItemSummary,
 } from '@/services/catalog'
 import PageHeader from '@/components/shell/PageHeader'
-import NamespaceTag from '@/components/NamespaceTag'
 
 const PAGE_SIZE = 25
 const STATE_OPTIONS: Array<{ value: CatalogItemState | ''; label: string }> = [
@@ -71,11 +70,9 @@ export default function CatalogItemsPage() {
       <PageHeader>
         <Inline align="center" justify="between" className="w-full">
           <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">
-              Catalog items · <NamespaceTag name={ns} />
-            </h1>
+            <h1 className="text-foreground text-xl font-semibold">Catalog items</h1>
             <p className="text-foreground-subtle text-sm">
-              {items.data?.total ?? 0} matching · click a row to open detail.
+              {items.data?.total ?? 0} matching. Click a row to open detail.
             </p>
           </Stack>
           <Link to={`/ns/${encodeURIComponent(ns)}/catalog`}>

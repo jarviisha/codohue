@@ -20,7 +20,7 @@ import {
 } from '@jarviisha/davinci-react-ui'
 import { useTrending } from '@/services/trending'
 import PageHeader from '@/components/shell/PageHeader'
-import NamespaceTag from '@/components/NamespaceTag'
+import MetaLine from '@/components/MetaLine'
 
 const PAGE_SIZE = 50
 const WINDOW_OPTIONS = [
@@ -61,9 +61,7 @@ export default function TrendingPage() {
         <Inline align="center" justify="between" className="w-full" wrap>
           <Stack gap="050">
             <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">
-                Trending · <NamespaceTag name={ns} />
-              </h1>
+              <h1 className="text-foreground text-xl font-semibold">Trending</h1>
               {cacheTTL != null && <CacheTTLBadge ttl={cacheTTL} />}
             </Inline>
             <p className="text-foreground-subtle text-sm">
@@ -113,13 +111,19 @@ export default function TrendingPage() {
         ) : (
           <Stack>
             <Inline align="center" justify="between" wrap>
-              <span className="text-foreground-subtle text-xs tabular-nums">
-                {total.toLocaleString()} entr{total === 1 ? 'y' : 'ies'} · window{' '}
-                {trending.data?.window_hours
-                  ? `${trending.data.window_hours}h`
-                  : 'config default'}{' '}
-                · generated {new Date(trending.data!.generated_at).toLocaleTimeString()}
-              </span>
+              <MetaLine
+                size="xs"
+                className="tabular-nums"
+                items={[
+                  `${total.toLocaleString()} entr${total === 1 ? 'y' : 'ies'}`,
+                  `window ${
+                    trending.data?.window_hours
+                      ? `${trending.data.window_hours}h`
+                      : 'config default'
+                  }`,
+                  `generated ${new Date(trending.data!.generated_at).toLocaleTimeString()}`,
+                ]}
+              />
             </Inline>
             <TableContainer>
               <Table>
@@ -163,5 +167,5 @@ function CacheTTLBadge({ ttl }: { ttl: number }) {
   if (ttl === -2) return <Badge variant="warning">redis key missing</Badge>
   if (ttl === -1) return <Badge variant="neutral">no TTL</Badge>
   if (ttl < 60) return <Badge variant="warning">{`expires in ${ttl}s`}</Badge>
-  return <Badge variant="success">{`fresh · ${Math.round(ttl / 60)}m left`}</Badge>
+  return <Badge variant="success">{`fresh ${Math.round(ttl / 60)}m left`}</Badge>
 }

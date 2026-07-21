@@ -266,13 +266,13 @@ function buildCommands({
   if (currentNs) {
     const ns = encodeURIComponent(currentNs)
     commands.push(
-      { id: `ns-overview`, title: `Overview · #${currentNs}`, subtitle: `/ns/${currentNs}`, group: 'Namespace', run: go(`/ns/${ns}`) },
-      { id: `ns-batch-runs`, title: `Batch runs · #${currentNs}`, subtitle: `/ns/${currentNs}/batch-runs`, group: 'Namespace', run: go(`/ns/${ns}/batch-runs`) },
-      { id: `ns-catalog`, title: `Catalog · #${currentNs}`, subtitle: `/ns/${currentNs}/catalog`, group: 'Namespace', run: go(`/ns/${ns}/catalog`) },
-      { id: `ns-catalog-items`, title: `Catalog items · #${currentNs}`, subtitle: `/ns/${currentNs}/catalog/items`, group: 'Namespace', run: go(`/ns/${ns}/catalog/items`) },
-      { id: `ns-subjects`, title: `Subjects · #${currentNs}`, subtitle: `/ns/${currentNs}/subjects`, group: 'Namespace', run: go(`/ns/${ns}/subjects`), keywords: 'inspector recommend' },
-      { id: `ns-events`, title: `Events · #${currentNs}`, subtitle: `/ns/${currentNs}/events`, group: 'Namespace', run: go(`/ns/${ns}/events`), keywords: 'tail ingest' },
-      { id: `ns-trending`, title: `Trending · #${currentNs}`, subtitle: `/ns/${currentNs}/trending`, group: 'Namespace', run: go(`/ns/${ns}/trending`) },
+      { id: `ns-overview`, title: 'Overview', subtitle: `/ns/${currentNs}`, group: 'Namespace', run: go(`/ns/${ns}`) },
+      { id: `ns-batch-runs`, title: 'Batch runs', subtitle: `/ns/${currentNs}/batch-runs`, group: 'Namespace', run: go(`/ns/${ns}/batch-runs`) },
+      { id: `ns-catalog`, title: 'Catalog', subtitle: `/ns/${currentNs}/catalog`, group: 'Namespace', run: go(`/ns/${ns}/catalog`) },
+      { id: `ns-catalog-items`, title: 'Catalog items', subtitle: `/ns/${currentNs}/catalog/items`, group: 'Namespace', run: go(`/ns/${ns}/catalog/items`) },
+      { id: `ns-subjects`, title: 'Subjects', subtitle: `/ns/${currentNs}/subjects`, group: 'Namespace', run: go(`/ns/${ns}/subjects`), keywords: 'inspector recommend' },
+      { id: `ns-events`, title: 'Events', subtitle: `/ns/${currentNs}/events`, group: 'Namespace', run: go(`/ns/${ns}/events`), keywords: 'tail ingest' },
+      { id: `ns-trending`, title: 'Trending', subtitle: `/ns/${currentNs}/trending`, group: 'Namespace', run: go(`/ns/${ns}/trending`) },
     )
   }
 

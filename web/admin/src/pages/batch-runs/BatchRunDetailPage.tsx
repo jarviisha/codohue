@@ -21,6 +21,7 @@ import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import LogLineViewer from '@/components/monitoring/LogLineViewer'
+import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 
 type LocalState = {
@@ -155,13 +156,15 @@ export default function BatchRunDetailPage() {
               <Badge variant={run.kind === 'reembed' ? 'discovery' : 'neutral'}>{run.kind}</Badge>
               <RunStateBadge state={state} run={run} />
             </Inline>
-            <p className="text-foreground-subtle text-sm">
-              <Link to={`/ns/${encodeURIComponent(run.namespace)}`}>
-                <NamespaceTag name={run.namespace} />
-              </Link>{' '}
-              · trigger={run.trigger_source} · started{' '}
-              {new Date(run.started_at).toLocaleString()}
-            </p>
+            <MetaLine
+              items={[
+                <Link to={`/ns/${encodeURIComponent(run.namespace)}`}>
+                  <NamespaceTag name={run.namespace} />
+                </Link>,
+                `trigger=${run.trigger_source}`,
+                `started ${new Date(run.started_at).toLocaleString()}`,
+              ]}
+            />
           </Stack>
           <Inline align="center">
             {!state.completed && (
