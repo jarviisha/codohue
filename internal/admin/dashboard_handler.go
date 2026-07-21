@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -12,7 +13,7 @@ import (
 func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	out, err := h.svc.GetOverview(r.Context())
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not build overview")
+		writeInternalError(w, r, "could not build overview", err)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
@@ -28,7 +29,7 @@ func (h *Handler) GetNamespaceDashboard(w http.ResponseWriter, r *http.Request) 
 	}
 	out, err := h.svc.GetNamespaceDashboard(r.Context(), ns)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not build dashboard")
+		writeInternalError(w, r, "could not build dashboard", err, slog.String("namespace", ns))
 		return
 	}
 	if out == nil {

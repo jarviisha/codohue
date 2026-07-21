@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +14,23 @@ import (
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
+
+// logHandlerError records the cause behind a failed request. Client-facing
+// bodies stay deliberately generic, so without this the error never leaves the
+// handler and the operator is left with a bare status code in the access log.
+func logHandlerError(r *http.Request, msg string, err error, attrs ...any) {
+	args := make([]any, 0, len(attrs)+2)
+	args = append(args, slog.String("error", err.Error()), slog.String("path", r.URL.Path))
+	args = append(args, attrs...)
+	slog.ErrorContext(r.Context(), msg, args...)
+}
+
+// writeInternalError logs the underlying cause and writes the generic 500 the
+// client sees. msg doubles as the log message and the response message.
+func writeInternalError(w http.ResponseWriter, r *http.Request, msg string, err error, attrs ...any) {
+	logHandlerError(r, msg, err, attrs...)
+	httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", msg)
+}
 
 // adminSvc is the service interface used by Handler.
 type adminSvc interface {
@@ -85,7 +103,7 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 
 	token, err := createSessionToken(h.apiKey)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not create session")
+		writeInternalError(w, r, "could not create session", err)
 		return
 	}
 
@@ -120,6 +138,7 @@ func (h *Handler) DeleteCurrentSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	health, _, err := h.svc.GetHealth(r.Context())
 	if err != nil {
+		logHandlerError(r, "health probe failed", err)
 		httpapi.WriteJSON(w, http.StatusOK, &HealthResponse{
 			Postgres: "unknown",
 			Redis:    "unknown",
@@ -137,7 +156,7 @@ func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
 	namespaces, err := h.svc.ListNamespaces(r.Context())
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not list namespaces")
+		writeInternalError(w, r, "could not list namespaces", err)
 		return
 	}
 	if namespaces == nil {
@@ -151,7 +170,7 @@ func (h *Handler) GetNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	cfg, err := h.svc.GetNamespace(r.Context(), ns)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get namespace")
+		writeInternalError(w, r, "could not get namespace", err, slog.String("namespace", ns))
 		return
 	}
 	if cfg == nil {
@@ -173,7 +192,7 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 
 	result, statusCode, err := h.svc.UpsertNamespace(r.Context(), ns, &req)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not upsert namespace")
+		writeInternalError(w, r, "could not upsert namespace", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, statusCode, result)
@@ -192,7 +211,7 @@ func (h *Handler) GetCatalogConfig(w http.ResponseWriter, r *http.Request) {
 				"catalog auto-embedding is not wired in this deployment")
 			return
 		}
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not load catalog config")
+		writeInternalError(w, r, "could not load catalog config", err, slog.String("namespace", ns))
 		return
 	}
 	if resp == nil {
@@ -282,7 +301,7 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 
 	runs, total, stats, err := h.svc.GetBatchRuns(r.Context(), ns, status, kind, limit, offset)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get batch runs")
+		writeInternalError(w, r, "could not get batch runs", err, slog.String("namespace", ns))
 		return
 	}
 	summaries := make([]BatchRunSummary, 0, len(runs))
@@ -342,7 +361,7 @@ func (h *Handler) GetQdrant(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	stats, err := h.svc.GetQdrant(r.Context(), ns)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get qdrant stats")
+		writeInternalError(w, r, "could not get qdrant stats", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, stats)
@@ -355,7 +374,8 @@ func (h *Handler) GetSubjectProfile(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.svc.GetSubjectProfile(r.Context(), ns, id)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not get subject profile")
+		writeInternalError(w, r, "could not get subject profile", err,
+			slog.String("namespace", ns), slog.String("subject_id", id))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, profile)
@@ -387,6 +407,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.GetTrending(r.Context(), ns, limit, offset, windowHours)
 	if err != nil {
+		logHandlerError(r, "could not get trending data", err, slog.String("namespace", ns))
 		httpapi.WriteError(w, http.StatusBadGateway, "proxy_error", "could not get trending data")
 		return
 	}
@@ -408,7 +429,7 @@ func (h *Handler) CreateBatchRun(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteError(w, http.StatusGatewayTimeout, "timeout", "batch run timed out")
 			return
 		}
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "batch trigger failed")
+		writeInternalError(w, r, "batch trigger failed", err, slog.String("namespace", ns))
 		return
 	}
 	if result == nil {
@@ -451,7 +472,7 @@ func (h *Handler) GetRecentEvents(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.GetRecentEvents(r.Context(), ns, limit, offset, subjectID)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not fetch events")
+		writeInternalError(w, r, "could not fetch events", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)
@@ -477,6 +498,7 @@ func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
 
 	eventID, err := h.svc.InjectEvent(r.Context(), ns, req)
 	if err != nil {
+		logHandlerError(r, "upstream event API unavailable", err, slog.String("namespace", ns))
 		httpapi.WriteError(w, http.StatusBadGateway, "upstream_error", "upstream event API unavailable")
 		return
 	}
@@ -512,7 +534,7 @@ func (h *Handler) GetEventsSummary(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.GetEventsSummary(r.Context(), ns, window, bucket)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not aggregate events")
+		writeInternalError(w, r, "could not aggregate events", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)
@@ -523,7 +545,7 @@ func (h *Handler) GetEventsSummary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) GetMetricsSummary(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.GetMetricsSummary(r.Context())
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not build metrics summary")
+		writeInternalError(w, r, "could not build metrics summary", err)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, result)
@@ -535,7 +557,7 @@ func (h *Handler) GetMetricsSummary(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateDemoData(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.CreateDemoData(r.Context())
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not seed demo dataset")
+		writeInternalError(w, r, "could not seed demo dataset", err)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusAccepted, result)
@@ -545,7 +567,7 @@ func (h *Handler) CreateDemoData(w http.ResponseWriter, r *http.Request) {
 // dataset across postgres, redis, and qdrant. Returns 204 No Content.
 func (h *Handler) DeleteDemoData(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.svc.DeleteDemoData(r.Context()); err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not clear demo dataset")
+		writeInternalError(w, r, "could not clear demo dataset", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -564,7 +586,7 @@ func (h *Handler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.DeleteNamespace(r.Context(), ns)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not delete namespace")
+		writeInternalError(w, r, "could not delete namespace", err, slog.String("namespace", ns))
 		return
 	}
 	if resp == nil {
@@ -591,7 +613,7 @@ func (h *Handler) ResetApp(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.ResetApp(r.Context())
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not reset app")
+		writeInternalError(w, r, "could not reset app", err)
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, resp)

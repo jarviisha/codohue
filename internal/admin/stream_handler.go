@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,7 +44,7 @@ func (h *Handler) StreamBatchRun(w http.ResponseWriter, r *http.Request) {
 	}
 	run, err := h.svc.GetBatchRunDetail(r.Context(), id)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not load batch run")
+		writeInternalError(w, r, "could not load batch run", err, slog.Int64("batch_run_id", id))
 		return
 	}
 	if run == nil {

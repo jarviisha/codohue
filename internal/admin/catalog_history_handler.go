@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -28,7 +29,7 @@ func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Reques
 	}
 	resp, err := h.svc.GetCatalogBacklogHistory(r.Context(), ns, window)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not load backlog history")
+		writeInternalError(w, r, "could not load backlog history", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, resp)
@@ -62,7 +63,7 @@ func (h *Handler) GetCatalogFailuresSummary(w http.ResponseWriter, r *http.Reque
 	}
 	resp, err := h.svc.GetCatalogFailuresSummary(r.Context(), ns, window, limit)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not load failures summary")
+		writeInternalError(w, r, "could not load failures summary", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, resp)

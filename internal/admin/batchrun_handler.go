@@ -3,6 +3,7 @@ package admin
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -33,7 +34,7 @@ func (h *Handler) GetBatchRunDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	detail, err := h.svc.GetBatchRunDetail(r.Context(), id)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "could not load batch run")
+		writeInternalError(w, r, "could not load batch run", err, slog.Int64("batch_run_id", id))
 		return
 	}
 	if detail == nil {
@@ -56,6 +57,7 @@ func (h *Handler) CancelBatchRun(w http.ResponseWriter, r *http.Request) {
 	}
 	summary, status, err := h.svc.CancelBatchRun(r.Context(), id)
 	if err != nil {
+		logHandlerError(r, "could not cancel batch run", err, slog.Int64("batch_run_id", id))
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
@@ -102,6 +104,7 @@ func (h *Handler) RetryBatchRun(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteError(w, http.StatusConflict, "conflict", err.Error())
 			return
 		}
+		logHandlerError(r, "could not retry batch run", err, slog.Int64("batch_run_id", id))
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
@@ -37,8 +38,7 @@ func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteError(w, http.StatusConflict, "reembed_running",
 				"a re-embed is already in progress for this namespace")
 		default:
-			httpapi.WriteError(w, http.StatusInternalServerError, "internal_error",
-				"could not trigger re-embed")
+			writeInternalError(w, r, "could not trigger re-embed", err, slog.String("namespace", ns))
 		}
 		return
 	}
@@ -96,8 +96,7 @@ func (h *Handler) ListCatalogItems(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.ListCatalogItems(r.Context(), ns, state, limit, offset, objectIDFilter)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error",
-			"could not list catalog items")
+		writeInternalError(w, r, "could not list catalog items", err, slog.String("namespace", ns))
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, resp)
@@ -118,8 +117,8 @@ func (h *Handler) GetCatalogItem(w http.ResponseWriter, r *http.Request) {
 
 	item, err := h.svc.GetCatalogItem(r.Context(), ns, id)
 	if err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error",
-			"could not get catalog item")
+		writeInternalError(w, r, "could not get catalog item", err,
+			slog.String("namespace", ns), slog.Int64("catalog_item_id", id))
 		return
 	}
 	if item == nil {
@@ -151,8 +150,8 @@ func (h *Handler) RedriveCatalogItem(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable",
 				"catalog auto-embedding is not wired in this deployment")
 		default:
-			httpapi.WriteError(w, http.StatusInternalServerError, "internal_error",
-				"could not redrive catalog item")
+			writeInternalError(w, r, "could not redrive catalog item", err,
+				slog.String("namespace", ns), slog.Int64("catalog_item_id", id))
 		}
 		return
 	}
@@ -180,8 +179,8 @@ func (h *Handler) BulkRedriveDeadletter(w http.ResponseWriter, r *http.Request) 
 			httpapi.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable",
 				"catalog auto-embedding is not wired in this deployment")
 		default:
-			httpapi.WriteError(w, http.StatusInternalServerError, "internal_error",
-				"could not bulk redrive dead-letter items")
+			writeInternalError(w, r, "could not bulk redrive dead-letter items", err,
+				slog.String("namespace", ns))
 		}
 		return
 	}
@@ -207,8 +206,8 @@ func (h *Handler) DeleteCatalogItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.DeleteCatalogItem(r.Context(), ns, id); err != nil {
-		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error",
-			"could not delete catalog item")
+		writeInternalError(w, r, "could not delete catalog item", err,
+			slog.String("namespace", ns), slog.Int64("catalog_item_id", id))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
