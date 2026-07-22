@@ -530,6 +530,18 @@ radius khi admin key lộ). Sửa `auth/auth.go:36-39` để chỉ fallback khi
 
 ## Phase 6 — Config, validation, contract trung thực
 
+> **✅ HOÀN THÀNH 2026-07-22** — 4 commit: `feat(nsconfig): validate config
+> writes; fix(ingest): occurred_at rules` (6.1+6.2), `feat(types)!: drop
+> unimplemented metadata` (6.3-Metadata, đã chốt phương án b),
+> `fix(config): wire the global catalog limit env vars` (6.3 + migration
+> 023 nullable columns + compose env passthrough), `chore(ops): ...` (6.4).
+> Ghi chú lệch: 6.4 chọn interval=0 là **lỗi config** (không phải disable);
+> ghi chú 021 rolling-deploy bỏ qua (đã ship); GO_MODULES giữ nguyên, chỉ
+> ghi chú exclusion. **Toàn bộ 6 phase của kế hoạch đã hoàn thành** — còn
+> lại: chạy `make test-e2e-heavy` + soak test kill -9 với hạ tầng thật
+> (cần docker stack), và một lần full recompute mỗi namespace sau khi
+> deploy migration 022.
+
 ### 6.1 Validation nsconfig + chặn transition nguy hiểm — **M**
 
 **Vấn đề (F33-occurred, F34, F-nsconfig-validate):**
