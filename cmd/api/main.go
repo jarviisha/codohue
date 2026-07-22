@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,6 +41,7 @@ var (
 	newQdrantFn       = infraqdrant.NewClient
 	registerMetricsFn = metrics.Register
 	signalNotifyFn    = signal.Notify
+	hostnameFn        = os.Hostname
 	closePoolFn       = func(db *pgxpool.Pool) { db.Close() }
 	closeRedisFn      = func(client *goredis.Client) error { return client.Close() }
 	checkPostgresFn   = checkPostgres
@@ -115,7 +117,13 @@ func run() error {
 	tailPublisher := ingest.NewRedisEventTailPublisher(redisClient, 0)
 	ingestSvc.SetTailPublisher(tailPublisher)
 	ingestHandler := ingest.NewHandler(ingestSvc)
-	ingestWorker := ingest.NewWorker(redisClient, ingestSvc)
+	consumerName := cfg.IngestReplicaName
+	if consumerName == "" {
+		if h, err := hostnameFn(); err == nil {
+			consumerName = h
+		}
+	}
+	ingestWorker := ingest.NewWorker(redisClient, ingestSvc, consumerName)
 
 	if err := ingestWorker.Init(ctx); err != nil {
 		return fmt.Errorf("init ingest worker: %w", err)
@@ -179,9 +187,18 @@ func run() error {
 		r.Delete("/v1/namespaces/{ns}/objects/{id}", recommendHandler.DeleteObject)
 	})
 
-	// Goroutines
-	go ingestWorker.Run(ctx)
-	go tailPublisher.Run(ctx)
+	// Goroutines. Joined on shutdown before the deferred pool/redis closes
+	// fire, so in-flight events finish their write + XACK against live clients.
+	var workerWG sync.WaitGroup
+	workerWG.Add(2)
+	go func() {
+		defer workerWG.Done()
+		ingestWorker.Run(ctx)
+	}()
+	go func() {
+		defer workerWG.Done()
+		tailPublisher.Run(ctx)
+	}()
 
 	// HTTP Server
 	srv := &http.Server{
@@ -211,6 +228,17 @@ func run() error {
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server shutdown error", "error", err)
+	}
+
+	workerDone := make(chan struct{})
+	go func() {
+		workerWG.Wait()
+		close(workerDone)
+	}()
+	select {
+	case <-workerDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("ingest worker shutdown timed out")
 	}
 
 	slog.Info("API stopped")

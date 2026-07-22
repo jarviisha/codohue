@@ -287,6 +287,7 @@ CODOHUE_BATCH_INTERVAL_MINUTES=5
 CODOHUE_LOG_FORMAT=text   # "text" (default) | "json"
 CODOHUE_API_PORT=2001     # cmd/api listen port
 CODOHUE_ADMIN_PORT=2002   # cmd/admin listen port
+CODOHUE_INGEST_REPLICA_NAME=  # consumer name for the ingest worker's XREADGROUP; defaults to hostname
 CODOHUE_API_URL=http://localhost:2001  # used by cmd/admin to proxy /healthz and inject test events
 
 # Catalog auto-embedding (cmd/embedder) — feature 004

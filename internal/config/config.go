@@ -32,6 +32,11 @@ type AppConfig struct {
 	LogFormat            string // "json" | "text" (default: "text")
 	APIPort              string // HTTP listen port (default: "2001")
 
+	// IngestReplicaName is the consumer name the ingest worker joins the
+	// Redis Streams consumer group with. Empty string means "use the
+	// hostname at runtime". Read by cmd/api only.
+	IngestReplicaName string
+
 	// Retention windows for observability tables that grow unbounded under
 	// steady-state operation. Zero or negative disables the prune for the
 	// matching table. Read by cmd/cron only.
@@ -54,6 +59,7 @@ func LoadAPI() (*AppConfig, error) {
 	}
 
 	cfg.APIPort = getEnv("CODOHUE_API_PORT", "2001")
+	cfg.IngestReplicaName = getEnv("CODOHUE_INGEST_REPLICA_NAME", "")
 	return cfg, nil
 }
 

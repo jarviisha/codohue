@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -23,77 +24,104 @@ func (f *fakeProcessor) Process(_ context.Context, p *EventPayload) (int64, erro
 	return 0, f.processErr
 }
 
-func TestWorkerHandleMessage_MissingPayload(t *testing.T) {
-	w := &Worker{}
-	msg := redis.XMessage{ID: "1-0", Values: map[string]any{}}
-
-	if err := w.handleMessage(context.Background(), msg); err == nil {
-		t.Error("expected error for missing payload field, got nil")
+// ackRecorder returns an ackFn capturing acked ids into the given slice.
+func ackRecorder(acked *[]string) func(context.Context, string, string, ...string) error {
+	return func(_ context.Context, _, _ string, ids ...string) error {
+		*acked = append(*acked, ids...)
+		return nil
 	}
 }
 
-func TestWorkerHandleMessage_InvalidJSON(t *testing.T) {
-	w := &Worker{}
-	msg := redis.XMessage{ID: "1-0", Values: map[string]any{"payload": "not-valid-json"}}
-
-	if err := w.handleMessage(context.Background(), msg); err == nil {
-		t.Error("expected error for invalid JSON, got nil")
-	}
-}
-
-func TestWorkerHandleMessage_ValidPayload(t *testing.T) {
-	proc := &fakeProcessor{}
-	w := &Worker{service: proc}
-
-	now := time.Now().UTC()
-	p := EventPayload{
-		Namespace:  "test-ns",
-		SubjectID:  "user-1",
-		ObjectID:   "item-1",
-		Action:     ActionLike,
-		OccurredAt: now,
-	}
-	raw, err := json.Marshal(p)
+func eventMessage(t *testing.T, id string) redis.XMessage {
+	t.Helper()
+	payload, err := json.Marshal(EventPayload{Namespace: "ns", SubjectID: "u1", ObjectID: "o1", Action: ActionView})
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	msg := redis.XMessage{ID: "1-0", Values: map[string]any{"payload": string(raw)}}
+	return redis.XMessage{ID: id, Values: map[string]any{"payload": string(payload)}}
+}
 
-	if err := w.handleMessage(context.Background(), msg); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+func TestWorkerHandleMessage_MissingPayloadAckedAndDropped(t *testing.T) {
+	acked := []string{}
+	w := &Worker{ackFn: ackRecorder(&acked)}
+
+	w.handleMessage(context.Background(), redis.XMessage{ID: "1-0", Values: map[string]any{}})
+
+	if len(acked) != 1 || acked[0] != "1-0" {
+		t.Fatalf("expected malformed entry to be acked, got %v", acked)
 	}
+}
+
+func TestWorkerHandleMessage_InvalidJSONAckedAndDropped(t *testing.T) {
+	acked := []string{}
+	w := &Worker{ackFn: ackRecorder(&acked)}
+
+	w.handleMessage(context.Background(), redis.XMessage{ID: "1-0", Values: map[string]any{"payload": "not-valid-json"}})
+
+	if len(acked) != 1 {
+		t.Fatalf("expected invalid JSON entry to be acked, got %v", acked)
+	}
+}
+
+func TestWorkerHandleMessage_ValidPayloadProcessedAndAcked(t *testing.T) {
+	proc := &fakeProcessor{}
+	acked := []string{}
+	w := &Worker{service: proc, ackFn: ackRecorder(&acked)}
+
+	w.handleMessage(context.Background(), eventMessage(t, "1-0"))
+
 	if !proc.processCalled {
 		t.Fatal("expected service.Process to be called")
 	}
-	if proc.lastPayload.Namespace != p.Namespace {
-		t.Errorf("Namespace: got %q, want %q", proc.lastPayload.Namespace, p.Namespace)
+	if proc.lastPayload.Namespace != "ns" || proc.lastPayload.Action != ActionView {
+		t.Errorf("unexpected payload: %+v", proc.lastPayload)
 	}
-	if proc.lastPayload.Action != p.Action {
-		t.Errorf("Action: got %q, want %q", proc.lastPayload.Action, p.Action)
+	if len(acked) != 1 || acked[0] != "1-0" {
+		t.Fatalf("expected processed entry to be acked, got %v", acked)
 	}
 }
 
-func TestWorkerHandleMessage_ServiceError(t *testing.T) {
-	proc := &fakeProcessor{processErr: errors.New("process failed")}
-	w := &Worker{service: proc}
+func TestWorkerHandleMessage_TransientErrorLeavesEntryPending(t *testing.T) {
+	proc := &fakeProcessor{processErr: errors.New("db down")}
+	acked := []string{}
+	w := &Worker{service: proc, ackFn: ackRecorder(&acked)}
 
-	p := EventPayload{Namespace: "ns", SubjectID: "u1", ObjectID: "o1", Action: ActionView}
-	raw, err := json.Marshal(p)
-	if err != nil {
-		t.Fatalf("marshal payload: %v", err)
+	w.handleMessage(context.Background(), eventMessage(t, "1-0"))
+
+	if len(acked) != 0 {
+		t.Fatalf("transient failure must not ack, got %v", acked)
 	}
-	msg := redis.XMessage{ID: "1-0", Values: map[string]any{"payload": string(raw)}}
+}
 
-	if err := w.handleMessage(context.Background(), msg); err == nil {
-		t.Error("expected error from service.Process, got nil")
+func TestWorkerHandleMessage_PermanentErrorAckedAndDropped(t *testing.T) {
+	for _, sentinel := range []error{ErrInvalidPayload, ErrUnknownAction} {
+		proc := &fakeProcessor{processErr: fmt.Errorf("wrapped: %w", sentinel)}
+		acked := []string{}
+		w := &Worker{service: proc, ackFn: ackRecorder(&acked)}
+
+		w.handleMessage(context.Background(), eventMessage(t, "1-0"))
+
+		if len(acked) != 1 {
+			t.Fatalf("%v: expected poison entry to be acked, got %v", sentinel, acked)
+		}
 	}
 }
 
 func TestNewWorker(t *testing.T) {
 	svc := &Service{}
-	w := NewWorker(nil, svc)
+	w := NewWorker(nil, svc, "replica-a")
 	if w == nil || w.service != svc {
 		t.Fatal("expected worker to wire dependencies")
+	}
+	if w.consumer != "replica-a" {
+		t.Fatalf("consumer: got %q want %q", w.consumer, "replica-a")
+	}
+}
+
+func TestNewWorker_EmptyConsumerFallsBack(t *testing.T) {
+	w := NewWorker(nil, &Service{}, "")
+	if w.consumer != defaultConsumerName {
+		t.Fatalf("consumer: got %q want %q", w.consumer, defaultConsumerName)
 	}
 }
 
@@ -146,28 +174,18 @@ func TestWorkerRun_ContinuesOnReadErrorAndAcksProcessedMessages(t *testing.T) {
 			readCalls++
 			switch readCalls {
 			case 1:
-				return nil, errors.New("temporary redis error")
+				return nil, redis.Nil // empty block window must not back off
 			case 2:
-				payload, err := json.Marshal(EventPayload{Namespace: "ns", SubjectID: "u1", ObjectID: "o1", Action: ActionView})
-				if err != nil {
-					t.Fatalf("marshal payload: %v", err)
-				}
 				cancel()
 				return []redis.XStream{{
-					Stream: streamName,
-					Messages: []redis.XMessage{{
-						ID:     "1-0",
-						Values: map[string]any{"payload": string(payload)},
-					}},
+					Stream:   streamName,
+					Messages: []redis.XMessage{eventMessage(t, "1-0")},
 				}}, nil
 			default:
 				return nil, context.Canceled
 			}
 		},
-		ackFn: func(_ context.Context, _, _ string, ids ...string) error {
-			acked = append(acked, ids...)
-			return nil
-		},
+		ackFn: ackRecorder(&acked),
 	}
 
 	w.Run(ctx)
@@ -181,4 +199,71 @@ func TestWorkerRun_ContinuesOnReadErrorAndAcksProcessedMessages(t *testing.T) {
 	if len(acked) != 1 || acked[0] != "1-0" {
 		t.Fatalf("unexpected acked ids: %v", acked)
 	}
+}
+
+func TestWorkerRun_RecreatesGroupOnNoGroup(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	groupCreated := false
+	w := &Worker{
+		readGroupFn: func(_ context.Context, _ *redis.XReadGroupArgs) ([]redis.XStream, error) {
+			return nil, errors.New("NOGROUP No such key 'codohue:events' or consumer group")
+		},
+		createGroupFn: func(_ context.Context, stream, group, _ string) error {
+			groupCreated = true
+			if stream != streamName || group != consumerGroup {
+				t.Errorf("unexpected group recreate args: %s/%s", stream, group)
+			}
+			cancel() // stop the run loop during the post-error backoff
+			return nil
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		w.Run(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("worker did not stop")
+	}
+	if !groupCreated {
+		t.Fatal("expected consumer group to be recreated after NOGROUP")
+	}
+}
+
+func TestWorkerReapOnce_ReprocessesClaimedEntries(t *testing.T) {
+	proc := &fakeProcessor{}
+	acked := []string{}
+	w := &Worker{
+		service: proc,
+		autoClaimFn: func(_ context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			if args.Stream != streamName || args.Group != consumerGroup {
+				t.Errorf("unexpected autoclaim args: %s/%s", args.Stream, args.Group)
+			}
+			return []redis.XMessage{eventMessage(t, "9-0")}, "0-0", nil
+		},
+		ackFn: ackRecorder(&acked),
+	}
+
+	w.reapOnce(context.Background())
+
+	if !proc.processCalled {
+		t.Fatal("expected claimed entry to be processed")
+	}
+	if len(acked) != 1 || acked[0] != "9-0" {
+		t.Fatalf("unexpected acked ids: %v", acked)
+	}
+}
+
+func TestWorkerReapOnce_ToleratesAutoClaimError(t *testing.T) {
+	w := &Worker{
+		autoClaimFn: func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("redis down")
+		},
+	}
+	w.reapOnce(context.Background()) // must not panic or ack anything
 }
