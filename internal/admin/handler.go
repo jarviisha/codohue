@@ -209,15 +209,27 @@ func (h *Handler) GetNamespace(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 
+	// DecodeStrict: with PATCH semantics a typo'd field name would silently
+	// no-op the whole edit — reject it loudly instead.
 	var req NamespaceUpsertRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body: "+err.Error())
 		return
 	}
 
 	result, statusCode, err := h.svc.UpsertNamespace(r.Context(), ns, &req)
 	if err != nil {
-		writeInternalError(w, r, "could not upsert namespace", err, slog.String("namespace", ns))
+		switch {
+		case errors.Is(err, ErrNamespaceConfigInvalid):
+			httpapi.WriteError(w, statusCode, "invalid_config", err.Error())
+		case errors.Is(err, ErrCatalogSourceViaUpsert):
+			httpapi.WriteError(w, statusCode, "catalog_via_upsert",
+				"dense_source=catalog is enabled via PUT .../catalog, which validates the strategy against embedding_dim")
+		case errors.Is(err, ErrEmbeddingDimLocked):
+			httpapi.WriteError(w, statusCode, "embedding_dim_locked", err.Error())
+		default:
+			writeInternalError(w, r, "could not upsert namespace", err, slog.String("namespace", ns))
+		}
 		return
 	}
 	httpapi.WriteJSON(w, statusCode, result)

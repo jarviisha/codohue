@@ -324,14 +324,12 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		strategyVer = nil
 	}
 
+	// Zero means "not supplied": COALESCE(NULLIF($n,0), column) below keeps
+	// the current value, so a disable/enable cycle (whose body carries
+	// zeros) no longer resets an operator's custom limits back to the
+	// schema defaults.
 	maxAttempts := req.MaxAttempts
-	if maxAttempts <= 0 {
-		maxAttempts = 5
-	}
 	maxBytes := req.MaxContentBytes
-	if maxBytes <= 0 {
-		maxBytes = 32768
-	}
 
 	var cfg namespace.Config
 	var weightsRaw []byte
@@ -351,8 +349,8 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		    catalog_strategy_id        = $3,
 		    catalog_strategy_version   = $4,
 		    catalog_strategy_params    = $5,
-		    catalog_max_attempts       = $6,
-		    catalog_max_content_bytes  = $7,
+		    catalog_max_attempts       = COALESCE(NULLIF($6, 0), catalog_max_attempts),
+		    catalog_max_content_bytes  = COALESCE(NULLIF($7, 0), catalog_max_content_bytes),
 		    updated_at                 = NOW()
 		WHERE namespace = $1
 		RETURNING

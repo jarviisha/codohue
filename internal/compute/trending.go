@@ -41,7 +41,7 @@ func TrendingScores(events []*RawEvent, actionWeights map[string]float64, lambda
 			weight = w
 		}
 
-		ageHours := float64(now-e.OccurredAt) / 3600.0
+		ageHours := max(float64(now-e.OccurredAt)/3600.0, 0)
 		scores[e.ObjectID] += weight * math.Exp(-lambdaTrending*ageHours)
 	}
 	return scores

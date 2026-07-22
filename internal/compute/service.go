@@ -184,7 +184,9 @@ func (s *Service) buildVectors(ctx context.Context, namespace, subjectID string,
 	now := time.Now().Unix()
 
 	for _, e := range events {
-		daysSince := float64(now-e.OccurredAt) / 86400.0
+		// Clamp: a future-dated event (clock skew that slipped past ingest)
+		// must cap at freshness 1.0, not exponentiate into +Inf.
+		daysSince := max(float64(now-e.OccurredAt)/86400.0, 0)
 		freshness := math.Exp(-lambda * daysSince)
 		objectScores[e.ObjectID] += e.Weight * freshness
 

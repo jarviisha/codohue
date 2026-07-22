@@ -37,7 +37,23 @@ type nsConfigRepository interface {
 type Service struct {
 	repo     nsConfigRepository
 	registry *embedstrategy.Registry
+
+	// denseCollections backs the embedding_dim change guard. Optional —
+	// wired by cmd/admin (the only place config writes happen); nil skips
+	// the guard.
+	denseCollections DenseCollectionChecker
 }
+
+// DenseCollectionChecker reports whether a namespace's dense Qdrant
+// collections already exist. Defined here (implemented at the wiring layer)
+// so nsconfig never grows a Qdrant dependency.
+type DenseCollectionChecker interface {
+	DenseCollectionsExist(ctx context.Context, namespace string) (bool, error)
+}
+
+// SetDenseCollectionChecker wires the embedding_dim change guard. Safe to
+// call once at startup before serving.
+func (s *Service) SetDenseCollectionChecker(c DenseCollectionChecker) { s.denseCollections = c }
 
 // NewService creates a new Service with the given repository. The catalog
 // strategy registry defaults to embedstrategy.DefaultRegistry().
@@ -53,6 +69,13 @@ func NewService(repo *Repository) *Service {
 // plaintext in UpsertResponse.APIKey. The plaintext key is shown once only —
 // subsequent updates will not return the key.
 func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*UpsertResponse, error) {
+	if err := validateUpsert(req); err != nil {
+		return nil, err
+	}
+	if err := s.guardEmbeddingDimChange(ctx, ns, req); err != nil {
+		return nil, err
+	}
+
 	cfg, err := s.repo.Upsert(ctx, ns, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert namespace config: %w", err)
@@ -103,6 +126,30 @@ func (s *Service) RotateAPIKey(ctx context.Context, ns string) (*RotateAPIKeyRes
 		return nil, ErrNamespaceNotFound
 	}
 	return &RotateAPIKeyResponse{Namespace: ns, APIKey: plaintext}, nil
+}
+
+// guardEmbeddingDimChange rejects an embedding_dim change while the
+// namespace's dense collections exist. Without a wired checker (data plane,
+// tests) the guard is skipped — creation-time defaults are unaffected.
+func (s *Service) guardEmbeddingDimChange(ctx context.Context, ns string, req *UpsertRequest) error {
+	if req == nil || req.EmbeddingDim == nil || s.denseCollections == nil {
+		return nil
+	}
+	current, err := s.repo.Get(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("load current config: %w", err)
+	}
+	if current == nil || current.EmbeddingDim == *req.EmbeddingDim {
+		return nil // new namespace, or a no-op change
+	}
+	exists, err := s.denseCollections.DenseCollectionsExist(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("check dense collections: %w", err)
+	}
+	if exists {
+		return ErrEmbeddingDimLocked
+	}
+	return nil
 }
 
 // Get returns the configuration for a namespace, or nil if it does not exist.

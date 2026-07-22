@@ -363,12 +363,16 @@ func TestRepositoryUpsertCatalogConfig_AppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertCatalogConfig: %v", err)
 	}
-	// Args order: ns, enabled, strategy_id, strategy_version, params, max_attempts, max_content_bytes.
-	if capturedArgs[5].(int) != 5 {
-		t.Errorf("expected default max_attempts=5, got %v", capturedArgs[5])
+	// Args order: ns, enabled, strategy_id, strategy_version, params,
+	// max_attempts, max_content_bytes. Zeros pass through raw: the SQL's
+	// COALESCE(NULLIF($n,0), column) keeps the CURRENT values, so a
+	// disable/enable cycle no longer resets an operator's custom limits
+	// (schema defaults cover brand-new rows).
+	if capturedArgs[5].(int) != 0 {
+		t.Errorf("unsupplied max_attempts must pass 0 for keep-current, got %v", capturedArgs[5])
 	}
-	if capturedArgs[6].(int) != 32768 {
-		t.Errorf("expected default max_content_bytes=32768, got %v", capturedArgs[6])
+	if capturedArgs[6].(int) != 0 {
+		t.Errorf("unsupplied max_content_bytes must pass 0 for keep-current, got %v", capturedArgs[6])
 	}
 }
 

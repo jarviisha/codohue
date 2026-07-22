@@ -1,6 +1,9 @@
 package admin
 
-import "time"
+import (
+	"errors"
+	"time"
+)
 
 // NamespaceConfig is the admin view of a namespace configuration.
 //
@@ -182,6 +185,15 @@ const (
 	ReembedOnlyStateAll      = "all"
 	ReembedOnlyStateEmbedded = "embedded"
 	ReembedOnlyStateFailed   = "failed"
+)
+
+// Namespace config write rejections, mapped from the nsconfig domain by the
+// cmd/admin adapter (admin cannot import that peer domain). The handler maps
+// them to 400 / 422 / 409 respectively.
+var (
+	ErrNamespaceConfigInvalid = errors.New("admin: invalid namespace configuration")
+	ErrCatalogSourceViaUpsert = errors.New("admin: dense_source=catalog must be set via the catalog endpoint")
+	ErrEmbeddingDimLocked     = errors.New("admin: embedding_dim cannot change while dense collections exist")
 )
 
 // NamespaceKeyRotateResponse carries the freshly rotated namespace API key.

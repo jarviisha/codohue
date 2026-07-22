@@ -4,10 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
+
+// maxOccurredAtSkew is how far into the future occurred_at may point —
+// generous enough for ordinary clock skew, tight enough to reject unit
+// mistakes (epoch millis land ~year 56000).
+const maxOccurredAtSkew = 5 * time.Minute
 
 var (
 	// ErrInvalidPayload indicates that the inbound event payload is missing required fields or is otherwise malformed.
@@ -50,6 +56,19 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 	if payload.Namespace == "" || payload.SubjectID == "" || payload.ObjectID == "" {
 		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "invalid_payload").Inc()
 		return 0, fmt.Errorf("%w: namespace, subject_id, object_id are required", ErrInvalidPayload)
+	}
+
+	// occurred_at rules. Omitted used to store year 0001 — a 202'd event no
+	// 90-day window would ever see. A far-future timestamp is worse: the
+	// decay term e^(-λ·daysSince) exponentiates a NEGATIVE daysSince, so one
+	// epoch-millis-mistaken-for-seconds event drove a subject's whole sparse
+	// vector to +Inf.
+	now := time.Now().UTC()
+	if payload.OccurredAt.IsZero() {
+		payload.OccurredAt = now
+	} else if payload.OccurredAt.After(now.Add(maxOccurredAtSkew)) {
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "future_occurred_at").Inc()
+		return 0, fmt.Errorf("%w: occurred_at %s is in the future", ErrInvalidPayload, payload.OccurredAt.Format(time.RFC3339))
 	}
 
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)

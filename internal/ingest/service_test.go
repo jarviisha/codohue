@@ -243,3 +243,51 @@ func TestServiceProcess_EventFields(t *testing.T) {
 		t.Errorf("ObjectCreatedAt: got %v, want %v", e.ObjectCreatedAt, payload.ObjectCreatedAt)
 	}
 }
+
+func TestProcess_OmittedOccurredAtDefaultsToNow(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(nil, &fakeNsConfig{})
+	svc.repo = repo
+
+	before := time.Now().UTC().Add(-time.Second)
+	_, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1", Action: ActionView,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := repo.lastEvent.OccurredAt
+	if got.Before(before) || got.After(time.Now().UTC().Add(time.Second)) {
+		t.Fatalf("omitted occurred_at must default to now, got %s — year-0001 events were 202'd but invisible to every window", got)
+	}
+}
+
+func TestProcess_FutureOccurredAtRejected(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(nil, &fakeNsConfig{})
+	svc.repo = repo
+
+	_, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1", Action: ActionView,
+		OccurredAt: time.Now().Add(time.Hour),
+	})
+	if !errors.Is(err, ErrInvalidPayload) {
+		t.Fatalf("a future occurred_at must be rejected (it exponentiates into +Inf in the decay math), got %v", err)
+	}
+	if repo.insertCalled {
+		t.Fatal("rejected event must not be stored")
+	}
+}
+
+func TestProcess_SlightClockSkewTolerated(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(nil, &fakeNsConfig{})
+	svc.repo = repo
+
+	if _, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1", Action: ActionView,
+		OccurredAt: time.Now().Add(30 * time.Second),
+	}); err != nil {
+		t.Fatalf("ordinary clock skew must pass: %v", err)
+	}
+}

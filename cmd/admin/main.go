@@ -75,6 +75,9 @@ func run() error {
 
 	nsConfigRepo := nsconfig.NewRepository(db)
 	nsConfigSvc := nsconfig.NewService(nsConfigRepo)
+	if qdrantClient != nil {
+		nsConfigSvc.SetDenseCollectionChecker(&denseCollectionChecker{client: qdrantClient})
+	}
 
 	computeRepo := compute.NewRepository(db)
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)

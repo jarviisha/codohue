@@ -212,7 +212,7 @@ func SVDEmbeddings(events []*RawEvent, embeddingDim int, lambda float64) (map[st
 	for _, e := range events {
 		si := subjectIndex[e.SubjectID]
 		oi := objectIndex[e.ObjectID]
-		daysSince := float64(now-e.OccurredAt) / 86400.0
+		daysSince := max(float64(now-e.OccurredAt)/86400.0, 0)
 		score := e.Weight * math.Exp(-lambda*daysSince)
 		data[si*nObjects+oi] += score
 	}

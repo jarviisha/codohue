@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/nsconfig"
@@ -45,7 +46,7 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 
 	resp, err := a.svc.Upsert(ctx, namespace, nsReq)
 	if err != nil {
-		return nil, err
+		return nil, mapNsConfigError(err)
 	}
 
 	out := &admin.NamespaceUpsertResponse{
@@ -71,4 +72,20 @@ func (a *nsConfigAdapter) RotateAPIKey(ctx context.Context, namespace string) (*
 		return nil, err
 	}
 	return &admin.NamespaceKeyRotateResponse{Namespace: resp.Namespace, APIKey: resp.APIKey}, nil
+}
+
+// mapNsConfigError translates nsconfig validation sentinels into the admin
+// domain's equivalents, preserving the detail message so the operator sees
+// which field failed. Unknown errors pass through (→ 500).
+func mapNsConfigError(err error) error {
+	switch {
+	case errors.Is(err, nsconfig.ErrCatalogViaUpsert):
+		return fmt.Errorf("%w: %s", admin.ErrCatalogSourceViaUpsert, err.Error())
+	case errors.Is(err, nsconfig.ErrEmbeddingDimLocked):
+		return fmt.Errorf("%w: %s", admin.ErrEmbeddingDimLocked, err.Error())
+	case errors.Is(err, nsconfig.ErrInvalidConfig):
+		return fmt.Errorf("%w: %s", admin.ErrNamespaceConfigInvalid, err.Error())
+	default:
+		return err
+	}
 }
