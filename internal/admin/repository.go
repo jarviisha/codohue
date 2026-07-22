@@ -711,11 +711,12 @@ func (r *Repository) SeedDemoCatalogItems(ctx context.Context, namespace string,
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO catalog_items (
-				namespace, object_id, content, content_hash, metadata,
+				namespace, object_id, content, content_hash, author_subject_id, metadata,
 				state, attempt_count, created_at, updated_at
 			)
-			VALUES ($1, $2, $3, $4, $5, 'pending', 0, NOW(), NOW())`,
-			namespace, it.ObjectID, it.Content, demoContentHash(it.Content), metaBytes,
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, 'pending', 0, NOW(), NOW())`,
+			namespace, it.ObjectID, it.Content, demoContentHash(it.Content),
+			it.AuthorSubjectID, metaBytes,
 		); err != nil {
 			return 0, fmt.Errorf("insert demo catalog item %s: %w", it.ObjectID, err)
 		}

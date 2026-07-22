@@ -31,7 +31,11 @@ type demoEvent struct {
 type demoCatalogItem struct {
 	ObjectID string
 	Content  string
-	Metadata map[string]any
+	// AuthorSubjectID points at a subject in demoDataset so the admin UI can
+	// round-trip subject → authored objects → subject. Empty on one item on
+	// purpose, to exercise the unattributed rendering path.
+	AuthorSubjectID string
+	Metadata        map[string]any
 }
 
 var demoNamespaceConfig = NamespaceUpsertRequest{
@@ -94,34 +98,40 @@ var demoDataset = []demoEvent{
 // approaching the default 32 KiB cap.
 var demoCatalogDataset = []demoCatalogItem{
 	{
-		ObjectID: "item_wireless_keyboard",
-		Content:  "Slim wireless mechanical keyboard with low-profile switches, multi-device Bluetooth pairing, and a backlit white aluminum chassis. Optimized for long typing sessions.",
-		Metadata: map[string]any{"category": "peripherals", "price_tier": "mid"},
+		ObjectID:        "item_wireless_keyboard",
+		Content:         "Slim wireless mechanical keyboard with low-profile switches, multi-device Bluetooth pairing, and a backlit white aluminum chassis. Optimized for long typing sessions.",
+		AuthorSubjectID: "u_ava",
+		Metadata:        map[string]any{"category": "peripherals", "price_tier": "mid"},
 	},
 	{
-		ObjectID: "item_usb_c_hub",
-		Content:  "Compact USB-C hub with HDMI 4K@60Hz, two USB-A 3.2 ports, SD/microSD card readers, and 100W power delivery passthrough. Plug-and-play, no drivers required.",
-		Metadata: map[string]any{"category": "accessories", "price_tier": "budget"},
+		ObjectID:        "item_usb_c_hub",
+		Content:         "Compact USB-C hub with HDMI 4K@60Hz, two USB-A 3.2 ports, SD/microSD card readers, and 100W power delivery passthrough. Plug-and-play, no drivers required.",
+		AuthorSubjectID: "u_ava",
+		Metadata:        map[string]any{"category": "accessories", "price_tier": "budget"},
 	},
 	{
-		ObjectID: "item_standing_desk_mat",
-		Content:  "Ergonomic anti-fatigue standing desk mat with contoured terrain points. Encourages micro-movements while standing, reducing pressure on heels and lower back.",
-		Metadata: map[string]any{"category": "ergonomics", "price_tier": "mid"},
+		ObjectID:        "item_standing_desk_mat",
+		Content:         "Ergonomic anti-fatigue standing desk mat with contoured terrain points. Encourages micro-movements while standing, reducing pressure on heels and lower back.",
+		AuthorSubjectID: "u_ben",
+		Metadata:        map[string]any{"category": "ergonomics", "price_tier": "mid"},
 	},
 	{
-		ObjectID: "item_laptop_stand",
-		Content:  "Adjustable aluminum laptop stand that elevates the screen to eye level. Foldable, portable, and stable up to 17-inch laptops. Vents allow airflow to reduce thermal throttling.",
-		Metadata: map[string]any{"category": "ergonomics", "price_tier": "budget"},
+		ObjectID:        "item_laptop_stand",
+		Content:         "Adjustable aluminum laptop stand that elevates the screen to eye level. Foldable, portable, and stable up to 17-inch laptops. Vents allow airflow to reduce thermal throttling.",
+		AuthorSubjectID: "u_chloe",
+		Metadata:        map[string]any{"category": "ergonomics", "price_tier": "budget"},
 	},
 	{
-		ObjectID: "item_noise_canceling_headphones",
-		Content:  "Over-ear wireless headphones with hybrid active noise canceling, transparency mode, multi-point Bluetooth, and 40-hour battery life. Tuned for both focused work and music listening.",
-		Metadata: map[string]any{"category": "audio", "price_tier": "premium"},
+		ObjectID:        "item_noise_canceling_headphones",
+		Content:         "Over-ear wireless headphones with hybrid active noise canceling, transparency mode, multi-point Bluetooth, and 40-hour battery life. Tuned for both focused work and music listening.",
+		AuthorSubjectID: "u_chloe",
+		Metadata:        map[string]any{"category": "audio", "price_tier": "premium"},
 	},
 	{
-		ObjectID: "item_wireless_mouse",
-		Content:  "Lightweight wireless ergonomic mouse with high-DPI optical sensor, side scroll wheel, programmable side buttons, and USB-C fast charging. Bluetooth + 2.4GHz dongle.",
-		Metadata: map[string]any{"category": "peripherals", "price_tier": "mid"},
+		ObjectID:        "item_wireless_mouse",
+		Content:         "Lightweight wireless ergonomic mouse with high-DPI optical sensor, side scroll wheel, programmable side buttons, and USB-C fast charging. Bluetooth + 2.4GHz dongle.",
+		AuthorSubjectID: "u_diego",
+		Metadata:        map[string]any{"category": "peripherals", "price_tier": "mid"},
 	},
 	{
 		ObjectID: "item_desk_lamp",
@@ -129,9 +139,10 @@ var demoCatalogDataset = []demoCatalogItem{
 		Metadata: map[string]any{"category": "lighting", "price_tier": "mid"},
 	},
 	{
-		ObjectID: "item_monitor_arm",
-		Content:  "Heavy-duty gas-spring monitor arm with VESA 75x75 / 100x100, full motion tilt, swivel, and rotation. Supports 17 to 32 inch monitors up to 9kg, integrated cable management.",
-		Metadata: map[string]any{"category": "ergonomics", "price_tier": "premium"},
+		ObjectID:        "item_monitor_arm",
+		Content:         "Heavy-duty gas-spring monitor arm with VESA 75x75 / 100x100, full motion tilt, swivel, and rotation. Supports 17 to 32 inch monitors up to 9kg, integrated cable management.",
+		AuthorSubjectID: "u_emma",
+		Metadata:        map[string]any{"category": "ergonomics", "price_tier": "premium"},
 	},
 }
 

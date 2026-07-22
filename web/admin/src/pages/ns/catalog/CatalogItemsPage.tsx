@@ -66,9 +66,10 @@ export default function CatalogItemsPage() {
     offset: page * PAGE_SIZE,
   })
 
-  const clearAuthor = () => {
+  const applyAuthor = (next: string) => {
     const params = new URLSearchParams(searchParams)
-    params.delete('author')
+    if (next) params.set('author', next)
+    else params.delete('author')
     setSearchParams(params)
     setPage(0)
   }
@@ -128,8 +129,15 @@ export default function CatalogItemsPage() {
           {author && (
             <Inline align="center">
               <span className="text-foreground-subtle text-sm">author</span>
-              <code className="text-foreground text-xs">{author}</code>
-              <Button size="sm" variant="ghost" tone="neutral" onClick={clearAuthor}>
+              {/* The chip links out to the subject; filtering by author is the
+                  in-table click, so each affordance sits where it's wanted. */}
+              <Link
+                to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(author)}`}
+                className="text-foreground text-xs"
+              >
+                {author}
+              </Link>
+              <Button size="sm" variant="ghost" tone="neutral" onClick={() => applyAuthor('')}>
                 Clear
               </Button>
             </Inline>
@@ -179,6 +187,7 @@ export default function CatalogItemsPage() {
                     key={it.id}
                     ns={ns}
                     item={it}
+                    onFilterAuthor={applyAuthor}
                     onRedrive={() => redrive.mutate(it.id)}
                     onDelete={() => remove.mutate(it.id)}
                     redriving={redrive.isPending && redrive.variables === it.id}
@@ -207,6 +216,7 @@ export default function CatalogItemsPage() {
 function ItemRow({
   ns,
   item,
+  onFilterAuthor,
   onRedrive,
   onDelete,
   redriving,
@@ -214,6 +224,7 @@ function ItemRow({
 }: {
   ns: string
   item: CatalogItemSummary
+  onFilterAuthor: (author: string) => void
   onRedrive: () => void
   onDelete: () => void
   redriving: boolean
@@ -232,12 +243,14 @@ function ItemRow({
       </TableCell>
       <TableCell>
         {item.author_subject_id ? (
-          <Link
-            to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(item.author_subject_id)}`}
-            className="text-foreground-subtle text-xs"
+          <Button
+            size="sm"
+            variant="ghost"
+            tone="neutral"
+            onClick={() => onFilterAuthor(item.author_subject_id!)}
           >
             {item.author_subject_id}
-          </Link>
+          </Button>
         ) : (
           <span className="text-foreground-subtle text-xs">—</span>
         )}
