@@ -11,6 +11,8 @@ import (
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
 // ─── fake repo ────────────────────────────────────────────────────────────────
@@ -720,13 +722,26 @@ func TestTriggerBatch_NamespaceNotFound(t *testing.T) {
 	}
 }
 
+// fakeBatchRunner implements batchRunner for CreateBatchRun tests.
+type fakeBatchRunner struct {
+	runID    int64
+	startErr error
+	started  int
+}
+
+func (f *fakeBatchRunner) StartNamespaceRun(_ context.Context, _ string, _ batchrun.TriggerSource, _ time.Duration) (int64, error) {
+	f.started++
+	return f.runID, f.startErr
+}
+
+func (f *fakeBatchRunner) LockNamespace(_ context.Context, _ string) (func(), error) {
+	return func() {}, nil
+}
+
 func TestTriggerBatch_ConcurrentLock(t *testing.T) {
 	repo := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1"}}
 	svc := newTestService(repo, "", "")
-
-	// Pre-load the key to simulate a running batch.
-	svc.runningBatch.Store("ns1", true)
-	defer svc.runningBatch.Delete("ns1")
+	svc.job = &fakeBatchRunner{startErr: batchrun.ErrRunInProgress}
 
 	_, err := svc.CreateBatchRun(context.Background(), "ns1")
 	if err == nil {
@@ -734,6 +749,24 @@ func TestTriggerBatch_ConcurrentLock(t *testing.T) {
 	}
 	if !errors.Is(err, errBatchRunning) {
 		t.Errorf("expected errBatchRunning, got %v", err)
+	}
+}
+
+func TestTriggerBatch_ReturnsRunID(t *testing.T) {
+	repo := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1"}}
+	svc := newTestService(repo, "", "")
+	runner := &fakeBatchRunner{runID: 42}
+	svc.job = runner
+
+	resp, err := svc.CreateBatchRun(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ID != 42 || resp.Status != "running" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+	if runner.started != 1 {
+		t.Errorf("expected exactly one run start, got %d", runner.started)
 	}
 }
 

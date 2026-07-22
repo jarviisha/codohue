@@ -93,8 +93,8 @@ func (s *Service) RetryBatchRun(ctx context.Context, id int64) (*BatchRunCreateR
 	}
 
 	// CreateBatchRun is the existing manual-CF path. It guards against a
-	// concurrent run on the same namespace via runningBatch, so we don't
-	// duplicate that protection here.
+	// concurrent run on the same namespace via the cross-process compute
+	// lock, so we don't duplicate that protection here.
 	created, err := s.CreateBatchRun(ctx, row.Namespace)
 	if err != nil {
 		if errors.Is(err, errBatchRunning) {

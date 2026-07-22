@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jarviisha/codohue/internal/compute"
@@ -75,7 +76,11 @@ func run() error {
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := newComputeJobFn(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, cfg.BatchIntervalMinutes)
 
-	go job.Run(ctx)
+	jobDone := make(chan struct{})
+	go func() {
+		defer close(jobDone)
+		job.Run(ctx)
+	}()
 
 	// Retention: prune batch_run_logs + catalog_backlog_samples on a
 	// configurable interval. Both windows can be disabled by setting their
@@ -85,7 +90,9 @@ func run() error {
 		BacklogSamplesRetentionDays: cfg.BacklogSamplesRetentionDays,
 		Interval:                    cfg.RetentionInterval,
 	})
+	retentionDone := make(chan struct{})
 	go func() {
+		defer close(retentionDone)
 		if err := retentionJob.Run(ctx); err != nil {
 			slog.Error("retention job exited with error", "error", err)
 		}
@@ -95,7 +102,24 @@ func run() error {
 	signalNotifyFn(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
+	// Cancel first, then join both goroutines BEFORE the deferred pool close
+	// runs — a run interrupted mid-phase still gets to finalize its
+	// batch_run_logs row against a live pool.
 	slog.Info("cron shutting down")
+	cancel()
+
+	shutdownTimer := time.NewTimer(30 * time.Second)
+	defer shutdownTimer.Stop()
+	for _, done := range []<-chan struct{}{jobDone, retentionDone} {
+		select {
+		case <-done:
+		case <-shutdownTimer.C:
+			slog.Warn("cron shutdown timed out waiting for background jobs")
+			return nil
+		}
+	}
+
+	slog.Info("cron stopped")
 	return nil
 }
 

@@ -217,6 +217,85 @@ func (r *Repository) UpdateBatchRunLog(ctx context.Context, id int64, completedA
 	return nil
 }
 
+// TryLockNamespace attempts the cross-process per-namespace compute lock —
+// a Postgres advisory lock keyed on ('codohue:compute', namespace). It is
+// held by cron ticks, admin manual runs, and the admin namespace wipe so two
+// full recomputes (or a recompute and a delete) never interleave.
+//
+// Advisory locks are session-scoped, so the lock pins one pool connection
+// until release is called. On successful acquisition, ok is true and release
+// must be called exactly once; ok=false means another holder owns the lock.
+func (r *Repository) TryLockNamespace(ctx context.Context, namespace string) (release func(), ok bool, err error) {
+	conn, err := r.db.Acquire(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("acquire conn for advisory lock: %w", err)
+	}
+	var got bool
+	if lockErr := conn.QueryRow(ctx,
+		`SELECT pg_try_advisory_lock(hashtext('codohue:compute'), hashtext($1))`, namespace,
+	).Scan(&got); lockErr != nil {
+		conn.Release()
+		return nil, false, fmt.Errorf("advisory lock %s: %w", namespace, lockErr)
+	}
+	if !got {
+		conn.Release()
+		return nil, false, nil
+	}
+	return releaseLockFunc(conn, namespace), true, nil
+}
+
+// LockNamespace is the blocking variant of TryLockNamespace — it waits until
+// the current holder releases (or ctx is cancelled). Used by the admin
+// namespace wipe, which must not proceed mid-recompute.
+func (r *Repository) LockNamespace(ctx context.Context, namespace string) (release func(), err error) {
+	conn, err := r.db.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire conn for advisory lock: %w", err)
+	}
+	if _, lockErr := conn.Exec(ctx,
+		`SELECT pg_advisory_lock(hashtext('codohue:compute'), hashtext($1))`, namespace,
+	); lockErr != nil {
+		conn.Release()
+		return nil, fmt.Errorf("advisory lock %s: %w", namespace, lockErr)
+	}
+	return releaseLockFunc(conn, namespace), nil
+}
+
+func releaseLockFunc(conn *pgxpool.Conn, namespace string) func() {
+	return func() {
+		// Unlock on a fresh context: the run's ctx may already be cancelled.
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, unlockErr := conn.Exec(unlockCtx,
+			`SELECT pg_advisory_unlock(hashtext('codohue:compute'), hashtext($1))`, namespace,
+		); unlockErr != nil {
+			// A pooled connection keeps its session (and thus the lock) alive,
+			// so on unlock failure the connection must die with the lock.
+			conn.Conn().Close(unlockCtx) //nolint:errcheck,gosec // best-effort teardown; Release below discards the closed conn
+		}
+		conn.Release()
+	}
+}
+
+// FinalizeOrphanRuns closes batch_run_logs rows whose owning process died
+// mid-run: still open (completed_at IS NULL) and started before cutoff.
+// Without this, a crash or redeploy leaves phantom "running" rows that block
+// retry (409) and mislead the admin UI until retention deletes them.
+func (r *Repository) FinalizeOrphanRuns(ctx context.Context, cutoff time.Time) (int64, error) {
+	tag, err := r.db.Exec(ctx, `
+		UPDATE batch_run_logs
+		SET completed_at = NOW(),
+		    duration_ms = (EXTRACT(EPOCH FROM (NOW() - started_at)) * 1000)::int,
+		    success = FALSE,
+		    error_message = $2
+		WHERE completed_at IS NULL AND started_at < $1
+	`, cutoff, batchrun.OrphanedRunMessage)
+	if err != nil {
+		return 0, fmt.Errorf("finalize orphan runs: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // GetCancelRequested reads the cancel_requested flag for a batch run row.
 // Returns false if the row doesn't exist; callers treat ErrNoRows as a soft no.
 func (r *Repository) GetCancelRequested(ctx context.Context, id int64) (bool, error) {

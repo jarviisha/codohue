@@ -84,6 +84,9 @@ type Job struct {
 	observer    BatchRunObserver // optional; nil = no-op
 
 	// injectable for testing — wired to real implementations in NewJob
+	tryLockFn                func(ctx context.Context, ns string) (release func(), ok bool, err error)
+	lockFn                   func(ctx context.Context, ns string) (release func(), err error)
+	finalizeOrphansFn        func(ctx context.Context, cutoff time.Time) (int64, error)
 	ensureCollectionsFn      func(ctx context.Context, ns string) error
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
 	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
@@ -108,6 +111,9 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		redis:       redisClient,
 		interval:    time.Duration(intervalMinutes) * time.Minute,
 
+		tryLockFn:         repo.TryLockNamespace,
+		lockFn:            repo.LockNamespace,
+		finalizeOrphansFn: repo.FinalizeOrphanRuns,
 		ensureCollectionsFn: func(ctx context.Context, ns string) error {
 			return infraqdrant.EnsureCollections(ctx, qdrantClient, ns)
 		},
@@ -150,9 +156,24 @@ func (j *Job) Run(ctx context.Context) {
 	}
 }
 
+// orphanRunCutoff is how old an open batch_run_logs row must be before the
+// orphan sweep finalizes it. Must exceed the longest plausible run so an
+// in-flight run in another process is never closed under it.
+const orphanRunCutoff = time.Hour
+
 func (j *Job) runOnce(ctx context.Context) {
 	slog.Info("batch run started")
 	start := time.Now()
+
+	// Close rows abandoned by a crashed/redeployed process; without this,
+	// phantom "running" rows block retry (409) until retention deletes them.
+	if j.finalizeOrphansFn != nil {
+		if n, err := j.finalizeOrphansFn(ctx, time.Now().Add(-orphanRunCutoff)); err != nil {
+			slog.Warn("finalize orphan batch runs failed", "error", err)
+		} else if n > 0 {
+			slog.Warn("finalized orphaned batch runs", "count", n)
+		}
+	}
 
 	namespaces, err := j.repo.GetActiveNamespaces(ctx)
 	if err != nil {
@@ -161,7 +182,13 @@ func (j *Job) runOnce(ctx context.Context) {
 	}
 
 	for _, ns := range namespaces {
-		j.RunNamespace(ctx, ns, batchrun.TriggerCron)
+		if err := j.RunNamespace(ctx, ns, batchrun.TriggerCron); err != nil {
+			if errors.Is(err, batchrun.ErrRunInProgress) {
+				slog.Info("skipping namespace: run already in progress", "namespace", ns)
+			} else {
+				slog.Error("run namespace failed", "namespace", ns, "error", err)
+			}
+		}
 	}
 
 	elapsed := time.Since(start)
@@ -169,20 +196,90 @@ func (j *Job) runOnce(ctx context.Context) {
 	slog.Info("batch run done", "duration_ms", elapsed.Milliseconds())
 }
 
-// RunNamespace runs all batch phases for a single namespace and writes
-// batch_run_logs. triggerSource is the typed enum from core/batchrun so the
-// caller cannot pass an unconstrained string by accident.
+// RunNamespace runs all batch phases for a single namespace synchronously
+// and writes batch_run_logs. triggerSource is the typed enum from
+// core/batchrun so the caller cannot pass an unconstrained string by
+// accident. Returns batchrun.ErrRunInProgress when another process (or this
+// one) already holds the namespace's compute lock.
 //
 // Between phases the job polls batch_run_logs.cancel_requested; when set, it
 // finalizes the row with error_message="operator_cancelled" and returns
 // without running the remaining phases. Mid-phase cancel is intentionally
 // unsupported — see BUILD_PLAN §9.2.
-func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) {
-	nsStart := time.Now()
-	capture := &LogCapture{}
+func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) error {
+	release, ok, err := j.tryLock(ctx, ns)
+	if err != nil {
+		return fmt.Errorf("namespace lock %s: %w", ns, err)
+	}
+	if !ok {
+		return fmt.Errorf("%w: %s", batchrun.ErrRunInProgress, ns)
+	}
+	defer release()
+
+	j.runNamespaceLocked(ctx, ns, triggerSource, 0)
+	return nil
+}
+
+// StartNamespaceRun acquires the namespace lock, inserts the running
+// batch_run_logs row, and executes the run in a background goroutine
+// detached from ctx — the caller's request can end (or be cancelled)
+// without aborting the run. Returns the run id for the Location header.
+// The lock is held for exactly the run's lifetime; timeout bounds the run.
+func (j *Job) StartNamespaceRun(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, timeout time.Duration) (int64, error) {
+	release, ok, err := j.tryLock(ctx, ns)
+	if err != nil {
+		return 0, fmt.Errorf("namespace lock %s: %w", ns, err)
+	}
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", batchrun.ErrRunInProgress, ns)
+	}
 
 	var logID int64
 	if j.batchLog != nil {
+		logID, err = j.batchLog.InsertBatchRunLog(ctx, ns, time.Now(), triggerSource)
+		if err != nil {
+			release()
+			return 0, fmt.Errorf("insert batch_run_log: %w", err)
+		}
+	}
+
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), timeout)
+	go func() {
+		defer cancel()
+		defer release()
+		j.runNamespaceLocked(runCtx, ns, triggerSource, logID)
+	}()
+	return logID, nil
+}
+
+// tryLock delegates to the injected lock fn; a Job built without one (unit
+// tests) runs unlocked.
+func (j *Job) tryLock(ctx context.Context, ns string) (release func(), ok bool, err error) {
+	if j.tryLockFn == nil {
+		return func() {}, true, nil
+	}
+	return j.tryLockFn(ctx, ns)
+}
+
+// LockNamespace acquires the namespace compute lock, blocking until the
+// current holder (a cron tick or manual run) releases it. The admin
+// namespace wipe takes this before deleting so a run in flight can never
+// re-upsert Qdrant collections after the wipe finishes.
+func (j *Job) LockNamespace(ctx context.Context, ns string) (release func(), err error) {
+	if j.lockFn == nil {
+		return func() {}, nil
+	}
+	return j.lockFn(ctx, ns)
+}
+
+// runNamespaceLocked executes the three phases and finalizes the run row.
+// The caller must hold the namespace lock. logID > 0 means the row was
+// already inserted (async path); 0 inserts it here.
+func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, logID int64) {
+	nsStart := time.Now()
+	capture := &LogCapture{}
+
+	if logID == 0 && j.batchLog != nil {
 		var err error
 		logID, err = j.batchLog.InsertBatchRunLog(ctx, ns, nsStart, triggerSource)
 		if err != nil {
@@ -266,11 +363,16 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 	}
 
 	if j.batchLog != nil && logID > 0 {
+		// Finalize on a context detached from the run's: a cancelled or
+		// timed-out run must still close its row, or it stays "running"
+		// forever (blocking retry with 409 until retention deletes it).
+		finCtx, cancelFin := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancelFin()
 		now := time.Now()
-		if err := j.batchLog.UpdateBatchRunLog(ctx, logID, now, totalMs, subjects, success, errMsg, capture.Entries()); err != nil {
+		if err := j.batchLog.UpdateBatchRunLog(finCtx, logID, now, totalMs, subjects, success, errMsg, capture.Entries()); err != nil {
 			slog.Warn("could not update batch_run_log", "namespace", ns, "error", err)
 		}
-		if err := j.batchLog.UpdateBatchRunPhases(ctx, logID, phases); err != nil {
+		if err := j.batchLog.UpdateBatchRunPhases(finCtx, logID, phases); err != nil {
 			slog.Warn("could not update batch_run_phases", "namespace", ns, "error", err)
 		}
 	}

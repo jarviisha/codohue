@@ -102,7 +102,14 @@ type eventRateReader interface {
 }
 
 type batchRunner interface {
-	RunNamespace(ctx context.Context, namespace string, triggerSource batchrun.TriggerSource)
+	// StartNamespaceRun inserts the running row and executes the run in a
+	// goroutine detached from ctx, returning the run id. Returns
+	// batchrun.ErrRunInProgress when the namespace's cross-process compute
+	// lock is held.
+	StartNamespaceRun(ctx context.Context, namespace string, triggerSource batchrun.TriggerSource, timeout time.Duration) (int64, error)
+	// LockNamespace blocks until the namespace's compute lock is free —
+	// taken by DeleteNamespace so a wipe never races a run in flight.
+	LockNamespace(ctx context.Context, namespace string) (release func(), err error)
 }
 
 // streamPublisher abstracts the Redis Streams write used by the catalog
@@ -144,7 +151,6 @@ type Service struct {
 	qdrantDeleter   qdrantPointDeleter
 	eventRate       eventRateReader
 	nowFn           func() time.Time
-	runningBatch    sync.Map // keyed by namespace name; prevents concurrent batch triggers
 	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
 }
 
@@ -651,11 +657,17 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 // errBatchRunning is returned when a concurrent batch trigger is attempted for the same namespace.
 var errBatchRunning = errors.New("batch already in progress")
 
-// CreateBatchRun runs all batch phases for a namespace synchronously and
-// returns the resulting BatchRun resource. The HTTP layer translates this to
-// 202 Accepted + Location header.
+// manualRunTimeout bounds an admin-triggered batch run. Generous on purpose:
+// a large item2vec retrain can take a long time, and the run no longer holds
+// an HTTP request open while it works.
+const manualRunTimeout = time.Hour
+
+// CreateBatchRun starts all batch phases for a namespace in the background
+// and returns the created run immediately — true 202 Accepted semantics; the
+// client's disconnect can no longer abort the run mid-phase.
 //
-// Returns 409-style errBatchRunning if a batch is already in progress for that namespace.
+// Returns 409-style errBatchRunning if a batch is already in progress for
+// that namespace (cross-process, via the compute advisory lock).
 // Returns 404-style nil,nil from GetNamespace when namespace does not exist.
 func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreateResponse, error) {
 	nsConfig, err := s.repo.GetNamespace(ctx, ns)
@@ -665,41 +677,24 @@ func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreat
 	if nsConfig == nil {
 		return nil, nil // caller maps nil,nil → 404
 	}
-
-	if _, loaded := s.runningBatch.LoadOrStore(ns, true); loaded {
-		return nil, fmt.Errorf("%w for namespace %s", errBatchRunning, ns)
+	if s.job == nil {
+		return nil, errors.New("batch runner is not wired")
 	}
-	defer s.runningBatch.Delete(ns)
-
-	batchCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
 
 	start := time.Now()
-	s.job.RunNamespace(batchCtx, ns, batchrun.TriggerManual)
-
-	logs, _, _, err := s.repo.GetBatchRunLogs(ctx, ns, "", "", 1, 0)
-	if err != nil || len(logs) == 0 {
-		return &BatchRunCreateResponse{
-			Namespace: ns,
-			Status:    "queued",
-			StartedAt: start.UTC(),
-		}, nil
-	}
-
-	log := logs[0]
-	status := "running"
-	if log.CompletedAt != nil {
-		if log.Success {
-			status = "succeeded"
-		} else {
-			status = "failed"
+	runID, err := s.job.StartNamespaceRun(ctx, ns, batchrun.TriggerManual, manualRunTimeout)
+	if err != nil {
+		if errors.Is(err, batchrun.ErrRunInProgress) {
+			return nil, fmt.Errorf("%w for namespace %s", errBatchRunning, ns)
 		}
+		return nil, fmt.Errorf("start batch run: %w", err)
 	}
+
 	return &BatchRunCreateResponse{
-		ID:        log.ID,
+		ID:        runID,
 		Namespace: ns,
-		Status:    status,
-		StartedAt: log.StartedAt.UTC(),
+		Status:    "running",
+		StartedAt: start.UTC(),
 	}, nil
 }
 
@@ -853,6 +848,17 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 	}
 	if cfg == nil {
 		return nil, nil
+	}
+
+	// Hold the namespace's compute lock for the whole wipe: a cron tick or
+	// manual run in flight would otherwise re-upsert Qdrant collections
+	// after the delete finishes, leaving orphans nothing ever cleans.
+	if s.job != nil {
+		release, lockErr := s.job.LockNamespace(ctx, namespace)
+		if lockErr != nil {
+			return nil, fmt.Errorf("acquire namespace lock: %w", lockErr)
+		}
+		defer release()
 	}
 
 	deleted, err := s.clearNamespaceEverywhere(ctx, namespace)

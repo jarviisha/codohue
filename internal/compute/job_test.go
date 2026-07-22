@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
@@ -618,4 +619,119 @@ func (f *fakeWindowRepo) GetNamespaceEventsInWindow(ctx context.Context, ns stri
 		f.onWindow(window)
 	}
 	return f.fakeJobRepo.GetNamespaceEventsInWindow(ctx, ns, window)
+}
+
+// ─── namespace lock + async start ────────────────────────────────────────────
+
+type fakeBatchLogger struct {
+	insertID  int64
+	insertErr error
+	updated   chan int64
+}
+
+func newFakeBatchLogger(id int64) *fakeBatchLogger {
+	return &fakeBatchLogger{insertID: id, updated: make(chan int64, 2)}
+}
+
+func (f *fakeBatchLogger) InsertBatchRunLog(_ context.Context, _ string, _ time.Time, _ batchrun.TriggerSource) (int64, error) {
+	return f.insertID, f.insertErr
+}
+
+func (f *fakeBatchLogger) UpdateBatchRunLog(_ context.Context, id int64, _ time.Time, _, _ int, _ bool, _ string, _ []LogEntry) error {
+	select {
+	case f.updated <- id:
+	default:
+	}
+	return nil
+}
+
+func (f *fakeBatchLogger) UpdateBatchRunPhases(_ context.Context, _ int64, _ PhaseResults) error {
+	return nil
+}
+
+func (f *fakeBatchLogger) GetCancelRequested(_ context.Context, _ int64) (bool, error) {
+	return false, nil
+}
+
+func TestRunNamespace_ReturnsErrRunInProgressWhenLockHeld(t *testing.T) {
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		return nil, false, nil
+	}
+
+	err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerManual)
+	if !errors.Is(err, batchrun.ErrRunInProgress) {
+		t.Fatalf("expected ErrRunInProgress, got %v", err)
+	}
+	if svc.called {
+		t.Fatal("recompute must not run when the lock is held")
+	}
+}
+
+func TestRunNamespace_ReleasesLockAfterRun(t *testing.T) {
+	released := false
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		return func() { released = true }, true, nil
+	}
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !released {
+		t.Fatal("lock must be released after the run")
+	}
+}
+
+func TestStartNamespaceRun_RunsDetachedFromCallerContext(t *testing.T) {
+	logger := newFakeBatchLogger(7)
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.batchLog = logger
+
+	ctx, cancel := context.WithCancel(context.Background())
+	runID, err := job.StartNamespaceRun(ctx, "ns1", batchrun.TriggerManual, time.Minute)
+	cancel() // caller disconnects immediately — the run must still finish
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if runID != 7 {
+		t.Fatalf("run id: got %d want 7", runID)
+	}
+
+	select {
+	case id := <-logger.updated:
+		if id != 7 {
+			t.Fatalf("finalized run id: got %d want 7", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run was not finalized — cancelled caller context must not abort it")
+	}
+}
+
+func TestStartNamespaceRun_LockHeld(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		return nil, false, nil
+	}
+	if _, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute); !errors.Is(err, batchrun.ErrRunInProgress) {
+		t.Fatalf("expected ErrRunInProgress, got %v", err)
+	}
+}
+
+func TestRunOnce_FinalizesOrphanRuns(t *testing.T) {
+	called := false
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.finalizeOrphansFn = func(_ context.Context, cutoff time.Time) (int64, error) {
+		called = true
+		if time.Until(cutoff) > -30*time.Minute {
+			t.Errorf("cutoff too recent: %v", cutoff)
+		}
+		return 2, nil
+	}
+
+	job.runOnce(context.Background())
+	if !called {
+		t.Fatal("orphan finalizer must run every tick")
+	}
 }

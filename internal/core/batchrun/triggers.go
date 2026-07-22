@@ -34,3 +34,7 @@ func (t TriggerSource) String() string { return string(t) }
 // compute job (which writes the row) reference one literal — peer-domain
 // imports are forbidden so a shared constant is the only drift-proof option.
 const OperatorCancelledMessage = "operator_cancelled"
+
+// OrphanedRunMessage is the batch_run_logs.error_message the orphan reaper
+// writes when it finalizes a row whose owning process died mid-run.
+const OrphanedRunMessage = "orphaned by process restart"
