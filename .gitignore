@@ -58,3 +58,4 @@ uploads/
 
 # go build artifact when built inside the module dir
 examples/geminipump/geminipump
+reports/
