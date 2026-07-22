@@ -463,6 +463,13 @@ item được re-embed thật. Golden/handler test cho body mới.
 
 ## Phase 5 — Bảo mật
 
+> **✅ HOÀN THÀNH 2026-07-22** — một commit `fix(auth): credential hardening
+> across both planes` phủ 5.1–5.4. Ghi chú lệch so với plan: cookie `Secure`
+> tự suy từ TLS/`X-Forwarded-Proto` thay vì env riêng; denylist logout dùng
+> `jti` in-memory (restart = secret mới = logout-all, an toàn hơn); endpoint
+> rotate là `POST /namespaces/{ns}/api-key` trả 200 (không 202); helper
+> constant-time duplicate ở `internal/admin` theo tiền lệ import-rule.
+
 ### 5.1 So sánh constant-time + rate limit login — **S**
 
 **Vấn đề (F27, F30):** `admin/handler.go:100` và `auth/auth.go:37` so key bằng
