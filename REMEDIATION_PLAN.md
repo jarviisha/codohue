@@ -103,6 +103,14 @@ vì item pending kẹt sẽ tự đóng sau khi sweep chạy.
 
 ## Phase 2 — Gỡ các trạng thái kẹt vĩnh viễn
 
+> **✅ HOÀN THÀNH 2026-07-22** — 2.1+2.4 `fix(compute): cross-process run
+> lock...`, 2.2+2.3 `fix(embedder): worker resilience...`, 2.5
+> `fix(compute): svd padding...`. Unit test + lint xanh. Ghi chú lệch nhỏ so
+> với plan: guard `runningBatch` sync.Map được **bỏ hẳn** (advisory lock phủ
+> cả in-process); timeout manual run đặt 1h (const `manualRunTimeout`) thay
+> vì "cấu hình được"; per-item timeout cho ProcessItem chưa làm (rủi ro đã
+> giảm nhờ idempotency + hash guard).
+
 ### 2.1 Batch run lifecycle: async thật + orphan reaper + defer order — **M**
 
 **Vấn đề (F6-cron, F6-admin):**
