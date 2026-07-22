@@ -55,7 +55,7 @@ func (f *fakeRepo) MarkInFlight(_ context.Context, id int64) (int, error) {
 	return f.markInFlightAttempt, f.markInFlightErr
 }
 
-func (f *fakeRepo) MarkEmbedded(_ context.Context, id int64, sid, sver string, _ time.Time) error {
+func (f *fakeRepo) MarkEmbedded(_ context.Context, id int64, sid, sver string, _ time.Time, _ []byte) error {
 	f.calls.markEmbedded = append(f.calls.markEmbedded, embeddedCall{id, sid, sver})
 	return f.markEmbeddedErr
 }
@@ -492,5 +492,81 @@ func TestProcessOutcome_ShouldAck(t *testing.T) {
 		if got := c.out.ShouldAck(); got != c.want {
 			t.Errorf("outcome=%v ShouldAck(): got %v, want %v", c.out, got, c.want)
 		}
+	}
+}
+
+// --- idempotency + dead-letter bookkeeping (remediation phase 2) ----------
+
+func TestServiceProcessItem_AlreadyEmbeddedSameStrategySkips(t *testing.T) {
+	svc, repo, _, _, _, upserts := newSvc(t)
+	repo.loadItem = &PendingItem{
+		ID: 7, Namespace: "ns", ObjectID: "obj1", Content: "hello world",
+		State:      StateEmbedded,
+		StrategyID: "internal-hashing-ngrams", StrategyVersion: "v1",
+	}
+
+	out, err := svc.ProcessItem(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ProcessItem: %v", err)
+	}
+	if out != OutcomeSkipped {
+		t.Errorf("expected OutcomeSkipped for duplicate delivery, got %v", out)
+	}
+	if len(repo.calls.markInFlight) != 0 {
+		t.Errorf("duplicate delivery must not burn an attempt, got %d MarkInFlight calls", len(repo.calls.markInFlight))
+	}
+	if len(*upserts) != 0 {
+		t.Errorf("duplicate delivery must not re-embed, got %d upserts", len(*upserts))
+	}
+}
+
+func TestServiceProcessItem_EmbeddedUnderOldStrategyStillProcessed(t *testing.T) {
+	svc, repo, _, _, _, _ := newSvc(t)
+	repo.markInFlightAttempt = 1
+	repo.loadItem = &PendingItem{
+		ID: 7, Namespace: "ns", ObjectID: "obj1", Content: "hello world",
+		State:      StateEmbedded,
+		StrategyID: "internal-hashing-ngrams", StrategyVersion: "v0-old",
+	}
+
+	out, err := svc.ProcessItem(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ProcessItem: %v", err)
+	}
+	if out != OutcomeEmbedded {
+		t.Errorf("stale strategy version must be re-embedded, got %v", out)
+	}
+}
+
+func TestServiceProcessItem_DeadLetterBookkeepingFailureDoesNotAck(t *testing.T) {
+	svc, repo, _, reg, _, _ := newSvc(t)
+	repo.markInFlightAttempt = 1
+	repo.markDeadLetterErr = errors.New("postgres blip")
+	reg.strategy = &fakeStrategy{id: "internal-hashing-ngrams", version: "v1", dim: 128,
+		embedFn: func(_ context.Context, _ string) ([]float32, error) {
+			return nil, embedstrategy.ErrZeroNorm
+		}}
+
+	out, err := svc.ProcessItem(context.Background(), 7)
+	if err == nil {
+		t.Fatal("expected error when dead-letter bookkeeping fails")
+	}
+	if out.ShouldAck() {
+		t.Errorf("a failed dead-letter write must NOT ack (outcome %v) — the row would be stuck in_flight with its entry gone", out)
+	}
+}
+
+func TestServiceInvalidateEnsured(t *testing.T) {
+	svc, _, _, _, _, _ := newSvc(t)
+	svc.ensured["ns|128|cosine"] = struct{}{}
+	svc.ensured["other|128|cosine"] = struct{}{}
+
+	svc.invalidateEnsured("ns")
+
+	if _, still := svc.ensured["ns|128|cosine"]; still {
+		t.Error("expected ns ensure-cache entry to be dropped")
+	}
+	if _, kept := svc.ensured["other|128|cosine"]; !kept {
+		t.Error("other namespaces' entries must be untouched")
 	}
 }

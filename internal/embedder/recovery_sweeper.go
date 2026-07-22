@@ -210,6 +210,10 @@ func (s *RecoverySweeper) publish(ctx context.Context, ns string, item StrandedI
 	// is authoritative (see StreamEntry).
 	err := s.redis.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamName(ns),
+		// Approximate cap; keep in sync with internal/catalog's
+		// catalogStreamMaxLen (peer-domain imports are forbidden).
+		MaxLen: 100_000,
+		Approx: true,
 		Values: map[string]any{
 			"catalog_item_id":  item.ID,
 			"namespace":        ns,

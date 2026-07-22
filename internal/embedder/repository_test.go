@@ -70,19 +70,22 @@ func TestRepositoryLoadByID_Success(t *testing.T) {
 				if err := setString(dest[2], "obj1"); err != nil {
 					return err
 				}
-				if err := setString(dest[3], "hello"); err != nil {
+				if err := setString(dest[3], "pending"); err != nil {
 					return err
 				}
-				if err := setBytes(dest[4], []byte("hash")); err != nil {
+				if err := setString(dest[4], "hello"); err != nil {
 					return err
 				}
-				if err := setString(dest[5], "internal-hashing-ngrams"); err != nil {
+				if err := setBytes(dest[5], []byte("hash")); err != nil {
 					return err
 				}
-				if err := setString(dest[6], "v1"); err != nil {
+				if err := setString(dest[6], "internal-hashing-ngrams"); err != nil {
 					return err
 				}
-				return setInt(dest[7], 2)
+				if err := setString(dest[7], "v1"); err != nil {
+					return err
+				}
+				return setInt(dest[8], 2)
 			}}
 		},
 	}
@@ -92,6 +95,9 @@ func TestRepositoryLoadByID_Success(t *testing.T) {
 	}
 	if item.ID != 7 || item.Namespace != "ns" || item.ObjectID != "obj1" {
 		t.Errorf("unexpected item: %+v", item)
+	}
+	if item.State != StatePending {
+		t.Errorf("State: got %q, want %q", item.State, StatePending)
 	}
 	if item.StrategyID != "internal-hashing-ngrams" || item.StrategyVersion != "v1" {
 		t.Errorf("strategy fields: %s@%s", item.StrategyID, item.StrategyVersion)
@@ -171,7 +177,7 @@ func TestRepositoryMarkEmbedded_Success(t *testing.T) {
 			return 1, nil
 		},
 	}
-	err := repo.MarkEmbedded(context.Background(), 7, "internal-hashing-ngrams", "v1", time.Now())
+	err := repo.MarkEmbedded(context.Background(), 7, "internal-hashing-ngrams", "v1", time.Now(), []byte("h1"))
 	if err != nil {
 		t.Fatalf("MarkEmbedded: %v", err)
 	}
@@ -180,15 +186,15 @@ func TestRepositoryMarkEmbedded_Success(t *testing.T) {
 	}
 }
 
-func TestRepositoryMarkEmbedded_NotFoundReturnsSentinel(t *testing.T) {
+func TestRepositoryMarkEmbedded_ZeroRowsReturnsStaleSentinel(t *testing.T) {
 	repo := &Repository{
 		execFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
 			return 0, nil
 		},
 	}
-	err := repo.MarkEmbedded(context.Background(), 7, "x", "v1", time.Now())
-	if !errors.Is(err, ErrItemNotFound) {
-		t.Fatalf("expected ErrItemNotFound, got %v", err)
+	err := repo.MarkEmbedded(context.Background(), 7, "x", "v1", time.Now(), []byte("h1"))
+	if !errors.Is(err, ErrStaleItem) {
+		t.Fatalf("expected ErrStaleItem, got %v", err)
 	}
 }
 

@@ -260,9 +260,21 @@ func (s *BacklogSampler) consumerLag(ctx context.Context, namespace string) (int
 	return 0, nil
 }
 
+// streamLen reports the number of stream entries not yet fully processed by
+// the embedder group: undelivered entries (lag) plus the PEL. Raw XLEN would
+// be an all-time total — XACK never deletes entries — so it only serves as
+// the fallback when the group doesn't exist yet (everything undelivered).
 func (s *BacklogSampler) streamLen(ctx context.Context, namespace string) (int, error) {
 	if s.redis == nil {
 		return 0, nil
+	}
+	groups, err := s.redis.XInfoGroups(ctx, streamName(namespace)).Result()
+	if err == nil {
+		for _, g := range groups {
+			if g.Name == defaultConsumerGroup {
+				return int(g.Lag + g.Pending), nil
+			}
+		}
 	}
 	cmd := s.redis.XLen(ctx, streamName(namespace))
 	n, err := cmd.Result()

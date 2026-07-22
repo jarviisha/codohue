@@ -207,9 +207,22 @@ func (w *Worker) consumeStream(ctx context.Context, ns string) {
 	stream := streamName(ns)
 	group := defaultConsumerGroup
 
-	if err := w.ensureGroup(ctx, stream, group); err != nil {
-		slog.ErrorContext(ctx, "ensure consumer group failed", slog.String("namespace", ns), slog.String("error", err.Error()))
-		return
+	// The group must exist before the first XREADGROUP. Retry with backoff —
+	// one failure here (e.g. the embedder booted before Redis) must not kill
+	// this namespace's consumer for the life of the process: the namespace
+	// stays in w.cancels, so refreshNamespaces would never restart it.
+	for {
+		err := w.ensureGroup(ctx, stream, group)
+		if err == nil {
+			break
+		}
+		slog.WarnContext(ctx, "ensure consumer group failed; retrying",
+			slog.String("namespace", ns), slog.String("error", err.Error()))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
 	}
 
 	slog.InfoContext(ctx, "embedder consuming", slog.String("namespace", ns), slog.String("stream", stream))
@@ -235,6 +248,16 @@ func (w *Worker) consumeStream(ctx context.Context, ns string) {
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return
+			}
+			// NOGROUP means the stream or group vanished after this consumer
+			// started (namespace deleted + recreated, Redis restarted without
+			// persistence). Re-create instead of retrying into the same error
+			// until the process restarts.
+			if strings.Contains(err.Error(), "NOGROUP") {
+				if egErr := w.ensureGroup(ctx, stream, group); egErr != nil {
+					slog.WarnContext(ctx, "recreate consumer group failed",
+						slog.String("namespace", ns), slog.String("error", egErr.Error()))
+				}
 			}
 			slog.WarnContext(ctx, "xreadgroup failed", slog.String("namespace", ns), slog.String("error", err.Error()))
 			// Brief back-off so we don't hot-loop on persistent errors.
@@ -282,7 +305,11 @@ func (w *Worker) reapStream(ctx context.Context, ns string) {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return
 			}
-			slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+			// NOGROUP just means the group hasn't been (re)created yet — the
+			// consumer loop owns that; warning every tick is pure noise.
+			if !strings.Contains(err.Error(), "NOGROUP") {
+				slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+			}
 			continue
 		}
 		for _, msg := range msgs {

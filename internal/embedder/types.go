@@ -33,6 +33,7 @@ type PendingItem struct {
 	ID              int64
 	Namespace       string
 	ObjectID        string
+	State           State
 	Content         string
 	ContentHash     []byte
 	StrategyID      string // strategy id LAST USED to embed this row, may be empty for never-embedded
@@ -107,6 +108,13 @@ var (
 	// ErrItemNotFound is returned by Repository.LoadByID when no row matches.
 	// The worker ACKs the stream entry and skips — likely a race with delete.
 	ErrItemNotFound = errors.New("embedder: catalog item not found")
+
+	// ErrStaleItem is returned by Repository.MarkEmbedded when the row's
+	// content_hash changed while the item was being embedded (a re-ingest
+	// raced processing) or the row is gone. The vector just written belongs
+	// to the OLD content — the caller must not record it as embedded; a
+	// retry reloads the row and embeds the new content.
+	ErrStaleItem = errors.New("embedder: catalog item changed during embed")
 
 	// ErrNamespaceNotEnabled is returned when the embedder picks up an
 	// entry for a namespace that is no longer catalog-enabled. The worker

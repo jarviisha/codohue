@@ -157,9 +157,17 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 // §5: catalog:embed:{namespace}.
 func streamName(ns string) string { return "catalog:embed:" + ns }
 
+// catalogStreamMaxLen caps the embed stream via approximate XADD MAXLEN.
+// XACK never deletes entries, so without a cap the stream grows one entry
+// per ingest forever. Keep in sync with the same constant in internal/admin
+// and internal/embedder (peer-domain imports are forbidden).
+const catalogStreamMaxLen = 100_000
+
 func (s *Service) publish(ctx context.Context, ns string, item *Item, cfg *namespace.Config) error {
 	args := &redis.XAddArgs{
 		Stream: streamName(ns),
+		MaxLen: catalogStreamMaxLen,
+		Approx: true,
 		Values: map[string]any{
 			"catalog_item_id":  item.ID,
 			"namespace":        ns,

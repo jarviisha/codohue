@@ -78,6 +78,10 @@ func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, target C
 	}
 	args := &goredis.XAddArgs{
 		Stream: catalogStreamName(ns),
+		// Approximate cap; keep in sync with internal/catalog's
+		// catalogStreamMaxLen (peer-domain imports are forbidden).
+		MaxLen: 100_000,
+		Approx: true,
 		Values: map[string]any{
 			"catalog_item_id":  target.ID,
 			"namespace":        ns,

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,7 +55,7 @@ func (o ProcessOutcome) ShouldAck() bool { return o != OutcomeFailed }
 type catalogItemRepo interface {
 	LoadByID(ctx context.Context, id int64) (*PendingItem, error)
 	MarkInFlight(ctx context.Context, id int64) (int, error)
-	MarkEmbedded(ctx context.Context, id int64, strategyID, strategyVersion string, embeddedAt time.Time) error
+	MarkEmbedded(ctx context.Context, id int64, strategyID, strategyVersion string, embeddedAt time.Time, contentHash []byte) error
 	MarkFailed(ctx context.Context, id int64, lastError string) error
 	MarkDeadLetter(ctx context.Context, id int64, lastError string) error
 }
@@ -171,6 +172,17 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 		return OutcomeSkipped, nil
 	}
 
+	// Idempotency short-circuit: a duplicate delivery (reaper reclaim after
+	// a lost XACK, redrive of an already-processed entry) of an item that is
+	// already embedded under the active strategy must not re-embed or burn
+	// an attempt. Content changes reset state to 'pending' at ingest, and
+	// MarkEmbedded's hash guard keeps this state truthful.
+	if item.State == StateEmbedded &&
+		item.StrategyID == cfg.CatalogStrategyID &&
+		item.StrategyVersion == cfg.CatalogStrategyVersion {
+		return OutcomeSkipped, nil
+	}
+
 	maxAttempts := cfg.CatalogMaxAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = 5
@@ -186,8 +198,6 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	s.publishItemStateChanged(ctx, item, "pending", "in_flight")
 
 	if attempt > maxAttempts {
-		s.markDeadLetter(ctx, item,
-			fmt.Sprintf("attempt %d exceeds max %d", attempt, maxAttempts))
 		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "max_attempts")
 		slog.WarnContext(ctx, "catalog item dead-lettered (max attempts exceeded)",
 			slog.String("namespace", item.Namespace),
@@ -196,16 +206,16 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 			slog.Int("attempt", attempt),
 			slog.Int("max_attempts", maxAttempts),
 		)
-		return OutcomeDeadLetter, nil
+		return s.deadLetterOutcome(ctx, item,
+			fmt.Sprintf("attempt %d exceeds max %d", attempt, maxAttempts))
 	}
 
 	strategy, err := s.resolveStrategy(item.Namespace, cfg)
 	if err != nil {
 		// Misconfiguration (unknown strategy or factory rejected params) —
 		// terminal until operator fixes config; dead-letter immediately.
-		s.markDeadLetter(ctx, item, fmt.Sprintf("strategy resolve: %v", err))
 		s.recordFailure(item.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, "strategy_resolve")
-		return OutcomeDeadLetter, nil
+		return s.deadLetterOutcome(ctx, item, fmt.Sprintf("strategy resolve: %v", err))
 	}
 
 	embedStart := s.clock()
@@ -215,10 +225,9 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	}
 
 	if len(vec) != cfg.EmbeddingDim {
-		s.markDeadLetter(ctx, item,
-			fmt.Sprintf("dim mismatch: produced=%d expected=%d", len(vec), cfg.EmbeddingDim))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "dim_mismatch")
-		return OutcomeDeadLetter, nil
+		return s.deadLetterOutcome(ctx, item,
+			fmt.Sprintf("dim mismatch: produced=%d expected=%d", len(vec), cfg.EmbeddingDim))
 	}
 
 	if err := s.ensureNamespaceCollections(ctx, item.Namespace, cfg); err != nil {
@@ -236,15 +245,20 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 
 	embeddedAt := s.clock().UTC()
 	if err := s.upsertVector(ctx, item.Namespace, item.ObjectID, pointID, vec, strategy, embeddedAt); err != nil {
+		// The collection may have been dropped (namespace wipe + recreate):
+		// invalidate the ensure cache so the next attempt re-creates it
+		// instead of dead-lettering every item until a process restart.
+		s.invalidateEnsured(item.Namespace)
 		s.markFailed(ctx, item, fmt.Sprintf("qdrant: %v", err))
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "qdrant")
 		return OutcomeFailed, fmt.Errorf("qdrant upsert: %w", err)
 	}
 
-	if err := s.repo.MarkEmbedded(ctx, item.ID, strategy.ID(), strategy.Version(), embeddedAt); err != nil {
+	if err := s.repo.MarkEmbedded(ctx, item.ID, strategy.ID(), strategy.Version(), embeddedAt, item.ContentHash); err != nil {
 		// Postgres write failed AFTER Qdrant succeeded. The vector is in
-		// Qdrant but the row says 'in_flight'. Surface as transient — next
-		// retry will re-upsert (idempotent on point id) and re-mark.
+		// Qdrant but the row says 'in_flight' (or, for ErrStaleItem, is
+		// 'pending' again with new content). Surface as transient — the
+		// retry reloads the row and re-embeds whatever it holds now.
 		s.recordFailure(item.Namespace, strategy.ID(), strategy.Version(), "mark_embedded")
 		return OutcomeFailed, fmt.Errorf("mark embedded: %w", err)
 	}
@@ -281,27 +295,37 @@ func (s *Service) recordFailure(ns, strategyID, strategyVersion, reason string) 
 	metrics.CatalogEmbedFailuresTotal.WithLabelValues(ns, strategyID, strategyVersion, reason).Inc()
 }
 
-// markDeadLetter is a thin wrapper that ignores the repo error after logging.
-// Failed bookkeeping must not block the outer flow — the row stays 'in_flight'
-// in that case and the embedder's recovery sweep will eventually re-process it.
-// Publishes an item_state_changed event on success so the admin SSE stream
-// surfaces the transition to operators.
-func (s *Service) markDeadLetter(ctx context.Context, item *PendingItem, reason string) {
-	if err := s.repo.MarkDeadLetter(ctx, item.ID, reason); err != nil {
-		slog.WarnContext(ctx, "catalog mark dead_letter failed",
+// deadLetterOutcome writes the dead_letter transition and maps the result to
+// an outcome the worker can trust: when the bookkeeping write itself fails,
+// the entry must NOT be ACKed (OutcomeFailed keeps it in the PEL for the
+// reaper), otherwise the row would sit 'in_flight' forever with its stream
+// entry gone — recoverable only by the slow stale-in_flight sweep.
+func (s *Service) deadLetterOutcome(ctx context.Context, item *PendingItem, reason string) (ProcessOutcome, error) {
+	// State writes run on a detached context: a shutdown-cancelled ctx must
+	// not lose the transition the item just earned.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
+	if err := s.repo.MarkDeadLetter(writeCtx, item.ID, reason); err != nil {
+		slog.WarnContext(ctx, "catalog mark dead_letter failed; leaving entry pending",
 			slog.Int64("catalog_item_id", item.ID),
 			slog.String("reason", reason),
 			slog.String("error", err.Error()),
 		)
-		return
+		return OutcomeFailed, fmt.Errorf("mark dead_letter %d: %w", item.ID, err)
 	}
-	s.publishItemStateChanged(ctx, item, "in_flight", "dead_letter")
+	s.publishItemStateChanged(writeCtx, item, "in_flight", "dead_letter")
+	return OutcomeDeadLetter, nil
 }
 
-// markFailed is the transient-failure counterpart of markDeadLetter. The row
-// stays eligible for retry until attempt_count exceeds max_attempts.
+// markFailed records a transient failure. The row stays eligible for retry
+// until attempt_count exceeds max_attempts. Best-effort: the entry is not
+// ACKed on the paths that call this, so a lost write only costs bookkeeping.
 func (s *Service) markFailed(ctx context.Context, item *PendingItem, reason string) {
-	if err := s.repo.MarkFailed(ctx, item.ID, reason); err != nil {
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+
+	if err := s.repo.MarkFailed(writeCtx, item.ID, reason); err != nil {
 		slog.WarnContext(ctx, "catalog mark failed (transient) failed",
 			slog.Int64("catalog_item_id", item.ID),
 			slog.String("reason", reason),
@@ -309,7 +333,7 @@ func (s *Service) markFailed(ctx context.Context, item *PendingItem, reason stri
 		)
 		return
 	}
-	s.publishItemStateChanged(ctx, item, "in_flight", "failed")
+	s.publishItemStateChanged(writeCtx, item, "in_flight", "failed")
 }
 
 // publishItemStateChanged is the single fan-out point for state-change
@@ -352,22 +376,19 @@ func (s *Service) handleEmbedError(ctx context.Context, item *PendingItem, strat
 	sid, sver := strategy.ID(), strategy.Version()
 	switch {
 	case errors.Is(err, embedstrategy.ErrZeroNorm):
-		s.markDeadLetter(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "zero_norm")
 		s.logDeadLetter(ctx, item, sid, sver, "zero_norm", err)
-		return OutcomeDeadLetter, nil
+		return s.deadLetterOutcome(ctx, item, err.Error())
 
 	case errors.Is(err, embedstrategy.ErrInputTooLarge):
-		s.markDeadLetter(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "input_too_large")
 		s.logDeadLetter(ctx, item, sid, sver, "input_too_large", err)
-		return OutcomeDeadLetter, nil
+		return s.deadLetterOutcome(ctx, item, err.Error())
 
 	case errors.Is(err, embedstrategy.ErrDimensionMismatch):
-		s.markDeadLetter(ctx, item, err.Error())
 		s.recordFailure(item.Namespace, sid, sver, "dim_mismatch")
 		s.logDeadLetter(ctx, item, sid, sver, "dim_mismatch", err)
-		return OutcomeDeadLetter, nil
+		return s.deadLetterOutcome(ctx, item, err.Error())
 
 	case errors.Is(err, embedstrategy.ErrTransient),
 		errors.Is(err, context.Canceled),
@@ -414,29 +435,45 @@ func (s *Service) resolveStrategy(ns string, cfg *namespace.Config) (embedstrate
 }
 
 // ensureNamespaceCollections creates the dense Qdrant collections for the
-// namespace if they do not yet exist. The result is cached so each
-// namespace pays the round-trip cost at most once per process lifetime.
+// namespace if they do not yet exist. The result is cached (keyed on
+// namespace + dim + distance so a config change re-ensures) and invalidated
+// by invalidateEnsured when an upsert fails — a wiped-and-recreated
+// namespace must not keep hitting a cache entry for a dropped collection.
 func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg *namespace.Config) error {
-	s.ensuredMu.Lock()
-	if _, done := s.ensured[ns]; done {
-		s.ensuredMu.Unlock()
-		return nil
-	}
-	s.ensuredMu.Unlock()
-
 	dim := uint64(cfg.EmbeddingDim)
 	distance := cfg.DenseDistance
 	if distance == "" {
 		distance = "cosine"
 	}
+	key := fmt.Sprintf("%s|%d|%s", ns, dim, distance)
+
+	s.ensuredMu.Lock()
+	if _, done := s.ensured[key]; done {
+		s.ensuredMu.Unlock()
+		return nil
+	}
+	s.ensuredMu.Unlock()
+
 	if err := s.ensureCollFn(ctx, ns, dim, distance); err != nil {
 		return err
 	}
 
 	s.ensuredMu.Lock()
-	s.ensured[ns] = struct{}{}
+	s.ensured[key] = struct{}{}
 	s.ensuredMu.Unlock()
 	return nil
+}
+
+// invalidateEnsured drops every ensure-cache entry for the namespace so the
+// next ProcessItem re-runs EnsureDenseCollections.
+func (s *Service) invalidateEnsured(ns string) {
+	s.ensuredMu.Lock()
+	defer s.ensuredMu.Unlock()
+	for key := range s.ensured {
+		if strings.HasPrefix(key, ns+"|") {
+			delete(s.ensured, key)
+		}
+	}
 }
 
 // upsertVector writes the dense point to {ns}_objects_dense with the V1

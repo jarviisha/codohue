@@ -48,18 +48,19 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 func (r *Repository) LoadByID(ctx context.Context, id int64) (*PendingItem, error) {
 	var (
 		item       PendingItem
+		state      string
 		strategyID string
 		strategyV  string
 	)
 	err := r.queryRowFn(ctx, `
-		SELECT id, namespace, object_id, content, content_hash,
+		SELECT id, namespace, object_id, state, content, content_hash,
 		       COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 		       attempt_count
 		FROM catalog_items
 		WHERE id = $1`,
 		id,
 	).Scan(
-		&item.ID, &item.Namespace, &item.ObjectID, &item.Content, &item.ContentHash,
+		&item.ID, &item.Namespace, &item.ObjectID, &state, &item.Content, &item.ContentHash,
 		&strategyID, &strategyV,
 		&item.AttemptCount,
 	)
@@ -69,6 +70,7 @@ func (r *Repository) LoadByID(ctx context.Context, id int64) (*PendingItem, erro
 	if err != nil {
 		return nil, fmt.Errorf("load catalog item %d: %w", id, err)
 	}
+	item.State = State(state)
 	item.StrategyID = strategyID
 	item.StrategyVersion = strategyV
 	return &item, nil
@@ -99,8 +101,16 @@ func (r *Repository) MarkInFlight(ctx context.Context, id int64) (int, error) {
 
 // MarkEmbedded transitions the row to state='embedded', writing the
 // strategy id+version under which the embedding was produced and
-// embedded_at=NOW(). Clears last_error.
-func (r *Repository) MarkEmbedded(ctx context.Context, id int64, strategyID, strategyVersion string, embeddedAt time.Time) error {
+// embedded_at=NOW(). Clears last_error and resets attempt_count — a
+// successfully embedded item starts its retry budget fresh, so duplicate
+// deliveries can never accumulate attempts into a spurious dead-letter.
+//
+// The content_hash guard makes the write conditional on the row still
+// holding the content that was embedded: a re-ingest that raced processing
+// leaves the row 'pending' for its own (re-published) entry instead of
+// being overwritten with a stale vector's bookkeeping. Returns ErrStaleItem
+// in that case (or when the row is gone).
+func (r *Repository) MarkEmbedded(ctx context.Context, id int64, strategyID, strategyVersion string, embeddedAt time.Time, contentHash []byte) error {
 	rowsAffected, err := r.execFn(ctx, `
 		UPDATE catalog_items
 		SET state = 'embedded',
@@ -108,15 +118,16 @@ func (r *Repository) MarkEmbedded(ctx context.Context, id int64, strategyID, str
 		    strategy_version = $3,
 		    embedded_at = $4,
 		    last_error = NULL,
+		    attempt_count = 0,
 		    updated_at = NOW()
-		WHERE id = $1`,
-		id, strategyID, strategyVersion, embeddedAt,
+		WHERE id = $1 AND content_hash = $5`,
+		id, strategyID, strategyVersion, embeddedAt, contentHash,
 	)
 	if err != nil {
 		return fmt.Errorf("mark embedded %d: %w", id, err)
 	}
 	if rowsAffected == 0 {
-		return ErrItemNotFound
+		return ErrStaleItem
 	}
 	return nil
 }
