@@ -51,6 +51,18 @@ type recommendNsConfig interface {
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
+// objectMetadataDeleter removes an object's row from the objects table.
+// Satisfied by objects.Service and injected by cmd/api — the import rule
+// forbids recommend from reaching into a peer domain directly.
+//
+// Note the asymmetry with GetAuthoredObjects, which reads the same table
+// straight from this package's repository: reads stay there because the
+// exclusion query is per-request and its cap is a Qdrant concern, while the
+// write goes through the table's owner.
+type objectMetadataDeleter interface {
+	Delete(ctx context.Context, namespace, objectID string) error
+}
+
 type recommendIDMapper interface {
 	GetOrCreateSubjectID(ctx context.Context, subjectID, namespace string) (uint64, error)
 	GetOrCreateObjectID(ctx context.Context, objectID, namespace string) (uint64, error)
@@ -62,6 +74,9 @@ type Service struct {
 	nsConfigSvc recommendNsConfig
 	idmapSvc    recommendIDMapper
 	qdrant      *qdrant.Client
+
+	// optional; object metadata cleanup is skipped when nil
+	objectMeta objectMetadataDeleter
 
 	// injectable for testing — wired to real implementations in NewService
 	getCacheFn               func(ctx context.Context, key string) (string, error)
@@ -140,6 +155,11 @@ func NewService(
 	}
 	return s
 }
+
+// SetObjectMetadataDeleter wires the objects domain in so DeleteObject can
+// drop the object's metadata row alongside its vectors. The wiring layer
+// calls this once at startup.
+func (s *Service) SetObjectMetadataDeleter(d objectMetadataDeleter) { s.objectMeta = d }
 
 // StoreObjectEmbedding stores a BYOE dense vector for an object in {ns}_objects_dense.
 func (s *Service) StoreObjectEmbedding(ctx context.Context, ns, objectID string, vector []float32) error {
@@ -1155,6 +1175,20 @@ func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
 	// or no embeddings have been pushed yet. Treat cleanup errors as best-effort.
 	if err := s.deleteFromCollectionFn(ctx, ns+"_objects_dense", pointIDs); err != nil {
 		slog.Debug("delete object: dense collection cleanup skipped", "namespace", ns, "object_id", objectID, "error", err)
+	}
+
+	// Drop the metadata row too. Without this the attribution outlives the
+	// object, so re-creating the same object_id later silently inherits the
+	// old author — and until then it inflates author coverage and pads the
+	// exclude_authored filter with a dead id.
+	//
+	// Best-effort: the vectors are already gone, which is what the caller
+	// asked for, and a stale metadata row is recoverable by re-deleting.
+	if s.objectMeta != nil {
+		if err := s.objectMeta.Delete(ctx, ns, objectID); err != nil {
+			slog.Error("delete object: metadata row cleanup failed",
+				"namespace", ns, "object_id", objectID, "error", err)
+		}
 	}
 
 	return nil

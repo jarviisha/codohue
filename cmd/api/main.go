@@ -137,6 +137,7 @@ func run() error {
 	// recommend
 	recommendRepo := recommend.NewRepository(db)
 	recommendSvc := recommend.NewService(recommendRepo, nsConfigSvc, idmapSvc, qdrantClient, redisClient)
+	recommendSvc.SetObjectMetadataDeleter(objectsSvc)
 
 	// keyHashFn bridges nsconfig.Service to auth.KeyHashFn without coupling packages.
 	keyHashFn := func(ctx context.Context, namespace string) (string, error) {

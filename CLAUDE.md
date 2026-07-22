@@ -186,7 +186,7 @@ Every business capability is reachable from exactly one canonical path. Legacy d
 | `PUT`    | `/v1/namespaces/{ns}/objects/{id}`                                      | Store per-object metadata — currently `author_subject_id` (idempotent, 200). Accepted for **every** `dense_source`; an empty author clears the attribution |
 | `PUT`    | `/v1/namespaces/{ns}/objects/{id}/embedding`                            | Store/replace BYOE dense vector for an object (idempotent, 204). Returns **409 Conflict** when the namespace has `dense_source="catalog"` (catalog auto-embedding is the source of truth in that mode). |
 | `PUT`    | `/v1/namespaces/{ns}/subjects/{id}/embedding`                           | Store/replace BYOE dense vector for a subject (idempotent, 204). NOT guarded by catalog mode — unlike object vectors, subject vectors have no single owner: `cmd/cron` phase 2 mean-pools them on every tick, and this endpoint lets a client overwrite one between ticks to cut staleness. |
-| `DELETE` | `/v1/namespaces/{ns}/objects/{id}`                                      | Remove an object from all Qdrant collections (idempotent, 204)         |
+| `DELETE` | `/v1/namespaces/{ns}/objects/{id}`                                      | Remove an object from all Qdrant collections **and drop its `objects` metadata row** (idempotent, 204). Deleting a *catalog item* from the admin plane does not — that removes embedding input, not the object |
 
 > **Ingest transport options:** Events can be sent via the HTTP endpoint above **or** published directly to Redis Streams — the `ingest` worker consumes both paths and writes to the same `events` table. The Redis Streams transport carries `namespace` inside the payload because it has no URL path.
 

@@ -1305,3 +1305,55 @@ func TestFallbackPopular_ExcludesAuthored(t *testing.T) {
 		t.Errorf("expected 2 items, got %+v", resp.Items)
 	}
 }
+
+// ─── object delete cleans up metadata ─────────────────────────────────────────
+
+type fakeObjectMetaDeleter struct {
+	deleted []string // "ns/object" per call
+	err     error
+}
+
+func (f *fakeObjectMetaDeleter) Delete(_ context.Context, ns, objectID string) error {
+	f.deleted = append(f.deleted, ns+"/"+objectID)
+	return f.err
+}
+
+// Without this the attribution outlives the object, so re-creating the same
+// object_id later silently inherits the old author.
+func TestDeleteObject_DropsMetadataRow(t *testing.T) {
+	meta := &fakeObjectMetaDeleter{}
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc.SetObjectMetadataDeleter(meta)
+	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
+
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if len(meta.deleted) != 1 || meta.deleted[0] != "ns/o1" {
+		t.Errorf("metadata delete = %v, want [ns/o1]", meta.deleted)
+	}
+}
+
+// The vectors are already gone by then — what the caller asked for — so a
+// metadata cleanup failure must not turn the delete into an error.
+func TestDeleteObject_MetadataFailureIsNotFatal(t *testing.T) {
+	meta := &fakeObjectMetaDeleter{err: errors.New("db down")}
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc.SetObjectMetadataDeleter(meta)
+	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
+
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
+		t.Fatalf("expected the delete to survive a metadata failure, got %v", err)
+	}
+}
+
+// cmd/cron and cmd/embedder build a recommend.Service without the objects
+// domain wired; the nil deleter must be skipped, not dereferenced.
+func TestDeleteObject_NilMetadataDeleterIsSkipped(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
+
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
+		t.Fatalf("DeleteObject with no metadata deleter: %v", err)
+	}
+}
