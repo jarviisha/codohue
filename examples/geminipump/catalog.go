@@ -11,12 +11,15 @@ import (
 // catalogItem is one piece of Gemini-generated content. Title and Summary are
 // concatenated into the catalog Content that feeds the embedder; Category drives
 // each simulated user's affinity so the events we emit form a learnable signal.
+// AuthorSubjectID attributes the item to one of the simulated users so the
+// objects table fills up and the exclude_authored filter has data to act on.
 type catalogItem struct {
-	ObjectID  string
-	Title     string
-	Summary   string
-	Category  string
-	CreatedAt time.Time
+	ObjectID        string
+	Title           string
+	Summary         string
+	Category        string
+	AuthorSubjectID string
+	CreatedAt       time.Time
 }
 
 // catalogStore holds the growing catalog. The generator goroutine appends to it
@@ -98,8 +101,11 @@ func slugify(s string) string {
 
 // toCatalogItems converts a Gemini batch into store items with globally unique
 // object IDs. The model's suggested id is only used as a slug hint; the batch
-// and index prefix guarantee uniqueness across the whole run.
-func toCatalogItems(batch int, gen []genItem, now time.Time) []catalogItem {
+// and index prefix guarantee uniqueness across the whole run. Each item is
+// attributed to a deterministic author from the numUsers simulated-user pool
+// (matching the simulator's u_%04d ids); every eighth item is deliberately left
+// unattributed so the unattributed rendering and filtering paths stay exercised.
+func toCatalogItems(batch int, gen []genItem, now time.Time, numUsers int) []catalogItem {
 	out := make([]catalogItem, 0, len(gen))
 	for i, g := range gen {
 		title := strings.TrimSpace(g.Title)
@@ -112,12 +118,17 @@ func toCatalogItems(batch int, gen []genItem, now time.Time) []catalogItem {
 		if slug == "" {
 			slug = slugify(title)
 		}
+		var author string
+		if numUsers > 0 && (batch+i)%8 != 0 {
+			author = fmt.Sprintf("u_%04d", (batch*13+i)%numUsers)
+		}
 		out = append(out, catalogItem{
-			ObjectID:  fmt.Sprintf("g%03d_%02d_%s", batch, i, slug),
-			Title:     title,
-			Summary:   summary,
-			Category:  category,
-			CreatedAt: now,
+			ObjectID:        fmt.Sprintf("g%03d_%02d_%s", batch, i, slug),
+			Title:           title,
+			Summary:         summary,
+			Category:        category,
+			AuthorSubjectID: author,
+			CreatedAt:       now,
 		})
 	}
 	return out

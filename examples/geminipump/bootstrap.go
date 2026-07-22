@@ -46,27 +46,33 @@ func (a *adminClient) upsertNamespace(ctx context.Context, ns string, dim int) e
 	alpha := 0.7
 	lambda := 0.92
 	gamma := 0.12
-	denseSource := "byoe" // catalog auto-embedding supplies the object dense vectors
+	// Placeholder only — the enableCatalog call that follows flips
+	// dense_source to "catalog"; that is what turns catalog auto-embedding on.
+	denseSource := "disabled"
 	distance := "cosine"
 	maxResults := 20
 	seenItemsDays := 30
 	trendingWindow := 72
 	trendingTTL := 3600
 	lambdaTrending := 0.18
+	// The pump attributes catalog items to simulated users, so turn the
+	// authored-objects exclusion on to exercise that filter end-to-end.
+	excludeAuthored := true
 
 	body := map[string]any{
-		"action_weights":  weights,
-		"lambda":          &lambda,
-		"gamma":           &gamma,
-		"alpha":           &alpha,
-		"max_results":     &maxResults,
-		"seen_items_days": &seenItemsDays,
-		"dense_source":    &denseSource,
-		"embedding_dim":   &dim,
-		"dense_distance":  &distance,
-		"trending_window": &trendingWindow,
-		"trending_ttl":    &trendingTTL,
-		"lambda_trending": &lambdaTrending,
+		"action_weights":   weights,
+		"lambda":           &lambda,
+		"gamma":            &gamma,
+		"alpha":            &alpha,
+		"max_results":      &maxResults,
+		"seen_items_days":  &seenItemsDays,
+		"dense_source":     &denseSource,
+		"embedding_dim":    &dim,
+		"dense_distance":   &distance,
+		"trending_window":  &trendingWindow,
+		"trending_ttl":     &trendingTTL,
+		"lambda_trending":  &lambdaTrending,
+		"exclude_authored": &excludeAuthored,
 	}
 	path := "/api/admin/v1/namespaces/" + ns
 	// 200 (update) and 201 (create) are both success.

@@ -103,7 +103,7 @@ func bootstrap(ctx context.Context, cfg config, gem *geminiClient, ns *codohue.N
 	if err := admin.enableCatalog(ctx, cfg.namespace, cfg.dim); err != nil {
 		return err
 	}
-	log.Printf("namespace %q configured (dense=byoe, catalog=internal-hashing-ngrams@v1 dim=%d)", cfg.namespace, cfg.dim)
+	log.Printf("namespace %q configured (dense_source=catalog, strategy=internal-hashing-ngrams@v1 dim=%d, exclude_authored=on)", cfg.namespace, cfg.dim)
 
 	return generateAndSeed(ctx, cfg, gem, ns, store, 0)
 }
@@ -118,7 +118,7 @@ func generateAndSeed(ctx context.Context, cfg config, gem *geminiClient, ns *cod
 		return err
 	}
 
-	added := store.add(toCatalogItems(batch, gen, time.Now().UTC()))
+	added := store.add(toCatalogItems(batch, gen, time.Now().UTC(), cfg.users))
 	if len(added) == 0 {
 		log.Printf("gemini batch #%d produced no new items", batch)
 		return nil
@@ -127,9 +127,10 @@ func generateAndSeed(ctx context.Context, cfg config, gem *geminiClient, ns *cod
 	seeded := 0
 	for _, it := range added {
 		req := codohuetypes.CatalogIngestRequest{
-			ObjectID: it.ObjectID,
-			Content:  it.Title + ". " + it.Summary,
-			Metadata: map[string]any{"category": it.Category, "title": it.Title},
+			ObjectID:        it.ObjectID,
+			Content:         it.Title + ". " + it.Summary,
+			AuthorSubjectID: it.AuthorSubjectID,
+			Metadata:        map[string]any{"category": it.Category, "title": it.Title},
 		}
 		if err := ns.IngestCatalog(ctx, req); err != nil {
 			if errors.Is(err, context.Canceled) {

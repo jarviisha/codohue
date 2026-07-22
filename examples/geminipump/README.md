@@ -8,12 +8,16 @@ recommendation loop close end-to-end.
 What it does:
 
 1. **Bootstraps** a namespace through the admin plane (`cmd/admin`): logs in,
-   upserts the namespace config (`dense_strategy=byoe`, `alpha=0.7`), and enables
-   catalog auto-embedding (`internal-hashing-ngrams@v1`, dim 256).
+   upserts the namespace config (`alpha=0.7`, `exclude_authored=true`), and
+   enables catalog auto-embedding (`internal-hashing-ngrams@v1`, dim 256) —
+   which is what sets `dense_source=catalog`.
 2. **Generates catalog content** by asking Gemini for a batch of items (title +
    summary + category) via structured JSON output, then ingests each through the
-   public catalog path (`cmd/api`). The embedder worker upserts their dense
-   vectors. A background loop keeps topping the catalog up until `-max-items`.
+   public catalog path (`cmd/api`). Each item carries an `author_subject_id`
+   pointing at one of the simulated users (every eighth item is left
+   unattributed on purpose), so the `objects` table and the `exclude_authored`
+   filter get real data. The embedder worker upserts their dense vectors. A
+   background loop keeps topping the catalog up until `-max-items`.
 3. **Pumps events** through the public HTTP ingest path using the Go SDK. Each
    simulated user has a category affinity, so the VIEW/LIKE/COMMENT/SHARE/SKIP
    stream carries a learnable preference signal instead of uniform noise.
