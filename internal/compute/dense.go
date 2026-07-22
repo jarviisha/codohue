@@ -153,7 +153,10 @@ func TrainItem2Vec(sequences []InteractionSequence, cfg Item2VecConfig) map[stri
 
 					for k := 0; k < cfg.NegSamples; k++ {
 						negIdx := sampler.sample()
-						if negIdx == targetIdx {
+						// Skip a draw equal to the positive context: the
+						// negative update targets Wp[negIdx], so it would
+						// counter-train the pair updated just above.
+						if negIdx == ctxIdx {
 							continue
 						}
 						sgdUpdate(W[targetIdx], Wp[negIdx], 0.0, lr)
@@ -177,8 +180,9 @@ func TrainItem2Vec(sequences []InteractionSequence, cfg Item2VecConfig) map[stri
 
 // SVDEmbeddings builds a decay-weighted user×item interaction matrix,
 // applies truncated SVD, and returns item_id → dense vector (the item latent factors).
+// lambda is the namespace's per-day decay rate — the same one phase 1 uses.
 // Returns an error if the matrix size exceeds svdMaxMatrixSize to prevent OOM.
-func SVDEmbeddings(events []*RawEvent, embeddingDim int) (map[string][]float32, error) {
+func SVDEmbeddings(events []*RawEvent, embeddingDim int, lambda float64) (map[string][]float32, error) {
 	// Build index maps for subjects and objects.
 	subjectIndex := make(map[string]int)
 	objectIndex := make(map[string]int)
@@ -209,7 +213,7 @@ func SVDEmbeddings(events []*RawEvent, embeddingDim int) (map[string][]float32, 
 		si := subjectIndex[e.SubjectID]
 		oi := objectIndex[e.ObjectID]
 		daysSince := float64(now-e.OccurredAt) / 86400.0
-		score := e.Weight * math.Exp(-defaultLambda*daysSince)
+		score := e.Weight * math.Exp(-lambda*daysSince)
 		data[si*nObjects+oi] += score
 	}
 
@@ -239,7 +243,10 @@ func SVDEmbeddings(events []*RawEvent, embeddingDim int) (map[string][]float32, 
 		invObjectIndex[idx] = id
 	}
 	for oi, itemID := range invObjectIndex {
-		vec := make([]float32, rank)
+		// Zero-pad up to embeddingDim: the dense collections are created with
+		// exactly that dimension, and Qdrant rejects shorter vectors — which
+		// is every vector while the corpus is smaller than embeddingDim.
+		vec := make([]float32, embeddingDim)
 		for d := range rank {
 			vec[d] = float32(V.At(oi, d) * math.Sqrt(singVals[d]))
 		}

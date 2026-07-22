@@ -339,6 +339,12 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", capture, func() (int, error) {
 			return j.runPhase3Trending(ctx, ns, cfg, capture)
 		})
+		// Unlike phase 2 (dense is an optional surface), a failed trending
+		// phase folds into the run status — an all-green run list must mean
+		// every phase that ran actually succeeded.
+		if !phases.Phase3.OK && runErr == nil {
+			runErr = errors.New(phases.Phase3.Error)
+		}
 	} else if !cancelled {
 		capture.Info("phase 3 · trending skipped (no Redis)")
 	}
@@ -564,7 +570,11 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		itemVecs = TrainItem2Vec(seqs, i2vCfg)
 
 	case "svd":
-		itemVecs, err = SVDEmbeddings(events, embeddingDim)
+		lambda := defaultLambda
+		if cfg.Lambda > 0 {
+			lambda = cfg.Lambda
+		}
+		itemVecs, err = SVDEmbeddings(events, embeddingDim, lambda)
 		if err != nil {
 			return 0, 0, fmt.Errorf("svd embeddings: %w", err)
 		}

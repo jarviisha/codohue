@@ -446,7 +446,7 @@ func TestSVDEmbeddings_ProducesVectors(t *testing.T) {
 		{SubjectID: "u2", ObjectID: "o3", Weight: 1, OccurredAt: now},
 	}
 
-	vecs, err := SVDEmbeddings(events, 2)
+	vecs, err := SVDEmbeddings(events, 2, defaultLambda)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -455,5 +455,71 @@ func TestSVDEmbeddings_ProducesVectors(t *testing.T) {
 	}
 	if len(vecs["o1"]) != 2 {
 		t.Fatalf("expected vector dim 2, got %d", len(vecs["o1"]))
+	}
+}
+
+func TestRecomputeNamespace_AllUpsertsFailedReturnsError(t *testing.T) {
+	now := time.Now().Unix()
+	repo := &fakeComputeRepo{
+		subjects: []string{"u1", "u2"},
+		subjectEvents: map[string][]*RawEvent{
+			"u1": {{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now}},
+			"u2": {{SubjectID: "u2", ObjectID: "o2", Weight: 2, OccurredAt: now}},
+		},
+	}
+	svc := newTestService(repo, newFakeIDMap())
+	svc.upsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+		return context.DeadlineExceeded
+	}
+
+	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	if err == nil {
+		t.Fatal("a run where every upsert failed must not report success")
+	}
+}
+
+func TestRecomputeNamespace_ObjectUpsertFailureReturnsError(t *testing.T) {
+	now := time.Now().Unix()
+	repo := &fakeComputeRepo{
+		subjects: []string{"u1"},
+		subjectEvents: map[string][]*RawEvent{
+			"u1": {
+				{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now},
+				{SubjectID: "u1", ObjectID: "o2", Weight: 1, OccurredAt: now},
+			},
+		},
+	}
+	svc := newTestService(repo, newFakeIDMap())
+	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+		if points.CollectionName == "ns_objects" {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
+
+	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	if err == nil {
+		t.Fatal("a failed object-vector upsert must fail the phase")
+	}
+}
+
+func TestSVDEmbeddings_PadsToEmbeddingDim(t *testing.T) {
+	now := time.Now().Unix()
+	// 2 subjects × 3 objects → rank min(8, 2) = 2, padded up to dim 8.
+	events := []*RawEvent{
+		{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now},
+		{SubjectID: "u1", ObjectID: "o2", Weight: 1, OccurredAt: now},
+		{SubjectID: "u2", ObjectID: "o1", Weight: 1, OccurredAt: now},
+		{SubjectID: "u2", ObjectID: "o3", Weight: 1, OccurredAt: now},
+	}
+
+	vecs, err := SVDEmbeddings(events, 8, defaultLambda)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for id, v := range vecs {
+		if len(v) != 8 {
+			t.Fatalf("vector %s: got dim %d, want padded 8", id, len(v))
+		}
 	}
 }

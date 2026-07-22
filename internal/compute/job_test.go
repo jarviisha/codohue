@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/namespace"
 )
@@ -734,4 +736,45 @@ func TestRunOnce_FinalizesOrphanRuns(t *testing.T) {
 	if !called {
 		t.Fatal("orphan finalizer must run every tick")
 	}
+}
+
+func TestRunNamespace_Phase3FailureFailsRun(t *testing.T) {
+	logger := newFakeBatchLogger(9)
+	successCh := make(chan bool, 1)
+	loggerWithSuccess := &successCapturingLogger{fakeBatchLogger: logger, success: successCh}
+
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.batchLog = loggerWithSuccess
+	job.redis = &goredis.Client{} // non-nil so phase 3 executes; storeTrendingFn is stubbed
+	job.repo = &fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}}
+	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+		return errors.New("redis write failed")
+	}
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	select {
+	case ok := <-successCh:
+		if ok {
+			t.Fatal("a run whose trending phase failed must not be recorded as success")
+		}
+	default:
+		t.Fatal("run was not finalized")
+	}
+}
+
+// successCapturingLogger records the success flag passed to UpdateBatchRunLog.
+type successCapturingLogger struct {
+	*fakeBatchLogger
+	success chan bool
+}
+
+func (l *successCapturingLogger) UpdateBatchRunLog(ctx context.Context, id int64, at time.Time, dur, entities int, success bool, errMsg string, lines []LogEntry) error {
+	select {
+	case l.success <- success:
+	default:
+	}
+	return l.fakeBatchLogger.UpdateBatchRunLog(ctx, id, at, dur, entities, success, errMsg, lines)
 }

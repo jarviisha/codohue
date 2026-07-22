@@ -70,6 +70,11 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// objectCreatedAt[objectID] = object_created_at when explicitly provided by the event source
 	objectCreatedAt := make(map[string]int64)
 
+	// Per-subject failures are tolerated (one bad subject must not sink the
+	// namespace), but a run where nothing was upserted is a failure — phase 1
+	// reporting success while Qdrant holds only stale vectors is worse than
+	// an honest red run.
+	upserted := 0
 	for _, subjectID := range subjects {
 		subjectVec, scores, maxTimes, createdTimes, err := s.buildVectors(ctx, namespace, subjectID, lambda)
 		if err != nil {
@@ -79,6 +84,8 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 
 		if err := s.upsertSubjectVector(ctx, namespace, subjectVec); err != nil {
 			slog.Error("upsert subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
+		} else {
+			upserted++
 		}
 
 		if err := s.accumulateObjectCooccurrence(ctx, namespace, objectAccum, scores); err != nil {
@@ -97,13 +104,17 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 		}
 	}
 
-	if err := s.upsertObjectVectors(ctx, namespace, objectAccum, objectMaxTime, objectCreatedAt); err != nil {
-		slog.Error("upsert object vectors failed", "namespace", namespace, "error", err)
+	if len(subjects) > 0 && upserted == 0 {
+		return 0, 0, fmt.Errorf("all %d subject upserts failed", len(subjects))
 	}
 
-	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(len(subjects)))
-	slog.Info("namespace recomputed", "namespace", namespace, "subjects", len(subjects), "objects", len(objectAccum))
-	return len(subjects), len(objectAccum), nil
+	if err := s.upsertObjectVectors(ctx, namespace, objectAccum, objectMaxTime, objectCreatedAt); err != nil {
+		return upserted, 0, fmt.Errorf("upsert object vectors: %w", err)
+	}
+
+	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(upserted))
+	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", len(objectAccum))
+	return upserted, len(objectAccum), nil
 }
 
 func (s *Service) accumulateObjectCooccurrence(ctx context.Context, namespace string, objectAccum map[string]map[uint64]float32, objectScores map[string]float64) error {

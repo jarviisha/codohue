@@ -442,7 +442,7 @@ func TestUpsertDenseVectors_EmptyIsNoOp(t *testing.T) {
 }
 
 func TestSVDEmbeddings_EmptyReturnsNil(t *testing.T) {
-	vecs, err := SVDEmbeddings(nil, 4)
+	vecs, err := SVDEmbeddings(nil, 4, defaultLambda)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestSVDEmbeddings_MatrixTooLargeReturnsError(t *testing.T) {
 		})
 	}
 
-	_, err := SVDEmbeddings(events, 8)
+	_, err := SVDEmbeddings(events, 8, defaultLambda)
 	if err == nil {
 		t.Fatal("expected matrix too large error, got nil")
 	}
