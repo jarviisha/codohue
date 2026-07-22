@@ -80,8 +80,9 @@ func run() error {
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := compute.NewJob(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, 5)
 
-	// Wire the admin-plane event bus. Cron emits run/phase/log events into it;
-	// SSE handlers subscribe with run-id / namespace filters in Phase 1+.
+	// Wire the admin-plane event bus. Batch-run and catalog events arrive
+	// over Redis pub/sub (cron and the embedder are separate processes);
+	// SSE handlers subscribe with run-id / namespace filters.
 	// Hook the bus's optional callbacks into the admin self-observability
 	// collectors so Grafana can chart publish rate, subscriber gauge, and
 	// backpressure drops without poking into bus internals.
@@ -103,7 +104,14 @@ func run() error {
 		}),
 	)
 	defer bus.Close()
-	job.SetObserver(newBatchRunObserverAdapter(bus))
+	// Runs publish to Redis so every admin replica — and streams for runs
+	// started by cron — see them. Without Redis we fall back to the
+	// in-process observer, which only covers runs this process started.
+	if redisClient != nil {
+		job.SetObserver(compute.NewRedisBatchRunObserver(redisClient))
+	} else {
+		job.SetObserver(newBatchRunObserverAdapter(bus))
+	}
 
 	// Catalog events bridge — subscribes to the Redis pub/sub channel
 	// cmd/embedder publishes item state changes onto and republishes each
@@ -118,6 +126,8 @@ func run() error {
 	if redisClient != nil {
 		bridge := newCatalogEventsBridge(redisClient, bus)
 		go bridge.Run(ctx)
+		runBridge := newBatchRunEventsBridge(redisClient, bus)
+		go runBridge.Run(ctx)
 
 		eventsBridge := newEventsTailBridge(redisClient, bus, eventRate)
 		go eventsBridge.Run(ctx)

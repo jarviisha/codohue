@@ -75,6 +75,11 @@ func run() error {
 	computeRepo := compute.NewRepository(db)
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := newComputeJobFn(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, cfg.BatchIntervalMinutes)
+	// Publish run lifecycle events so cmd/admin can stream cron runs live —
+	// its in-process observer never sees them (different process).
+	if obs := compute.NewRedisBatchRunObserver(redisClient); obs != nil {
+		job.SetObserver(obs)
+	}
 
 	jobDone := make(chan struct{})
 	go func() {
