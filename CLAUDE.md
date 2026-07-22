@@ -216,7 +216,7 @@ The admin API is designed for a monitoring UI, not plain REST CRUD: it exposes *
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/backlog-history`            | session       | Backlog time-series from `catalog_backlog_samples` (`?window=&bucket=`) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/failures-summary`          | session       | Top `last_error` reasons in window (`?window=`) with a sample object id |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/stream`                    | session       | **(SSE)** Live catalog signals: `item_state_changed`, `backlog_snapshot`, `dead_letter_grew`, `reembed_progress` |
-| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/items`                       | session       | Paginated browse of catalog items (`?state=&limit=&offset=&object_id=&author=&include_summary=&sort=`); `author` is an exact `author_subject_id` match; excludes `content` |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/items`                       | session       | Paginated browse of catalog items (`?state=&limit=&offset=&object_id=&author=`); `author` is an exact `author_subject_id` match, `object_id` a substring match; ordered by `updated_at DESC, id DESC`; excludes `content` |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/items/{id}`                  | session       | Full catalog item including `content` and `metadata`                    |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/items/{id}/redrive`          | session       | Re-drive a single failed / dead-letter item (202; 404 when not redrivable) |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/items/redrive-deadletter`    | session       | Bulk re-drive every dead-letter item in the namespace (200 with count)  |

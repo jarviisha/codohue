@@ -359,6 +359,16 @@ trending.
 
 ## Phase 4 — Admin plane
 
+> **✅ HOÀN THÀNH 2026-07-22** — 4.1+4.3+4.6 `fix(admin): namespace scoping,
+> SSE lifetimes, wipe completeness`, 4.4+4.5 `feat(admin): real liveness +
+> backlog data, working re-embed filters`, 4.2 `feat(admin): bridge cron
+> batch-run events onto the admin bus`. Ghi chú lệch so với plan: 4.2 chọn
+> phương án (a) — cron publish lên `codohue:batchrun-events`, admin bridge
+> subscribe; khi không có Redis thì admin fallback observer in-process.
+> Heartbeat embedder dùng key Redis TTL 90s (`codohue:embedder:heartbeat`).
+> `?sort=`/`?include_summary=` của catalog items **chưa** hiện thực — đã gỡ
+> khỏi CLAUDE.md thay vì làm (không có consumer).
+
 ### 4.1 Sửa scoping + Location + hai lỗi SSE có sẵn test sai — **S**
 
 - **F20:** `admin/handler.go` `GetBatchRuns`: đọc `chi.URLParam(r, "ns")`
