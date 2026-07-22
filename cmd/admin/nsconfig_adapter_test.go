@@ -31,7 +31,7 @@ func TestNsConfigAdapter_Upsert_MapsDenseSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if fake.gotReq == nil || fake.gotReq.DenseSource != "item2vec" {
+	if fake.gotReq == nil || fake.gotReq.DenseSource == nil || *fake.gotReq.DenseSource != "item2vec" {
 		t.Errorf("dense_source not mapped: %+v", fake.gotReq)
 	}
 }

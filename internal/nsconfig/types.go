@@ -5,28 +5,34 @@ import (
 	"time"
 )
 
-// UpsertRequest is the payload from the Main Backend for creating or updating a namespace config.
+// UpsertRequest is the payload for creating or updating a namespace config.
+//
+// Every field is a pointer with PATCH semantics: nil means "leave this column
+// alone". A value-typed field cannot express that, and the admin UI submits
+// only the fields the operator actually edited — so value fields made a
+// one-field edit silently reset every other column to its Go zero value.
+// On create, nil fields fall through to the column defaults in the schema.
 type UpsertRequest struct {
-	ActionWeights map[string]float64 `json:"action_weights"`
-	Lambda        float64            `json:"lambda"`
-	Gamma         float64            `json:"gamma"`
-	MaxResults    int                `json:"max_results"`
-	SeenItemsDays int                `json:"seen_items_days"`
+	ActionWeights map[string]float64 `json:"action_weights,omitempty"`
+	Lambda        *float64           `json:"lambda,omitempty"`
+	Gamma         *float64           `json:"gamma,omitempty"`
+	MaxResults    *int               `json:"max_results,omitempty"`
+	SeenItemsDays *int               `json:"seen_items_days,omitempty"`
 
 	// ExcludeAuthored drops the subject's own authored objects from their
 	// recommendations. Defaults to false — see migration 020.
-	ExcludeAuthored bool `json:"exclude_authored"`
+	ExcludeAuthored *bool `json:"exclude_authored,omitempty"`
 
 	// Dense hybrid
-	Alpha         float64 `json:"alpha"`
-	DenseSource   string  `json:"dense_source"`
-	EmbeddingDim  int     `json:"embedding_dim"`
-	DenseDistance string  `json:"dense_distance"`
+	Alpha         *float64 `json:"alpha,omitempty"`
+	DenseSource   *string  `json:"dense_source,omitempty"`
+	EmbeddingDim  *int     `json:"embedding_dim,omitempty"`
+	DenseDistance *string  `json:"dense_distance,omitempty"`
 
 	// Trending
-	TrendingWindow int     `json:"trending_window"`
-	TrendingTTL    int     `json:"trending_ttl"`
-	LambdaTrending float64 `json:"lambda_trending"`
+	TrendingWindow *int     `json:"trending_window,omitempty"`
+	TrendingTTL    *int     `json:"trending_ttl,omitempty"`
+	LambdaTrending *float64 `json:"lambda_trending,omitempty"`
 }
 
 // UpsertResponse is returned after a successful upsert.
@@ -63,3 +69,7 @@ func (e *DimensionMismatchError) Error() string {
 	return fmt.Sprintf("strategy dimension mismatch: strategy_dim=%d namespace_embedding_dim=%d",
 		e.StrategyDim, e.NamespaceEmbeddingDim)
 }
+
+// ptr returns a pointer to v. UpsertRequest fields are pointers so that nil
+// can mean "leave this column alone"; this keeps literals readable.
+func ptr[T any](v T) *T { return &v }

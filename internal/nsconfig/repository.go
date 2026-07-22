@@ -40,58 +40,74 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 }
 
 // Upsert creates or updates the configuration for a namespace.
-// api_key_hash is intentionally excluded from the ON CONFLICT UPDATE clause
-// so that an existing key is never overwritten by a config update.
 //
-// Catalog auto-embedding columns (catalog_*) are also excluded from the
-// UPDATE clause: they are owned by the separate UpsertCatalogConfig path.
-// On INSERT they fall back to the column defaults declared in migration 011.
-// For the same reason an UPDATE never moves dense_source away from "catalog" —
-// leaving catalog mode goes through UpsertCatalogConfig (disable), which owns
-// that transition.
+// PATCH semantics: a nil field on the request leaves that column untouched.
+// This is why the write is two statements rather than one INSERT ... ON
+// CONFLICT DO UPDATE — the conflict form has to supply a value for every
+// column, which is exactly what made a partial request wipe the fields it
+// did not mention.
+//
+//   - The INSERT seeds a brand-new row and names only `namespace`, so every
+//     other column takes the default declared in the schema. dense_source is
+//     the one exception: the schema default is "item2vec" but the app-level
+//     default for a fresh namespace is "disabled", so it is named explicitly.
+//   - The UPDATE then applies COALESCE($n, column) per field, so nil keeps
+//     whatever is already there.
+//
+// api_key_hash is never touched here, so an existing key is not overwritten.
+// The catalog_* columns are likewise absent — they are owned by the separate
+// UpsertCatalogConfig path — and for the same reason an UPDATE never moves
+// dense_source away from "catalog": leaving catalog mode goes through
+// UpsertCatalogConfig (disable), which owns that transition.
 func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*namespace.Config, error) {
-	weightsJSON, err := json.Marshal(req.ActionWeights)
-	if err != nil {
-		return nil, fmt.Errorf("marshal action weights: %w", err)
+	var weightsJSON []byte
+	if req.ActionWeights != nil {
+		var err error
+		weightsJSON, err = json.Marshal(req.ActionWeights)
+		if err != nil {
+			return nil, fmt.Errorf("marshal action weights: %w", err)
+		}
 	}
 
-	// An omitted dense_source arrives as "". Persist it as "disabled" — the
-	// same rule migration 016 uses for its backfill — so dense_source_chk
-	// never sees an empty string. Invalid non-empty values still fail the
-	// CHECK on purpose.
+	// An explicit empty dense_source is treated as "not supplied" rather than
+	// persisted, so dense_source_chk never sees "". Invalid non-empty values
+	// still fail the CHECK on purpose.
 	denseSource := req.DenseSource
-	if denseSource == "" {
-		denseSource = "disabled"
+	if denseSource != nil && *denseSource == "" {
+		denseSource = nil
+	}
+
+	if err := r.execFn(ctx, `
+		INSERT INTO namespace_configs (namespace, dense_source)
+		VALUES ($1, 'disabled')
+		ON CONFLICT (namespace) DO NOTHING`,
+		ns,
+	); err != nil {
+		return nil, fmt.Errorf("create namespace config: %w", err)
 	}
 
 	var cfg namespace.Config
 	var weightsRaw []byte
 	var paramsRaw []byte
 
-	err = r.queryRowFn(ctx, `
-		INSERT INTO namespace_configs (
-			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
-			exclude_authored,
-			alpha, dense_source, embedding_dim, dense_distance,
-			trending_window, trending_ttl, lambda_trending,
-			updated_at
-		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
-		ON CONFLICT (namespace) DO UPDATE
-		  SET action_weights    = EXCLUDED.action_weights,
-		      time_decay_factor = EXCLUDED.time_decay_factor,
-		      gamma             = EXCLUDED.gamma,
-		      max_results       = EXCLUDED.max_results,
-		      seen_items_days   = EXCLUDED.seen_items_days,
-		      exclude_authored  = EXCLUDED.exclude_authored,
-		      alpha             = EXCLUDED.alpha,
-		      dense_source      = CASE WHEN namespace_configs.dense_source = 'catalog' THEN 'catalog' ELSE EXCLUDED.dense_source END,
-		      embedding_dim     = EXCLUDED.embedding_dim,
-		      dense_distance    = EXCLUDED.dense_distance,
-		      trending_window   = EXCLUDED.trending_window,
-		      trending_ttl      = EXCLUDED.trending_ttl,
-		      lambda_trending   = EXCLUDED.lambda_trending,
-		      updated_at        = NOW()
+	err := r.queryRowFn(ctx, `
+		UPDATE namespace_configs SET
+			action_weights    = COALESCE($2::jsonb,   action_weights),
+			time_decay_factor = COALESCE($3::float8,  time_decay_factor),
+			gamma             = COALESCE($4::float8,  gamma),
+			max_results       = COALESCE($5::int,     max_results),
+			seen_items_days   = COALESCE($6::int,     seen_items_days),
+			exclude_authored  = COALESCE($7::boolean, exclude_authored),
+			alpha             = COALESCE($8::float8,  alpha),
+			dense_source      = CASE WHEN dense_source = 'catalog' THEN 'catalog'
+			                         ELSE COALESCE($9::text, dense_source) END,
+			embedding_dim     = COALESCE($10::int,    embedding_dim),
+			dense_distance    = COALESCE($11::text,   dense_distance),
+			trending_window   = COALESCE($12::int,    trending_window),
+			trending_ttl      = COALESCE($13::int,    trending_ttl),
+			lambda_trending   = COALESCE($14::float8, lambda_trending),
+			updated_at        = NOW()
+		WHERE namespace = $1
 		RETURNING
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
 			exclude_authored,

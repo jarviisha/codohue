@@ -37,10 +37,10 @@ func TestRepositoryUpsert_Create(t *testing.T) {
 	repo := NewRepository(db)
 	req := &UpsertRequest{
 		ActionWeights: map[string]float64{"VIEW": 1.0, "LIKE": 5.0},
-		Lambda:        0.05,
-		Gamma:         0.02,
-		MaxResults:    20,
-		DenseSource:   "disabled",
+		Lambda:        ptr(0.05),
+		Gamma:         ptr(0.02),
+		MaxResults:    ptr(20),
+		DenseSource:   ptr("disabled"),
 	}
 
 	cfg, err := repo.Upsert(context.Background(), "nsconfig_test", req)
@@ -50,8 +50,8 @@ func TestRepositoryUpsert_Create(t *testing.T) {
 	if cfg.Namespace != "nsconfig_test" {
 		t.Errorf("Namespace: got %q, want %q", cfg.Namespace, "nsconfig_test")
 	}
-	if cfg.Lambda != req.Lambda {
-		t.Errorf("Lambda: got %v, want %v", cfg.Lambda, req.Lambda)
+	if cfg.Lambda != *req.Lambda {
+		t.Errorf("Lambda: got %v, want %v", cfg.Lambda, *req.Lambda)
 	}
 	if cfg.ActionWeights["LIKE"] != 5.0 {
 		t.Errorf("ActionWeights[LIKE]: got %.1f, want 5.0", cfg.ActionWeights["LIKE"])
@@ -85,7 +85,7 @@ func TestRepositoryUpsertCatalogConfig_DisableSemantics(t *testing.T) {
 	ctx := context.Background()
 
 	repo := NewRepository(db)
-	if _, err := repo.Upsert(ctx, "nsconfig_test_disable", &UpsertRequest{DenseSource: "item2vec"}); err != nil {
+	if _, err := repo.Upsert(ctx, "nsconfig_test_disable", &UpsertRequest{DenseSource: ptr("item2vec")}); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
 
@@ -118,7 +118,7 @@ func TestRepositoryUpsert_Update_PreservesAPIKeyHash(t *testing.T) {
 	repo := NewRepository(db)
 
 	// First upsert — no hash yet.
-	cfg, err := repo.Upsert(ctx, "nsconfig_test_preserve", &UpsertRequest{Lambda: 0.01})
+	cfg, err := repo.Upsert(ctx, "nsconfig_test_preserve", &UpsertRequest{Lambda: ptr(0.01)})
 	if err != nil {
 		t.Fatalf("first Upsert: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestRepositoryUpsert_Update_PreservesAPIKeyHash(t *testing.T) {
 	}
 
 	// Second upsert — hash must survive.
-	cfg2, err := repo.Upsert(ctx, "nsconfig_test_preserve", &UpsertRequest{Lambda: 0.99})
+	cfg2, err := repo.Upsert(ctx, "nsconfig_test_preserve", &UpsertRequest{Lambda: ptr(0.99)})
 	if err != nil {
 		t.Fatalf("second Upsert: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRepositoryGet_ReturnsConfig(t *testing.T) {
 	ctx := context.Background()
 
 	repo := NewRepository(db)
-	req := &UpsertRequest{Lambda: 0.07, MaxResults: 50}
+	req := &UpsertRequest{Lambda: ptr(0.07), MaxResults: ptr(50)}
 	if _, err := repo.Upsert(ctx, "nsconfig_test_get", req); err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -162,11 +162,11 @@ func TestRepositoryGet_ReturnsConfig(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("expected config, got nil")
 	}
-	if cfg.Lambda != req.Lambda {
-		t.Errorf("Lambda: got %v, want %v", cfg.Lambda, req.Lambda)
+	if cfg.Lambda != *req.Lambda {
+		t.Errorf("Lambda: got %v, want %v", cfg.Lambda, *req.Lambda)
 	}
-	if cfg.MaxResults != req.MaxResults {
-		t.Errorf("MaxResults: got %d, want %d", cfg.MaxResults, req.MaxResults)
+	if cfg.MaxResults != *req.MaxResults {
+		t.Errorf("MaxResults: got %d, want %d", cfg.MaxResults, *req.MaxResults)
 	}
 }
 
@@ -228,7 +228,7 @@ func TestRepositoryListCatalogNamespaces(t *testing.T) {
 
 	repo := NewRepository(db)
 	for _, n := range []string{nsEnabledA, nsEnabledB, nsDisabled} {
-		if _, err := repo.Upsert(ctx, n, &UpsertRequest{EmbeddingDim: 128}); err != nil {
+		if _, err := repo.Upsert(ctx, n, &UpsertRequest{EmbeddingDim: ptr(128)}); err != nil {
 			t.Fatalf("Upsert %q: %v", n, err)
 		}
 	}
@@ -304,5 +304,106 @@ func TestRepositoryListCatalogNamespaces_NilDB(t *testing.T) {
 	repo := &Repository{}
 	if _, err := repo.ListCatalogNamespaces(context.Background()); err == nil {
 		t.Fatal("expected error when db is nil")
+	}
+}
+
+// Regression: a partial upsert used to reset every unmentioned column to its
+// Go zero value, so editing one field in the admin UI wiped the rest.
+func TestRepositoryUpsert_PartialLeavesOtherFieldsAlone(t *testing.T) {
+	db := openTestDB(t)
+	const ns = "nsconfig_test_partial"
+	cleanupNS(t, db, ns)
+	ctx := context.Background()
+
+	repo := NewRepository(db)
+	full := &UpsertRequest{
+		ActionWeights:   map[string]float64{"VIEW": 1, "LIKE": 5},
+		Lambda:          ptr(0.9),
+		Gamma:           ptr(0.15),
+		MaxResults:      ptr(42),
+		SeenItemsDays:   ptr(30),
+		ExcludeAuthored: ptr(true),
+		Alpha:           ptr(0.65),
+		DenseSource:     ptr("byoe"),
+		EmbeddingDim:    ptr(128),
+		DenseDistance:   ptr("cosine"),
+		TrendingWindow:  ptr(72),
+		TrendingTTL:     ptr(3600),
+		LambdaTrending:  ptr(0.18),
+	}
+	if _, err := repo.Upsert(ctx, ns, full); err != nil {
+		t.Fatalf("initial Upsert: %v", err)
+	}
+
+	// Exactly what the admin UI sends when only lambda was edited.
+	got, err := repo.Upsert(ctx, ns, &UpsertRequest{Lambda: ptr(0.5)})
+	if err != nil {
+		t.Fatalf("partial Upsert: %v", err)
+	}
+
+	if got.Lambda != 0.5 {
+		t.Errorf("Lambda: got %v, want the edited 0.5", got.Lambda)
+	}
+	checks := []struct {
+		field string
+		got   any
+		want  any
+	}{
+		{"Gamma", got.Gamma, 0.15},
+		{"MaxResults", got.MaxResults, 42},
+		{"SeenItemsDays", got.SeenItemsDays, 30},
+		{"ExcludeAuthored", got.ExcludeAuthored, true},
+		{"Alpha", got.Alpha, 0.65},
+		{"DenseSource", got.DenseSource, "byoe"},
+		{"EmbeddingDim", got.EmbeddingDim, 128},
+		{"DenseDistance", got.DenseDistance, "cosine"},
+		{"TrendingWindow", got.TrendingWindow, 72},
+		{"TrendingTTL", got.TrendingTTL, 3600},
+		{"LambdaTrending", got.LambdaTrending, 0.18},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s was clobbered by a partial upsert: got %v, want %v", c.field, c.got, c.want)
+		}
+	}
+	if got.ActionWeights["LIKE"] != 5 {
+		t.Errorf("ActionWeights clobbered: got %v", got.ActionWeights)
+	}
+}
+
+// A brand-new namespace created from an empty request must land on the schema
+// defaults, not on Go zero values.
+func TestRepositoryUpsert_CreateAppliesSchemaDefaults(t *testing.T) {
+	db := openTestDB(t)
+	const ns = "nsconfig_test_defaults"
+	cleanupNS(t, db, ns)
+
+	cfg, err := NewRepository(db).Upsert(context.Background(), ns, &UpsertRequest{})
+	if err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	checks := []struct {
+		field string
+		got   any
+		want  any
+	}{
+		{"Lambda", cfg.Lambda, 0.95},
+		{"Gamma", cfg.Gamma, 0.02},
+		{"MaxResults", cfg.MaxResults, 50},
+		{"SeenItemsDays", cfg.SeenItemsDays, 30},
+		{"ExcludeAuthored", cfg.ExcludeAuthored, false},
+		{"Alpha", cfg.Alpha, 0.7},
+		{"EmbeddingDim", cfg.EmbeddingDim, 64},
+		{"DenseDistance", cfg.DenseDistance, "cosine"},
+		{"TrendingWindow", cfg.TrendingWindow, 24},
+		{"TrendingTTL", cfg.TrendingTTL, 600},
+		{"LambdaTrending", cfg.LambdaTrending, 0.1},
+		// App-level default, deliberately not the schema's "item2vec".
+		{"DenseSource", cfg.DenseSource, "disabled"},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s default: got %v, want %v", c.field, c.got, c.want)
+		}
 	}
 }

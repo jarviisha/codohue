@@ -18,6 +18,10 @@ func (f fakeRow) Scan(dest ...any) error {
 	return f.scanFn(dest...)
 }
 
+// noopExec stands in for the INSERT ... ON CONFLICT DO NOTHING that Upsert
+// runs before its UPDATE; these unit tests only exercise the UPDATE path.
+func noopExec(_ context.Context, _ string, _ ...any) error { return nil }
+
 func setString(dest any, value string) error {
 	ptr, ok := dest.(*string)
 	if !ok {
@@ -157,6 +161,7 @@ func TestNewRepository(t *testing.T) {
 
 func TestRepositoryUpsert_QueryError(t *testing.T) {
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
 		},
@@ -171,6 +176,7 @@ func TestRepositoryUpsert_QueryError(t *testing.T) {
 func TestRepositoryUpsert_UnmarshalActionWeightsError(t *testing.T) {
 	now := time.Now()
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, []byte("not-json"), []byte("{}"), now)
@@ -187,6 +193,7 @@ func TestRepositoryUpsert_UnmarshalActionWeightsError(t *testing.T) {
 func TestRepositoryUpsert_UnmarshalCatalogParamsError(t *testing.T) {
 	now := time.Now()
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, []byte("{}"), []byte("not-json"), now)
@@ -202,6 +209,7 @@ func TestRepositoryUpsert_UnmarshalCatalogParamsError(t *testing.T) {
 
 func TestRepositoryGet_NoRowsReturnsNil(t *testing.T) {
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
@@ -218,6 +226,7 @@ func TestRepositoryGet_NoRowsReturnsNil(t *testing.T) {
 
 func TestRepositoryGet_QueryError(t *testing.T) {
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
 		},
@@ -232,6 +241,7 @@ func TestRepositoryGet_QueryError(t *testing.T) {
 func TestRepositoryGet_UnmarshalActionWeightsError(t *testing.T) {
 	now := time.Now()
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, []byte("not-json"), []byte("{}"), now)
@@ -248,6 +258,7 @@ func TestRepositoryGet_UnmarshalActionWeightsError(t *testing.T) {
 func TestRepositoryGet_UnmarshalCatalogParamsError(t *testing.T) {
 	now := time.Now()
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, []byte("{}"), []byte("not-json"), now)
@@ -264,6 +275,7 @@ func TestRepositoryGet_UnmarshalCatalogParamsError(t *testing.T) {
 func TestRepositoryGet_PopulatesCatalogFields(t *testing.T) {
 	now := time.Now()
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
 				if err := fillScanRow(dest, []byte("{}"), []byte(`{"dim":128}`), now); err != nil {
@@ -308,6 +320,7 @@ func TestRepositoryGet_PopulatesCatalogFields(t *testing.T) {
 
 func TestRepositoryUpsertCatalogConfig_QueryError(t *testing.T) {
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
 		},
@@ -320,6 +333,7 @@ func TestRepositoryUpsertCatalogConfig_QueryError(t *testing.T) {
 
 func TestRepositoryUpsertCatalogConfig_NoRowsReturnsNil(t *testing.T) {
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
@@ -337,6 +351,7 @@ func TestRepositoryUpsertCatalogConfig_AppliesDefaults(t *testing.T) {
 	now := time.Now()
 	var capturedArgs []any
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, args ...any) rowScanner {
 			capturedArgs = args
 			return fakeRow{scanFn: func(dest ...any) error {
@@ -361,6 +376,7 @@ func TestRepositoryUpsertCatalogConfig_DisableNullsStrategy(t *testing.T) {
 	now := time.Now()
 	var capturedArgs []any
 	repo := &Repository{
+		execFn: noopExec,
 		queryRowFn: func(_ context.Context, _ string, args ...any) rowScanner {
 			capturedArgs = args
 			return fakeRow{scanFn: func(dest ...any) error {

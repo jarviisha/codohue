@@ -15,52 +15,30 @@ type nsConfigUpsertSvc interface {
 }
 
 // nsConfigAdapter bridges admin.Service (which must not import nsconfig per the
-// constitution) and nsconfig.Service. It maps the admin pointer-field DTOs to
-// nsconfig's value-field DTOs, treating nil pointers as Go zero values to match
-// the prior JSON round-trip behavior.
+// constitution) and nsconfig.Service. Both DTOs are pointer-field, and nil is
+// forwarded as nil so PATCH semantics survive down to the SQL.
 type nsConfigAdapter struct {
 	svc nsConfigUpsertSvc
 }
 
 func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *admin.NamespaceUpsertRequest) (*admin.NamespaceUpsertResponse, error) {
+	// Pointers pass straight through: nil carries "not supplied" all the way
+	// to the SQL, where COALESCE leaves the column alone. Dereferencing here
+	// is what used to turn an unsent field into a zero value and wipe it.
 	nsReq := &nsconfig.UpsertRequest{
-		ActionWeights: req.ActionWeights,
-	}
-	if req.Lambda != nil {
-		nsReq.Lambda = *req.Lambda
-	}
-	if req.Gamma != nil {
-		nsReq.Gamma = *req.Gamma
-	}
-	if req.Alpha != nil {
-		nsReq.Alpha = *req.Alpha
-	}
-	if req.MaxResults != nil {
-		nsReq.MaxResults = *req.MaxResults
-	}
-	if req.SeenItemsDays != nil {
-		nsReq.SeenItemsDays = *req.SeenItemsDays
-	}
-	if req.ExcludeAuthored != nil {
-		nsReq.ExcludeAuthored = *req.ExcludeAuthored
-	}
-	if req.DenseSource != nil {
-		nsReq.DenseSource = *req.DenseSource
-	}
-	if req.EmbeddingDim != nil {
-		nsReq.EmbeddingDim = *req.EmbeddingDim
-	}
-	if req.DenseDistance != nil {
-		nsReq.DenseDistance = *req.DenseDistance
-	}
-	if req.TrendingWindow != nil {
-		nsReq.TrendingWindow = *req.TrendingWindow
-	}
-	if req.TrendingTTL != nil {
-		nsReq.TrendingTTL = *req.TrendingTTL
-	}
-	if req.LambdaTrending != nil {
-		nsReq.LambdaTrending = *req.LambdaTrending
+		ActionWeights:   req.ActionWeights,
+		Lambda:          req.Lambda,
+		Gamma:           req.Gamma,
+		Alpha:           req.Alpha,
+		MaxResults:      req.MaxResults,
+		SeenItemsDays:   req.SeenItemsDays,
+		ExcludeAuthored: req.ExcludeAuthored,
+		DenseSource:     req.DenseSource,
+		EmbeddingDim:    req.EmbeddingDim,
+		DenseDistance:   req.DenseDistance,
+		TrendingWindow:  req.TrendingWindow,
+		TrendingTTL:     req.TrendingTTL,
+		LambdaTrending:  req.LambdaTrending,
 	}
 
 	resp, err := a.svc.Upsert(ctx, namespace, nsReq)
