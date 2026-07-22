@@ -271,6 +271,7 @@ Key columns added by later migrations:
 - **019** — `author_subject_id` on `catalog_items` + partial index `idx_catalog_items_ns_author` (attributed rows only); nullable, no FK
 - **020** — `exclude_authored` on namespace_configs (default FALSE) — opt-in filter dropping a subject's own authored objects from their recommendations
 - **021** — `objects` table (`namespace`, `object_id`, `author_subject_id`) + partial index; **moves** `author_subject_id` off `catalog_items` and drops that column, so attribution works under every `dense_source`
+- **022** — re-keys `id_mappings` on `PRIMARY KEY (namespace, entity_type, string_id)` (was a global `string_id` PK that let two namespaces — or a subject and an object — share one row); run a full recompute per namespace after deploying so Qdrant points use the newly minted numeric ids
 
 ## Environment Variables
 

@@ -33,7 +33,7 @@ func (r *Repository) GetOrCreate(ctx context.Context, stringID, namespace, entit
 	err := r.queryRowFn(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (string_id) DO UPDATE SET string_id = EXCLUDED.string_id
+		ON CONFLICT (namespace, entity_type, string_id) DO UPDATE SET string_id = EXCLUDED.string_id
 		RETURNING numeric_id`,
 		stringID, namespace, entityType,
 	).Scan(&numID)
