@@ -37,6 +37,9 @@ type fakeSvc struct {
 	trendingErr        error
 	profileResp        *SubjectProfileResponse
 	profileErr         error
+	subjectsResp       *SubjectsListResponse
+	subjectsErr        error
+	subjectsArgs       []any // ns, prefix, sort, limit, offset — captured for assertions
 	qdrantStatsResp    *QdrantInspectResponse
 	qdrantStatsErr     error
 	triggerResp        *BatchRunCreateResponse
@@ -173,6 +176,11 @@ func (f *fakeSvc) GetTrending(_ context.Context, _ string, _, _, _ int) (*Trendi
 
 func (f *fakeSvc) GetSubjectProfile(_ context.Context, _, _ string) (*SubjectProfileResponse, error) {
 	return f.profileResp, f.profileErr
+}
+
+func (f *fakeSvc) ListSubjects(_ context.Context, ns, prefix, sort string, limit, offset int) (*SubjectsListResponse, error) {
+	f.subjectsArgs = []any{ns, prefix, sort, limit, offset}
+	return f.subjectsResp, f.subjectsErr
 }
 
 func (f *fakeSvc) GetQdrant(_ context.Context, _ string) (*QdrantInspectResponse, error) {
@@ -666,6 +674,80 @@ func TestGetSubjectProfile_OK(t *testing.T) {
 	assertJSON(t, rec, &resp)
 	if resp.InteractionCount != 5 {
 		t.Errorf("expected interaction_count=5, got %d", resp.InteractionCount)
+	}
+}
+
+// ─── subject list handler tests ──────────────────────────────────────────────
+
+func TestListSubjects_OK(t *testing.T) {
+	svc := &fakeSvc{
+		subjectsResp: &SubjectsListResponse{
+			Items: []SubjectListItem{
+				{SubjectID: "user-1", InteractionCount: 12, LastSeen: "2026-07-22T10:00:00Z"},
+			},
+			Total: 1, Limit: 25, Sort: SubjectSortLastSeen,
+		},
+	}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet,
+		"/api/admin/v1/namespaces/ns1/subjects?q=user&sort=interactions&limit=10&offset=20",
+		map[string]string{"ns": "ns1"}, "")
+	h.ListSubjects(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var resp SubjectsListResponse
+	assertJSON(t, rec, &resp)
+	if len(resp.Items) != 1 || resp.Items[0].SubjectID != "user-1" {
+		t.Errorf("unexpected items: %+v", resp.Items)
+	}
+	want := []any{"ns1", "user", SubjectSortInteractions, 10, 20}
+	if fmt.Sprint(svc.subjectsArgs) != fmt.Sprint(want) {
+		t.Errorf("service args = %v, want %v", svc.subjectsArgs, want)
+	}
+}
+
+func TestListSubjects_Defaults(t *testing.T) {
+	svc := &fakeSvc{subjectsResp: &SubjectsListResponse{Items: []SubjectListItem{}}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/subjects",
+		map[string]string{"ns": "ns1"}, "")
+	h.ListSubjects(rec, r)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	// Empty sort passes through — the service resolves it to last_seen.
+	want := []any{"ns1", "", "", 25, 0}
+	if fmt.Sprint(svc.subjectsArgs) != fmt.Sprint(want) {
+		t.Errorf("service args = %v, want %v", svc.subjectsArgs, want)
+	}
+}
+
+func TestListSubjects_InvalidSort(t *testing.T) {
+	svc := &fakeSvc{subjectsResp: &SubjectsListResponse{}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/subjects?sort=bogus",
+		map[string]string{"ns": "ns1"}, "")
+	h.ListSubjects(rec, r)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if svc.subjectsArgs != nil {
+		t.Error("service should not be called on invalid sort")
+	}
+}
+
+func TestListSubjects_ServiceError(t *testing.T) {
+	h := newTestHandler(&fakeSvc{subjectsErr: fmt.Errorf("db down")})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/subjects",
+		map[string]string{"ns": "ns1"}, "")
+	h.ListSubjects(rec, r)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rec.Code)
 	}
 }
 

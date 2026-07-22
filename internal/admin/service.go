@@ -32,6 +32,7 @@ type adminRepo interface {
 	GetCatalogFailuresSummary(ctx context.Context, namespace string, windowSeconds, limit int) ([]CatalogFailureReason, error)
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
+	ListSubjects(ctx context.Context, ns, prefix, sort string, limit, offset int) ([]SubjectListItem, int, error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
 	GetEventsSummary(ctx context.Context, ns string, windowSecs, bucketSecs int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error)
@@ -490,6 +491,36 @@ func (s *Service) recommendDebug(ctx context.Context, namespace, subjectID strin
 		debug.SparseNNZ = s.sparseNNZ(ctx, namespace, *stats.NumericID)
 	}
 	return debug
+}
+
+// ListSubjects returns a page of the subjects that have events in namespace,
+// derived from the events table. prefix narrows to subject ids starting with
+// it; sort falls back to last_seen when empty or unrecognised.
+func (s *Service) ListSubjects(ctx context.Context, namespace, prefix, sort string, limit, offset int) (*SubjectsListResponse, error) {
+	if limit <= 0 {
+		limit = 25
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if _, ok := subjectOrderBy[sort]; !ok {
+		sort = SubjectSortLastSeen
+	}
+
+	items, total, err := s.repo.ListSubjects(ctx, namespace, prefix, sort, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list subjects: %w", err)
+	}
+	return &SubjectsListResponse{
+		Items:  items,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
+		Sort:   sort,
+	}, nil
 }
 
 // GetSubjectProfile returns interaction count, seen items, and sparse vector NNZ for a subject.

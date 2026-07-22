@@ -98,6 +98,7 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 		r.Get("/api/admin/v1/namespaces/{ns}/qdrant", h.GetQdrant)
 
 		// Subjects
+		r.Get("/api/admin/v1/namespaces/{ns}/subjects", h.ListSubjects)
 		r.Get("/api/admin/v1/namespaces/{ns}/subjects/{id}/profile", h.GetSubjectProfile)
 		r.Get("/api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations", h.GetSubjectRecommendations)
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,6 +28,10 @@ type fakeRepo struct {
 	recentEventCountsErr   error
 	subjectStats           *SubjectStats
 	subjectStatsErr        error
+	subjectList            []SubjectListItem
+	subjectListTotal       int
+	subjectListErr         error
+	subjectListArgs        []any // ns, prefix, sort, limit, offset — captured for assertions
 	events                 []EventSummary
 	eventsTotal            int
 	eventsErr              error
@@ -163,6 +168,11 @@ func (f *fakeRepo) GetRecentEventCounts(_ context.Context, _ int) (map[string]in
 
 func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*SubjectStats, error) {
 	return f.subjectStats, f.subjectStatsErr
+}
+
+func (f *fakeRepo) ListSubjects(_ context.Context, ns, prefix, sort string, limit, offset int) ([]SubjectListItem, int, error) {
+	f.subjectListArgs = []any{ns, prefix, sort, limit, offset}
+	return f.subjectList, f.subjectListTotal, f.subjectListErr
 }
 
 func (f *fakeRepo) GetRecentEvents(_ context.Context, _ string, _, _ int, _ string) ([]EventSummary, int, error) {
@@ -597,6 +607,65 @@ func TestGetSubjectProfile_NoQdrant(t *testing.T) {
 	}
 	if profile.SeenItemsDays != 30 {
 		t.Errorf("expected seen_items_days=30, got %d", profile.SeenItemsDays)
+	}
+}
+
+func TestListSubjects_ClampsAndDefaults(t *testing.T) {
+	cases := []struct {
+		name                  string
+		sort                  string
+		limit, offset         int
+		wantSort              string
+		wantLimit, wantOffset int
+	}{
+		{"defaults", "", 0, 0, SubjectSortLastSeen, 25, 0},
+		{"unknown sort falls back", "bogus", 10, 0, SubjectSortLastSeen, 10, 0},
+		{"limit capped", "", 5000, 0, SubjectSortLastSeen, 200, 0},
+		{"negative offset floored", "", 10, -5, SubjectSortLastSeen, 10, 0},
+		{"explicit sort kept", SubjectSortInteractions, 10, 30, SubjectSortInteractions, 10, 30},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRepo{subjectListTotal: 3}
+			svc := newTestService(repo, "", "")
+			resp, err := svc.ListSubjects(context.Background(), "ns1", "user", tc.sort, tc.limit, tc.offset)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			want := []any{"ns1", "user", tc.wantSort, tc.wantLimit, tc.wantOffset}
+			if fmt.Sprint(repo.subjectListArgs) != fmt.Sprint(want) {
+				t.Errorf("repo args = %v, want %v", repo.subjectListArgs, want)
+			}
+			if resp.Limit != tc.wantLimit || resp.Offset != tc.wantOffset || resp.Sort != tc.wantSort {
+				t.Errorf("echoed params = %d/%d/%s, want %d/%d/%s",
+					resp.Limit, resp.Offset, resp.Sort, tc.wantLimit, tc.wantOffset, tc.wantSort)
+			}
+			if resp.Total != 3 {
+				t.Errorf("expected total=3, got %d", resp.Total)
+			}
+		})
+	}
+}
+
+func TestListSubjects_RepoError(t *testing.T) {
+	repo := &fakeRepo{subjectListErr: errors.New("db down")}
+	svc := newTestService(repo, "", "")
+	if _, err := svc.ListSubjects(context.Background(), "ns1", "", "", 10, 0); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestEscapeLikePrefix(t *testing.T) {
+	cases := map[string]string{
+		"user":     "user",
+		"a_b":      `a\_b`,
+		"50%":      `50\%`,
+		`back\sla`: `back\\sla`,
+	}
+	for in, want := range cases {
+		if got := escapeLikePrefix(in); got != want {
+			t.Errorf("escapeLikePrefix(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

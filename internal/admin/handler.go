@@ -41,6 +41,7 @@ type adminSvc interface {
 	GetBatchRuns(ctx context.Context, namespace, status, kind string, limit, offset int) ([]BatchRunLog, int, BatchRunStats, error)
 	GetSubjectRecommendations(ctx context.Context, namespace, subjectID string, limit, offset int, debug bool) (*RecommendResponse, int, error)
 	GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error)
+	ListSubjects(ctx context.Context, namespace, prefix, sort string, limit, offset int) (*SubjectsListResponse, error)
 	GetSubjectProfile(ctx context.Context, namespace, subjectID string) (*SubjectProfileResponse, error)
 	GetQdrant(ctx context.Context, namespace string) (*QdrantInspectResponse, error)
 	CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreateResponse, error)
@@ -365,6 +366,44 @@ func (h *Handler) GetQdrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, stats)
+}
+
+// ListSubjects handles GET /api/admin/v1/namespaces/{ns}/subjects.
+// Optional query params: q (subject id prefix), sort, limit, offset.
+func (h *Handler) ListSubjects(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
+		return
+	}
+	q := r.URL.Query()
+
+	limit := 25
+	if lStr := q.Get("limit"); lStr != "" {
+		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	offset := 0
+	if oStr := q.Get("offset"); oStr != "" {
+		if o, err := strconv.Atoi(oStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	sort := q.Get("sort")
+	if sort != "" && sort != SubjectSortLastSeen && sort != SubjectSortInteractions && sort != SubjectSortID {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request",
+			"sort must be 'last_seen', 'interactions' or 'subject_id'")
+		return
+	}
+
+	result, err := h.svc.ListSubjects(r.Context(), ns, q.Get("q"), sort, limit, offset)
+	if err != nil {
+		writeInternalError(w, r, "could not list subjects", err, slog.String("namespace", ns))
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, result)
 }
 
 // GetSubjectProfile handles GET /api/admin/v1/namespaces/{ns}/subjects/{id}/profile.

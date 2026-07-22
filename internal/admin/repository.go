@@ -462,6 +462,92 @@ func (r *Repository) GetRecentEventCounts(ctx context.Context, windowHours int) 
 	return out, nil
 }
 
+// subjectOrderBy maps a validated sort key to its ORDER BY clause. subject_id
+// is always the final tiebreaker so pagination stays stable across pages when
+// last_seen / interaction counts collide.
+var subjectOrderBy = map[string]string{
+	SubjectSortLastSeen:     "last_seen DESC, subject_id ASC",
+	SubjectSortInteractions: "interaction_count DESC, subject_id ASC",
+	SubjectSortID:           "subject_id ASC",
+}
+
+// escapeLikePrefix neutralises the LIKE wildcards in a user-supplied prefix so
+// a subject id containing % or _ matches literally. Pairs with ESCAPE '\'.
+func escapeLikePrefix(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
+}
+
+// ListSubjects returns a paginated aggregate of the subjects that have events
+// in ns. prefix optionally narrows to subject ids starting with it; sort must
+// be one of the SubjectSort* constants (the caller validates). Both queries
+// ride idx_events_ns_subject_occurred.
+//
+// Returns the page, the number of distinct subjects matching the filter, and
+// any error.
+func (r *Repository) ListSubjects(ctx context.Context, ns, prefix, sort string, limit, offset int) ([]SubjectListItem, int, error) {
+	orderBy, ok := subjectOrderBy[sort]
+	if !ok {
+		orderBy = subjectOrderBy[SubjectSortLastSeen]
+	}
+
+	// The prefix predicate is appended rather than guarded by a runtime
+	// `$n = ''` check: an always-true LIKE '%' would hide the range from the
+	// planner, and a bare `$n = ''` gives pgx no column to infer the param
+	// type from.
+	where := "namespace = $1"
+	args := []any{ns}
+	if prefix != "" {
+		args = append(args, escapeLikePrefix(prefix)+"%")
+		where += fmt.Sprintf(` AND subject_id LIKE $%d ESCAPE '\'`, len(args))
+	}
+
+	var total int
+	if err := r.db.QueryRow(ctx,
+		`SELECT COUNT(*) FROM (
+		     SELECT 1 FROM events
+		     WHERE `+where+`
+		     GROUP BY subject_id
+		 ) s`,
+		args...,
+	).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count subjects: %w", err)
+	}
+
+	pageArgs := append(append([]any{}, args...), limit, offset)
+	rows, err := r.db.Query(ctx,
+		fmt.Sprintf(
+			`SELECT subject_id, COUNT(*) AS interaction_count, MAX(occurred_at) AS last_seen
+			 FROM events
+			 WHERE %s
+			 GROUP BY subject_id
+			 ORDER BY %s
+			 LIMIT $%d OFFSET $%d`,
+			where, orderBy, len(args)+1, len(args)+2,
+		),
+		pageArgs...,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("query subjects: %w", err)
+	}
+	defer rows.Close()
+
+	out := []SubjectListItem{}
+	for rows.Next() {
+		var it SubjectListItem
+		var lastSeen time.Time
+		if err := rows.Scan(&it.SubjectID, &it.InteractionCount, &lastSeen); err != nil {
+			return nil, 0, fmt.Errorf("scan subject: %w", err)
+		}
+		it.LastSeen = lastSeen.UTC().Format(time.RFC3339)
+		out = append(out, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate subjects: %w", err)
+	}
+	return out, total, nil
+}
+
 // GetRecentEvents returns a paginated list of events for a namespace, newest first.
 // subjectID is optional — pass empty string to return all subjects.
 // Returns the events slice, the total count matching the filter, and any error.

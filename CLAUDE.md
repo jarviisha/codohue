@@ -228,6 +228,7 @@ The admin API is designed for a monitoring UI, not plain REST CRUD: it exposes *
 | `GET`    | `/api/admin/v1/namespaces/{ns}/events/stream`                      | session       | **(SSE)** Live event tail (`?action=&subject_id=`): `event` per ingested event, `dropped` on backpressure. Fed by the `codohue:events-tail:*` pub/sub bridge, so it captures HTTP + Redis-stream + injected events |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/events/summary`                    | session       | Server-side ingest aggregation (`?window=1m\|5m\|1h`): total + rate + by-action + time-bucketed series |
 | `POST`   | `/api/admin/v1/namespaces/{ns}/events`                              | session       | Inject a test event (proxied to `cmd/api`, 202 + `{"ok":true,"event_id":N}`) |
+| `GET`    | `/api/admin/v1/namespaces/{ns}/subjects`                            | session       | Browse subjects aggregated from `events` (`?q=` subject_id prefix, `?sort=last_seen\|interactions\|subject_id`, `?limit=&offset=`) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/subjects/{id}/profile`               | session       | Subject profile: interaction count, seen items, sparse vector NNZ       |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/subjects/{id}/recommendations`       | session       | Recommendations for a subject (`?limit=&offset=&debug=`)                |
 | `POST`   | `/api/admin/v1/demo-data`                                           | session       | Seed the bundled demo dataset (202)                                     |
@@ -259,6 +260,7 @@ Key columns added by later migrations:
 - **015** — indexes on `batch_run_logs.started_at` + `catalog_backlog_samples.sampled_at` to support the cron retention prune (`CODOHUE_BATCH_RUN_RETENTION_DAYS` / `CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS`)
 - **016** — `dense_source` on namespace_configs (single producer enum: `disabled`/`item2vec`/`svd`/`byoe`/`catalog`), backfilled from `catalog_enabled`/`dense_strategy` + CHECK constraint; legacy columns kept for the dual-write window
 - **017** — drops the legacy `dense_strategy` + `catalog_enabled` columns; `dense_source` is the single source of truth (down recreates + backfills them, mapping `catalog` → `disabled` + `catalog_enabled=TRUE`)
+- **018** — `idx_events_ns_subject_occurred` on `events (namespace, subject_id, occurred_at DESC)` so the admin subject browser aggregates via index-only scan
 
 ## Environment Variables
 

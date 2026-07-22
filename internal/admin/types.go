@@ -711,3 +711,28 @@ type SubjectProfileResponse struct {
 	SeenItemsDays    int      `json:"seen_items_days"`
 	SparseVectorNNZ  int      `json:"sparse_vector_nnz"` // -1 means not yet indexed in Qdrant
 }
+
+// Sort orders accepted by GET /api/admin/v1/namespaces/{ns}/subjects.
+const (
+	SubjectSortLastSeen     = "last_seen"
+	SubjectSortInteractions = "interactions"
+	SubjectSortID           = "subject_id"
+)
+
+// SubjectListItem is one row of GET /api/admin/v1/namespaces/{ns}/subjects.
+// Subjects are not a stored resource — each row is an aggregate over the
+// events table, so there is no created_at and no id beyond subject_id itself.
+type SubjectListItem struct {
+	SubjectID        string `json:"subject_id"`
+	InteractionCount int    `json:"interaction_count"`
+	LastSeen         string `json:"last_seen"`
+}
+
+// SubjectsListResponse is the response for GET /api/admin/v1/namespaces/{ns}/subjects.
+type SubjectsListResponse struct {
+	Items  []SubjectListItem `json:"items"`
+	Total  int               `json:"total"` // distinct subjects matching the filter
+	Limit  int               `json:"limit"`
+	Offset int               `json:"offset"`
+	Sort   string            `json:"sort"`
+}

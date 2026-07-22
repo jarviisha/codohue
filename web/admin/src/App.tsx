@@ -21,7 +21,7 @@ const CatalogItemsPage = lazy(() => import('@/pages/ns/catalog/CatalogItemsPage'
 const CatalogStatusPage = lazy(() => import('@/pages/ns/catalog/CatalogStatusPage'))
 const EventsPage = lazy(() => import('@/pages/ns/events/EventsPage'))
 const SubjectInspectorPage = lazy(() => import('@/pages/ns/subjects/SubjectInspectorPage'))
-const SubjectLookupPage = lazy(() => import('@/pages/ns/subjects/SubjectLookupPage'))
+const SubjectsListPage = lazy(() => import('@/pages/ns/subjects/SubjectsListPage'))
 const TrendingPage = lazy(() => import('@/pages/ns/trending/TrendingPage'))
 const NamespaceConfigPage = lazy(() => import('@/pages/ns/config/NamespaceConfigPage'))
 const NamespaceOverviewPage = lazy(() => import('@/pages/ns/NamespaceOverviewPage'))
@@ -67,7 +67,7 @@ const router = createBrowserRouter([
           { path: 'catalog', element: withSuspense(CatalogStatusPage) },
           { path: 'catalog/items', element: withSuspense(CatalogItemsPage) },
           { path: 'catalog/items/:id', element: withSuspense(CatalogItemDetailPage) },
-          { path: 'subjects', element: withSuspense(SubjectLookupPage) },
+          { path: 'subjects', element: withSuspense(SubjectsListPage) },
           { path: 'subjects/:id', element: withSuspense(SubjectInspectorPage) },
           { path: 'events', element: withSuspense(EventsPage) },
           { path: 'trending', element: withSuspense(TrendingPage) },
