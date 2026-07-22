@@ -22,7 +22,7 @@ const maxCandidates = 500
 
 type recommendSvc interface {
 	Recommend(ctx context.Context, req *Request) (*Response, error)
-	GetTrending(ctx context.Context, ns string, limit, offset, windowHours int) (*TrendingResponse, error)
+	GetTrending(ctx context.Context, ns string, limit, offset int) (*TrendingResponse, error)
 	Rank(ctx context.Context, req *RankRequest, namespace string) (*RankResponse, error)
 	StoreObjectEmbedding(ctx context.Context, namespace, objectID string, vector []float32) error
 	StoreSubjectEmbedding(ctx context.Context, namespace, subjectID string, vector []float32) error
@@ -164,17 +164,10 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 		offset = n
 	}
 
-	windowHours := 0
-	if wh := q.Get("window_hours"); wh != "" {
-		n, err := strconv.Atoi(wh)
-		if err != nil || n <= 0 {
-			httpapi.WriteError(w, http.StatusBadRequest, "invalid_window_hours", "invalid window_hours")
-			return
-		}
-		windowHours = n
-	}
-
-	resp, err := h.service.GetTrending(r.Context(), ns, limit, offset, windowHours)
+	// window_hours is deliberately not read: there is exactly one trending
+	// ZSET per namespace, built with the configured window. The response's
+	// window_hours field reports that actual window.
+	resp, err := h.service.GetTrending(r.Context(), ns, limit, offset)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return

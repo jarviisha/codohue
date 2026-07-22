@@ -74,6 +74,8 @@ func TestTrending_PaginationParams(t *testing.T) {
 }
 
 func TestTrending_WindowHours(t *testing.T) {
+	// The request param is ignored; the response reports the window the
+	// ZSET was actually built with (the namespace config, default 24).
 	resp := doRequest(t, http.MethodGet,
 		baseURL+"/v1/namespaces/"+testNS+"/trending?window_hours=48", nsKey, nil)
 
@@ -82,7 +84,7 @@ func TestTrending_WindowHours(t *testing.T) {
 	}
 	decodeJSON(t, resp, &body)
 
-	if body.WindowHours != 48 {
-		t.Errorf("window_hours = %d, want 48", body.WindowHours)
+	if body.WindowHours == 48 {
+		t.Errorf("window_hours must reflect the namespace config, not the request param; got %d", body.WindowHours)
 	}
 }

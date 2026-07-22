@@ -282,8 +282,13 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 		return nil, err
 	}
 
-	if b, err := json.Marshal(resp); err == nil {
-		s.setCacheFn(ctx, cacheKey, string(b), recCacheTTL)
+	// A degraded response (fallback caused by an infra error) is served but
+	// never cached: a one-second Qdrant blip must not pin popular items on a
+	// warm subject for the full TTL.
+	if !req.degraded {
+		if b, err := json.Marshal(resp); err == nil {
+			s.setCacheFn(ctx, cacheKey, string(b), recCacheTTL)
+		}
 	}
 	return resp, nil
 }
@@ -292,6 +297,8 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 	count, err := s.repo.CountInteractions(ctx, req.Namespace, req.SubjectID)
 	if err != nil {
 		slog.Error("count interactions failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		// A warm subject about to be served the cold-start path — degraded.
+		req.degraded = true
 	}
 
 	if count == 0 {
@@ -307,12 +314,19 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, req.Namespace)
 	if err != nil {
 		slog.Error("get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		req.degraded = true
 		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
 	subjectVec, err := s.fetchSubjectVecFn(ctx, req.Namespace, subjectNumID)
 	if err != nil || subjectVec == nil {
 		slog.Error("fetch subject vector failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		// err != nil is an infra failure; a nil vector without error just
+		// means the cron batch has not caught up with this subject yet —
+		// that state is stable for the tick, so caching it is fine.
+		if err != nil {
+			req.degraded = true
+		}
 		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
@@ -347,6 +361,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	results, err := s.searchObjectsFn(ctx, req.Namespace, subjectVec, seenFilter, fetchLimit)
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		req.degraded = true
 		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
@@ -393,6 +408,7 @@ func (s *Service) hybridRecommend(
 	if err != nil {
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
+		req.degraded = true
 	}
 
 	// Dense retrieval.
@@ -400,6 +416,7 @@ func (s *Service) hybridRecommend(
 	if err != nil {
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
+		req.degraded = true
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
@@ -596,7 +613,9 @@ func buildCreatedAtLookup(sets ...[]*qdrant.ScoredPoint) map[string]time.Time {
 }
 
 func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
-	// Over-fetch from both sources to cover offset before blending.
+	// Over-fetch from both sources to cover offset before blending. The
+	// inner requests page from 0, so every branch below must re-apply the
+	// caller's offset before returning — including the degraded ones.
 	overLimit := req.Offset + limit
 	innerReq := &Request{
 		SubjectID: req.SubjectID,
@@ -607,17 +626,24 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 
 	cfResp, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
 	popularResp, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg)
+	req.degraded = req.degraded || innerReq.degraded
 
 	if popErr != nil && cfErr != nil {
 		return nil, fmt.Errorf("hybrid cold: popular: %w; cf: %v", popErr, cfErr)
 	}
 	if popErr != nil {
+		req.degraded = true
 		if cfResp != nil {
 			cfResp.Source = SourceHybridCold
+			paginateResponse(cfResp, req.Offset, limit)
 		}
 		return cfResp, nil
 	}
 	if cfErr != nil || len(cfResp.Items) == 0 {
+		if cfErr != nil {
+			req.degraded = true
+		}
+		paginateResponse(popularResp, req.Offset, limit)
 		return popularResp, nil
 	}
 
@@ -654,8 +680,10 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 }
 
 // GetTrending returns the trending items for a namespace from Redis.
-// windowHours overrides the namespace config when > 0.
-func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, windowHours int) (*TrendingResponse, error) {
+// There is exactly one trending ZSET per namespace, computed by cron with
+// the namespace's configured window — the response reports that actual
+// window rather than pretending a per-request override exists.
+func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int) (*TrendingResponse, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -669,9 +697,7 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, win
 	}
 
 	actualWindow := 24
-	if windowHours > 0 {
-		actualWindow = windowHours
-	} else if cfg != nil && cfg.TrendingWindow > 0 {
+	if cfg != nil && cfg.TrendingWindow > 0 {
 		actualWindow = cfg.TrendingWindow
 	}
 
@@ -699,7 +725,10 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, win
 }
 
 // fallbackTrending serves trending items from Redis as the cold-start response.
-// When the trending cache is empty or unavailable, falls back to DB popular items.
+// The DB-popular fallback is used only when there is NO trending data at all
+// (or Redis is unavailable) — a merely empty page means the client paginated
+// past the end of trending and must get an empty page back, not a switch to a
+// differently-ordered list whose items were already served.
 func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
 	// With the author filter on, the exclusion has to happen before paging or
 	// the offset would count rows that are about to be dropped. Fetch from
@@ -711,7 +740,25 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	}
 
 	entries, err := s.getTrendingFn(ctx, req.Namespace, fetchOffset, fetchLimit)
-	if len(authored) > 0 && err == nil {
+	if err != nil {
+		slog.Error("get trending failed, serving popular", "namespace", req.Namespace, "error", err)
+		req.degraded = true
+		return s.fallbackPopular(ctx, req, limit, cfg)
+	}
+
+	hasTrending := len(entries) > 0
+	if !hasTrending && fetchOffset > 0 {
+		// Empty page at a non-zero offset: distinguish "past the end of
+		// trending" from "no trending data" by probing rank 0.
+		if probe, probeErr := s.getTrendingFn(ctx, req.Namespace, 0, 1); probeErr == nil && len(probe) > 0 {
+			hasTrending = true
+		}
+	}
+	if !hasTrending {
+		return s.fallbackPopular(ctx, req, limit, cfg)
+	}
+
+	if len(authored) > 0 {
 		entries = dropAuthoredEntries(entries, authored)
 		if req.Offset < len(entries) {
 			entries = entries[req.Offset:]
@@ -722,29 +769,28 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 			entries = entries[:limit]
 		}
 	}
-	if err == nil && len(entries) > 0 {
-		items := make([]RecommendedItem, len(entries))
-		for i, e := range entries {
-			items[i] = RecommendedItem{
-				ObjectID: e.ObjectID,
-				Score:    e.Score,
-				Rank:     req.Offset + i + 1,
-			}
+
+	// entries may be empty here — that is the page that terminates the
+	// client's pagination.
+	items := make([]RecommendedItem, len(entries))
+	for i, e := range entries {
+		items[i] = RecommendedItem{
+			ObjectID: e.ObjectID,
+			Score:    e.Score,
+			Rank:     req.Offset + i + 1,
 		}
-		metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
-		return &Response{
-			SubjectID:   req.SubjectID,
-			Namespace:   req.Namespace,
-			Items:       items,
-			Source:      SourceFallbackPopular,
-			Limit:       limit,
-			Offset:      req.Offset,
-			Total:       req.Offset + len(items),
-			GeneratedAt: time.Now().UTC(),
-		}, nil
 	}
-	// Trending cache empty or unavailable — fall back to DB popular items.
-	return s.fallbackPopular(ctx, req, limit, cfg)
+	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
+	return &Response{
+		SubjectID:   req.SubjectID,
+		Namespace:   req.Namespace,
+		Items:       items,
+		Source:      SourceFallbackPopular,
+		Limit:       limit,
+		Offset:      req.Offset,
+		Total:       req.Offset + len(items),
+		GeneratedAt: time.Now().UTC(),
+	}, nil
 }
 
 func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
@@ -1011,6 +1057,31 @@ func pageItems(scored []scoredItem, offset, limit int) []RecommendedItem {
 	return items
 }
 
+// paginateResponse re-slices a response whose Items were built from rank 0,
+// applying the caller's offset+limit and rewriting ranks. Used by
+// hybridCold's pass-through branches, whose inner requests always fetch
+// from offset 0 with limit offset+limit.
+func paginateResponse(resp *Response, offset, limit int) {
+	start := offset
+	if start > len(resp.Items) {
+		start = len(resp.Items)
+	}
+	end := start + limit
+	if end > len(resp.Items) {
+		end = len(resp.Items)
+	}
+	paged := resp.Items[start:end]
+
+	items := make([]RecommendedItem, len(paged))
+	for i, it := range paged {
+		it.Rank = start + i + 1
+		items[i] = it
+	}
+	resp.Items = items
+	resp.Offset = offset
+	resp.Limit = limit
+}
+
 // itemIDs extracts ObjectID strings from a RecommendedItem slice for use with blendItems.
 func itemIDs(items []RecommendedItem) []string {
 	ids := make([]string, len(items))
@@ -1118,9 +1189,22 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	}
 	scored := rerankScored(results, gamma, len(req.Candidates))
 
-	ranked := make([]RankedItem, len(scored))
-	for i, s := range scored {
-		ranked[i] = RankedItem{ObjectID: s.objectID, Score: s.finalScore, Rank: i + 1}
+	// Every candidate the caller sent comes back: items with no sparse
+	// overlap (or never upserted) score 0 and trail the scored ones in
+	// request order — consistent with rankFallback, which returns the full
+	// list when no subject vector exists.
+	ranked := make([]RankedItem, 0, len(req.Candidates))
+	present := make(map[string]struct{}, len(req.Candidates))
+	for _, sc := range scored {
+		present[sc.objectID] = struct{}{}
+		ranked = append(ranked, RankedItem{ObjectID: sc.objectID, Score: sc.finalScore, Rank: len(ranked) + 1})
+	}
+	for _, c := range req.Candidates {
+		if _, ok := present[c]; ok {
+			continue
+		}
+		present[c] = struct{}{}
+		ranked = append(ranked, RankedItem{ObjectID: c, Score: 0, Rank: len(ranked) + 1})
 	}
 
 	metrics.RecommendRequests.WithLabelValues(ns, SourceHybridRank).Inc()

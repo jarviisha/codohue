@@ -8,6 +8,13 @@ type Request struct {
 	Namespace string
 	Limit     int
 	Offset    int
+
+	// degraded is set by the strategy paths when the response being served
+	// is a fallback caused by an infrastructure error (Qdrant/Redis/DB
+	// unavailable) rather than by the subject's data state (cold start).
+	// Recommend skips caching degraded responses so a one-second blip does
+	// not pin fallback results for the full cache TTL. Internal only.
+	degraded bool
 }
 
 // RecommendedItem re-exports codohuetypes.RecommendedItem.

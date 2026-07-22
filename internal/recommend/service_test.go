@@ -322,17 +322,19 @@ func TestDoRecommend_ColdStart_PopularError_ReturnsError(t *testing.T) {
 
 // ─── GetTrending: window resolution ─────────────────────────────────────────
 
-func TestGetTrending_UsesParamWindow(t *testing.T) {
+func TestGetTrending_ReportsConfigWindowOnly(t *testing.T) {
+	// There is one trending ZSET per namespace, built with the configured
+	// window — the response must report that window, never a per-request one.
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{TrendingWindow: 48},
 	}, newFakeIDMapper())
 
-	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 12) // param=12 overrides config=48
+	resp, err := s.GetTrending(context.Background(), "ns", 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.WindowHours != 12 {
-		t.Errorf("window: got %d, want 12", resp.WindowHours)
+	if resp.WindowHours != 48 {
+		t.Errorf("window: got %d, want config value 48", resp.WindowHours)
 	}
 }
 
@@ -341,7 +343,7 @@ func TestGetTrending_UsesConfigWindow(t *testing.T) {
 		cfg: &namespace.Config{TrendingWindow: 72},
 	}, newFakeIDMapper())
 
-	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 0) // param=0 → use config
+	resp, err := s.GetTrending(context.Background(), "ns", 10, 0) // param=0 → use config
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,7 +355,7 @@ func TestGetTrending_UsesConfigWindow(t *testing.T) {
 func TestGetTrending_DefaultWindow(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: nil}, newFakeIDMapper())
 
-	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 0)
+	resp, err := s.GetTrending(context.Background(), "ns", 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +373,7 @@ func TestGetTrending_ReturnsItems(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 0)
+	resp, err := s.GetTrending(context.Background(), "ns", 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -395,7 +397,7 @@ func TestGetTrending_NormalizesLimitAndOffset(t *testing.T) {
 		return nil, nil
 	}
 
-	resp, err := s.GetTrending(context.Background(), "ns", 0, -3, 0)
+	resp, err := s.GetTrending(context.Background(), "ns", 0, -3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -410,7 +412,7 @@ func TestGetTrending_ConfigAndRedisErrorsStillReturnResponse(t *testing.T) {
 		return nil, errors.New("redis failed")
 	}
 
-	resp, err := s.GetTrending(context.Background(), "ns", 10, 0, 0)
+	resp, err := s.GetTrending(context.Background(), "ns", 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1355,5 +1357,187 @@ func TestDeleteObject_NilMetadataDeleterIsSkipped(t *testing.T) {
 
 	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
 		t.Fatalf("DeleteObject with no metadata deleter: %v", err)
+	}
+}
+
+// ─── remediation phase 3: degraded-cache, hybridCold offset, trending paging, rank ───
+
+func TestRecommend_DegradedFallbackNotCached(t *testing.T) {
+	repo := &fakeRepo{count: 10, popularItems: []string{"p1", "p2"}}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, errors.New("qdrant blip")
+	}
+	cached := false
+	s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 2})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular {
+		t.Fatalf("expected popular fallback, got %s", resp.Source)
+	}
+	if cached {
+		t.Fatal("an error-driven fallback response must not be cached")
+	}
+}
+
+func TestRecommend_ColdStartFallbackIsCached(t *testing.T) {
+	repo := &fakeRepo{count: 0, popularItems: []string{"p1", "p2"}}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	cached := false
+	s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+
+	if _, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 2}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cached {
+		t.Fatal("a legitimate cold-start response must still be cached")
+	}
+}
+
+func TestHybridCold_DegradedCFBranchAppliesOffset(t *testing.T) {
+	// Trending errors → the CF response (built from offset 0) is served and
+	// must be re-paginated to the caller's offset.
+	repo := &fakeRepo{count: 2}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o1")}},
+			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o2")}},
+			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o3")}},
+		}, nil
+	}
+	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return nil, errors.New("redis down")
+	}
+	repo.popularErr = errors.New("db down") // popular path also fails → cf branch
+
+	req := &Request{SubjectID: "u1", Namespace: "ns", Offset: 2}
+	resp, err := s.hybridCold(context.Background(), req, 2, &namespace.Config{Gamma: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Offset != 2 || resp.Limit != 2 {
+		t.Errorf("offset/limit: got %d/%d, want 2/2", resp.Offset, resp.Limit)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "o3" {
+		t.Fatalf("expected page [o3], got %+v", resp.Items)
+	}
+	if resp.Items[0].Rank != 3 {
+		t.Errorf("rank: got %d, want 3", resp.Items[0].Rank)
+	}
+	if !req.degraded {
+		t.Error("degraded flag must be set on the trending-error branch")
+	}
+}
+
+func TestHybridCold_EmptyCFBranchAppliesOffset(t *testing.T) {
+	// CF succeeds with zero items → the trending response (built from
+	// offset 0) is served and must be re-paginated.
+	repo := &fakeRepo{count: 2}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+		all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 3}, {ObjectID: "t2", Score: 2}, {ObjectID: "t3", Score: 1}}
+		if offset >= len(all) {
+			return nil, nil
+		}
+		end := offset + limit
+		if end > len(all) {
+			end = len(all)
+		}
+		return all[offset:end], nil
+	}
+
+	req := &Request{SubjectID: "u1", Namespace: "ns", Offset: 2}
+	resp, err := s.hybridCold(context.Background(), req, 2, &namespace.Config{Gamma: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "t3" {
+		t.Fatalf("expected page [t3], got %+v", resp.Items)
+	}
+	if resp.Offset != 2 {
+		t.Errorf("offset: got %d, want 2", resp.Offset)
+	}
+	if req.degraded {
+		t.Error("an empty CF result is a data state, not degradation")
+	}
+}
+
+func TestFallbackTrending_PastEndReturnsEmptyPageNotPopular(t *testing.T) {
+	repo := &fakeRepo{popularItems: []string{"p1", "p2", "p3"}}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 2}, {ObjectID: "t2", Score: 1}}
+	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+		if offset >= len(all) {
+			return nil, nil
+		}
+		end := offset + limit
+		if end > len(all) {
+			end = len(all)
+		}
+		return all[offset:end], nil
+	}
+
+	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Offset: 10}, 5, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Items) != 0 {
+		t.Fatalf("paging past the end of trending must return an empty page, got %+v", resp.Items)
+	}
+}
+
+func TestFallbackTrending_NoTrendingAtAllFallsToPopular(t *testing.T) {
+	repo := &fakeRepo{popularItems: []string{"p1", "p2"}}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	// default getTrendingFn returns empty at every offset
+
+	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 5, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected popular items when trending has no data, got %+v", resp.Items)
+	}
+}
+
+func TestRank_ReturnsAllCandidatesIncludingUnscored(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("c2")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{
+		SubjectID:  "u1",
+		Candidates: []string{"c1", "c2", "c3"},
+	}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Total != 3 || len(resp.Items) != 3 {
+		t.Fatalf("all candidates must come back: got %d items", len(resp.Items))
+	}
+	if resp.Items[0].ObjectID != "c2" || resp.Items[0].Score == 0 {
+		t.Errorf("scored candidate must lead: %+v", resp.Items[0])
+	}
+	if resp.Items[1].ObjectID != "c1" || resp.Items[2].ObjectID != "c3" {
+		t.Errorf("unscored candidates must trail in request order: %+v", resp.Items)
+	}
+	if resp.Items[2].Rank != 3 {
+		t.Errorf("rank: got %d, want 3", resp.Items[2].Rank)
 	}
 }

@@ -34,7 +34,7 @@ func (f *fakeSvc) Recommend(_ context.Context, _ *Request) (*Response, error) {
 	return f.recommendResp, f.recommendErr
 }
 
-func (f *fakeSvc) GetTrending(_ context.Context, _ string, _, _, _ int) (*TrendingResponse, error) {
+func (f *fakeSvc) GetTrending(_ context.Context, _ string, _, _ int) (*TrendingResponse, error) {
 	return f.trendingResp, f.trendingErr
 }
 

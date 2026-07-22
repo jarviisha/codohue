@@ -99,6 +99,8 @@ func TestClientRoutes_RankByNamespace(t *testing.T) {
 }
 
 func TestClientRoutes_TrendingByNamespace(t *testing.T) {
+	// window_hours is ignored: there is one trending ZSET per namespace,
+	// built with the configured window, and the response reports that.
 	resp := doRequest(t, http.MethodGet, baseURL+"/v1/namespaces/"+testNS+"/trending?window_hours=48", nsKey, nil)
 
 	var body struct {
@@ -110,8 +112,8 @@ func TestClientRoutes_TrendingByNamespace(t *testing.T) {
 	if body.Namespace != testNS {
 		t.Fatalf("namespace = %q, want %q", body.Namespace, testNS)
 	}
-	if body.WindowHours != 48 {
-		t.Fatalf("window_hours = %d, want 48", body.WindowHours)
+	if body.WindowHours == 48 {
+		t.Fatalf("window_hours must reflect the namespace config, not the request param; got %d", body.WindowHours)
 	}
 }
 
