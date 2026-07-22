@@ -253,6 +253,14 @@ collection Qdrant mồ côi sau đó.
 
 ## Phase 3 — Recommend trả kết quả đúng
 
+> **✅ HOÀN THÀNH 2026-07-22** — 3.1–3.5 `fix(recommend): degraded-cache
+> skip...`, 3.6 `feat(compute): sweep stale Qdrant points...`, 3.7
+> `fix(recommend): symmetric freshness decay...`. Ghi chú: 3.5 chọn phương án
+> (a) — bỏ hẳn param `window_hours` (e2e cập nhật theo); 3.2 dùng field nội
+> bộ `Request.degraded` thay vì TTL ngắn; 3.7 sweep subjects_dense chỉ chạy
+> khi `trained` (dưới `catalog` coverage một phần nên xoá là không an toàn);
+> BYOE `object_created_at` đã vào wire contract + golden, SDK sẽ expose sau.
+
 ### 3.1 `hybridCold`: sửa offset ở nhánh degraded — **S**
 
 **Vấn đề (F11):** `recommend/service.go:614-622` trả thẳng `cfResp`/
