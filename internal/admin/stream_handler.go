@@ -42,6 +42,23 @@ func (h *Handler) StreamBatchRun(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Subscribe BEFORE reading the snapshot: the other order loses the
+	// terminal event when the run completes between the two, leaving the
+	// client on a stream that only ever emits pings.
+	entityID := strconv.FormatInt(id, 10)
+	events, cancel := h.bus.Subscribe(eventbus.Filter{
+		EntityID: entityID,
+		Kinds: []string{
+			"batch_run.phase_started",
+			"batch_run.phase_completed",
+			"batch_run.log_line",
+			"batch_run.completed",
+			"batch_run.cancelled",
+		},
+	})
+	defer cancel()
+
 	run, err := h.svc.GetBatchRunDetail(r.Context(), id)
 	if err != nil {
 		writeInternalError(w, r, "could not load batch run", err, slog.Int64("batch_run_id", id))
@@ -56,20 +73,7 @@ func (h *Handler) StreamBatchRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entityID := strconv.FormatInt(id, 10)
-	events, cancel := h.bus.Subscribe(eventbus.Filter{
-		EntityID: entityID,
-		Kinds: []string{
-			"batch_run.phase_started",
-			"batch_run.phase_completed",
-			"batch_run.log_line",
-			"batch_run.completed",
-			"batch_run.cancelled",
-		},
-	})
-	defer cancel()
-
-	streamRun(w, r, events, "batch_run")
+	streamRun(w, r, events, "batch_run", true)
 }
 
 // StreamOps handles GET /api/admin/v1/stream — the global ops bus that drives
@@ -91,7 +95,10 @@ func (h *Handler) StreamOps(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	defer cancel()
-	streamRun(w, r, events, "ops")
+	// closeOnTerminal=false: this is the always-on fleet bus. Closing it on
+	// any run's completion would tear the sidebar's connection down on every
+	// finished run and drop events during the client's reconnect.
+	streamRun(w, r, events, "ops", false)
 }
 
 // StreamCatalog handles GET /api/admin/v1/namespaces/{ns}/catalog/stream —
@@ -125,17 +132,20 @@ func (h *Handler) StreamCatalog(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	defer cancel()
-	streamRun(w, r, events, "catalog")
+	streamRun(w, r, events, "catalog", false)
 }
 
-// streamRun is the shared writer loop used by both stream endpoints. It opens
-// an SSE connection, ships every event from the bus channel until either the
-// channel closes (cancelled subscription), the client disconnects, or — when
-// a terminal kind is observed — the run finishes.
+// streamRun is the shared writer loop used by every stream endpoint. It opens
+// an SSE connection and ships every event from the bus channel until the
+// channel closes (cancelled subscription) or the client disconnects.
+//
+// closeOnTerminal ends the stream when a run reaches a final state. Only the
+// per-run stream wants that: the fleet-wide ops bus and the catalog stream
+// are long-lived and must survive any single run completing.
 //
 // The `stream` label is fed straight into the Prometheus collectors so the
 // active-connection gauge + dropped counter can be sliced by stream kind.
-func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Event, stream string) {
+func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Event, stream string, closeOnTerminal bool) {
 	sw, err := sse.NewWriter(w, r)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusInternalServerError, "sse_unsupported", err.Error())
@@ -166,7 +176,7 @@ func streamRun(w http.ResponseWriter, r *http.Request, events <-chan eventbus.Ev
 				metrics.AdminSSEDroppedTotal.WithLabelValues(stream, "client_slow").Inc()
 				return
 			}
-			if isTerminalKind(e.Kind) {
+			if closeOnTerminal && isTerminalKind(e.Kind) {
 				return
 			}
 		}

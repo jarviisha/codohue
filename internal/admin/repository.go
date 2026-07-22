@@ -330,11 +330,18 @@ func (r *Repository) RequestCancel(ctx context.Context, id int64) (RequestCancel
 	if completedAt != nil {
 		return RequestCancelAlreadyTerminal, nil
 	}
-	if _, err := r.db.Exec(ctx, `
+	// The row can finalize between the SELECT and this UPDATE; RowsAffected
+	// is the authority, or an operator would get 200 "cancel requested" for
+	// a run that already finished.
+	tag, err := r.db.Exec(ctx, `
 		UPDATE batch_run_logs SET cancel_requested = TRUE
 		WHERE id = $1 AND completed_at IS NULL
-	`, id); err != nil {
+	`, id)
+	if err != nil {
 		return 0, fmt.Errorf("update cancel_requested %d: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return RequestCancelAlreadyTerminal, nil
 	}
 	return RequestCancelOK, nil
 }
@@ -564,7 +571,7 @@ func (r *Repository) GetRecentEvents(ctx context.Context, ns string, limit, offs
 		`SELECT id, namespace, subject_id, object_id, action, weight, occurred_at
 		 FROM events
 		 WHERE namespace = $1 AND ($2 = '' OR subject_id = $2)
-		 ORDER BY occurred_at DESC
+		 ORDER BY occurred_at DESC, id DESC
 		 LIMIT $3 OFFSET $4`,
 		ns, subjectID, limit, offset,
 	)
@@ -772,6 +779,9 @@ func (r *Repository) TruncateAllNamespaceData(ctx context.Context) (eventsDelete
 	if _, execErr := tx.Exec(ctx, `DELETE FROM batch_run_logs`); execErr != nil {
 		return 0, 0, fmt.Errorf("delete batch_run_logs: %w", execErr)
 	}
+	if _, execErr := tx.Exec(ctx, `DELETE FROM catalog_backlog_samples`); execErr != nil {
+		return 0, 0, fmt.Errorf("delete catalog_backlog_samples: %w", execErr)
+	}
 	if _, execErr := tx.Exec(ctx, `DELETE FROM id_mappings`); execErr != nil {
 		return 0, 0, fmt.Errorf("delete id_mappings: %w", execErr)
 	}
@@ -808,6 +818,11 @@ func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM batch_run_logs WHERE namespace = $1`, namespace); err != nil {
 		return 0, fmt.Errorf("delete batch run logs: %w", err)
+	}
+	// Without this the backlog timeline outlives the namespace, so a
+	// recreated namespace with the same name inherits the dead one's chart.
+	if _, err := tx.Exec(ctx, `DELETE FROM catalog_backlog_samples WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete catalog backlog samples: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM id_mappings WHERE namespace = $1`, namespace); err != nil {
 		return 0, fmt.Errorf("delete id mappings: %w", err)

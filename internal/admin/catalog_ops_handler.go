@@ -49,8 +49,9 @@ func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Location",
-		"/api/admin/v1/namespaces/"+ns+"/batch-runs/"+strconv.FormatInt(resp.BatchRunID, 10))
+	// The run detail resource lives at the unscoped path; the scoped one is
+	// not a registered route (it would fall through to the SPA).
+	w.Header().Set("Location", "/api/admin/v1/batch-runs/"+strconv.FormatInt(resp.BatchRunID, 10))
 	httpapi.WriteJSON(w, http.StatusAccepted, resp)
 }
 

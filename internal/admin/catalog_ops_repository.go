@@ -378,8 +378,10 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 		conds = append(conds, fmt.Sprintf("c.state = $%d", len(args)))
 	}
 	if objectIDFilter != "" {
-		args = append(args, "%"+objectIDFilter+"%")
-		conds = append(conds, fmt.Sprintf("c.object_id ILIKE $%d", len(args)))
+		// Escape the wildcards: an unescaped % or _ would match unintended
+		// rows, and a trailing backslash makes Postgres reject the pattern.
+		args = append(args, "%"+escapeLikePrefix(objectIDFilter)+"%")
+		conds = append(conds, fmt.Sprintf(`c.object_id ILIKE $%d ESCAPE '\'`, len(args)))
 	}
 	if authorFilter != "" {
 		args = append(args, authorFilter)
@@ -401,7 +403,9 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 		       COALESCE(c.strategy_id, ''), COALESCE(c.strategy_version, ''),
 		       c.attempt_count, COALESCE(c.last_error, ''),
 		       c.embedded_at, c.updated_at`+catalogItemsFrom+where+
-		fmt.Sprintf(" ORDER BY c.updated_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)),
+		// id tiebreaks: bulk redrive / re-embed stamp many rows with the same
+		// updated_at, which would make page boundaries nondeterministic.
+		fmt.Sprintf(" ORDER BY c.updated_at DESC, c.id DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)),
 		args...,
 	)
 	if err != nil {

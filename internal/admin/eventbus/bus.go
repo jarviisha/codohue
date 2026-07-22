@@ -185,9 +185,16 @@ func (b *Bus) Subscribe(filter Filter) (events <-chan Event, cancel func()) {
 	var once sync.Once
 	cancel = func() {
 		once.Do(func() {
+			// Close only if this subscription is still registered: Close()
+			// may have already closed the channel (a handler's deferred
+			// cancel racing shutdown), and closing twice panics.
 			b.mu.Lock()
+			_, registered := b.subscribers[s]
 			delete(b.subscribers, s)
 			b.mu.Unlock()
+			if !registered {
+				return
+			}
 			close(s.ch)
 			if b.onUnsubscribe != nil {
 				b.onUnsubscribe()

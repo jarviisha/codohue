@@ -29,6 +29,7 @@ type fakeSvc struct {
 	upsertErr          error
 	batchRuns          []BatchRunLog
 	batchRunsErr       error
+	batchRunsGotNS     string
 	batchRunsGotKind   string
 	debugResp          *RecommendResponse
 	debugStatus        int
@@ -162,8 +163,9 @@ func (f *fakeSvc) UpsertNamespace(_ context.Context, _ string, _ *NamespaceUpser
 	return f.upsertResp, f.upsertStatus, f.upsertErr
 }
 
-func (f *fakeSvc) GetBatchRuns(_ context.Context, _, _, kind string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
+func (f *fakeSvc) GetBatchRuns(_ context.Context, ns, _, kind string, _, _ int) ([]BatchRunLog, int, BatchRunStats, error) {
 	f.batchRunsGotKind = kind
+	f.batchRunsGotNS = ns
 	return f.batchRuns, len(f.batchRuns), BatchRunStats{Total: len(f.batchRuns)}, f.batchRunsErr
 }
 
@@ -833,7 +835,7 @@ func TestCreateBatchRun_OK(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if loc := rec.Header().Get("Location"); loc != "/api/admin/v1/namespaces/ns1/batch-runs/7" {
+	if loc := rec.Header().Get("Location"); loc != "/api/admin/v1/batch-runs/7" {
 		t.Errorf("unexpected Location header: %q", loc)
 	}
 	var resp BatchRunCreateResponse
@@ -1206,7 +1208,7 @@ func TestTriggerReEmbed_Accepted(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if loc := rec.Header().Get("Location"); loc != "/api/admin/v1/namespaces/ns/batch-runs/42" {
+	if loc := rec.Header().Get("Location"); loc != "/api/admin/v1/batch-runs/42" {
 		t.Errorf("unexpected Location: %q", loc)
 	}
 	var got CatalogReEmbedResponse
@@ -1627,5 +1629,37 @@ func TestResetApp_Handler_InternalError(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+// The namespace-scoped route must scope: reading only ?namespace= made
+// GET /namespaces/{ns}/batch-runs silently serve fleet-wide runs.
+func TestGetBatchRuns_URLPathScopesNamespace(t *testing.T) {
+	svc := &fakeSvc{batchRuns: []BatchRunLog{}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/namespaces/ns1/batch-runs",
+		map[string]string{"ns": "ns1"}, "")
+
+	h.GetBatchRuns(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if svc.batchRunsGotNS != "ns1" {
+		t.Fatalf("namespace from URL path ignored: got %q, want ns1", svc.batchRunsGotNS)
+	}
+}
+
+func TestGetBatchRuns_QueryParamStillWorksOnUnscopedRoute(t *testing.T) {
+	svc := &fakeSvc{batchRuns: []BatchRunLog{}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/batch-runs?namespace=ns2", nil, "")
+
+	h.GetBatchRuns(rec, r)
+
+	if svc.batchRunsGotNS != "ns2" {
+		t.Fatalf("query param namespace: got %q, want ns2", svc.batchRunsGotNS)
 	}
 }

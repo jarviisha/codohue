@@ -243,8 +243,6 @@ func TestStreamOpsForwardsRunLifecycleEvents(t *testing.T) {
 		Kind:    "batch_run.started",
 		Payload: map[string]any{"id": 42, "namespace": "prod"},
 	})
-	// StreamOps closes on terminal kinds (completed/cancelled) — emit
-	// completed so the goroutine exits and ssetest.Read finishes cleanly.
 	bus.Publish(context.Background(), eventbus.Event{
 		Kind:    "batch_run.completed",
 		Payload: map[string]any{"success": true},
@@ -253,5 +251,42 @@ func TestStreamOpsForwardsRunLifecycleEvents(t *testing.T) {
 	events := ssetest.Read(t, resp.Body, 2, 3*time.Second)
 	if events[0].Name != "started" {
 		t.Errorf("events[0].Name=%q, want started", events[0].Name)
+	}
+}
+
+// The ops bus is the always-on fleet stream: a run completing anywhere must
+// not tear down the connection, or the sidebar reconnects (and drops events)
+// after every finished run.
+func TestStreamOpsStaysOpenAfterTerminalEvent(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	bus := eventbus.NewBus()
+	defer bus.Close()
+	h.SetEventBus(bus)
+
+	srv := httptest.NewServer(http.HandlerFunc(h.StreamOps))
+	defer srv.Close()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck // test cleanup
+
+	time.Sleep(50 * time.Millisecond)
+	bus.Publish(context.Background(), eventbus.Event{
+		Kind: "batch_run.completed", Payload: map[string]any{"success": true},
+	})
+	// A second event only arrives if the stream survived the terminal one.
+	bus.Publish(context.Background(), eventbus.Event{
+		Kind: "batch_run.started", Payload: map[string]any{"id": 43},
+	})
+
+	events := ssetest.Read(t, resp.Body, 2, 3*time.Second)
+	if events[0].Name != "completed" || events[1].Name != "started" {
+		t.Fatalf("ops stream closed on the terminal event: got %+v", events)
 	}
 }

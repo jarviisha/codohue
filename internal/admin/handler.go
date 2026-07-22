@@ -273,10 +273,15 @@ func (h *Handler) UpdateCatalogConfig(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, cfg)
 }
 
-// GetBatchRuns handles GET /api/admin/v1/batch-runs.
+// GetBatchRuns handles GET /api/admin/v1/batch-runs and the namespace-scoped
+// GET /api/admin/v1/namespaces/{ns}/batch-runs. The URL path wins when
+// present — otherwise the scoped route would silently serve fleet-wide runs.
 func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	ns := q.Get("namespace")
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		ns = q.Get("namespace")
+	}
 	limit := 20
 	if lStr := q.Get("limit"); lStr != "" {
 		if l, err := strconv.Atoi(lStr); err == nil && l > 0 {
@@ -476,8 +481,9 @@ func (h *Handler) CreateBatchRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if result.ID > 0 {
-		w.Header().Set("Location",
-			"/api/admin/v1/namespaces/"+ns+"/batch-runs/"+strconv.FormatInt(result.ID, 10))
+		// The run detail resource lives at the unscoped path; the scoped
+		// one is not a registered route (it would fall through to the SPA).
+		w.Header().Set("Location", "/api/admin/v1/batch-runs/"+strconv.FormatInt(result.ID, 10))
 	}
 	httpapi.WriteJSON(w, http.StatusAccepted, result)
 }

@@ -59,7 +59,7 @@ func TestSSEStress_100Clients_1kEventsPerSec(t *testing.T) {
 	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
 		events, cancel := bus.Subscribe(eventbus.Filter{})
 		defer cancel()
-		streamRun(w, r, events, "stress")
+		streamRun(w, r, events, "stress", false)
 	})
 
 	srv := httptest.NewUnstartedServer(mux)

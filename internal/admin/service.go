@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	neturl "net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -393,8 +394,11 @@ func (s *Service) GetSubjectRecommendations(ctx context.Context, namespace, subj
 		limit = 10
 	}
 
+	// Path-escape the caller-supplied segments: a subject id containing "/"
+	// or "?" would otherwise steer this admin-authenticated proxy request at
+	// an arbitrary path on the API host.
 	url := fmt.Sprintf("%s/v1/namespaces/%s/subjects/%s/recommendations?limit=%d&offset=%d",
-		s.apiURL, namespace, subjectID, limit, offset)
+		s.apiURL, neturl.PathEscape(namespace), neturl.PathEscape(subjectID), limit, offset)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
@@ -592,7 +596,7 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 		params += "&window_hours=" + strconv.Itoa(windowHours)
 	}
 
-	url := s.apiURL + "/v1/namespaces/" + namespace + "/trending" + params
+	url := s.apiURL + "/v1/namespaces/" + neturl.PathEscape(namespace) + "/trending" + params
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("build trending request: %w", err)
@@ -732,7 +736,7 @@ func (s *Service) InjectEvent(ctx context.Context, ns string, req InjectEventReq
 		return 0, fmt.Errorf("marshal inject event: %w", err)
 	}
 
-	url := s.apiURL + "/v1/namespaces/" + ns + "/events"
+	url := s.apiURL + "/v1/namespaces/" + neturl.PathEscape(ns) + "/events"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
 		return 0, fmt.Errorf("build inject event request: %w", err)
