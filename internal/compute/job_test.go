@@ -64,7 +64,10 @@ func newTestJob(svc recomputer, nsCfg jobNsConfigReader, repo jobComputeRepo) *J
 		ensureDenseCollectionsFn: func(_ context.Context, _ string, _ uint64, _ string) error { return nil },
 		upsertItemDenseFn:        func(_ context.Context, _, _ string, _ map[string][]float32) error { return nil },
 		upsertSubjectDenseFn:     func(_ context.Context, _, _ string, _ map[string][]float32) error { return nil },
-		storeTrendingFn:          func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error { return nil },
+		fetchItemDenseFn: func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
+			return nil, nil
+		},
+		storeTrendingFn: func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error { return nil },
 	}
 }
 
@@ -165,22 +168,122 @@ func TestRunOnce_Phase2_SkippedForDisabled(t *testing.T) {
 	}
 }
 
-func TestRunOnce_Phase2_SkippedForCatalog(t *testing.T) {
-	phase2Called := false
+// Under dense_source=catalog the dense phase still runs — nothing else writes
+// {ns}_subjects_dense — but it must not write back item vectors, which
+// cmd/embedder owns.
+func TestRunOnce_Phase2_CatalogPoolsSubjectsWithoutUpsertingItems(t *testing.T) {
+	itemUpsert := false
+	var subjectsUpserted map[string][]float32
+
 	job := newTestJob(
 		&fakeRecomputer{},
-		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "catalog"}},
-		&fakeJobRepo{namespaces: []string{"ns1"}},
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}},
+		&fakeJobRepo{
+			namespaces: []string{"ns1"},
+			events: []*RawEvent{
+				{SubjectID: "u1", ObjectID: "o1", Weight: 1},
+				{SubjectID: "u1", ObjectID: "o2", Weight: 1},
+			},
+		},
 	)
+	job.fetchItemDenseFn = func(_ context.Context, _ string, objectIDs []string) (map[string][]float32, error) {
+		if len(objectIDs) != 2 {
+			t.Errorf("expected 2 interacted object ids, got %v", objectIDs)
+		}
+		return map[string][]float32{
+			"o1": {0, 2},
+			"o2": {2, 0},
+		}, nil
+	}
 	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
-		phase2Called = true
+		itemUpsert = true
+		return nil
+	}
+	job.upsertSubjectDenseFn = func(_ context.Context, _, _ string, vecs map[string][]float32) error {
+		subjectsUpserted = vecs
 		return nil
 	}
 
 	job.runOnce(context.Background())
 
-	if phase2Called {
-		t.Error("phase 2 should be skipped for dense_source=catalog (embedder owns object dense)")
+	if itemUpsert {
+		t.Error("catalog mode must not upsert item vectors — cmd/embedder owns {ns}_objects_dense")
+	}
+	if len(subjectsUpserted) != 1 {
+		t.Fatalf("expected 1 subject vector, got %d", len(subjectsUpserted))
+	}
+	// Mean of (0,2) and (2,0).
+	if got := subjectsUpserted["u1"]; len(got) != 2 || got[0] != 1 || got[1] != 1 {
+		t.Errorf("expected mean-pooled (1,1), got %v", got)
+	}
+}
+
+// Interacted items that the embedder has not embedded yet yield no vectors —
+// the phase must no-op rather than wipe existing subject vectors.
+func TestRunPhase2Dense_CatalogNoEmbeddingsYet(t *testing.T) {
+	subjectUpsertCalled := false
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{
+		events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1}},
+	})
+	job.fetchItemDenseFn = func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
+		return map[string][]float32{}, nil
+	}
+	job.upsertSubjectDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+		subjectUpsertCalled = true
+		return nil
+	}
+
+	items, subjects, err := job.runPhase2Dense(context.Background(), "ns1",
+		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, &LogCapture{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if items != 0 || subjects != 0 {
+		t.Errorf("expected 0/0 counts, got %d/%d", items, subjects)
+	}
+	if subjectUpsertCalled {
+		t.Error("must not upsert subject vectors when no item vectors are available")
+	}
+}
+
+func TestRunPhase2Dense_CatalogFetchError(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{
+		events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1}},
+	})
+	job.fetchItemDenseFn = func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
+		return nil, errors.New("qdrant down")
+	}
+
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1",
+		&namespace.Config{DenseSource: "catalog"}, &LogCapture{})
+	if err == nil {
+		t.Fatal("expected error when the item vector fetch fails")
+	}
+}
+
+func TestPhase2Runs(t *testing.T) {
+	for src, want := range map[string]bool{
+		"item2vec": true,
+		"svd":      true,
+		"catalog":  true,
+		"byoe":     false,
+		"disabled": false,
+		"":         false,
+	} {
+		if got := phase2Runs(src); got != want {
+			t.Errorf("phase2Runs(%q) = %v, want %v", src, got, want)
+		}
+	}
+}
+
+func TestInteractedObjectIDs(t *testing.T) {
+	got := interactedObjectIDs([]*RawEvent{
+		{SubjectID: "u1", ObjectID: "b"},
+		{SubjectID: "u2", ObjectID: "a"},
+		{SubjectID: "u1", ObjectID: "b"}, // duplicate
+	})
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Errorf("expected sorted distinct [a b], got %v", got)
 	}
 }
 

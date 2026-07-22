@@ -1,5 +1,25 @@
 package compute
 
+import "sort"
+
+// interactedObjectIDs returns the distinct object IDs appearing in events,
+// sorted for deterministic downstream batching. Used by the dense phase under
+// dense_source="catalog" to load only the item vectors that can actually
+// contribute to a subject's mean, instead of scanning the whole collection.
+func interactedObjectIDs(events []*RawEvent) []string {
+	seen := make(map[string]struct{}, len(events))
+	out := make([]string, 0, len(events))
+	for _, e := range events {
+		if _, ok := seen[e.ObjectID]; ok {
+			continue
+		}
+		seen[e.ObjectID] = struct{}{}
+		out = append(out, e.ObjectID)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // UserDenseVectors derives a dense vector for each subject by mean-pooling
 // the dense vectors of all items the subject has interacted with.
 // Subjects with no interacted items that have a dense vector are omitted from the result.

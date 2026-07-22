@@ -23,6 +23,14 @@ var qdrantUpsertDenseFn = func(ctx context.Context, client *qdrant.Client, point
 	return nil
 }
 
+var qdrantGetDenseFn = func(ctx context.Context, client *qdrant.Client, req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	points, err := client.Get(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("qdrant dense get: %w", err)
+	}
+	return points, nil
+}
+
 const (
 	denseVectorName  = "dense_interactions"
 	denseBatchSize   = 500
@@ -245,6 +253,81 @@ func SVDEmbeddings(events []*RawEvent, embeddingDim int) (map[string][]float32, 
 // ─────────────────────────────────────────────────────────────
 // Qdrant upsert
 // ─────────────────────────────────────────────────────────────
+
+// FetchItemDenseVectors reads back the dense vectors already stored in
+// {ns}_objects_dense for the given object IDs, keyed by string object ID.
+//
+// This is the read side that dense_source="catalog" needs: there, item vectors
+// are produced by cmd/embedder from raw catalog content, not trained by the
+// cron job, so phase 2 has to load them instead of computing them before it
+// can mean-pool subject vectors.
+//
+// Objects with no point in the collection (never embedded, or still pending)
+// are simply absent from the result — the caller treats that as "no dense
+// signal for that item" rather than an error.
+func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace string, objectIDs []string) (map[string][]float32, error) {
+	// Sort for deterministic batching, matching upsertDenseVectors.
+	ids := append([]string(nil), objectIDs...)
+	sort.Strings(ids)
+
+	out := make(map[string][]float32, len(ids))
+
+	// numToString lets us map a retrieved point back to its string id without
+	// depending on the payload shape written by whichever producer owns the
+	// collection (cmd/embedder writes its own payload keys).
+	numToString := make(map[uint64]string, denseBatchSize)
+	batch := make([]*qdrant.PointId, 0, denseBatchSize)
+
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		points, err := qdrantGetDenseFn(ctx, qdrantClient, &qdrant.GetPoints{
+			CollectionName: namespace + "_objects_dense",
+			Ids:            batch,
+			WithVectors:    qdrant.NewWithVectorsInclude(denseVectorName),
+		})
+		batch = batch[:0]
+		if err != nil {
+			return fmt.Errorf("fetch dense batch from qdrant: %w", err)
+		}
+		for _, p := range points {
+			objectID, ok := numToString[p.GetId().GetNum()]
+			if !ok {
+				continue
+			}
+			vec := p.GetVectors().GetVectors().GetVectors()[denseVectorName]
+			if vec == nil {
+				continue
+			}
+			if data := vec.GetDense().GetData(); len(data) > 0 {
+				out[objectID] = data
+			}
+		}
+		clear(numToString)
+		return nil
+	}
+
+	for _, objectID := range ids {
+		numID, err := idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
+		if err != nil {
+			slog.Error("fetch dense: get numeric id failed", "object", objectID, "error", err)
+			continue
+		}
+		numToString[numID] = objectID
+		batch = append(batch, qdrant.NewIDNum(numID))
+
+		if len(batch) >= denseBatchSize {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 // UpsertItemDenseVectors upserts item dense vectors into {ns}_objects_dense.
 func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, itemVecs map[string][]float32) error {

@@ -308,6 +308,119 @@ func TestUpsertDenseVectors_UpsertError(t *testing.T) {
 	}
 }
 
+// densePoint builds a RetrievedPoint shaped like what both cmd/embedder and
+// upsertDenseVectors write, so the fetch path is tested against the real
+// named-vector layout.
+func densePoint(numID uint64, vec []float32) *qdrant.RetrievedPoint {
+	return &qdrant.RetrievedPoint{
+		Id: qdrant.NewIDNum(numID),
+		Vectors: &qdrant.VectorsOutput{
+			VectorsOptions: &qdrant.VectorsOutput_Vectors{
+				Vectors: &qdrant.NamedVectorsOutput{
+					Vectors: map[string]*qdrant.VectorOutput{
+						denseVectorName: {
+							Vector: &qdrant.VectorOutput_Dense{
+								Dense: &qdrant.DenseVector{Data: vec},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestFetchItemDenseVectors_Success(t *testing.T) {
+	orig := qdrantGetDenseFn
+	t.Cleanup(func() { qdrantGetDenseFn = orig })
+
+	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 7, "obj-2": 8}, errs: map[string]error{}}
+	idmapSvc := idmap.NewService(repo)
+	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+		if req.CollectionName != "ns_objects_dense" {
+			t.Fatalf("unexpected collection: %s", req.CollectionName)
+		}
+		if len(req.Ids) != 2 {
+			t.Fatalf("expected 2 ids requested, got %d", len(req.Ids))
+		}
+		return []*qdrant.RetrievedPoint{
+			densePoint(7, []float32{0.1, 0.2}),
+			densePoint(8, []float32{0.3, 0.4}),
+		}, nil
+	}
+
+	got, err := FetchItemDenseVectors(context.Background(), nil, idmapSvc, "ns", []string{"obj-2", "obj-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 vectors, got %d", len(got))
+	}
+	if v := got["obj-1"]; len(v) != 2 || v[0] != 0.1 {
+		t.Errorf("obj-1 vector = %v", v)
+	}
+	if v := got["obj-2"]; len(v) != 2 || v[0] != 0.3 {
+		t.Errorf("obj-2 vector = %v", v)
+	}
+}
+
+// Objects the embedder has not written yet come back as missing points; they
+// must be absent from the result rather than an error.
+func TestFetchItemDenseVectors_MissingPointsOmitted(t *testing.T) {
+	orig := qdrantGetDenseFn
+	t.Cleanup(func() { qdrantGetDenseFn = orig })
+
+	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 7, "obj-2": 8}, errs: map[string]error{}}
+	idmapSvc := idmap.NewService(repo)
+	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+		return []*qdrant.RetrievedPoint{densePoint(7, []float32{0.1, 0.2})}, nil
+	}
+
+	got, err := FetchItemDenseVectors(context.Background(), nil, idmapSvc, "ns", []string{"obj-1", "obj-2"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected only the embedded object, got %v", got)
+	}
+	if _, ok := got["obj-2"]; ok {
+		t.Error("obj-2 has no point and must be omitted")
+	}
+}
+
+func TestFetchItemDenseVectors_GetError(t *testing.T) {
+	orig := qdrantGetDenseFn
+	t.Cleanup(func() { qdrantGetDenseFn = orig })
+
+	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 7}, errs: map[string]error{}}
+	idmapSvc := idmap.NewService(repo)
+	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+		return nil, errors.New("qdrant down")
+	}
+
+	if _, err := FetchItemDenseVectors(context.Background(), nil, idmapSvc, "ns", []string{"obj-1"}); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestFetchItemDenseVectors_EmptyIsNoOp(t *testing.T) {
+	orig := qdrantGetDenseFn
+	t.Cleanup(func() { qdrantGetDenseFn = orig })
+	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+		t.Fatal("qdrant get should not be called for an empty id list")
+		return nil, nil
+	}
+
+	got, err := FetchItemDenseVectors(context.Background(), nil, idmap.NewService(
+		&fakeDenseIDRepo{ids: map[string]uint64{}, errs: map[string]error{}}), "ns", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected empty result, got %v", got)
+	}
+}
+
 func TestUpsertDenseVectors_EmptyIsNoOp(t *testing.T) {
 	orig := qdrantUpsertDenseFn
 	t.Cleanup(func() { qdrantUpsertDenseFn = orig })

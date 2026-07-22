@@ -88,6 +88,7 @@ type Job struct {
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
 	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
 	upsertSubjectDenseFn     func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
+	fetchItemDenseFn         func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error)
 	storeTrendingFn          func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error
 }
 
@@ -118,6 +119,9 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		},
 		upsertSubjectDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
 			return UpsertSubjectDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs)
+		},
+		fetchItemDenseFn: func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error) {
+			return FetchItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, objectIDs)
 		},
 		storeTrendingFn: func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
 			return infraredis.StoreTrending(ctx, redisClient, ns, scores, ttl)
@@ -220,7 +224,7 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 		cancelled = true
 	}
 
-	if !cancelled && runErr == nil && cfg != nil && (cfg.DenseSource == "item2vec" || cfg.DenseSource == "svd") {
+	if !cancelled && runErr == nil && cfg != nil && phase2Runs(cfg.DenseSource) {
 		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseSource), capture, func() (int, int, error) {
 			return j.runPhase2Dense(ctx, ns, cfg, capture)
 		})
@@ -382,7 +386,28 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, c
 // a problem in production.
 const item2vecLargeEventThreshold = 500_000
 
+// phase2Runs reports whether the dense phase has work to do for a dense_source.
+//
+// "item2vec" / "svd" train item vectors and then mean-pool subject vectors.
+// "catalog" does not train — cmd/embedder owns {ns}_objects_dense — but the
+// phase still runs to derive subject vectors from those item vectors, because
+// nothing else in the system writes {ns}_subjects_dense in that mode.
+// "byoe" and "disabled" leave both collections to the client.
+func phase2Runs(denseSource string) bool {
+	switch denseSource {
+	case "item2vec", "svd", "catalog":
+		return true
+	default:
+		return false
+	}
+}
+
 // runPhase2Dense computes and upserts dense vectors for items and subjects.
+//
+// Item vector ownership depends on dense_source: "item2vec" and "svd" train
+// them here, "catalog" reads back what cmd/embedder already wrote. Subject
+// vectors are always derived here by mean-pooling, and are the reason this
+// phase runs at all under "catalog".
 //
 // Retrain strategy: full retrain on every cron run — no incremental updates.
 // Incremental Item2Vec (online Word2Vec) is deliberately avoided: it suffers from
@@ -420,7 +445,10 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	}
 	capture.Info(fmt.Sprintf("fetched %d events for embedding", len(events)))
 
+	// trained is false when the item vectors came from cmd/embedder rather than
+	// from this run — in that case they must not be written back.
 	var itemVecs map[string][]float32
+	trained := true
 
 	switch cfg.DenseSource {
 	case "item2vec":
@@ -438,17 +466,39 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		if err != nil {
 			return 0, 0, fmt.Errorf("svd embeddings: %w", err)
 		}
+
+	case "catalog":
+		// cmd/embedder owns {ns}_objects_dense here. Only the items that were
+		// actually interacted with can contribute to a subject's mean, so we
+		// load exactly those rather than scanning the whole collection.
+		trained = false
+		interacted := interactedObjectIDs(events)
+		itemVecs, err = j.fetchItemDenseFn(ctx, ns, interacted)
+		if err != nil {
+			return 0, 0, fmt.Errorf("fetch catalog item dense vectors: %w", err)
+		}
+		capture.Info(fmt.Sprintf("loaded %d/%d interacted item vectors from catalog embeddings",
+			len(itemVecs), len(interacted)))
 	}
 
 	if len(itemVecs) == 0 {
-		slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseSource)
-		capture.Warn("no item vectors produced")
+		if trained {
+			slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseSource)
+			capture.Warn("no item vectors produced")
+		} else {
+			// Every interacted object is still pending/failed in the embedder,
+			// so there is nothing to pool from yet.
+			slog.Warn("phase 2: no catalog item vectors available yet", "namespace", ns)
+			capture.Warn("no catalog embeddings for interacted items yet — subject vectors unchanged")
+		}
 		return 0, 0, nil
 	}
-	capture.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
 
-	if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseSource, itemVecs); err != nil {
-		return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
+	if trained {
+		capture.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
+		if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseSource, itemVecs); err != nil {
+			return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
+		}
 	}
 
 	subjectVecs := UserDenseVectors(events, itemVecs)
@@ -457,7 +507,11 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 			return 0, 0, fmt.Errorf("upsert subject dense vectors: %w", err)
 		}
 	}
-	capture.Info(fmt.Sprintf("upserted %d item + %d subject vectors to Qdrant", len(itemVecs), len(subjectVecs)))
+	if trained {
+		capture.Info(fmt.Sprintf("upserted %d item + %d subject vectors to Qdrant", len(itemVecs), len(subjectVecs)))
+	} else {
+		capture.Info(fmt.Sprintf("upserted %d subject vectors to Qdrant (item vectors owned by embedder)", len(subjectVecs)))
+	}
 
 	slog.Info("phase 2 dense complete",
 		"namespace", ns,
