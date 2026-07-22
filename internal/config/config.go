@@ -37,6 +37,10 @@ type AppConfig struct {
 	// hostname at runtime". Read by cmd/api only.
 	IngestReplicaName string
 
+	// CatalogMaxContentBytes is the global default content cap for catalog
+	// ingest, applied when a namespace has no override. Read by cmd/api.
+	CatalogMaxContentBytes int
+
 	// Retention windows for observability tables that grow unbounded under
 	// steady-state operation. Zero or negative disables the prune for the
 	// matching table. Read by cmd/cron only.
@@ -60,6 +64,15 @@ func LoadAPI() (*AppConfig, error) {
 
 	cfg.APIPort = getEnv("CODOHUE_API_PORT", "2001")
 	cfg.IngestReplicaName = getEnv("CODOHUE_INGEST_REPLICA_NAME", "")
+
+	maxBytes, err := strconv.Atoi(getEnv("CODOHUE_CATALOG_MAX_CONTENT_BYTES", "32768"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_CATALOG_MAX_CONTENT_BYTES: %w", err)
+	}
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("CODOHUE_CATALOG_MAX_CONTENT_BYTES must be positive, got %d", maxBytes)
+	}
+	cfg.CatalogMaxContentBytes = maxBytes
 	return cfg, nil
 }
 

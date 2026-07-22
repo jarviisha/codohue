@@ -44,7 +44,16 @@ type Service struct {
 	publisher    xAdder
 	authorWriter objectAuthorWriter // optional; attribution is skipped when nil
 	clock        func() time.Time
+
+	// defaultMaxContentBytes is the global content cap applied when the
+	// namespace carries no override (NULL column). Wired from
+	// CODOHUE_CATALOG_MAX_CONTENT_BYTES by cmd/api; 0 disables the fallback.
+	defaultMaxContentBytes int
 }
+
+// SetDefaultMaxContentBytes wires the global content cap. Call once at
+// startup, before serving.
+func (s *Service) SetDefaultMaxContentBytes(n int) { s.defaultMaxContentBytes = n }
 
 // SetAuthorWriter wires the objects domain in. The wiring layer calls this
 // once at startup; when unset, catalog ingest simply drops author_subject_id.
@@ -97,9 +106,15 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 		return nil, ErrNamespaceNotEnabled
 	}
 
-	if cfg.CatalogMaxContentBytes > 0 && len(req.Content) > cfg.CatalogMaxContentBytes {
+	maxContentBytes := cfg.CatalogMaxContentBytes
+	if maxContentBytes <= 0 {
+		// Namespace has no override (NULL column) — fall back to the global
+		// default injected from CODOHUE_CATALOG_MAX_CONTENT_BYTES.
+		maxContentBytes = s.defaultMaxContentBytes
+	}
+	if maxContentBytes > 0 && len(req.Content) > maxContentBytes {
 		return nil, fmt.Errorf("%w: limit=%d got=%d", ErrContentTooLarge,
-			cfg.CatalogMaxContentBytes, len(req.Content))
+			maxContentBytes, len(req.Content))
 	}
 
 	hash := ContentHash(req.Content)

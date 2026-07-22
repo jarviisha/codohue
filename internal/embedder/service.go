@@ -97,11 +97,19 @@ type Service struct {
 	ensuredMu sync.Mutex
 	ensured   map[string]struct{}
 
+	// defaultMaxAttempts is the global retry budget applied when the
+	// namespace carries no override. Wired from CODOHUE_EMBED_MAX_ATTEMPTS
+	// by cmd/embedder.
+	defaultMaxAttempts int
+
 	// eventPublisher is optional. When set, the service emits one
 	// CatalogItemStateChangedEvent after every successful state transition
 	// so the admin plane can fan progress out to operators over SSE.
 	eventPublisher CatalogEventPublisher
 }
+
+// SetDefaultMaxAttempts wires the global retry budget. Call once at startup.
+func (s *Service) SetDefaultMaxAttempts(n int) { s.defaultMaxAttempts = n }
 
 // SetEventPublisher wires a pub/sub publisher used to broadcast catalog item
 // state changes. Production wiring (cmd/embedder/main.go) passes a Redis-
@@ -183,7 +191,13 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 		return OutcomeSkipped, nil
 	}
 
+	// Precedence: namespace override (non-NULL column) → global default
+	// (CODOHUE_EMBED_MAX_ATTEMPTS) → hardcoded 5. Before migration 023 the
+	// column was NOT NULL, which made the env var a dead knob.
 	maxAttempts := cfg.CatalogMaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = s.defaultMaxAttempts
+	}
 	if maxAttempts <= 0 {
 		maxAttempts = 5
 	}

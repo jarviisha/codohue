@@ -134,6 +134,7 @@ func run() error {
 	// the request, persists the row, and publishes to Redis Streams.
 	catalogRepo := catalog.NewRepository(db)
 	catalogSvc := catalog.NewService(catalogRepo, nsConfigSvc, redisClient)
+	catalogSvc.SetDefaultMaxContentBytes(cfg.CatalogMaxContentBytes)
 	catalogHandler := catalog.NewHandler(catalogSvc)
 
 	// per-object metadata, independent of embedding. Wired into catalog as an

@@ -123,7 +123,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
-			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
+			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
 			created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
 		req.ExcludeAuthored,
@@ -204,7 +204,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
-			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
+			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
 			created_at, updated_at
 		FROM namespace_configs
 		WHERE namespace = $1`,
@@ -257,7 +257,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
-			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
+			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
 			created_at, updated_at
 		FROM namespace_configs
 		WHERE dense_source = 'catalog'
@@ -360,7 +360,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
-			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
+			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
 			created_at, updated_at`,
 		ns, req.Enabled, strategyID, strategyVer, paramsJSON, maxAttempts, maxBytes,
 	).Scan(

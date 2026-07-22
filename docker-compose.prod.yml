@@ -11,7 +11,8 @@ services:
       - QDRANT_PORT=6334
       - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
       - CODOHUE_LOG_FORMAT=json
-      - CODOHUE_BATCH_INTERVAL_MINUTES=5
+      - CODOHUE_BATCH_INTERVAL_MINUTES=${CODOHUE_BATCH_INTERVAL_MINUTES:-5}
+      - CODOHUE_CATALOG_MAX_CONTENT_BYTES=${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -35,7 +36,10 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
       - CODOHUE_LOG_FORMAT=json
-      - CODOHUE_BATCH_INTERVAL_MINUTES=5
+      - CODOHUE_BATCH_INTERVAL_MINUTES=${CODOHUE_BATCH_INTERVAL_MINUTES:-5}
+      - CODOHUE_BATCH_RUN_RETENTION_DAYS=${CODOHUE_BATCH_RUN_RETENTION_DAYS:-30}
+      - CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS=${CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS:-7}
+      - CODOHUE_RETENTION_INTERVAL=${CODOHUE_RETENTION_INTERVAL:-1h}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -55,6 +59,8 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6334
       - CODOHUE_LOG_FORMAT=json
+      - CODOHUE_CATALOG_MAX_CONTENT_BYTES=${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}
+      - CODOHUE_EMBED_MAX_ATTEMPTS=${CODOHUE_EMBED_MAX_ATTEMPTS:-5}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -83,6 +89,7 @@ services:
       - CODOHUE_API_URL=http://api:2001
       - CODOHUE_ADMIN_PORT=2002
       - CODOHUE_LOG_FORMAT=json
+      - CODOHUE_ADMIN_SESSION_SECRET=${CODOHUE_ADMIN_SESSION_SECRET:-}
     healthcheck:
       # cmd/admin has no unauthenticated /healthz; the embedded SPA index
       # doubles as the liveness probe.

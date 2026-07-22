@@ -111,6 +111,7 @@ func run() error {
 	// item events) and the sampler (snapshot + alert events).
 	catalogPublisher := embedder.NewRedisCatalogEventPublisher(redisClient)
 	embedderSvc.SetEventPublisher(catalogPublisher)
+	embedderSvc.SetDefaultMaxAttempts(cfg.EmbedMaxAttempts)
 
 	consumerName := cfg.ReplicaName
 	if consumerName == "" {
