@@ -18,6 +18,8 @@ COVERAGE_UNIT_OUT := $(COVERAGE_DIR)/unit.out
 COVERAGE_RACE_OUT := $(COVERAGE_DIR)/race.out
 
 # Go modules covered by workspace-wide lint, format, and test targets.
+# The examples/ modules in go.work are demo apps, deliberately excluded from
+# lint/test/coverage — they are not part of the shipped surface.
 GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
 
 GO_CACHE_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp
@@ -383,7 +385,7 @@ migrate-version:
 	migrate -path $(MIGRATIONS_DIR) -database "$$DATABASE_URL" version
 
 migrate-create:
-	migrate -path $(MIGRATIONS_DIR) -ext sql -seq create $(NAME)
+	migrate create -ext sql -dir $(MIGRATIONS_DIR) -seq $(NAME)
 
 # Clean
 

@@ -235,6 +235,23 @@ func (f *fakeDenseIDRepo) GetOrCreate(_ context.Context, stringID, _, _ string) 
 	return f.next, nil
 }
 
+func (f *fakeDenseIDRepo) Lookup(_ context.Context, stringID, _, _ string) (numericID uint64, found bool, err error) {
+	id, ok := f.ids[stringID]
+	return id, ok, nil
+}
+
+func (f *fakeDenseIDRepo) GetOrCreateBatch(ctx context.Context, stringIDs []string, ns, entityType string) (map[string]uint64, error) {
+	out := make(map[string]uint64, len(stringIDs))
+	for _, id := range stringIDs {
+		numID, err := f.GetOrCreate(ctx, id, ns, entityType)
+		if err != nil {
+			continue
+		}
+		out[id] = numID
+	}
+	return out, nil
+}
+
 func TestUpsertItemDenseVectors_Success(t *testing.T) {
 	orig := qdrantUpsertDenseFn
 	t.Cleanup(func() { qdrantUpsertDenseFn = orig })

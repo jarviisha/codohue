@@ -21,6 +21,14 @@ import (
 // ID lookups.
 const maxCandidates = 500
 
+// Upper bounds for paging params. Without them a huge offset overflowed the
+// over-fetch arithmetic (offset+limit wraps negative → absurd Qdrant topK,
+// negative SQL LIMIT → 500). The caps are far above any legitimate paging.
+const (
+	maxPageLimit  = 1000
+	maxPageOffset = 100_000
+)
+
 type recommendSvc interface {
 	Recommend(ctx context.Context, req *Request) (*Response, error)
 	GetTrending(ctx context.Context, ns string, limit, offset int) (*TrendingResponse, error)
@@ -60,7 +68,7 @@ func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Reque
 	limit := 20
 	if l := q.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
-		if err != nil || n <= 0 {
+		if err != nil || n <= 0 || n > maxPageLimit {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_limit", "invalid limit")
 			return
 		}
@@ -70,7 +78,7 @@ func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Reque
 	offset := 0
 	if o := q.Get("offset"); o != "" {
 		n, err := strconv.Atoi(o)
-		if err != nil || n < 0 {
+		if err != nil || n < 0 || n > maxPageOffset {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_offset", "invalid offset")
 			return
 		}
@@ -148,7 +156,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if l := q.Get("limit"); l != "" {
 		n, err := strconv.Atoi(l)
-		if err != nil || n <= 0 {
+		if err != nil || n <= 0 || n > maxPageLimit {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_limit", "invalid limit")
 			return
 		}
@@ -158,7 +166,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	offset := 0
 	if o := q.Get("offset"); o != "" {
 		n, err := strconv.Atoi(o)
-		if err != nil || n < 0 {
+		if err != nil || n < 0 || n > maxPageOffset {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_offset", "invalid offset")
 			return
 		}

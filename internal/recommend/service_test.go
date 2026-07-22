@@ -62,6 +62,7 @@ type fakeIDMapper struct {
 	nextID     uint64
 	ids        map[string]uint64
 	objectErrs map[string]error
+	lookupMiss bool // when true, LookupObjectID misses for unknown ids
 }
 
 func newFakeIDMapper() *fakeIDMapper {
@@ -82,6 +83,29 @@ func (f *fakeIDMapper) GetOrCreateObjectID(_ context.Context, id, _ string) (uin
 	f.nextID++
 	f.ids[id] = f.nextID
 	return f.nextID, nil
+}
+
+func (f *fakeIDMapper) GetOrCreateObjectIDs(ctx context.Context, ids []string, ns string) (map[string]uint64, error) {
+	out := make(map[string]uint64, len(ids))
+	for _, id := range ids {
+		numID, err := f.GetOrCreateObjectID(ctx, id, ns)
+		if err != nil {
+			continue // batch skips unmappable ids, mirroring the old loop
+		}
+		out[id] = numID
+	}
+	return out, nil
+}
+
+func (f *fakeIDMapper) LookupObjectID(ctx context.Context, id, ns string) (numericID uint64, found bool, err error) {
+	if _, exists := f.ids[id]; !exists && f.lookupMiss {
+		return 0, false, nil
+	}
+	numID, err := f.GetOrCreateObjectID(ctx, id, ns)
+	if err != nil {
+		return 0, false, err
+	}
+	return numID, true, nil
 }
 
 // newTestService builds a Service with all infra replaced by no-ops / fakes.

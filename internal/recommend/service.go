@@ -66,6 +66,8 @@ type objectMetadataDeleter interface {
 type recommendIDMapper interface {
 	GetOrCreateSubjectID(ctx context.Context, subjectID, namespace string) (uint64, error)
 	GetOrCreateObjectID(ctx context.Context, objectID, namespace string) (uint64, error)
+	GetOrCreateObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error)
+	LookupObjectID(ctx context.Context, objectID, namespace string) (uint64, bool, error)
 }
 
 // Service serves recommendations via collaborative filtering or fallback to popular items.
@@ -912,12 +914,16 @@ func (s *Service) buildSeenItemsFilter(ctx context.Context, ns string, excludedS
 	if len(excludedStringIDs) == 0 {
 		return nil
 	}
-	ids := make([]*qdrant.PointId, 0, len(excludedStringIDs))
-	for _, sid := range excludedStringIDs {
-		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, sid, ns)
-		if err != nil {
-			continue
-		}
+	// One round-trip for the whole exclusion set — at the 5000-id authored
+	// cap the per-id variant was ~5000 sequential queries per uncached
+	// request. Errors degrade to an unfiltered search, same as before.
+	numIDs, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, excludedStringIDs, ns)
+	if err != nil {
+		slog.Error("build seen filter: batch id mapping failed, serving unfiltered", "namespace", ns, "error", err)
+		return nil
+	}
+	ids := make([]*qdrant.PointId, 0, len(numIDs))
+	for _, numID := range numIDs {
 		ids = append(ids, qdrant.NewIDNum(numID))
 	}
 	if len(ids) == 0 {
@@ -1184,13 +1190,16 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		return s.rankFallback(req, ns), nil
 	}
 
-	ids := make([]*qdrant.PointId, 0, len(req.Candidates))
-	for _, candidateID := range req.Candidates {
-		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, candidateID, ns)
-		if err != nil {
-			slog.Error("rank: get object numeric id failed", "object_id", candidateID, "error", err)
-			continue
-		}
+	// One round-trip for all candidates (up to 500). GetOrCreate rather than
+	// Lookup on purpose: candidates about to be ranked are usually about to
+	// be interacted with, so pre-minting their ids is not junk.
+	numIDs, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, req.Candidates, ns)
+	if err != nil {
+		slog.Error("rank: batch id mapping failed", "namespace", ns, "error", err)
+		return s.rankFallback(req, ns), nil
+	}
+	ids := make([]*qdrant.PointId, 0, len(numIDs))
+	for _, numID := range numIDs {
 		ids = append(ids, qdrant.NewIDNum(numID))
 	}
 
@@ -1271,9 +1280,14 @@ func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 // recCacheTTL (5 minutes) after deletion, since the cache is keyed by subject rather than
 // by individual objects.
 func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
-	numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, ns)
+	// Lookup, not GetOrCreate: deleting a never-ingested object must be an
+	// idempotent no-op, not a write that mints a mapping for it.
+	numID, found, err := s.idmapSvc.LookupObjectID(ctx, objectID, ns)
 	if err != nil {
 		return fmt.Errorf("get numeric id: %w", err)
+	}
+	if !found {
+		return nil
 	}
 
 	pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}

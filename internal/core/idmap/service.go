@@ -7,17 +7,21 @@ import (
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
+// idmapRepo is the repository surface the Service needs; *Repository
+// implements it, tests fake it.
+type idmapRepo interface {
+	GetOrCreate(ctx context.Context, stringID, namespace, entityType string) (uint64, error)
+	Lookup(ctx context.Context, stringID, namespace, entityType string) (uint64, bool, error)
+	GetOrCreateBatch(ctx context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error)
+}
+
 // Service provides methods to get or create numeric IDs for subjects and objects.
 type Service struct {
-	repo interface {
-		GetOrCreate(ctx context.Context, stringID, namespace, entityType string) (uint64, error)
-	}
+	repo idmapRepo
 }
 
 // NewService creates a new Service with the given repository.
-func NewService(repo interface {
-	GetOrCreate(ctx context.Context, stringID, namespace, entityType string) (uint64, error)
-}) *Service {
+func NewService(repo idmapRepo) *Service {
 	return &Service{repo: repo}
 }
 
@@ -39,4 +43,24 @@ func (s *Service) GetOrCreateObjectID(ctx context.Context, objectID, namespace s
 		return id, fmt.Errorf("get or create object id: %w", err)
 	}
 	return id, nil
+}
+
+// LookupObjectID returns the numeric id for objectID without creating one.
+func (s *Service) LookupObjectID(ctx context.Context, objectID, namespace string) (numericID uint64, found bool, err error) {
+	id, found, err := s.repo.Lookup(ctx, objectID, namespace, "object")
+	if err != nil {
+		metrics.IDMappingErrors.WithLabelValues("object").Inc()
+		return 0, false, fmt.Errorf("lookup object id: %w", err)
+	}
+	return id, found, nil
+}
+
+// GetOrCreateObjectIDs resolves many object ids in a single round-trip.
+func (s *Service) GetOrCreateObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error) {
+	ids, err := s.repo.GetOrCreateBatch(ctx, objectIDs, namespace, "object")
+	if err != nil {
+		metrics.IDMappingErrors.WithLabelValues("object").Inc()
+		return nil, fmt.Errorf("batch get or create object ids: %w", err)
+	}
+	return ids, nil
 }

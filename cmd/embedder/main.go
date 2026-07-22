@@ -206,10 +206,16 @@ func run() error {
 	quit := make(chan os.Signal, 1)
 	signalNotifyFn(quit, syscall.SIGINT, syscall.SIGTERM)
 
+	// workerDone delivers exactly one value; remember whether we consumed it
+	// here so the drain below doesn't block on an empty channel — that made
+	// every worker-error shutdown eat the full 10s timeout with a spurious
+	// "worker shutdown timed out" warning.
+	workerExited := false
 	select {
 	case <-quit:
 		slog.Info("embedder shutting down (signal)")
 	case err := <-workerDone:
+		workerExited = true
 		if err != nil && !errors.Is(err, context.Canceled) {
 			slog.Error("worker exited with error", "error", err)
 		}
@@ -224,12 +230,13 @@ func run() error {
 		slog.Error("health server shutdown error", "error", err)
 	}
 
-	// Wait for the worker goroutine to drain (it may already have exited if
-	// the trigger was workerDone above).
-	select {
-	case <-workerDone:
-	case <-shutdownCtx.Done():
-		slog.Warn("worker shutdown timed out")
+	// Wait for the worker goroutine to drain unless it already has.
+	if !workerExited {
+		select {
+		case <-workerDone:
+		case <-shutdownCtx.Done():
+			slog.Warn("worker shutdown timed out")
+		}
 	}
 
 	// Wait for the watcher goroutine to drain (it returns nil on context cancel).

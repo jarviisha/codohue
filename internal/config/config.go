@@ -107,6 +107,11 @@ func loadBase() (*AppConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid CODOHUE_BATCH_INTERVAL_MINUTES: %w", err)
 	}
+	if batchInterval <= 0 {
+		// time.NewTicker panics on non-positive durations — without this
+		// check, setting 0 (hoping for "disable") crash-looped cmd/cron.
+		return nil, fmt.Errorf("CODOHUE_BATCH_INTERVAL_MINUTES must be positive, got %d", batchInterval)
+	}
 	cfg.BatchIntervalMinutes = batchInterval
 
 	batchRetention, err := strconv.Atoi(getEnv("CODOHUE_BATCH_RUN_RETENTION_DAYS", "30"))

@@ -16,6 +16,7 @@ func (f fakeRow) Scan(dest ...any) error {
 
 type fakeRepo struct {
 	id         uint64
+	found      bool
 	err        error
 	lastString string
 	lastNS     string
@@ -27,6 +28,26 @@ func (f *fakeRepo) GetOrCreate(_ context.Context, stringID, namespace, entityTyp
 	f.lastNS = namespace
 	f.lastType = entityType
 	return f.id, f.err
+}
+
+func (f *fakeRepo) Lookup(_ context.Context, stringID, namespace, entityType string) (numericID uint64, found bool, err error) {
+	f.lastString = stringID
+	f.lastNS = namespace
+	f.lastType = entityType
+	return f.id, f.found, f.err
+}
+
+func (f *fakeRepo) GetOrCreateBatch(_ context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
+	f.lastNS = namespace
+	f.lastType = entityType
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]uint64, len(stringIDs))
+	for i, id := range stringIDs {
+		out[id] = f.id + uint64(i)
+	}
+	return out, nil
 }
 
 func TestNewRepository(t *testing.T) {
