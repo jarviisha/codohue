@@ -31,10 +31,11 @@ type idmapService interface {
 
 // Service computes sparse vectors with time decay for each subject in a namespace.
 type Service struct {
-	repo     computeRepo
-	idmapSvc idmapService
-	qdrant   *qdrant.Client
-	upsertFn func(ctx context.Context, points *qdrant.UpsertPoints) error
+	repo      computeRepo
+	idmapSvc  idmapService
+	qdrant    *qdrant.Client
+	upsertFn  func(ctx context.Context, points *qdrant.UpsertPoints) error
+	cleanupFn func(ctx context.Context, collection string, keep map[uint64]struct{}) (int, error)
 }
 
 // NewService creates a new Service with the required dependencies.
@@ -49,6 +50,9 @@ func NewService(repo *Repository, idmapSvc *idmap.Service, qdrantClient *qdrant.
 				return fmt.Errorf("qdrant upsert: %w", err)
 			}
 			return nil
+		},
+		cleanupFn: func(ctx context.Context, collection string, keep map[uint64]struct{}) (int, error) {
+			return CleanupStalePoints(ctx, qdrantClient, collection, keep)
 		},
 	}
 }
@@ -75,6 +79,7 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// reporting success while Qdrant holds only stale vectors is worse than
 	// an honest red run.
 	upserted := 0
+	keepSubjects := make(map[uint64]struct{}, len(subjects))
 	for _, subjectID := range subjects {
 		subjectVec, scores, maxTimes, createdTimes, err := s.buildVectors(ctx, namespace, subjectID, lambda)
 		if err != nil {
@@ -86,6 +91,7 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 			slog.Error("upsert subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
 		} else {
 			upserted++
+			keepSubjects[subjectVec.NumericID] = struct{}{}
 		}
 
 		if err := s.accumulateObjectCooccurrence(ctx, namespace, objectAccum, scores); err != nil {
@@ -108,13 +114,35 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 		return 0, 0, fmt.Errorf("all %d subject upserts failed", len(subjects))
 	}
 
-	if err := s.upsertObjectVectors(ctx, namespace, objectAccum, objectMaxTime, objectCreatedAt); err != nil {
+	keepObjects, err := s.upsertObjectVectors(ctx, namespace, objectAccum, objectMaxTime, objectCreatedAt)
+	if err != nil {
 		return upserted, 0, fmt.Errorf("upsert object vectors: %w", err)
 	}
+
+	// Full recompute only upserts what the window produced — sweep out the
+	// points of entities that aged past it, or they keep frozen scores (and
+	// keep matching searches) forever. Best-effort: a failed sweep is stale
+	// data, not a failed run; the next tick retries it.
+	s.cleanupCollection(ctx, namespace+"_subjects", keepSubjects)
+	s.cleanupCollection(ctx, namespace+"_objects", keepObjects)
 
 	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(upserted))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", len(objectAccum))
 	return upserted, len(objectAccum), nil
+}
+
+func (s *Service) cleanupCollection(ctx context.Context, collection string, keep map[uint64]struct{}) {
+	if s.cleanupFn == nil {
+		return
+	}
+	n, err := s.cleanupFn(ctx, collection, keep)
+	if err != nil {
+		slog.Warn("stale point cleanup failed", "collection", collection, "error", err)
+		return
+	}
+	if n > 0 {
+		slog.Info("stale points removed", "collection", collection, "removed", n)
+	}
 }
 
 func (s *Service) accumulateObjectCooccurrence(ctx context.Context, namespace string, objectAccum map[string]map[uint64]float32, objectScores map[string]float64) error {
@@ -242,8 +270,9 @@ func (s *Service) upsertSubjectVector(ctx context.Context, namespace string, vec
 	return nil
 }
 
-func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[string]map[uint64]float32, maxTimes, createdTimes map[string]int64) error {
+func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[string]map[uint64]float32, maxTimes, createdTimes map[string]int64) (map[uint64]struct{}, error) {
 	collectionName := namespace + "_objects"
+	upsertedIDs := make(map[uint64]struct{}, len(accum))
 	var batch []*qdrant.PointStruct
 
 	flush := func() error {
@@ -264,8 +293,9 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 	for objectID, subjectScores := range accum {
 		objNumID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
 		if err != nil {
-			return fmt.Errorf("get object id %q: %w", objectID, err)
+			return upsertedIDs, fmt.Errorf("get object id %q: %w", objectID, err)
 		}
+		upsertedIDs[objNumID] = struct{}{}
 
 		type sparseEntry struct {
 			index uint32
@@ -313,9 +343,9 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 
 		if len(batch) >= qdrantBatchSize {
 			if err := flush(); err != nil {
-				return err
+				return upsertedIDs, err
 			}
 		}
 	}
-	return flush()
+	return upsertedIDs, flush()
 }

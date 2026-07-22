@@ -91,6 +91,8 @@ type Job struct {
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
 	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
 	upsertSubjectDenseFn     func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
+	cleanupItemDenseFn       func(ctx context.Context, ns string, keepIDs []string) (int, error)
+	cleanupSubjectDenseFn    func(ctx context.Context, ns string, keepIDs []string) (int, error)
 	fetchItemDenseFn         func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error)
 	storeTrendingFn          func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error
 }
@@ -125,6 +127,12 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		},
 		upsertSubjectDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
 			return UpsertSubjectDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs)
+		},
+		cleanupItemDenseFn: func(ctx context.Context, ns string, keepIDs []string) (int, error) {
+			return CleanupStaleItemDensePoints(ctx, qdrantClient, idmapSvc, ns, keepIDs)
+		},
+		cleanupSubjectDenseFn: func(ctx context.Context, ns string, keepIDs []string) (int, error) {
+			return CleanupStaleSubjectDensePoints(ctx, qdrantClient, idmapSvc, ns, keepIDs)
 		},
 		fetchItemDenseFn: func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error) {
 			return FetchItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, objectIDs)
@@ -625,6 +633,28 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		capture.Info(fmt.Sprintf("upserted %d subject vectors to Qdrant (item vectors owned by embedder)", len(subjectVecs)))
 	}
 
+	// Sweep out points this full retrain no longer produced. Only when this
+	// run owns them: under "catalog", {ns}_objects_dense belongs to
+	// cmd/embedder, and subjectVecs covers only subjects whose interacted
+	// items happen to be embedded — deleting the rest would drop vectors
+	// that are still valid. Best-effort, like the phase 1 sweep.
+	if trained {
+		if j.cleanupItemDenseFn != nil {
+			if n, err := j.cleanupItemDenseFn(ctx, ns, mapKeys(itemVecs)); err != nil {
+				slog.Warn("stale item dense cleanup failed", "namespace", ns, "error", err)
+			} else if n > 0 {
+				capture.Info(fmt.Sprintf("removed %d stale item dense vectors", n))
+			}
+		}
+		if len(subjectVecs) > 0 && j.cleanupSubjectDenseFn != nil {
+			if n, err := j.cleanupSubjectDenseFn(ctx, ns, mapKeys(subjectVecs)); err != nil {
+				slog.Warn("stale subject dense cleanup failed", "namespace", ns, "error", err)
+			} else if n > 0 {
+				capture.Info(fmt.Sprintf("removed %d stale subject dense vectors", n))
+			}
+		}
+	}
+
 	slog.Info("phase 2 dense complete",
 		"namespace", ns,
 		"strategy", cfg.DenseSource,
@@ -689,4 +719,13 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.C
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
 	return len(scores), nil
+}
+
+// mapKeys returns the keys of a string-keyed map, in map order.
+func mapKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

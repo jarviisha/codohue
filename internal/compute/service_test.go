@@ -324,7 +324,7 @@ func TestUpsertObjectVectors_UsesExplicitCreatedAt(t *testing.T) {
 		return nil
 	}
 
-	err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(context.Background(), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		map[string]int64{"o1": createdAt.Add(-time.Hour).Unix()},
 		map[string]int64{"o1": createdAt.Unix()},
@@ -353,7 +353,7 @@ func TestUpsertObjectVectors_UsesMaxOccurredAtFallback(t *testing.T) {
 		return nil
 	}
 
-	err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(context.Background(), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		map[string]int64{"o1": maxTime.Unix()},
 		nil,
@@ -371,7 +371,7 @@ func TestUpsertObjectVectors_ObjectIDError(t *testing.T) {
 	idmap.objectErrs["o1"] = context.DeadlineExceeded
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
-	err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(context.Background(), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		nil,
 		nil,
@@ -387,7 +387,7 @@ func TestUpsertObjectVectors_UpsertError(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(context.Background(), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		nil,
 		nil,
