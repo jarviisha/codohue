@@ -79,7 +79,7 @@ type fakeRepo struct {
 	staleResetTargets []CatalogReembedTarget
 	staleResetErr     error
 	staleResetCalled  struct {
-		namespace, version string
+		namespace, version, onlyState string
 	}
 
 	listItemsResp   []CatalogItemSummary
@@ -238,10 +238,23 @@ func (f *fakeRepo) InsertReembedRun(_ context.Context, namespace, strategyID, st
 	return f.insertReembedID, f.insertReembedErr
 }
 
-func (f *fakeRepo) SelectAndResetStaleCatalogItems(_ context.Context, namespace, version string) ([]CatalogReembedTarget, error) {
+func (f *fakeRepo) SelectAndResetStaleCatalogItems(_ context.Context, namespace, version, onlyState string) ([]CatalogReembedTarget, error) {
 	f.staleResetCalled.namespace = namespace
 	f.staleResetCalled.version = version
+	f.staleResetCalled.onlyState = onlyState
 	return f.staleResetTargets, f.staleResetErr
+}
+
+func (f *fakeRepo) StartReembedRun(ctx context.Context, namespace, strategyID, strategyVersion, onlyState string, startedAt time.Time) (int64, []CatalogReembedTarget, error) {
+	id, err := f.InsertReembedRun(ctx, namespace, strategyID, strategyVersion, startedAt)
+	if err != nil {
+		return 0, nil, err
+	}
+	targets, err := f.SelectAndResetStaleCatalogItems(ctx, namespace, strategyVersion, onlyState)
+	if err != nil {
+		return 0, nil, err
+	}
+	return id, targets, nil
 }
 
 func (f *fakeRepo) ListCatalogItems(_ context.Context, namespace, state string, limit, offset int, objectFilter, authorFilter string) ([]CatalogItemSummary, int, error) {

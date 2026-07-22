@@ -162,24 +162,96 @@ func (r *Repository) CompleteReembedRun(ctx context.Context, id int64, processed
 // Items already in state='pending' or 'in_flight' are left alone — they are
 // already on the embedder's path. Items with NULL strategy_version are
 // included so first-time embed candidates are not lost.
-func (r *Repository) SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) ([]CatalogReembedTarget, error) {
-	rows, err := r.db.Query(ctx, `
+//
+// onlyState selects which states to re-drive and, when set, drops the
+// version filter — an operator naming a state is explicitly asking for those
+// rows regardless of the version they carry (this is the "rebuild Qdrant
+// after data loss" path, which the version-only filter made impossible):
+//
+//	""         — stale rows only: embedded/failed/dead_letter at another version
+//	"all"      — every embedded/failed/dead_letter row
+//	"embedded" — every embedded row
+//	"failed"   — every failed / dead_letter row
+func (r *Repository) SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion, onlyState string) ([]CatalogReembedTarget, error) {
+	rows, err := r.db.Query(ctx, reembedResetSQL(onlyState), namespace, targetStrategyVersion)
+	if err != nil {
+		return nil, fmt.Errorf("reset stale catalog items: %w", err)
+	}
+	defer rows.Close()
+	return scanReembedTargets(rows)
+}
+
+// reembedResetSQL builds the UPDATE ... RETURNING for the requested state
+// filter. onlyState is validated by the caller against ReembedOnlyState*;
+// anything else falls back to the stale-only default, so no user input ever
+// reaches the SQL text.
+func reembedResetSQL(onlyState string) string {
+	stateCond := "state IN ('embedded', 'failed', 'dead_letter')"
+	versionCond := " AND (strategy_version IS NULL OR strategy_version <> $2)"
+	switch onlyState {
+	case ReembedOnlyStateAll:
+		versionCond = ""
+	case ReembedOnlyStateEmbedded:
+		stateCond, versionCond = "state = 'embedded'", ""
+	case ReembedOnlyStateFailed:
+		stateCond, versionCond = "state IN ('failed', 'dead_letter')", ""
+	}
+	return `
 		UPDATE catalog_items
 		SET state = 'pending',
 		    attempt_count = 0,
 		    last_error = NULL,
 		    updated_at = NOW()
 		WHERE namespace = $1
-		  AND state IN ('embedded', 'failed', 'dead_letter')
-		  AND (strategy_version IS NULL OR strategy_version <> $2)
-		RETURNING id, object_id`,
-		namespace, targetStrategyVersion,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("reset stale catalog items: %w", err)
-	}
-	defer rows.Close()
+		  AND ` + stateCond + versionCond + `
+		RETURNING id, object_id`
+}
 
+// StartReembedRun inserts the orchestration row and resets the target rows in
+// ONE transaction. Two statements would let the embedder's completion watcher
+// tick in between, see zero stale items, and close the brand-new run as
+// successful before any work started.
+func (r *Repository) StartReembedRun(
+	ctx context.Context,
+	namespace, strategyID, strategyVersion, onlyState string,
+	startedAt time.Time,
+) (batchRunID int64, targets []CatalogReembedTarget, err error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return 0, nil, fmt.Errorf("begin reembed tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // commit path below owns successful completion
+
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO batch_run_logs (
+			namespace, started_at, entities_processed, success,
+			trigger_source, log_lines,
+			target_strategy_id, target_strategy_version
+		)
+		VALUES ($1, $2, 0, FALSE, $3, '[]'::jsonb, $4, $5)
+		RETURNING id`,
+		namespace, startedAt, batchrun.TriggerReembed, strategyID, strategyVersion,
+	).Scan(&batchRunID); err != nil {
+		return 0, nil, fmt.Errorf("insert reembed run: %w", err)
+	}
+
+	rows, err := tx.Query(ctx, reembedResetSQL(onlyState), namespace, strategyVersion)
+	if err != nil {
+		return 0, nil, fmt.Errorf("reset stale catalog items: %w", err)
+	}
+	targets, err = scanReembedTargets(rows)
+	rows.Close()
+	if err != nil {
+		return 0, nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, nil, fmt.Errorf("commit reembed tx: %w", err)
+	}
+	return batchRunID, targets, nil
+}
+
+func scanReembedTargets(rows pgx.Rows) ([]CatalogReembedTarget, error) {
 	var out []CatalogReembedTarget
 	for rows.Next() {
 		var t CatalogReembedTarget

@@ -147,6 +147,10 @@ func run() error {
 	// namespaces whose stream is fully drained; see RecoverySweeper docs.
 	recoverySweeper := embedder.NewRecoverySweeper(embedderRepo, redisClient, nsConfigSvc, embedder.RecoverySweeperConfig{})
 
+	// Liveness signal for the admin overview — without it that page has no
+	// way to tell a running embedder from a dead one.
+	heartbeat := embedder.NewHeartbeat(redisClient, consumerName)
+
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.
 	healthSrv := newHealthServer(cfg.HealthPort, db, redisClient, qdrantClient)
@@ -184,6 +188,12 @@ func run() error {
 	go func() {
 		defer close(sweeperDone)
 		recoverySweeper.Run(ctx)
+	}()
+
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		heartbeat.Run(ctx)
 	}()
 
 	slog.Info("embedder started",
@@ -240,6 +250,12 @@ func run() error {
 	case <-sweeperDone:
 	case <-shutdownCtx.Done():
 		slog.Warn("recovery sweeper shutdown timed out")
+	}
+
+	select {
+	case <-heartbeatDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("heartbeat shutdown timed out")
 	}
 
 	slog.Info("embedder stopped")

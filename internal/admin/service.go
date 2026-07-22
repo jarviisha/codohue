@@ -47,7 +47,8 @@ type adminRepo interface {
 	FindRunningReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
 	FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
 	InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error)
-	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) ([]CatalogReembedTarget, error)
+	StartReembedRun(ctx context.Context, namespace, strategyID, strategyVersion, onlyState string, startedAt time.Time) (batchRunID int64, targets []CatalogReembedTarget, err error)
+	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion, onlyState string) ([]CatalogReembedTarget, error)
 
 	// Catalog liveness signal for the admin Status tab.
 	GetLastCatalogEmbeddedAt(ctx context.Context, namespace string) (*time.Time, error)

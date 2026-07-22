@@ -67,7 +67,7 @@ Live reload in development uses `air` (configured in `.air.toml`), auto-rebuilds
 - **`cmd/api`** — HTTP API server (port **2001**) + Redis Streams ingest worker goroutine
 - **`cmd/cron`** — Batch job daemon that recomputes sparse and dense vectors plus trending data on a configurable interval (default: 5 min)
 - **`cmd/admin`** — Admin server (port **2002**) that serves the embedded `web/admin` SPA, the session-cookie auth API, and the `/api/admin/v1/*` operational dashboard endpoints
-- **`cmd/embedder`** — Catalog auto-embedding worker (port **2003** for `/healthz` + `/metrics`); consumes raw catalog content from per-namespace `catalog:embed:{ns}` Redis streams, embeds it via the configured `embedstrategy.Strategy`, and upserts dense vectors into `{ns}_objects_dense`. Also runs the re-embed completion watcher that closes admin-triggered batch runs when the namespace's catalog backlog drains.
+- **`cmd/embedder`** — Catalog auto-embedding worker (port **2003** for `/healthz` + `/metrics`); consumes raw catalog content from per-namespace `catalog:embed:{ns}` Redis streams, embeds it via the configured `embedstrategy.Strategy`, and upserts dense vectors into `{ns}_objects_dense`. Also runs the re-embed completion watcher that closes admin-triggered batch runs when the namespace's catalog backlog drains, the recovery sweeper that re-publishes rows whose stream entry was lost, and the liveness heartbeat (`codohue:embedder:heartbeat`, TTL 90s) the admin overview reads.
 
 ### Go Workspace
 
@@ -212,7 +212,7 @@ The admin API is designed for a monitoring UI, not plain REST CRUD: it exposes *
 | `POST`   | `/api/admin/v1/reset`                                               | session       | App-wide reset — drops every namespace; requires body `{"confirm":"RESET"}` (400 otherwise) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Catalog config + available strategies + backlog + consumer lag + failures + throughput |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Enable / update / disable catalog auto-embedding for a namespace (400 on dim mismatch with both dims in body; 503 when feature unwired) |
-| `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                    | session       | Trigger a namespace-wide re-embed (202 + `Location`); body `{"only_state":"all\|embedded\|failed"}`; 409 when one is already running; 503 when feature unwired |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                    | session       | Trigger a namespace-wide re-embed (202 + `Location`); optional body `{"only_state":"all\|embedded\|failed"}` — omitted re-drives only rows at another `strategy_version`, naming a state re-drives those rows regardless of version (the "rebuild after Qdrant loss" path); 409 when one is already running; 503 when feature unwired |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/backlog-history`            | session       | Backlog time-series from `catalog_backlog_samples` (`?window=&bucket=`) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/failures-summary`          | session       | Top `last_error` reasons in window (`?window=`) with a sample object id |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog/stream`                    | session       | **(SSE)** Live catalog signals: `item_state_changed`, `backlog_snapshot`, `dead_letter_grew`, `reembed_progress` |

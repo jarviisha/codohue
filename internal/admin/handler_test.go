@@ -64,6 +64,7 @@ type fakeSvc struct {
 	// US3 operator endpoints
 	reembedResp       *CatalogReEmbedResponse
 	reembedErr        error
+	reembedOnlyState  string
 	reembedNS         string
 	listItemsResp     *CatalogItemsListResponse
 	listItemsErr      error
@@ -227,8 +228,9 @@ func (f *fakeSvc) UpdateCatalogConfig(_ context.Context, _ string, req *Namespac
 	return f.catalogUpdateResp, f.catalogUpdateErr
 }
 
-func (f *fakeSvc) TriggerReEmbed(_ context.Context, namespace string) (*CatalogReEmbedResponse, error) {
+func (f *fakeSvc) TriggerReEmbed(_ context.Context, namespace, onlyState string) (*CatalogReEmbedResponse, error) {
 	f.reembedNS = namespace
+	f.reembedOnlyState = onlyState
 	return f.reembedResp, f.reembedErr
 }
 

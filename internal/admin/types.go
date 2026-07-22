@@ -174,6 +174,31 @@ func (e *CatalogDimensionMismatch) Error() string {
 	return "catalog strategy dimension mismatch"
 }
 
+// Re-embed state filters accepted in the POST .../catalog/re-embed body.
+// An empty value keeps the default: only rows whose strategy_version differs
+// from the target. Naming a state re-drives those rows regardless of version,
+// which is what makes "rebuild after Qdrant data loss" possible.
+const (
+	ReembedOnlyStateAll      = "all"
+	ReembedOnlyStateEmbedded = "embedded"
+	ReembedOnlyStateFailed   = "failed"
+)
+
+// CatalogReEmbedRequest is the optional body of POST .../catalog/re-embed.
+type CatalogReEmbedRequest struct {
+	OnlyState string `json:"only_state,omitempty"`
+}
+
+// Valid reports whether OnlyState is empty or one of the accepted filters.
+func (r CatalogReEmbedRequest) Valid() bool {
+	switch r.OnlyState {
+	case "", ReembedOnlyStateAll, ReembedOnlyStateEmbedded, ReembedOnlyStateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
 // CatalogReEmbedResponse is the body returned by POST .../catalog/re-embed.
 // 202 Accepted; the operator can poll batch_run_logs by ID for progress.
 type CatalogReEmbedResponse struct {
@@ -182,6 +207,7 @@ type CatalogReEmbedResponse struct {
 	StrategyID      string    `json:"strategy_id"`
 	StrategyVersion string    `json:"strategy_version"`
 	StaleItems      int       `json:"stale_items"`
+	OnlyState       string    `json:"only_state,omitempty"`
 	StartedAt       time.Time `json:"started_at"`
 }
 

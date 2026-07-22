@@ -111,11 +111,16 @@ func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, target C
 //     batch run id and stale count.
 //
 // Best-effort guarantees:
-//   - The DB reset is atomic via UPDATE ... RETURNING.
+//   - The run row and the item reset share one transaction, so the embedder's
+//     completion watcher can never observe a brand-new run with zero pending
+//     work and close it as finished before anything started.
 //   - XADD failures for individual items are logged but do not roll back the
-//     reset. The embedder's recovery sweep eventually picks up any 'pending'
-//     row that has no PEL entry.
-func (s *Service) TriggerReEmbed(ctx context.Context, namespace string) (*CatalogReEmbedResponse, error) {
+//     reset. The embedder's recovery sweep picks up any 'pending' row that
+//     has no stream entry.
+//
+// onlyState narrows which rows are re-driven; see
+// Repository.SelectAndResetStaleCatalogItems for the exact semantics.
+func (s *Service) TriggerReEmbed(ctx context.Context, namespace, onlyState string) (*CatalogReEmbedResponse, error) {
 	if s.catalogPicker == nil {
 		return nil, ErrCatalogStrategyPickerUnavailable
 	}
@@ -151,14 +156,9 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace string) (*Catalo
 	}
 
 	startedAt := s.nowFn().UTC()
-	batchID, err := s.repo.InsertReembedRun(ctx, namespace, strategyID, strategyVersion, startedAt)
+	batchID, targets, err := s.repo.StartReembedRun(ctx, namespace, strategyID, strategyVersion, onlyState, startedAt)
 	if err != nil {
-		return nil, fmt.Errorf("insert reembed run: %w", err)
-	}
-
-	targets, err := s.repo.SelectAndResetStaleCatalogItems(ctx, namespace, strategyVersion)
-	if err != nil {
-		return nil, fmt.Errorf("reset stale catalog items: %w", err)
+		return nil, fmt.Errorf("start reembed run: %w", err)
 	}
 
 	for _, t := range targets {
@@ -177,6 +177,7 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace string) (*Catalo
 		StrategyID:      strategyID,
 		StrategyVersion: strategyVersion,
 		StaleItems:      len(targets),
+		OnlyState:       onlyState,
 		StartedAt:       startedAt,
 	}, nil
 }

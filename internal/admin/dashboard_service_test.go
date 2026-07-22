@@ -162,3 +162,18 @@ func TestGetNamespaceDashboard_AuthorCoverageErrorDegrades(t *testing.T) {
 		t.Errorf("expected zeroed coverage on error, got %+v", out.AuthorCoverage)
 	}
 }
+
+// The overview used to hardcode "embedder OK", claiming a healthy worker even
+// when the process was down. With no Redis (or no heartbeat key) we cannot
+// know it is alive, and must not say it is.
+func TestGetOverview_EmbedderHeartbeatNotFakedWhenUnknown(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, "", "")
+
+	resp, err := svc.GetOverview(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.EmbedderHeartbeat.OK {
+		t.Fatal("embedder heartbeat must not report OK without a liveness signal")
+	}
+}

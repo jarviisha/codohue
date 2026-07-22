@@ -730,7 +730,7 @@ func TestCatalogE2E_ReEmbed_DrainAndComplete(t *testing.T) {
 
 	// Phase 2: trigger re-embed via admin service.
 	adminSvc := newAdminServiceForTest(t)
-	reembedResp, err := adminSvc.TriggerReEmbed(context.Background(), namespace)
+	reembedResp, err := adminSvc.TriggerReEmbed(context.Background(), namespace, "")
 	if err != nil {
 		t.Fatalf("trigger re-embed: %v", err)
 	}

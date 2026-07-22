@@ -4,19 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
 // GetOverview returns the full payload that drives the Fleet overview page.
-// Health, cron heartbeat, per-namespace summary, and alert rules are evaluated
-// in one call so the SPA does not have to fan out.
-//
-// Embedder heartbeat and per-namespace ingest rate are stubbed in Phase 1 —
-// embedder heartbeat lands when the embedder exposes its liveness signal,
-// per-namespace ingest rate lands once Prometheus rolling counters are wired
-// in Phase 3.
+// Health, cron + embedder heartbeats, per-namespace summary, and alert rules
+// are evaluated in one call so the SPA does not have to fan out.
 func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 	now := s.nowFn()
 
@@ -50,9 +46,18 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 			EventsPerMinNow: s.eventsPerMin(ns.Namespace),
 			Catalog: NamespaceOverviewCatalog{
 				Enabled: ns.DenseSource == "catalog",
-				// Pending / DeadLetter populated by the catalog stream once
-				// Phase 2 lands; Phase 1 leaves zeros so the shape stays stable.
 			},
+		}
+		if row.Catalog.Enabled && s.catalogBacklog != nil {
+			// Best-effort: a failed read leaves zeros rather than sinking the
+			// whole fleet page, but it is logged so a persistent failure shows.
+			if backlog, blErr := s.catalogBacklog.Read(ctx, ns.Namespace); blErr == nil {
+				row.Catalog.Pending = backlog.Pending
+				row.Catalog.DeadLetter = backlog.DeadLetter
+			} else {
+				slog.WarnContext(ctx, "overview: catalog backlog read failed",
+					slog.String("namespace", ns.Namespace), slog.String("error", blErr.Error()))
+			}
 		}
 		if run, ok := lastRuns[ns.Namespace]; ok {
 			r := run
@@ -67,17 +72,12 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 	}
 
 	return &OverviewResponse{
-		GeneratedAt:   now.UTC(),
-		Health:        *health,
-		CronHeartbeat: cron,
-		EmbedderHeartbeat: EmbedderHeartbeat{
-			// Phase 1 stub: no liveness signal wired yet. Default OK so the
-			// UI doesn't render a spurious "embedder silent" alert before
-			// the actual heartbeat path lands.
-			OK: true,
-		},
-		Alerts:     alerts,
-		Namespaces: nsOut,
+		GeneratedAt:       now.UTC(),
+		Health:            *health,
+		CronHeartbeat:     cron,
+		EmbedderHeartbeat: s.embedderHeartbeat(ctx),
+		Alerts:            alerts,
+		Namespaces:        nsOut,
 	}, nil
 }
 
@@ -128,11 +128,11 @@ func (s *Service) GetNamespaceDashboard(ctx context.Context, namespace string) (
 		GeneratedAt:     now.UTC(),
 		Config:          *cfg,
 		LastRuns:        lastRuns,
-		Catalog:         CatalogBacklog{}, // Phase 2 wires real backlog
+		Catalog:         s.namespaceBacklog(ctx, namespace),
 		Events24h:       eventCounts[namespace],
 		EventsPerMinNow: s.eventsPerMin(namespace),
 		Qdrant:          *qdrant,
-		TrendingTTLSec:  0, // Phase 2/3 wires trending TTL probe
+		TrendingTTLSec:  s.trendingTTLSec(ctx, namespace),
 		AuthorCoverage:  AuthorCoverage{Attributed: attributed, Total: totalItems},
 	}, nil
 }
@@ -229,4 +229,62 @@ func buildAlerts(namespaces []NamespaceConfig, lastRuns map[string]BatchRunLog, 
 		}
 	}
 	return alerts
+}
+
+// embedderHeartbeatKey mirrors embedder.HeartbeatKey. The literal is repeated
+// because the import rule forbids reaching into that peer domain; the
+// embedder package documents this pairing.
+const embedderHeartbeatKey = "codohue:embedder:heartbeat"
+
+// embedderHeartbeat reads the embedder's liveness key. A missing key means no
+// replica has stamped it within its TTL — reported as not OK rather than the
+// old hardcoded "true", which claimed a healthy embedder even when the
+// process was down. With no Redis wired we cannot know, so we do not claim to.
+func (s *Service) embedderHeartbeat(ctx context.Context) EmbedderHeartbeat {
+	if s.redisClient == nil {
+		return EmbedderHeartbeat{OK: false}
+	}
+	raw, err := s.redisClient.Get(ctx, embedderHeartbeatKey).Result()
+	if err != nil || raw == "" {
+		return EmbedderHeartbeat{OK: false}
+	}
+	hb := EmbedderHeartbeat{OK: true}
+	// Value is "<RFC3339>" or "<RFC3339>|<replica>".
+	stamp := raw
+	if i := strings.IndexByte(raw, '|'); i >= 0 {
+		stamp = raw[:i]
+	}
+	if t, parseErr := time.Parse(time.RFC3339, stamp); parseErr == nil {
+		hb.LastSeenAt = &t
+	}
+	return hb
+}
+
+// namespaceBacklog reads the live catalog backlog for the dashboard. Failures
+// (or no reader wired) degrade to zero counts, logged so a persistent
+// failure stays visible.
+func (s *Service) namespaceBacklog(ctx context.Context, namespace string) CatalogBacklog {
+	if s.catalogBacklog == nil {
+		return CatalogBacklog{}
+	}
+	backlog, err := s.catalogBacklog.Read(ctx, namespace)
+	if err != nil {
+		slog.WarnContext(ctx, "dashboard: catalog backlog read failed",
+			slog.String("namespace", namespace), slog.String("error", err.Error()))
+		return CatalogBacklog{}
+	}
+	return backlog
+}
+
+// trendingTTLSec probes the remaining TTL of the namespace's trending ZSET.
+// Redis TTL semantics carry through: -2 = key missing, -1 = no expiry.
+func (s *Service) trendingTTLSec(ctx context.Context, namespace string) int {
+	if s.redisClient == nil {
+		return -2
+	}
+	d, err := s.redisClient.TTL(ctx, "trending:"+namespace).Result()
+	if err != nil {
+		return -2
+	}
+	return int(d.Seconds())
 }

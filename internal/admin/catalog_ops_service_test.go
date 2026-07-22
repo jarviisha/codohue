@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -164,7 +165,7 @@ func TestTriggerReEmbed_Service_HappyPath(t *testing.T) {
 	picker := &fakeStrategyPicker{id: "internal-hashing-ngrams", version: "v1", enabled: true}
 	svc, pub, _ := withCatalogPlumbing(t, repo, picker)
 
-	resp, err := svc.TriggerReEmbed(context.Background(), "ns")
+	resp, err := svc.TriggerReEmbed(context.Background(), "ns", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestTriggerReEmbed_Service_NotEnabled_ReturnsNil(t *testing.T) {
 	picker := &fakeStrategyPicker{enabled: false}
 	svc, _, _ := withCatalogPlumbing(t, repo, picker)
 
-	resp, err := svc.TriggerReEmbed(context.Background(), "ns")
+	resp, err := svc.TriggerReEmbed(context.Background(), "ns", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -211,7 +212,7 @@ func TestTriggerReEmbed_Service_RunningInDB_409(t *testing.T) {
 	picker := &fakeStrategyPicker{id: "x", version: "v1", enabled: true}
 	svc, _, _ := withCatalogPlumbing(t, repo, picker)
 
-	_, err := svc.TriggerReEmbed(context.Background(), "ns")
+	_, err := svc.TriggerReEmbed(context.Background(), "ns", "")
 	if !errors.Is(err, ErrReembedAlreadyRunning) {
 		t.Fatalf("expected ErrReembedAlreadyRunning, got %v", err)
 	}
@@ -221,7 +222,7 @@ func TestTriggerReEmbed_Service_PickerUnavailable_503(t *testing.T) {
 	svc := newTestService(&fakeRepo{}, "", "")
 	// no SetCatalogStrategyPicker call
 
-	_, err := svc.TriggerReEmbed(context.Background(), "ns")
+	_, err := svc.TriggerReEmbed(context.Background(), "ns", "")
 	if !errors.Is(err, ErrCatalogStrategyPickerUnavailable) {
 		t.Fatalf("expected ErrCatalogStrategyPickerUnavailable, got %v", err)
 	}
@@ -236,7 +237,7 @@ func TestTriggerReEmbed_Service_PublishFailureIsBestEffort(t *testing.T) {
 	svc, pub, _ := withCatalogPlumbing(t, repo, picker)
 	pub.err = errors.New("redis down")
 
-	resp, err := svc.TriggerReEmbed(context.Background(), "ns")
+	resp, err := svc.TriggerReEmbed(context.Background(), "ns", "")
 	if err != nil {
 		t.Fatalf("publish failure must NOT bubble up: %v", err)
 	}
@@ -437,5 +438,54 @@ func TestDeleteCatalogItem_Service_QdrantMissIsBestEffort(t *testing.T) {
 
 	if err := svc.DeleteCatalogItem(context.Background(), "ns", 7); err != nil {
 		t.Fatalf("qdrant failure must NOT bubble up: %v", err)
+	}
+}
+
+// only_state is what makes "rebuild Qdrant after data loss" possible: without
+// it the reset matched on version mismatch only, so a re-embed at an
+// unchanged strategy version reset zero rows and completed as a silent no-op.
+func TestTriggerReEmbed_OnlyStateForwardedToRepo(t *testing.T) {
+	for _, state := range []string{"", ReembedOnlyStateAll, ReembedOnlyStateEmbedded, ReembedOnlyStateFailed} {
+		repo := &fakeRepo{insertReembedID: 7}
+		picker := &fakeStrategyPicker{id: "internal-hashing-ngrams", version: "v1", enabled: true}
+		svc, _, _ := withCatalogPlumbing(t, repo, picker)
+
+		resp, err := svc.TriggerReEmbed(context.Background(), "ns", state)
+		if err != nil {
+			t.Fatalf("only_state=%q: unexpected error: %v", state, err)
+		}
+		if repo.staleResetCalled.onlyState != state {
+			t.Errorf("only_state=%q not forwarded, repo got %q", state, repo.staleResetCalled.onlyState)
+		}
+		if resp.OnlyState != state {
+			t.Errorf("response only_state: got %q, want %q", resp.OnlyState, state)
+		}
+	}
+}
+
+func TestReembedResetSQL_StateFilters(t *testing.T) {
+	cases := []struct {
+		onlyState   string
+		wantState   string
+		wantVersion bool
+	}{
+		{"", "state IN ('embedded', 'failed', 'dead_letter')", true},
+		{ReembedOnlyStateAll, "state IN ('embedded', 'failed', 'dead_letter')", false},
+		{ReembedOnlyStateEmbedded, "state = 'embedded'", false},
+		{ReembedOnlyStateFailed, "state IN ('failed', 'dead_letter')", false},
+		{"bogus", "state IN ('embedded', 'failed', 'dead_letter')", true}, // falls back, never interpolated
+	}
+	for _, tc := range cases {
+		sql := reembedResetSQL(tc.onlyState)
+		if !strings.Contains(sql, tc.wantState) {
+			t.Errorf("only_state=%q: missing %q in\n%s", tc.onlyState, tc.wantState, sql)
+		}
+		hasVersion := strings.Contains(sql, "strategy_version <> $2")
+		if hasVersion != tc.wantVersion {
+			t.Errorf("only_state=%q: version filter present=%v, want %v", tc.onlyState, hasVersion, tc.wantVersion)
+		}
+		if strings.Contains(sql, tc.onlyState) && tc.onlyState == "bogus" {
+			t.Errorf("only_state=%q leaked into SQL text", tc.onlyState)
+		}
 	}
 }

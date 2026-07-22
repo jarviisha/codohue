@@ -28,7 +28,23 @@ func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := h.svc.TriggerReEmbed(r.Context(), ns)
+	// The body is optional: no body (or an empty one) keeps the default
+	// stale-only filter. DecodeStrict rejects unknown fields so a typo'd
+	// filter name fails loudly instead of silently re-driving everything.
+	var req CatalogReEmbedRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+			return
+		}
+	}
+	if !req.Valid() {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request",
+			`only_state must be one of "all", "embedded", "failed"`)
+		return
+	}
+
+	resp, err := h.svc.TriggerReEmbed(r.Context(), ns, req.OnlyState)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrCatalogStrategyPickerUnavailable):
