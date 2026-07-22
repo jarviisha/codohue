@@ -88,6 +88,7 @@ export default function NamespaceConfigPage() {
       key={dashboard.data.config.updated_at}
       ns={ns}
       initial={dashboard.data.config}
+      authorCoverage={dashboard.data.author_coverage}
       onSubmit={(body, onReset) => {
         upsert.mutate(
           { namespace: ns, body },
@@ -110,12 +111,14 @@ export default function NamespaceConfigPage() {
 function ConfigForm({
   ns,
   initial,
+  authorCoverage,
   onSubmit,
   saving,
   error,
 }: {
   ns: string
   initial: NamespaceConfig
+  authorCoverage: { attributed: number; total: number }
   onSubmit: (body: NamespaceUpsertRequest, onReset: () => void) => void
   saving: boolean
   error: string | undefined
@@ -245,7 +248,7 @@ function ConfigForm({
             </FormField>
             <FormField
               label="Exclude authored"
-              helpText="Drop objects the subject authored from their own recommendations. Needs author_subject_id on catalog items — inert without it."
+              helpText={excludeAuthoredHelp(authorCoverage)}
             >
               <Switch
                 checked={draft.exclude_authored ?? false}
@@ -518,4 +521,27 @@ function diffConfig(
   }
 
   return { body, dirty: Object.keys(body).length > 0 }
+}
+
+/**
+ * excludeAuthoredHelp states plainly whether the toggle can act on anything.
+ * The filter reads catalog_items.author_subject_id, so in a namespace with no
+ * attributed items it is a silent no-op — which is exactly the case an
+ * operator cannot otherwise see from this page.
+ */
+function excludeAuthoredHelp({
+  attributed,
+  total,
+}: {
+  attributed: number
+  total: number
+}): string {
+  const what = 'Drop objects the subject authored from their own recommendations.'
+  if (total === 0) {
+    return `${what} This namespace has no catalog items, so nothing carries an author and the filter will do nothing.`
+  }
+  if (attributed === 0) {
+    return `${what} None of the ${total} catalog items here carry an author, so the filter will do nothing.`
+  }
+  return `${what} ${attributed} of ${total} catalog items carry an author.`
 }

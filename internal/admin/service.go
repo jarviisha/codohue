@@ -33,6 +33,7 @@ type adminRepo interface {
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)
 	ListSubjects(ctx context.Context, ns, prefix, sort string, limit, offset int) ([]SubjectListItem, int, error)
+	GetAuthorCoverage(ctx context.Context, namespace string) (attributed, total int, err error)
 	GetSubjectStats(ctx context.Context, namespace, subjectID string, seenItemsDays int) (*SubjectStats, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) ([]EventSummary, int, error)
 	GetEventsSummary(ctx context.Context, ns string, windowSecs, bucketSecs int) (total int, byAction map[string]int, series []EventsSummaryBucket, err error)

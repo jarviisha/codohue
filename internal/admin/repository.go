@@ -797,3 +797,20 @@ func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (
 	}
 	return eventsDeleted, nil
 }
+
+// GetAuthorCoverage returns how many catalog items in the namespace carry an
+// author_subject_id, and how many exist in total. Both zero for a namespace
+// with no catalog items at all — which is the normal case outside catalog
+// mode, since the data-plane ingest is the only supported way to create them.
+func (r *Repository) GetAuthorCoverage(ctx context.Context, namespace string) (attributed, total int, err error) {
+	err = r.db.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE author_subject_id IS NOT NULL), COUNT(*)
+		FROM catalog_items
+		WHERE namespace = $1`,
+		namespace,
+	).Scan(&attributed, &total)
+	if err != nil {
+		return 0, 0, fmt.Errorf("count author coverage: %w", err)
+	}
+	return attributed, total, nil
+}

@@ -696,6 +696,16 @@ type NamespaceDashboardResponse struct {
 	EventsPerMinNow float64               `json:"events_per_min_now"`
 	Qdrant          QdrantInspectResponse `json:"qdrant"`
 	TrendingTTLSec  int                   `json:"trending_ttl_sec"`
+	AuthorCoverage  AuthorCoverage        `json:"author_coverage"`
+}
+
+// AuthorCoverage reports how many of the namespace's catalog items carry an
+// author. The exclude_authored filter reads author_subject_id and silently
+// does nothing when no item has one, so the config page needs this to tell
+// the operator whether the toggle can act on anything.
+type AuthorCoverage struct {
+	Attributed int `json:"attributed"`
+	Total      int `json:"total"`
 }
 
 // SubjectStats holds raw DB data for a subject used internally by Service.

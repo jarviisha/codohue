@@ -28,6 +28,9 @@ type fakeRepo struct {
 	recentEventCountsErr   error
 	subjectStats           *SubjectStats
 	subjectStatsErr        error
+	authorAttributed       int
+	authorTotal            int
+	authorCoverageErr      error
 	subjectList            []SubjectListItem
 	subjectListTotal       int
 	subjectListErr         error
@@ -168,6 +171,10 @@ func (f *fakeRepo) GetRecentEventCounts(_ context.Context, _ int) (map[string]in
 
 func (f *fakeRepo) GetSubjectStats(_ context.Context, _, _ string, _ int) (*SubjectStats, error) {
 	return f.subjectStats, f.subjectStatsErr
+}
+
+func (f *fakeRepo) GetAuthorCoverage(_ context.Context, _ string) (attributed, total int, err error) {
+	return f.authorAttributed, f.authorTotal, f.authorCoverageErr
 }
 
 func (f *fakeRepo) ListSubjects(_ context.Context, ns, prefix, sort string, limit, offset int) ([]SubjectListItem, int, error) {

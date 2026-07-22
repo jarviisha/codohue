@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
@@ -112,6 +113,16 @@ func (s *Service) GetNamespaceDashboard(ctx context.Context, namespace string) (
 		return nil, fmt.Errorf("get qdrant: %w", err)
 	}
 
+	// Attribution coverage drives the exclude_authored hint on the config
+	// page. A failure here must not sink the whole dashboard — the operator
+	// just loses one advisory line.
+	attributed, totalItems, err := s.repo.GetAuthorCoverage(ctx, namespace)
+	if err != nil {
+		slog.ErrorContext(ctx, "dashboard: author coverage query failed",
+			slog.String("namespace", namespace), slog.String("error", err.Error()))
+		attributed, totalItems = 0, 0
+	}
+
 	return &NamespaceDashboardResponse{
 		Namespace:       namespace,
 		GeneratedAt:     now.UTC(),
@@ -122,6 +133,7 @@ func (s *Service) GetNamespaceDashboard(ctx context.Context, namespace string) (
 		EventsPerMinNow: s.eventsPerMin(namespace),
 		Qdrant:          *qdrant,
 		TrendingTTLSec:  0, // Phase 2/3 wires trending TTL probe
+		AuthorCoverage:  AuthorCoverage{Attributed: attributed, Total: totalItems},
 	}, nil
 }
 

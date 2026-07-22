@@ -82,6 +82,8 @@ export type NamespaceDashboardResponse = {
   events_per_min_now: number
   qdrant: QdrantInspectResponse
   trending_ttl_sec: number
+  /** How many catalog items carry an author — drives the exclude_authored hint. */
+  author_coverage: { attributed: number; total: number }
 }
 
 export function useNamespaces() {

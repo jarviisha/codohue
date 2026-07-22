@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -124,5 +125,40 @@ func TestGetNamespaceDashboardAggregates(t *testing.T) {
 	}
 	if out.Events24h != 100 {
 		t.Errorf("events24h=%d, want 100", out.Events24h)
+	}
+}
+
+func TestGetNamespaceDashboard_ReportsAuthorCoverage(t *testing.T) {
+	repo := &fakeRepo{
+		namespace:        &NamespaceConfig{Namespace: "prod"},
+		authorAttributed: 7,
+		authorTotal:      8,
+	}
+	svc := newTestService(repo, "http://api", "k")
+
+	out, err := svc.GetNamespaceDashboard(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.AuthorCoverage.Attributed != 7 || out.AuthorCoverage.Total != 8 {
+		t.Errorf("author coverage = %+v, want 7/8", out.AuthorCoverage)
+	}
+}
+
+// Coverage is an advisory line on one form field — a failed count must not
+// take the whole dashboard down with it.
+func TestGetNamespaceDashboard_AuthorCoverageErrorDegrades(t *testing.T) {
+	repo := &fakeRepo{
+		namespace:         &NamespaceConfig{Namespace: "prod"},
+		authorCoverageErr: errors.New("db down"),
+	}
+	svc := newTestService(repo, "http://api", "k")
+
+	out, err := svc.GetNamespaceDashboard(context.Background(), "prod")
+	if err != nil {
+		t.Fatalf("dashboard must still render, got error: %v", err)
+	}
+	if out.AuthorCoverage.Attributed != 0 || out.AuthorCoverage.Total != 0 {
+		t.Errorf("expected zeroed coverage on error, got %+v", out.AuthorCoverage)
 	}
 }
