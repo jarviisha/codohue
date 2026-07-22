@@ -81,8 +81,8 @@ type fakeRepo struct {
 	listItemsTotal  int
 	listItemsErr    error
 	listItemsCalled struct {
-		namespace, state, objectIDFilter string
-		limit, offset                    int
+		namespace, state, objectIDFilter, authorFilter string
+		limit, offset                                  int
 	}
 
 	getCatalogItem    *CatalogItemDetail
@@ -235,12 +235,13 @@ func (f *fakeRepo) SelectAndResetStaleCatalogItems(_ context.Context, namespace,
 	return f.staleResetTargets, f.staleResetErr
 }
 
-func (f *fakeRepo) ListCatalogItems(_ context.Context, namespace, state string, limit, offset int, objectFilter string) ([]CatalogItemSummary, int, error) {
+func (f *fakeRepo) ListCatalogItems(_ context.Context, namespace, state string, limit, offset int, objectFilter, authorFilter string) ([]CatalogItemSummary, int, error) {
 	f.listItemsCalled.namespace = namespace
 	f.listItemsCalled.state = state
 	f.listItemsCalled.limit = limit
 	f.listItemsCalled.offset = offset
 	f.listItemsCalled.objectIDFilter = objectFilter
+	f.listItemsCalled.authorFilter = authorFilter
 	return f.listItemsResp, f.listItemsTotal, f.listItemsErr
 }
 

@@ -87,6 +87,17 @@ export default function CatalogItemDetailPage() {
                 `updated ${new Date(item.updated_at).toLocaleString()}`,
               ]}
             />
+            {item.author_subject_id && (
+              <Inline align="center">
+                <span className="text-foreground-subtle text-xs">authored by</span>
+                <Link
+                  to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(item.author_subject_id)}`}
+                  className="text-foreground text-xs"
+                >
+                  {item.author_subject_id}
+                </Link>
+              </Inline>
+            )}
           </Stack>
           <Inline>
             {canRedrive && (

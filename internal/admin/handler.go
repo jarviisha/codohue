@@ -64,7 +64,7 @@ type adminSvc interface {
 	GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error)
 	UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
 	TriggerReEmbed(ctx context.Context, namespace string) (*CatalogReEmbedResponse, error)
-	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) (*CatalogItemsListResponse, error)
+	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter, authorFilter string) (*CatalogItemsListResponse, error)
 	GetCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
 	RedriveCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogRedriveResponse, error)
 	BulkRedriveDeadletter(ctx context.Context, namespace string) (*CatalogBulkRedriveResponse, error)

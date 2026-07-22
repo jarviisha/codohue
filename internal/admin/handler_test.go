@@ -70,6 +70,7 @@ type fakeSvc struct {
 	listItemsLimit    int
 	listItemsOffset   int
 	listItemsObjectID string
+	listItemsAuthor   string
 	getItemResp       *CatalogItemDetail
 	getItemErr        error
 	getItemID         int64
@@ -229,11 +230,12 @@ func (f *fakeSvc) TriggerReEmbed(_ context.Context, namespace string) (*CatalogR
 	return f.reembedResp, f.reembedErr
 }
 
-func (f *fakeSvc) ListCatalogItems(_ context.Context, _, state string, limit, offset int, objectIDFilter string) (*CatalogItemsListResponse, error) {
+func (f *fakeSvc) ListCatalogItems(_ context.Context, _, state string, limit, offset int, objectIDFilter, authorFilter string) (*CatalogItemsListResponse, error) {
 	f.listItemsState = state
 	f.listItemsLimit = limit
 	f.listItemsOffset = offset
 	f.listItemsObjectID = objectIDFilter
+	f.listItemsAuthor = authorFilter
 	return f.listItemsResp, f.listItemsErr
 }
 
@@ -1276,6 +1278,23 @@ func TestListCatalogItems_OK(t *testing.T) {
 	if svc.listItemsState != "embedded" || svc.listItemsLimit != 20 || svc.listItemsOffset != 10 || svc.listItemsObjectID != "foo" {
 		t.Errorf("query params not propagated: state=%q limit=%d offset=%d object_id=%q",
 			svc.listItemsState, svc.listItemsLimit, svc.listItemsOffset, svc.listItemsObjectID)
+	}
+}
+
+func TestListCatalogItems_AuthorFilterPropagates(t *testing.T) {
+	svc := &fakeSvc{listItemsResp: &CatalogItemsListResponse{Items: []CatalogItemSummary{}}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet,
+		"/api/admin/v1/namespaces/ns/catalog/items?author=user-42", map[string]string{"ns": "ns"}, "")
+
+	h.ListCatalogItems(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if svc.listItemsAuthor != "user-42" {
+		t.Errorf("author filter = %q, want user-42", svc.listItemsAuthor)
 	}
 }
 

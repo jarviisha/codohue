@@ -63,6 +63,7 @@ func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
 //	limit      — page size, default 50, capped at 500.
 //	offset     — pagination offset, default 0.
 //	object_id  — substring filter over object_id (case-insensitive).
+//	author     — exact filter over author_subject_id.
 func (h *Handler) ListCatalogItems(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 	q := r.URL.Query()
@@ -93,8 +94,9 @@ func (h *Handler) ListCatalogItems(w http.ResponseWriter, r *http.Request) {
 		offset = o
 	}
 	objectIDFilter := q.Get("object_id")
+	authorFilter := q.Get("author")
 
-	resp, err := h.svc.ListCatalogItems(r.Context(), ns, state, limit, offset, objectIDFilter)
+	resp, err := h.svc.ListCatalogItems(r.Context(), ns, state, limit, offset, objectIDFilter, authorFilter)
 	if err != nil {
 		writeInternalError(w, r, "could not list catalog items", err, slog.String("namespace", ns))
 		return

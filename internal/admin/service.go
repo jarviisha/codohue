@@ -51,7 +51,7 @@ type adminRepo interface {
 	GetLastCatalogEmbeddedAt(ctx context.Context, namespace string) (*time.Time, error)
 
 	// Catalog item operator endpoints (US3).
-	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) ([]CatalogItemSummary, int, error)
+	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter, authorFilter string) ([]CatalogItemSummary, int, error)
 	GetCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
 	RedriveCatalogItem(ctx context.Context, namespace string, id int64) (*CatalogItemDetail, error)
 	BulkRedriveDeadletter(ctx context.Context, namespace string) ([]CatalogReembedTarget, error)
@@ -814,7 +814,7 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 		// ingest would. Publish failures are non-fatal — rows remain in
 		// state='pending' and can be picked up later (e.g. via re-embed).
 		if s.streamPublisher != nil {
-			items, _, err := s.repo.ListCatalogItems(ctx, demoNamespace, "pending", len(demoCatalogDataset), 0, "")
+			items, _, err := s.repo.ListCatalogItems(ctx, demoNamespace, "pending", len(demoCatalogDataset), 0, "", "")
 			if err != nil {
 				return nil, fmt.Errorf("list seeded demo catalog items: %w", err)
 			}

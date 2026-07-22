@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
@@ -49,16 +49,29 @@ const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'danger'
 
 export default function CatalogItemsPage() {
   const { ns } = useParams<{ ns: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [stateFilter, setStateFilter] = useState<CatalogItemState | ''>('')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
 
+  // The author filter lives in the URL rather than local state so the subject
+  // inspector can deep-link into "everything this subject authored".
+  const author = searchParams.get('author') ?? ''
+
   const items = useCatalogItems(ns ?? null, {
     state: stateFilter || undefined,
     objectId: search || undefined,
+    author: author || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
+
+  const clearAuthor = () => {
+    const params = new URLSearchParams(searchParams)
+    params.delete('author')
+    setSearchParams(params)
+    setPage(0)
+  }
 
   const redrive = useRedriveCatalogItem(ns ?? null)
   const remove = useDeleteCatalogItem(ns ?? null)
@@ -112,6 +125,15 @@ export default function CatalogItemsPage() {
               setPage(0)
             }}
           />
+          {author && (
+            <Inline align="center">
+              <span className="text-foreground-subtle text-sm">author</span>
+              <code className="text-foreground text-xs">{author}</code>
+              <Button size="sm" variant="ghost" tone="neutral" onClick={clearAuthor}>
+                Clear
+              </Button>
+            </Inline>
+          )}
           {items.data && (
             <span className="text-foreground-subtle text-sm ml-auto">page {page + 1}</span>
           )}
@@ -143,6 +165,7 @@ export default function CatalogItemsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Object</TableHead>
+                  <TableHead>Author</TableHead>
                   <TableHead>State</TableHead>
                   <TableHead align="right">Attempts</TableHead>
                   <TableHead>Last error</TableHead>
@@ -206,6 +229,18 @@ function ItemRow({
         >
           {item.object_id}
         </Link>
+      </TableCell>
+      <TableCell>
+        {item.author_subject_id ? (
+          <Link
+            to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(item.author_subject_id)}`}
+            className="text-foreground-subtle text-xs"
+          >
+            {item.author_subject_id}
+          </Link>
+        ) : (
+          <span className="text-foreground-subtle text-xs">—</span>
+        )}
       </TableCell>
       <TableCell>
         <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'}>{item.state}</Badge>

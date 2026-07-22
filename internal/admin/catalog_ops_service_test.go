@@ -254,7 +254,7 @@ func TestListCatalogItems_Service_DefaultsAndLimitClamp(t *testing.T) {
 	}
 	svc := newTestService(repo, "", "")
 
-	resp, err := svc.ListCatalogItems(context.Background(), "ns", "", 9999, -1, "")
+	resp, err := svc.ListCatalogItems(context.Background(), "ns", "", 9999, -1, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestListCatalogItems_Service_NilItemsBecomesEmpty(t *testing.T) {
 	repo := &fakeRepo{listItemsResp: nil, listItemsTotal: 0}
 	svc := newTestService(repo, "", "")
 
-	resp, err := svc.ListCatalogItems(context.Background(), "ns", "all", 50, 0, "")
+	resp, err := svc.ListCatalogItems(context.Background(), "ns", "all", 50, 0, "", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

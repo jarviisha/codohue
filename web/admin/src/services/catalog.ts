@@ -98,6 +98,8 @@ export type CatalogItemSummary = {
   id: number
   namespace: string
   object_id: string
+  /** Ownership metadata — who created the object. Absent when unattributed. */
+  author_subject_id?: string
   state: CatalogItemState
   strategy_id?: string
   strategy_version?: string
@@ -199,6 +201,8 @@ export function useCatalogFailuresSummary(ns: string | null, window: string = '2
 export type CatalogItemsFilter = {
   state?: CatalogItemState | ''
   objectId?: string
+  /** Exact match on author_subject_id (not a substring — it rides the index). */
+  author?: string
   limit?: number
   offset?: number
 }
@@ -207,6 +211,7 @@ function itemsQueryString(f: CatalogItemsFilter): string {
   const params = new URLSearchParams()
   if (f.state) params.set('state', f.state)
   if (f.objectId) params.set('object_id', f.objectId)
+  if (f.author) params.set('author', f.author)
   if (f.limit != null) params.set('limit', String(f.limit))
   if (f.offset != null) params.set('offset', String(f.offset))
   const q = params.toString()

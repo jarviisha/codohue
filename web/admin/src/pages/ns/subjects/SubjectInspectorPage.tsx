@@ -68,6 +68,14 @@ export default function SubjectInspectorPage() {
                 View events →
               </Button>
             </Link>
+            {/* Objects this subject authored — ownership metadata, unrelated to
+                the interactions above, which is why it links out rather than
+                folding into the profile card. */}
+            <Link to={`/ns/${encodeURIComponent(ns)}/catalog/items?author=${encodeURIComponent(id)}`}>
+              <Button variant="outline" tone="neutral" size="sm">
+                Authored objects →
+              </Button>
+            </Link>
           </Inline>
         </Inline>
       </PageHeader>

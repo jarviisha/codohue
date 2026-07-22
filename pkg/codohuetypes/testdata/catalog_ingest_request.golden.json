@@ -1,6 +1,7 @@
 {
   "object_id": "obj-1",
   "content": "hello world",
+  "author_subject_id": "subj-1",
   "metadata": {
     "lang": "en"
   }

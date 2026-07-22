@@ -57,7 +57,8 @@ func TestGoldenWireContract(t *testing.T) {
 			OccurredAt: ts, ObjectCreatedAt: &objCreated, Metadata: map[string]string{"src": "web"},
 		}},
 		{"catalog_ingest_request", codohuetypes.CatalogIngestRequest{
-			ObjectID: "obj-1", Content: "hello world", Metadata: map[string]any{"lang": "en"},
+			ObjectID: "obj-1", Content: "hello world", AuthorSubjectID: "subj-1",
+			Metadata: map[string]any{"lang": "en"},
 		}},
 		{"error_detail", codohuetypes.ErrorDetail{Code: "invalid_request", Message: "invalid request body"}},
 		{"error_response", codohuetypes.ErrorResponse{

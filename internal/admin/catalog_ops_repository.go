@@ -343,6 +343,7 @@ func (r *Repository) ListOpenReembedRuns(ctx context.Context) ([]OpenReembedRun,
 // endpoints so the column order stays consistent across both readers.
 const catalogItemSelectCols = `
 	SELECT id, namespace, object_id, content, content_hash, metadata,
+	       COALESCE(author_subject_id, ''),
 	       state, COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 	       embedded_at, attempt_count, COALESCE(last_error, ''),
 	       created_at, updated_at
@@ -351,8 +352,10 @@ const catalogItemSelectCols = `
 // ListCatalogItems returns a paginated browse of catalog items. The state
 // filter accepts the canonical state names ("pending", "in_flight",
 // "embedded", "failed", "dead_letter") or "all" / "" to disable filtering.
-// objectIDFilter is an optional substring match over object_id.
-func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) ([]CatalogItemSummary, int, error) {
+// objectIDFilter is an optional substring match over object_id; authorFilter
+// is an optional exact match over author_subject_id (exact, not substring, so
+// it rides idx_catalog_items_ns_author).
+func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter, authorFilter string) ([]CatalogItemSummary, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -373,6 +376,10 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 		args = append(args, "%"+objectIDFilter+"%")
 		conds = append(conds, fmt.Sprintf("object_id ILIKE $%d", len(args)))
 	}
+	if authorFilter != "" {
+		args = append(args, authorFilter)
+		conds = append(conds, fmt.Sprintf("author_subject_id = $%d", len(args)))
+	}
 	where := " WHERE " + strings.Join(conds, " AND ")
 
 	var total int
@@ -382,7 +389,7 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, object_id, LEFT(content, 240), state,
+		SELECT id, object_id, COALESCE(author_subject_id, ''), LEFT(content, 240), state,
 		       COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 		       attempt_count, COALESCE(last_error, ''),
 		       embedded_at, updated_at
@@ -399,7 +406,7 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 	for rows.Next() {
 		var it CatalogItemSummary
 		if err := rows.Scan(
-			&it.ID, &it.ObjectID, &it.ContentPreview, &it.State,
+			&it.ID, &it.ObjectID, &it.AuthorSubjectID, &it.ContentPreview, &it.State,
 			&it.StrategyID, &it.StrategyVersion,
 			&it.AttemptCount, &it.LastError,
 			&it.EmbeddedAt, &it.UpdatedAt,
@@ -427,6 +434,7 @@ func (r *Repository) GetCatalogItem(ctx context.Context, namespace string, id in
 		namespace, id,
 	).Scan(
 		&d.ID, &d.Namespace, &d.ObjectID, &d.Content, &contentHash, &metadataRaw,
+		&d.AuthorSubjectID,
 		&d.State, &d.StrategyID, &d.StrategyVersion,
 		&d.EmbeddedAt, &d.AttemptCount, &d.LastError,
 		&d.CreatedAt, &d.UpdatedAt,
@@ -468,6 +476,7 @@ func (r *Repository) RedriveCatalogItem(ctx context.Context, namespace string, i
 		  AND id = $2
 		  AND state IN ('failed', 'dead_letter')
 		RETURNING id, namespace, object_id, content, content_hash, metadata,
+		          COALESCE(author_subject_id, ''),
 		          state, COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 		          embedded_at, attempt_count, COALESCE(last_error, ''),
 		          created_at, updated_at`,
@@ -480,6 +489,7 @@ func (r *Repository) RedriveCatalogItem(ctx context.Context, namespace string, i
 	)
 	err := row.Scan(
 		&d.ID, &d.Namespace, &d.ObjectID, &d.Content, &contentHash, &metadataRaw,
+		&d.AuthorSubjectID,
 		&d.State, &d.StrategyID, &d.StrategyVersion,
 		&d.EmbeddedAt, &d.AttemptCount, &d.LastError,
 		&d.CreatedAt, &d.UpdatedAt,

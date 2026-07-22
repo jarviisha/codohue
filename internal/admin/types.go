@@ -190,6 +190,7 @@ type CatalogReEmbedResponse struct {
 type CatalogItemSummary struct {
 	ID              int64      `json:"id"`
 	ObjectID        string     `json:"object_id"`
+	AuthorSubjectID string     `json:"author_subject_id,omitempty"`
 	ContentPreview  string     `json:"content_preview,omitempty"`
 	State           string     `json:"state"`
 	StrategyID      string     `json:"strategy_id,omitempty"`

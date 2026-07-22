@@ -14,7 +14,7 @@ import (
 
 // catalogRepository abstracts Repository for tests.
 type catalogRepository interface {
-	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any) (*UpsertResult, error)
+	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, authorSubjectID string, metadata map[string]any) (*UpsertResult, error)
 }
 
 // nsConfigGetter abstracts nsconfig.Service.Get for tests.
@@ -92,7 +92,8 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 
 	hash := ContentHash(req.Content)
 
-	res, err := s.repo.Upsert(ctx, ns, req.ObjectID, req.Content, hash, req.Metadata)
+	res, err := s.repo.Upsert(ctx, ns, req.ObjectID, req.Content, hash,
+		strings.TrimSpace(req.AuthorSubjectID), req.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("persist catalog item: %w", err)
 	}

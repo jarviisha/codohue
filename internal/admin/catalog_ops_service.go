@@ -178,14 +178,14 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace string) (*Catalo
 }
 
 // ListCatalogItems returns a paginated browse of catalog items for the admin UI.
-func (s *Service) ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter string) (*CatalogItemsListResponse, error) {
+func (s *Service) ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter, authorFilter string) (*CatalogItemsListResponse, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	if limit > 500 {
 		limit = 500
 	}
-	items, total, err := s.repo.ListCatalogItems(ctx, namespace, state, limit, offset, objectIDFilter)
+	items, total, err := s.repo.ListCatalogItems(ctx, namespace, state, limit, offset, objectIDFilter, authorFilter)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog items: %w", err)
 	}
