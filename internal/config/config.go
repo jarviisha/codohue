@@ -131,6 +131,12 @@ type AdminConfig struct {
 	QdrantHost     string
 	QdrantPort     int
 	AllowDevOrigin string // CORS allow-origin for the Vite dev server; empty in prod (same-origin embed)
+
+	// SessionSecret pins the HMAC secret admin session tokens are signed
+	// with. Empty (the default) generates fresh material each boot, which
+	// logs everyone out on restart — set it when running multiple admin
+	// replicas or when restart-survivable sessions matter.
+	SessionSecret string
 }
 
 // LoadAdmin reads and validates configuration for the admin binary.
@@ -146,6 +152,7 @@ func LoadAdmin() (*AdminConfig, error) {
 		LogFormat:      getEnv("CODOHUE_LOG_FORMAT", "text"),
 		QdrantHost:     getEnv("QDRANT_HOST", "localhost"),
 		AllowDevOrigin: getEnv("CODOHUE_ALLOW_DEV_ORIGIN", ""),
+		SessionSecret:  getEnv("CODOHUE_ADMIN_SESSION_SECRET", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

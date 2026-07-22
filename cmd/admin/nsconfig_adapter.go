@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/nsconfig"
@@ -12,6 +13,7 @@ import (
 // so the adapter is unit-testable without standing up the real service.
 type nsConfigUpsertSvc interface {
 	Upsert(ctx context.Context, ns string, req *nsconfig.UpsertRequest) (*nsconfig.UpsertResponse, error)
+	RotateAPIKey(ctx context.Context, ns string) (*nsconfig.RotateAPIKeyResponse, error)
 }
 
 // nsConfigAdapter bridges admin.Service (which must not import nsconfig per the
@@ -55,4 +57,18 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 		out.APIKey = &key
 	}
 	return out, nil
+}
+
+// RotateAPIKey adapts nsconfig's key rotation to the admin DTO. nsconfig's
+// not-found sentinel becomes (nil, nil) so the admin handler maps it to 404
+// without importing the peer domain's errors.
+func (a *nsConfigAdapter) RotateAPIKey(ctx context.Context, namespace string) (*admin.NamespaceKeyRotateResponse, error) {
+	resp, err := a.svc.RotateAPIKey(ctx, namespace)
+	if err != nil {
+		if errors.Is(err, nsconfig.ErrNamespaceNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &admin.NamespaceKeyRotateResponse{Namespace: resp.Namespace, APIKey: resp.APIKey}, nil
 }

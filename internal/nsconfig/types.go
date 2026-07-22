@@ -44,6 +44,14 @@ type UpsertResponse struct {
 	APIKey string `json:"api_key,omitempty"`
 }
 
+// RotateAPIKeyResponse carries the freshly minted namespace key. Like
+// creation, the plaintext appears exactly once — only its bcrypt hash is
+// stored.
+type RotateAPIKeyResponse struct {
+	Namespace string `json:"namespace"`
+	APIKey    string `json:"api_key"`
+}
+
 // UpdateCatalogRequest is the payload accepted by Service.UpdateCatalogConfig.
 // It carries only the catalog-specific fields so the catalog admin endpoint
 // stays orthogonal to the existing UpsertRequest path.

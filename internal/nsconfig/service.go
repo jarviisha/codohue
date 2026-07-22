@@ -20,7 +20,8 @@ var ErrNamespaceNotFound = errors.New("nsconfig: namespace not found")
 
 type nsConfigRepository interface {
 	Upsert(ctx context.Context, namespace string, req *UpsertRequest) (*namespace.Config, error)
-	SetAPIKeyHash(ctx context.Context, namespace, hash string) error
+	SetAPIKeyHash(ctx context.Context, namespace, hash string) (won bool, err error)
+	ReplaceAPIKeyHash(ctx context.Context, namespace, hash string) (found bool, err error)
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 	UpsertCatalogConfig(ctx context.Context, namespace string, req *UpdateCatalogRequest) (*namespace.Config, error)
 	ListCatalogNamespaces(ctx context.Context) ([]*namespace.Config, error)
@@ -68,13 +69,40 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 		if err != nil {
 			return nil, fmt.Errorf("generate api key: %w", err)
 		}
-		if err := s.repo.SetAPIKeyHash(ctx, ns, hash); err != nil {
+		won, err := s.repo.SetAPIKeyHash(ctx, ns, hash)
+		if err != nil {
 			return nil, fmt.Errorf("store api key hash: %w", err)
 		}
-		resp.APIKey = plaintext
+		// Only the writer that actually landed the hash may hand out its
+		// plaintext. A concurrent first-time Upsert that lost the race used
+		// to return a key that was never stored — credentials that 401
+		// forever.
+		if won {
+			resp.APIKey = plaintext
+		}
 	}
 
 	return resp, nil
+}
+
+// RotateAPIKey replaces the namespace's API key with a fresh one and returns
+// the new plaintext (shown once, like creation). The old key stops working
+// immediately — this is the escape hatch for a leaked or lost key, which
+// previously required manual SQL or a full namespace wipe.
+// Returns ErrNamespaceNotFound when the namespace does not exist.
+func (s *Service) RotateAPIKey(ctx context.Context, ns string) (*RotateAPIKeyResponse, error) {
+	plaintext, hash, err := generateAPIKey()
+	if err != nil {
+		return nil, fmt.Errorf("generate api key: %w", err)
+	}
+	found, err := s.repo.ReplaceAPIKeyHash(ctx, ns, hash)
+	if err != nil {
+		return nil, fmt.Errorf("replace api key hash: %w", err)
+	}
+	if !found {
+		return nil, ErrNamespaceNotFound
+	}
+	return &RotateAPIKeyResponse{Namespace: ns, APIKey: plaintext}, nil
 }
 
 // Get returns the configuration for a namespace, or nil if it does not exist.

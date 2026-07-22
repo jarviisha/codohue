@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"golang.org/x/crypto/bcrypt"
@@ -67,10 +69,12 @@ func TestValidateNamespaceKey(t *testing.T) {
 		}
 	})
 
-	t.Run("admin key accepted even when namespace has a key", func(t *testing.T) {
+	t.Run("admin key rejected when namespace has its own key", func(t *testing.T) {
+		// Provisioning a namespace key must narrow the blast radius of an
+		// admin-key leak — the fallback only applies while no key exists.
 		ok := ValidateNamespaceKey(context.Background(), adminKey, adminKey, getHashWith(string(hash)), "ns")
-		if !ok {
-			t.Error("expected admin key to be accepted even when namespace has its own key")
+		if ok {
+			t.Error("expected admin key to be rejected once the namespace has its own key")
 		}
 	})
 
@@ -193,4 +197,62 @@ func TestRequireNamespace(t *testing.T) {
 			t.Fatal("expected next handler to be called")
 		}
 	})
+}
+
+func TestValidateNamespaceKey_HashLookupErrorDeniesEveryone(t *testing.T) {
+	failing := func(_ context.Context, _ string) (string, error) {
+		return "", errors.New("db down")
+	}
+	if ValidateNamespaceKey(context.Background(), "admin-key", "admin-key", failing, "ns") {
+		t.Fatal("authorization that cannot be established must not be granted")
+	}
+}
+
+func TestConstantTimeEqual(t *testing.T) {
+	if !ConstantTimeEqual("secret", "secret") {
+		t.Error("equal strings must match")
+	}
+	if ConstantTimeEqual("secret", "secreT") || ConstantTimeEqual("secret", "") {
+		t.Error("unequal strings must not match")
+	}
+}
+
+// A repeated bad token must not pay the namespace lookup + bcrypt cost every
+// time — that is a cheap CPU-exhaustion lever for an unauthenticated sender.
+func TestRequireNamespace_NegativeCacheShortCircuits(t *testing.T) {
+	lookups := 0
+	getHash := func(_ context.Context, _ string) (string, error) {
+		lookups++
+		return "", nil // no ns key; token won't match the admin key either
+	}
+	mw := RequireNamespace("admin-key", getHash, func(*http.Request) string { return "ns" })
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/namespaces/ns/trending", http.NoBody)
+		req.Header.Set("Authorization", "Bearer wrong-token")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status %d, want 401", i, rec.Code)
+		}
+	}
+	if lookups != 1 {
+		t.Fatalf("expected 1 hash lookup (then cache hits), got %d", lookups)
+	}
+}
+
+func TestNegativeCache_ExpiresEntries(t *testing.T) {
+	c := newNegativeCache()
+	now := time.Now()
+	c.now = func() time.Time { return now }
+
+	c.put("tok", "ns")
+	if !c.hit("tok", "ns") {
+		t.Fatal("fresh entry must hit")
+	}
+	now = now.Add(negativeCacheTTL + time.Second)
+	if c.hit("tok", "ns") {
+		t.Fatal("expired entry must miss — a rotated key has to become usable")
+	}
 }

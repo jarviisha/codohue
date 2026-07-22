@@ -15,10 +15,10 @@ import (
 // extracted from main.run() so cmd/admin/main_test.go can assert that all
 // expected paths are registered without spinning up the full binary.
 //
-// apiKey is forwarded to the session-cookie middleware. allowDevOrigin enables
+// sessions backs the session-cookie middleware. allowDevOrigin enables
 // credentialed CORS for the Vite dev server when non-empty (dev mode); empty
 // in production where the SPA is embedded same-origin.
-func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router {
+func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, allowDevOrigin string) chi.Router {
 	r := chi.NewRouter()
 	r.Use(admin.CORSMiddleware(allowDevOrigin))
 	r.Use(middleware.Logger)
@@ -36,7 +36,7 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 
 	// Protected admin API routes
 	r.Group(func(r chi.Router) {
-		r.Use(admin.RequireSession(apiKey))
+		r.Use(admin.RequireSession(sessions))
 		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
 
 		r.Get("/api/admin/v1/health", h.GetHealth)
@@ -57,6 +57,7 @@ func newAdminRouter(h *admin.Handler, apiKey, allowDevOrigin string) chi.Router 
 		r.Get("/api/admin/v1/namespaces/{ns}", h.GetNamespace)
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
 		r.Delete("/api/admin/v1/namespaces/{ns}", h.DeleteNamespace)
+		r.Post("/api/admin/v1/namespaces/{ns}/api-key", h.RotateNamespaceAPIKey)
 
 		// Per-namespace dashboard aggregate.
 		r.Get("/api/admin/v1/namespaces/{ns}/dashboard", h.GetNamespaceDashboard)

@@ -60,6 +60,7 @@ type adminSvc interface {
 	CreateDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteDemoData(ctx context.Context) (*DemoDatasetResponse, error)
 	DeleteNamespace(ctx context.Context, namespace string) (*NamespaceDeleteResponse, error)
+	RotateNamespaceAPIKey(ctx context.Context, namespace string) (*NamespaceKeyRotateResponse, error)
 	ResetApp(ctx context.Context) (*ResetAppResponse, error)
 	GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error)
 	UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
@@ -73,14 +74,17 @@ type adminSvc interface {
 
 // Handler handles HTTP requests for the admin API.
 type Handler struct {
-	svc    adminSvc
-	apiKey string
-	bus    *eventbus.Bus // optional; SSE handlers return 503 when nil
+	svc          adminSvc
+	apiKey       string
+	sessions     *SessionManager
+	loginLimiter *loginRateLimiter
+	bus          *eventbus.Bus // optional; SSE handlers return 503 when nil
 }
 
-// NewHandler creates a new Handler.
-func NewHandler(svc adminSvc, apiKey string) *Handler {
-	return &Handler{svc: svc, apiKey: apiKey}
+// NewHandler creates a new Handler. sessions may be nil in tests that never
+// exercise the auth endpoints; CreateSession then responds 503.
+func NewHandler(svc adminSvc, apiKey string, sessions *SessionManager) *Handler {
+	return &Handler{svc: svc, apiKey: apiKey, sessions: sessions, loginLimiter: newLoginRateLimiter()}
 }
 
 // SetEventBus wires the in-process event bus into the handler so SSE
@@ -90,44 +94,64 @@ func (h *Handler) SetEventBus(b *eventbus.Bus) { h.bus = b }
 
 // CreateSession handles POST /api/v1/auth/sessions — validates the admin API
 // key and issues a session cookie. Returns 201 Created with body
-// CreateSessionResponse on success, 401 on bad credentials.
+// CreateSessionResponse on success, 401 on bad credentials, 429 when the
+// caller's IP has burned through its login budget.
 func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
+	if h.sessions == nil {
+		httpapi.WriteError(w, http.StatusServiceUnavailable, "sessions_unavailable", "session manager is not wired")
+		return
+	}
+	// Rate-limit BEFORE the key compare: this public endpoint is the online
+	// guessing surface for the admin key.
+	if !h.loginLimiter.Allow(clientIP(r)) {
+		httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts, retry later")
+		return
+	}
+
 	var req CreateSessionRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
-	if req.APIKey != h.apiKey {
+	if !constantTimeEqual(req.APIKey, h.apiKey) {
 		httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 		return
 	}
 
-	token, err := createSessionToken(h.apiKey)
+	token, expiresAt, err := h.sessions.Issue()
 	if err != nil {
 		writeInternalError(w, r, "could not create session", err)
 		return
 	}
 
-	expiresAt := time.Now().Add(8 * time.Hour)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    token,
 		Path:     "/api",
 		HttpOnly: true,
-		MaxAge:   int((8 * time.Hour).Seconds()),
+		// Secure on HTTPS deployments; omitted on plain-HTTP dev so the
+		// cookie still round-trips there.
+		Secure:   requestIsTLS(r),
+		MaxAge:   int(time.Until(expiresAt).Seconds()),
 		SameSite: http.SameSiteLaxMode,
 	})
 	httpapi.WriteJSON(w, http.StatusCreated, &CreateSessionResponse{ExpiresAt: expiresAt.UTC()})
 }
 
-// DeleteCurrentSession handles DELETE /api/v1/auth/sessions/current — clears
-// the session cookie and returns 204 No Content.
+// DeleteCurrentSession handles DELETE /api/v1/auth/sessions/current — revokes
+// the presented token and clears the cookie, returning 204 No Content.
+// Revocation matters: without it a captured cookie kept working for the full
+// TTL after "logout".
 func (h *Handler) DeleteCurrentSession(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && h.sessions != nil {
+		h.sessions.Revoke(cookie.Value)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
 		Path:     "/api",
 		HttpOnly: true,
+		Secure:   requestIsTLS(r),
 		MaxAge:   -1,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -632,6 +656,29 @@ func (h *Handler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.DeleteNamespace(r.Context(), ns)
 	if err != nil {
 		writeInternalError(w, r, "could not delete namespace", err, slog.String("namespace", ns))
+		return
+	}
+	if resp == nil {
+		httpapi.WriteError(w, http.StatusNotFound, "not_found", "namespace not found")
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+// RotateNamespaceAPIKey handles POST /api/admin/v1/namespaces/{ns}/api-key —
+// mints a replacement namespace key, invalidating the old one immediately.
+// The plaintext is returned exactly once. 200 on success, 404 for unknown
+// namespaces.
+func (h *Handler) RotateNamespaceAPIKey(w http.ResponseWriter, r *http.Request) {
+	ns := chi.URLParam(r, "ns")
+	if ns == "" {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
+		return
+	}
+
+	resp, err := h.svc.RotateNamespaceAPIKey(r.Context(), ns)
+	if err != nil {
+		writeInternalError(w, r, "could not rotate namespace api key", err, slog.String("namespace", ns))
 		return
 	}
 	if resp == nil {

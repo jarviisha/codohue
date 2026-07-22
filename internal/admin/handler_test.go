@@ -65,6 +65,9 @@ type fakeSvc struct {
 	reembedResp       *CatalogReEmbedResponse
 	reembedErr        error
 	reembedOnlyState  string
+	rotateKeyNS       string
+	rotateKeyResp     *NamespaceKeyRotateResponse
+	rotateKeyErr      error
 	reembedNS         string
 	listItemsResp     *CatalogItemsListResponse
 	listItemsErr      error
@@ -263,6 +266,11 @@ func (f *fakeSvc) DeleteCatalogItem(_ context.Context, _ string, id int64) error
 	return f.deleteItemErr
 }
 
+func (f *fakeSvc) RotateNamespaceAPIKey(_ context.Context, ns string) (*NamespaceKeyRotateResponse, error) {
+	f.rotateKeyNS = ns
+	return f.rotateKeyResp, f.rotateKeyErr
+}
+
 func (f *fakeSvc) DeleteNamespace(_ context.Context, namespace string) (*NamespaceDeleteResponse, error) {
 	f.deleteNSCall = namespace
 	return f.deleteNSResp, f.deleteNSErr
@@ -277,8 +285,20 @@ func (f *fakeSvc) ResetApp(_ context.Context) (*ResetAppResponse, error) {
 
 const testAPIKey = "test-secret"
 
+// testSessions is the shared SessionManager for handler tests. One instance
+// so tokens issued by sessionCookie validate in RequireSession tests.
+var testSessions = mustSessionManager()
+
+func mustSessionManager() *SessionManager {
+	sm, err := NewSessionManager(nil)
+	if err != nil {
+		panic(err)
+	}
+	return sm
+}
+
 func newTestHandler(svc adminSvc) *Handler {
-	return NewHandler(svc, testAPIKey)
+	return NewHandler(svc, testAPIKey, testSessions)
 }
 
 func newChiRequest(method, target string, urlParams map[string]string, body string) *http.Request {
@@ -300,7 +320,7 @@ func newChiRequest(method, target string, urlParams map[string]string, body stri
 
 func sessionCookie(t *testing.T) *http.Cookie {
 	t.Helper()
-	token, err := createSessionToken(testAPIKey)
+	token, _, err := testSessions.Issue()
 	if err != nil {
 		t.Fatalf("create session token: %v", err)
 	}
@@ -365,7 +385,7 @@ func TestDeleteCurrentSession(t *testing.T) {
 }
 
 func TestProtectedRouteWithoutSession(t *testing.T) {
-	mw := RequireSession(testAPIKey)
+	mw := RequireSession(testSessions)
 	called := false
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
 	rec := httptest.NewRecorder()
@@ -1663,5 +1683,91 @@ func TestGetBatchRuns_QueryParamStillWorksOnUnscopedRoute(t *testing.T) {
 
 	if svc.batchRunsGotNS != "ns2" {
 		t.Fatalf("query param namespace: got %q, want ns2", svc.batchRunsGotNS)
+	}
+}
+
+func TestCreateSession_RateLimited(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	got429 := false
+	for i := 0; i < loginBurst+2; i++ {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions",
+			bytes.NewBufferString(`{"api_key":"wrong"}`))
+		r.RemoteAddr = "192.0.2.7:1234"
+		h.CreateSession(rec, r)
+		if rec.Code == http.StatusTooManyRequests {
+			got429 = true
+		}
+	}
+	if !got429 {
+		t.Fatal("repeated login attempts from one IP must eventually hit 429")
+	}
+}
+
+func TestCreateSession_SecureCookieBehindTLSProxy(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions",
+		bytes.NewBufferString(`{"api_key":"test-secret"}`))
+	r.Header.Set("X-Forwarded-Proto", "https")
+	h.CreateSession(rec, r)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName && !c.Secure {
+			t.Fatal("session cookie must carry Secure on HTTPS deployments")
+		}
+	}
+}
+
+func TestDeleteCurrentSession_RevokesToken(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	cookie := sessionCookie(t)
+	if !testSessions.Validate(cookie.Value) {
+		t.Fatal("precondition: token must validate before logout")
+	}
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodDelete, "/api/v1/auth/sessions/current", http.NoBody)
+	r.AddCookie(cookie)
+	h.DeleteCurrentSession(rec, r)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", rec.Code)
+	}
+	if testSessions.Validate(cookie.Value) {
+		t.Fatal("logout must revoke the token, not just clear the cookie — a captured cookie kept working for the full TTL")
+	}
+}
+
+func TestRotateNamespaceAPIKey_OK(t *testing.T) {
+	svc := &fakeSvc{rotateKeyResp: &NamespaceKeyRotateResponse{Namespace: "ns1", APIKey: "fresh-key"}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/api-key", map[string]string{"ns": "ns1"}, "")
+
+	h.RotateNamespaceAPIKey(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	var resp NamespaceKeyRotateResponse
+	assertJSON(t, rec, &resp)
+	if resp.APIKey != "fresh-key" || svc.rotateKeyNS != "ns1" {
+		t.Fatalf("unexpected: %+v (svc ns %q)", resp, svc.rotateKeyNS)
+	}
+}
+
+func TestRotateNamespaceAPIKey_NotFound(t *testing.T) {
+	h := newTestHandler(&fakeSvc{rotateKeyResp: nil})
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ghost/api-key", map[string]string{"ns": "ghost"}, "")
+
+	h.RotateNamespaceAPIKey(rec, r)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }

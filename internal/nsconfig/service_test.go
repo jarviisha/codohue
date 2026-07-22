@@ -15,6 +15,11 @@ type fakeRepo struct {
 	upsertErr               error
 	setAPIKeyHashErr        error
 	setAPIKeyHashCalled     bool
+	setAPIKeyHashLost       bool
+	replacedHashNS          string
+	replacedHash            string
+	replaceFound            bool
+	replaceErr              error
 	getCfg                  *namespace.Config
 	getErr                  error
 	upsertCatalogCfg        *namespace.Config
@@ -28,9 +33,18 @@ func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*names
 	return f.upsertCfg, f.upsertErr
 }
 
-func (f *fakeRepo) SetAPIKeyHash(_ context.Context, _, _ string) error {
+func (f *fakeRepo) SetAPIKeyHash(_ context.Context, _, _ string) (bool, error) {
 	f.setAPIKeyHashCalled = true
-	return f.setAPIKeyHashErr
+	if f.setAPIKeyHashErr != nil {
+		return false, f.setAPIKeyHashErr
+	}
+	return !f.setAPIKeyHashLost, nil
+}
+
+func (f *fakeRepo) ReplaceAPIKeyHash(_ context.Context, ns, hash string) (bool, error) {
+	f.replacedHashNS = ns
+	f.replacedHash = hash
+	return f.replaceFound, f.replaceErr
 }
 
 func (f *fakeRepo) Get(_ context.Context, _ string) (*namespace.Config, error) {
@@ -364,5 +378,54 @@ func TestServiceListCatalogNamespaces_EmptyResult(t *testing.T) {
 	}
 	if got != nil {
 		t.Errorf("expected nil/empty when no enabled namespaces, got %+v", got)
+	}
+}
+
+func TestServiceUpsert_RaceLoserDoesNotReturnPlaintext(t *testing.T) {
+	// Two concurrent first-time Upserts both see an empty hash; only one
+	// lands its write. The loser must not hand out credentials that were
+	// never stored — they would 401 forever.
+	repo := &fakeRepo{
+		upsertCfg:         &namespace.Config{Namespace: "ns"},
+		setAPIKeyHashLost: true,
+	}
+	svc := NewService(nil)
+	svc.repo = repo
+
+	resp, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.APIKey != "" {
+		t.Fatal("race loser must not return a plaintext key that was never stored")
+	}
+}
+
+func TestServiceRotateAPIKey(t *testing.T) {
+	repo := &fakeRepo{replaceFound: true}
+	svc := NewService(nil)
+	svc.repo = repo
+
+	resp, err := svc.RotateAPIKey(context.Background(), "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.APIKey == "" {
+		t.Fatal("rotation must return the new plaintext once")
+	}
+	if repo.replacedHashNS != "ns" || repo.replacedHash == "" {
+		t.Fatalf("hash not written: ns=%q hash=%q", repo.replacedHashNS, repo.replacedHash)
+	}
+	if repo.replacedHash == resp.APIKey {
+		t.Fatal("the stored value must be a hash, never the plaintext")
+	}
+}
+
+func TestServiceRotateAPIKey_UnknownNamespace(t *testing.T) {
+	svc := NewService(nil)
+	svc.repo = &fakeRepo{replaceFound: false}
+
+	if _, err := svc.RotateAPIKey(context.Background(), "ghost"); !errors.Is(err, ErrNamespaceNotFound) {
+		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
 	}
 }

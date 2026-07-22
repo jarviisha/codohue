@@ -147,10 +147,22 @@ func run() error {
 	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
 	svc.SetEventRateTracker(eventRate)
 
-	h := admin.NewHandler(svc, cfg.AdminAPIKey)
+	// Session tokens are signed with independent random material — never the
+	// API key. No pinned secret means a fresh one per boot: every restart
+	// logs all operators out, which multi-replica deployments avoid by
+	// setting CODOHUE_ADMIN_SESSION_SECRET.
+	sessions, err := admin.NewSessionManager([]byte(cfg.SessionSecret))
+	if err != nil {
+		return fmt.Errorf("init session manager: %w", err)
+	}
+	if cfg.SessionSecret == "" {
+		slog.Info("admin session secret generated for this boot; restarts invalidate sessions (set CODOHUE_ADMIN_SESSION_SECRET to pin)")
+	}
+
+	h := admin.NewHandler(svc, cfg.AdminAPIKey, sessions)
 	h.SetEventBus(bus)
 
-	r := newAdminRouter(h, cfg.AdminAPIKey, cfg.AllowDevOrigin)
+	r := newAdminRouter(h, sessions, cfg.AllowDevOrigin)
 
 	// Static file serving — React SPA embedded in the binary
 	distFS, err := fs.Sub(adminui.Files, "dist")

@@ -184,6 +184,13 @@ const (
 	ReembedOnlyStateFailed   = "failed"
 )
 
+// NamespaceKeyRotateResponse carries the freshly rotated namespace API key.
+// The plaintext appears exactly once; only its bcrypt hash is stored.
+type NamespaceKeyRotateResponse struct {
+	Namespace string `json:"namespace"`
+	APIKey    string `json:"api_key"`
+}
+
 // CatalogReEmbedRequest is the optional body of POST .../catalog/re-embed.
 type CatalogReEmbedRequest struct {
 	OnlyState string `json:"only_state,omitempty"`

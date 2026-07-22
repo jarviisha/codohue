@@ -159,7 +159,7 @@ The cron binary runs three phases per namespace on each tick:
 - **Time decay**: Events older than 90 days excluded. Freshness multiplier `e^(-λ × days_since)` applied during vector build; γ-based object freshness applied at rerank time.
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
-- **Two-tier auth**: Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and is **not** accepted by the data plane for mutations — namespace configuration lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate data-plane requests, with fallback to the global key when a namespace has no key provisioned.
+- **Two-tier auth**: Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and is **not** accepted by the data plane for mutations — namespace configuration lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate data-plane requests. The global key is a fallback **only while a namespace has no key provisioned** — once a key exists, the data plane rejects the global key, so provisioning narrows the blast radius of an admin-key leak. A leaked namespace key is rotated via `POST /api/admin/v1/namespaces/{ns}/api-key` (plaintext returned once). All plain-string credential compares are constant-time; the public admin login endpoint is per-IP rate-limited; repeated bad data-plane tokens hit a 30s negative cache instead of a bcrypt compare each time. Admin sessions are HMAC JWTs signed with an independent secret (`CODOHUE_ADMIN_SESSION_SECRET`, or fresh random material each boot), carry a `jti`, and logout revokes the token server-side.
 - **Locked client wire contract**: The client-facing JSON types live once in `pkg/codohuetypes` and are re-exported into the server domains via type aliases (e.g. `type Response = codohuetypes.Response`), so the server marshals the exact struct the SDK unmarshals. Request bodies are decoded with `httpapi.DecodeStrict` (rejects unknown fields + trailing data → 400), so client typos fail loudly instead of being silently dropped — a redundant `namespace` in the rankings/catalog body is rejected (the URL path is authoritative; `events` still carries `namespace` because the Redis-stream transport needs it). The marshaled shape of every wire type is pinned by golden snapshots in `pkg/codohuetypes/testdata/` (see the wire-contract convention below).
 
 ### REST API — `cmd/api` (port 2001)
@@ -208,6 +208,7 @@ The admin API is designed for a monitoring UI, not plain REST CRUD: it exposes *
 | `GET`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Get single namespace config                                             |
 | `PUT`    | `/api/admin/v1/namespaces/{ns}`                                     | session       | Create/update namespace; calls `nsconfig.Service` directly (200 / 201). **PATCH semantics** — an omitted field leaves that column untouched; see the config-write note below |
 | `DELETE` | `/api/admin/v1/namespaces/{ns}`                                     | session       | Wipe namespace + every trace of its data across postgres, redis, qdrant (200 with summary; 404 when missing) |
+| `POST`   | `/api/admin/v1/namespaces/{ns}/api-key`                             | session       | Rotate the namespace's data-plane API key — old key stops working immediately, new plaintext returned once (200; 404 when missing) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/dashboard`                          | session       | Per-namespace aggregate: config + last 12 runs (phase strip) + catalog backlog + events 24h/rate + qdrant counts + trending TTL + author coverage (attributed/total catalog items) |
 | `POST`   | `/api/admin/v1/reset`                                               | session       | App-wide reset — drops every namespace; requires body `{"confirm":"RESET"}` (400 otherwise) |
 | `GET`    | `/api/admin/v1/namespaces/{ns}/catalog`                             | session       | Catalog config + available strategies + backlog + consumer lag + failures + throughput |
@@ -288,6 +289,7 @@ CODOHUE_LOG_FORMAT=text   # "text" (default) | "json"
 CODOHUE_API_PORT=2001     # cmd/api listen port
 CODOHUE_ADMIN_PORT=2002   # cmd/admin listen port
 CODOHUE_INGEST_REPLICA_NAME=  # consumer name for the ingest worker's XREADGROUP; defaults to hostname
+CODOHUE_ADMIN_SESSION_SECRET=  # pins the admin session HMAC secret; empty = fresh per boot (restart logs everyone out)
 CODOHUE_API_URL=http://localhost:2001  # used by cmd/admin to proxy /healthz and inject test events
 
 # Catalog auto-embedding (cmd/embedder) — feature 004

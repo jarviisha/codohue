@@ -345,6 +345,10 @@ type fakeNSConfig struct {
 	err          error
 }
 
+func (f *fakeNSConfig) RotateAPIKey(_ context.Context, namespace string) (*NamespaceKeyRotateResponse, error) {
+	return &NamespaceKeyRotateResponse{Namespace: namespace, APIKey: "rotated-key"}, nil
+}
+
 func (f *fakeNSConfig) Upsert(_ context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error) {
 	f.gotNamespace = namespace
 	f.gotReq = req

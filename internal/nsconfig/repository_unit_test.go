@@ -398,14 +398,49 @@ func TestRepositoryUpsertCatalogConfig_DisableNullsStrategy(t *testing.T) {
 
 func TestRepositorySetAPIKeyHash_ExecError(t *testing.T) {
 	repo := &Repository{
-		execFn: func(_ context.Context, _ string, _ ...any) error {
-			return errors.New("exec failed")
+		execTagFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
+			return 0, errors.New("exec failed")
 		},
 	}
 
-	err := repo.SetAPIKeyHash(context.Background(), "ns", "hash")
-	if err == nil {
+	if _, err := repo.SetAPIKeyHash(context.Background(), "ns", "hash"); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRepositoryReplaceAPIKeyHash(t *testing.T) {
+	var gotSQL string
+	repo := &Repository{
+		execTagFn: func(_ context.Context, sql string, _ ...any) (int64, error) {
+			gotSQL = sql
+			return 1, nil
+		},
+	}
+
+	found, err := repo.ReplaceAPIKeyHash(context.Background(), "ns", "new-hash")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true when a row was updated")
+	}
+	if strings.Contains(gotSQL, "IS NULL") {
+		t.Fatal("rotation must overwrite unconditionally — the IS NULL guard is what made leaked keys unfixable")
+	}
+}
+
+func TestRepositoryReplaceAPIKeyHash_MissingNamespace(t *testing.T) {
+	repo := &Repository{
+		execTagFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
+			return 0, nil
+		},
+	}
+	found, err := repo.ReplaceAPIKeyHash(context.Background(), "ghost", "h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false for an unknown namespace")
 	}
 }
 

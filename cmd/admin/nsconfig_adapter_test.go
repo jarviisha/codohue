@@ -35,3 +35,7 @@ func TestNsConfigAdapter_Upsert_MapsDenseSource(t *testing.T) {
 		t.Errorf("dense_source not mapped: %+v", fake.gotReq)
 	}
 }
+
+func (f *fakeNsUpsertSvc) RotateAPIKey(_ context.Context, _ string) (*nsconfig.RotateAPIKeyResponse, error) {
+	return &nsconfig.RotateAPIKeyResponse{Namespace: "ns", APIKey: "new-key"}, nil
+}

@@ -127,7 +127,7 @@ func TestRepositoryUpsert_Update_PreservesAPIKeyHash(t *testing.T) {
 	}
 
 	// Write a hash.
-	if err := repo.SetAPIKeyHash(ctx, "nsconfig_test_preserve", "fakehash"); err != nil {
+	if _, err := repo.SetAPIKeyHash(ctx, "nsconfig_test_preserve", "fakehash"); err != nil {
 		t.Fatalf("SetAPIKeyHash: %v", err)
 	}
 
@@ -193,12 +193,20 @@ func TestRepositorySetAPIKeyHash_IsNoOpIfAlreadySet(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	if err := repo.SetAPIKeyHash(ctx, "nsconfig_test_hash", "first-hash"); err != nil {
+	won, err := repo.SetAPIKeyHash(ctx, "nsconfig_test_hash", "first-hash")
+	if err != nil {
 		t.Fatalf("SetAPIKeyHash first: %v", err)
 	}
+	if !won {
+		t.Fatal("first write must win")
+	}
 	// Second call must not overwrite — WHERE api_key_hash IS NULL guard.
-	if err := repo.SetAPIKeyHash(ctx, "nsconfig_test_hash", "second-hash"); err != nil {
+	won, err = repo.SetAPIKeyHash(ctx, "nsconfig_test_hash", "second-hash")
+	if err != nil {
 		t.Fatalf("SetAPIKeyHash second: %v", err)
+	}
+	if won {
+		t.Fatal("second write must lose against the existing hash")
 	}
 
 	cfg, err := repo.Get(ctx, "nsconfig_test_hash")

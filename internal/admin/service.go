@@ -67,6 +67,9 @@ type adminRepo interface {
 // namespace config service so the admin domain does not import it directly.
 type nsConfigUpserter interface {
 	Upsert(ctx context.Context, namespace string, req *NamespaceUpsertRequest) (*NamespaceUpsertResponse, error)
+	// RotateAPIKey mints a replacement namespace key, invalidating the old
+	// one immediately. Returns (nil, nil) when the namespace does not exist.
+	RotateAPIKey(ctx context.Context, namespace string) (*NamespaceKeyRotateResponse, error)
 }
 
 // nsCatalogConfigurator owns the catalog-specific config update path. Wired
@@ -273,6 +276,20 @@ func (s *Service) UpsertNamespace(ctx context.Context, namespace string, req *Na
 		status = http.StatusCreated
 	}
 	return resp, status, nil
+}
+
+// RotateNamespaceAPIKey mints a replacement API key for the namespace. The
+// old key stops working immediately; the new plaintext is returned once.
+// Returns (nil, nil) for unknown namespaces — handler maps to 404.
+func (s *Service) RotateNamespaceAPIKey(ctx context.Context, namespace string) (*NamespaceKeyRotateResponse, error) {
+	if s.nsConfigSvc == nil {
+		return nil, errors.New("namespace config service is not wired")
+	}
+	resp, err := s.nsConfigSvc.RotateAPIKey(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("rotate namespace api key: %w", err)
+	}
+	return resp, nil
 }
 
 // ErrCatalogConfiguratorUnavailable signals that the catalog config adapter

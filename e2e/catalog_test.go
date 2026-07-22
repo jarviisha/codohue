@@ -639,6 +639,10 @@ func (a *nsAdapterShim) Upsert(_ context.Context, _ string, _ *admin.NamespaceUp
 	return nil, fmt.Errorf("nsAdapterShim.Upsert not implemented for e2e")
 }
 
+func (a *nsAdapterShim) RotateAPIKey(_ context.Context, _ string) (*admin.NamespaceKeyRotateResponse, error) {
+	return nil, fmt.Errorf("nsAdapterShim.RotateAPIKey not implemented for e2e")
+}
+
 // strategyPickerShim mirrors cmd/admin/catalog_adapter.go's
 // GetCatalogStrategy method, but in-process. Returns enabled=false when the
 // namespace doesn't exist OR dense_source is not catalog (FR-008 single 404).

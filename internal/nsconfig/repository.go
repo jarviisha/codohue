@@ -19,6 +19,7 @@ type rowScanner interface {
 type Repository struct {
 	db         *pgxpool.Pool
 	execFn     func(ctx context.Context, sql string, args ...any) error
+	execTagFn  func(ctx context.Context, sql string, args ...any) (int64, error)
 	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
 }
 
@@ -32,6 +33,13 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 				return fmt.Errorf("exec namespace config statement: %w", err)
 			}
 			return nil
+		},
+		execTagFn: func(ctx context.Context, sql string, args ...any) (int64, error) {
+			tag, err := db.Exec(ctx, sql, args...)
+			if err != nil {
+				return 0, fmt.Errorf("exec namespace config statement: %w", err)
+			}
+			return tag.RowsAffected(), nil
 		},
 		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
 			return db.QueryRow(ctx, sql, args...)
@@ -146,20 +154,40 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	return &cfg, nil
 }
 
-// SetAPIKeyHash stores the bcrypt hash for the namespace. It is a no-op if the
-// namespace already has a hash (first-write-wins, matching the INSERT-then-check
-// pattern in Service.Upsert).
-func (r *Repository) SetAPIKeyHash(ctx context.Context, ns, hash string) error {
-	err := r.execFn(ctx, `
+// SetAPIKeyHash stores the bcrypt hash for the namespace and reports whether
+// this call won the write. It is a no-op (won=false) when the namespace
+// already has a hash — first-write-wins, matching the INSERT-then-check
+// pattern in Service.Upsert. The caller MUST NOT hand out its plaintext when
+// it lost: the stored hash belongs to the concurrent winner, and the loser's
+// plaintext would 401 forever.
+func (r *Repository) SetAPIKeyHash(ctx context.Context, ns, hash string) (won bool, err error) {
+	affected, err := r.execTagFn(ctx, `
 		UPDATE namespace_configs
 		SET api_key_hash = $2
 		WHERE namespace = $1 AND api_key_hash IS NULL`,
 		ns, hash,
 	)
 	if err != nil {
-		return fmt.Errorf("set api key hash: %w", err)
+		return false, fmt.Errorf("set api key hash: %w", err)
 	}
-	return nil
+	return affected > 0, nil
+}
+
+// ReplaceAPIKeyHash overwrites the namespace's key hash unconditionally —
+// the rotation path. Returns false when the namespace does not exist.
+// Without this a leaked namespace key was unfixable short of manual SQL or a
+// full namespace wipe (SetAPIKeyHash only ever writes into NULL).
+func (r *Repository) ReplaceAPIKeyHash(ctx context.Context, ns, hash string) (found bool, err error) {
+	affected, err := r.execTagFn(ctx, `
+		UPDATE namespace_configs
+		SET api_key_hash = $2, updated_at = NOW()
+		WHERE namespace = $1`,
+		ns, hash,
+	)
+	if err != nil {
+		return false, fmt.Errorf("replace api key hash: %w", err)
+	}
+	return affected > 0, nil
 }
 
 // Get returns the configuration for a namespace, or nil if it does not exist.
