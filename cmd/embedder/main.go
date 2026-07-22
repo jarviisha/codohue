@@ -141,6 +141,12 @@ func run() error {
 	backlogSampler := embedder.NewBacklogSampler(embedderRepo, redisClient, nsConfigSvc, embedder.BacklogSamplerConfig{})
 	backlogSampler.SetEventPublisher(catalogPublisher)
 
+	// Recovery sweeper — re-publishes catalog_items rows whose stream entry
+	// was lost (failed producer XADD, ack without a terminal state write),
+	// so nothing stays 'pending'/'in_flight' forever. Only acts on
+	// namespaces whose stream is fully drained; see RecoverySweeper docs.
+	recoverySweeper := embedder.NewRecoverySweeper(embedderRepo, redisClient, nsConfigSvc, embedder.RecoverySweeperConfig{})
+
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.
 	healthSrv := newHealthServer(cfg.HealthPort, db, redisClient, qdrantClient)
@@ -172,6 +178,12 @@ func run() error {
 	go func() {
 		defer close(samplerDone)
 		backlogSampler.Run(ctx)
+	}()
+
+	sweeperDone := make(chan struct{})
+	go func() {
+		defer close(sweeperDone)
+		recoverySweeper.Run(ctx)
 	}()
 
 	slog.Info("embedder started",
@@ -221,6 +233,13 @@ func run() error {
 	case <-samplerDone:
 	case <-shutdownCtx.Done():
 		slog.Warn("backlog sampler shutdown timed out")
+	}
+
+	// Wait for the recovery sweeper goroutine to drain.
+	select {
+	case <-sweeperDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("recovery sweeper shutdown timed out")
 	}
 
 	slog.Info("embedder stopped")

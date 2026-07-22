@@ -163,6 +163,71 @@ func (r *Repository) MarkDeadLetter(ctx context.Context, id int64, lastError str
 	return nil
 }
 
+// StrandedItem is a catalog_items row the recovery sweeper re-publishes to
+// the embed stream after its original entry was lost (failed XADD, an ack
+// without a state write, or a crash between the two).
+type StrandedItem struct {
+	ID       int64
+	ObjectID string
+}
+
+// ListStrandedPending returns up to limit pending rows untouched since before
+// cutoff. With the stream fully drained (no undelivered entries, empty PEL),
+// such rows have no entry left that could ever deliver them.
+func (r *Repository) ListStrandedPending(ctx context.Context, namespace string, cutoff time.Time, limit int) ([]StrandedItem, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, object_id
+		FROM catalog_items
+		WHERE namespace = $1 AND state = 'pending' AND updated_at < $2
+		ORDER BY updated_at
+		LIMIT $3`,
+		namespace, cutoff, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list stranded pending for %s: %w", namespace, err)
+	}
+	defer rows.Close()
+	return scanStrandedItems(rows)
+}
+
+// ResetStrandedInFlight resets in_flight rows untouched since before cutoff
+// back to pending and returns them for republish. An in_flight row with an
+// empty PEL means the entry was ACKed but the terminal state write was lost.
+func (r *Repository) ResetStrandedInFlight(ctx context.Context, namespace string, cutoff time.Time, limit int) ([]StrandedItem, error) {
+	rows, err := r.db.Query(ctx, `
+		UPDATE catalog_items
+		SET state = 'pending', updated_at = NOW()
+		WHERE id IN (
+			SELECT id FROM catalog_items
+			WHERE namespace = $1 AND state = 'in_flight' AND updated_at < $2
+			ORDER BY updated_at
+			LIMIT $3
+		)
+		RETURNING id, object_id`,
+		namespace, cutoff, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("reset stranded in_flight for %s: %w", namespace, err)
+	}
+	defer rows.Close()
+	return scanStrandedItems(rows)
+}
+
+func scanStrandedItems(rows pgx.Rows) ([]StrandedItem, error) {
+	var out []StrandedItem
+	for rows.Next() {
+		var item StrandedItem
+		if err := rows.Scan(&item.ID, &item.ObjectID); err != nil {
+			return nil, fmt.Errorf("scan stranded item: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate stranded items: %w", err)
+	}
+	return out, nil
+}
+
 // BacklogStateCounts holds per-state catalog_items counts the sampler writes
 // to catalog_backlog_samples each tick. Only the operationally interesting
 // states are tracked — `embedded` rows are deliberately omitted because the
