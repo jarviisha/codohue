@@ -159,14 +159,14 @@ func TestRepositoryGetPopularItems_Empty(t *testing.T) {
 	}
 }
 
+// Attribution lives in the objects table (migration 021), independent of
+// catalog_items — that independence is the point, so the fixture writes only
+// there and never creates a catalog row.
 func seedAuthoredItem(t *testing.T, db *pgxpool.Pool, ns, objectID, author string, createdAt time.Time) {
 	t.Helper()
 	_, err := db.Exec(context.Background(), `
-		INSERT INTO catalog_items (
-			namespace, object_id, content, content_hash, author_subject_id, metadata,
-			state, attempt_count, created_at, updated_at
-		)
-		VALUES ($1, $2, 'x', '\x00', NULLIF($3, ''), '{}', 'pending', 0, $4, $4)`,
+		INSERT INTO objects (namespace, object_id, author_subject_id, created_at, updated_at)
+		VALUES ($1, $2, NULLIF($3, ''), $4, $4)`,
 		ns, objectID, author, createdAt,
 	)
 	if err != nil {
@@ -178,7 +178,7 @@ func cleanupCatalogNS(t *testing.T, db *pgxpool.Pool, ns string) {
 	t.Helper()
 	t.Cleanup(func() {
 		db.Exec(context.Background(), //nolint:errcheck // test cleanup, failure is not critical
-			`DELETE FROM catalog_items WHERE namespace = $1`, ns)
+			`DELETE FROM objects WHERE namespace = $1`, ns)
 	})
 }
 
@@ -248,8 +248,8 @@ func TestRepositoryGetAuthoredObjects_Truncates(t *testing.T) {
 	}
 }
 
-// Namespaces without catalog rows (item2vec / svd / byoe) simply have no
-// authored objects — the query must return empty, not error.
+// A namespace nobody has attributed anything in simply has no authored
+// objects — the query must return empty, not error.
 func TestRepositoryGetAuthoredObjects_NonCatalogNamespace(t *testing.T) {
 	db := openTestDB(t)
 	got, truncated, err := NewRepository(db).GetAuthoredObjects(

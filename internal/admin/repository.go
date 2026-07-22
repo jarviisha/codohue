@@ -700,8 +700,14 @@ func (r *Repository) SeedDemoCatalogItems(ctx context.Context, namespace string,
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck // commit path below owns successful completion
 
+	if _, err := tx.Exec(ctx, `DELETE FROM objects WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete objects: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM catalog_items WHERE namespace = $1`, namespace); err != nil {
 		return 0, fmt.Errorf("delete existing catalog items: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM objects WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete existing objects: %w", err)
 	}
 
 	for _, it := range items {
@@ -711,14 +717,26 @@ func (r *Repository) SeedDemoCatalogItems(ctx context.Context, namespace string,
 		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO catalog_items (
-				namespace, object_id, content, content_hash, author_subject_id, metadata,
+				namespace, object_id, content, content_hash, metadata,
 				state, attempt_count, created_at, updated_at
 			)
-			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, 'pending', 0, NOW(), NOW())`,
-			namespace, it.ObjectID, it.Content, demoContentHash(it.Content),
-			it.AuthorSubjectID, metaBytes,
+			VALUES ($1, $2, $3, $4, $5, 'pending', 0, NOW(), NOW())`,
+			namespace, it.ObjectID, it.Content, demoContentHash(it.Content), metaBytes,
 		); err != nil {
 			return 0, fmt.Errorf("insert demo catalog item %s: %w", it.ObjectID, err)
+		}
+		// Attribution lives in objects, so the demo has to seed both to show
+		// the author column and the exclude_authored filter working.
+		if it.AuthorSubjectID != "" {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO objects (namespace, object_id, author_subject_id, created_at, updated_at)
+				VALUES ($1, $2, $3, NOW(), NOW())
+				ON CONFLICT (namespace, object_id) DO UPDATE
+				SET author_subject_id = EXCLUDED.author_subject_id, updated_at = NOW()`,
+				namespace, it.ObjectID, it.AuthorSubjectID,
+			); err != nil {
+				return 0, fmt.Errorf("insert demo object author %s: %w", it.ObjectID, err)
+			}
 		}
 	}
 
@@ -744,6 +762,9 @@ func (r *Repository) TruncateAllNamespaceData(ctx context.Context) (eventsDelete
 	eventsTag, execErr := tx.Exec(ctx, `DELETE FROM events`)
 	if execErr != nil {
 		return 0, 0, fmt.Errorf("delete events: %w", execErr)
+	}
+	if _, execErr := tx.Exec(ctx, `DELETE FROM objects`); execErr != nil {
+		return 0, 0, fmt.Errorf("delete objects: %w", execErr)
 	}
 	if _, execErr := tx.Exec(ctx, `DELETE FROM catalog_items`); execErr != nil {
 		return 0, 0, fmt.Errorf("delete catalog_items: %w", execErr)
@@ -779,6 +800,9 @@ func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (
 	}
 	eventsDeleted := int(tag.RowsAffected())
 
+	if _, err := tx.Exec(ctx, `DELETE FROM objects WHERE namespace = $1`, namespace); err != nil {
+		return 0, fmt.Errorf("delete objects: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM catalog_items WHERE namespace = $1`, namespace); err != nil {
 		return 0, fmt.Errorf("delete catalog items: %w", err)
 	}
@@ -798,15 +822,17 @@ func (r *Repository) ClearNamespaceData(ctx context.Context, namespace string) (
 	return eventsDeleted, nil
 }
 
-// GetAuthorCoverage returns how many catalog items in the namespace carry an
-// author_subject_id, and how many exist in total. Both zero for a namespace
-// with no catalog items at all — which is the normal case outside catalog
-// mode, since the data-plane ingest is the only supported way to create them.
+// GetAuthorCoverage returns how many objects in the namespace carry an
+// author, and how many catalog items exist. The two come from different
+// tables on purpose: attribution lives in `objects` and applies under every
+// dense_source, while the denominator is the catalog the operator is looking
+// at on that page.
 func (r *Repository) GetAuthorCoverage(ctx context.Context, namespace string) (attributed, total int, err error) {
 	err = r.db.QueryRow(ctx, `
-		SELECT COUNT(*) FILTER (WHERE author_subject_id IS NOT NULL), COUNT(*)
-		FROM catalog_items
-		WHERE namespace = $1`,
+		SELECT
+		  (SELECT COUNT(*) FROM objects
+		    WHERE namespace = $1 AND author_subject_id IS NOT NULL),
+		  (SELECT COUNT(*) FROM catalog_items WHERE namespace = $1)`,
 		namespace,
 	).Scan(&attributed, &total)
 	if err != nil {

@@ -14,12 +14,19 @@ import (
 
 // catalogRepository abstracts Repository for tests.
 type catalogRepository interface {
-	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, authorSubjectID string, metadata map[string]any) (*UpsertResult, error)
+	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any) (*UpsertResult, error)
 }
 
 // nsConfigGetter abstracts nsconfig.Service.Get for tests.
 type nsConfigGetter interface {
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
+}
+
+// objectAuthorWriter records an object's author. Satisfied by
+// objects.Service in cmd/api — declared here as an interface because the
+// import rule forbids catalog from importing a peer domain directly.
+type objectAuthorWriter interface {
+	SetAuthor(ctx context.Context, namespace, objectID, authorSubjectID string) error
 }
 
 // xAdder abstracts the Redis client's XAdd method so the service can be
@@ -32,11 +39,16 @@ type xAdder interface {
 // catalog_items table, and publishes pending items to the per-namespace
 // Redis Stream catalog:embed:{ns} for the embedder worker to consume.
 type Service struct {
-	repo        catalogRepository
-	nsConfigSvc nsConfigGetter
-	publisher   xAdder
-	clock       func() time.Time
+	repo         catalogRepository
+	nsConfigSvc  nsConfigGetter
+	publisher    xAdder
+	authorWriter objectAuthorWriter // optional; attribution is skipped when nil
+	clock        func() time.Time
 }
+
+// SetAuthorWriter wires the objects domain in. The wiring layer calls this
+// once at startup; when unset, catalog ingest simply drops author_subject_id.
+func (s *Service) SetAuthorWriter(w objectAuthorWriter) { s.authorWriter = w }
 
 // NewService creates a Service with the given dependencies. The publisher
 // is typically the process-wide *redis.Client; pass any implementation of
@@ -92,10 +104,24 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 
 	hash := ContentHash(req.Content)
 
-	res, err := s.repo.Upsert(ctx, ns, req.ObjectID, req.Content, hash,
-		strings.TrimSpace(req.AuthorSubjectID), req.Metadata)
+	res, err := s.repo.Upsert(ctx, ns, req.ObjectID, req.Content, hash, req.Metadata)
 	if err != nil {
 		return nil, fmt.Errorf("persist catalog item: %w", err)
+	}
+
+	// Attribution lives in the objects table, not here, so that it works for
+	// every dense_source. Written through an injected interface because the
+	// import rule forbids reaching into a peer domain; cmd/api supplies the
+	// real implementation. A failure is logged, not fatal: the catalog row is
+	// already durable and attribution is not embedding input.
+	if s.authorWriter != nil && req.AuthorSubjectID != "" {
+		if err := s.authorWriter.SetAuthor(ctx, ns, req.ObjectID, req.AuthorSubjectID); err != nil {
+			slog.WarnContext(ctx, "catalog ingest: could not record object author",
+				slog.String("namespace", ns),
+				slog.String("object_id", req.ObjectID),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 
 	if res.NeedsPublish {

@@ -39,7 +39,6 @@ type Item struct {
 	ObjectID        string
 	Content         string
 	ContentHash     []byte
-	AuthorSubjectID string // ownership metadata; empty when unattributed
 	Metadata        map[string]any
 	State           State
 	StrategyID      string

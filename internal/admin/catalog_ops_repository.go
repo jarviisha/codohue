@@ -341,13 +341,18 @@ func (r *Repository) ListOpenReembedRuns(ctx context.Context) ([]OpenReembedRun,
 
 // catalogItemSelectCols is the projection used by both the list and detail
 // endpoints so the column order stays consistent across both readers.
+// Attribution lives in `objects` (migration 021), not on catalog_items, so
+// every read that surfaces an author joins across. LEFT JOIN because an item
+// need not be attributed — and, symmetrically, an attributed object need not
+// have a catalog row at all.
 const catalogItemSelectCols = `
-	SELECT id, namespace, object_id, content, content_hash, metadata,
-	       COALESCE(author_subject_id, ''),
-	       state, COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
-	       embedded_at, attempt_count, COALESCE(last_error, ''),
-	       created_at, updated_at
-	FROM catalog_items`
+	SELECT c.id, c.namespace, c.object_id, c.content, c.content_hash, c.metadata,
+	       COALESCE(o.author_subject_id, ''),
+	       c.state, COALESCE(c.strategy_id, ''), COALESCE(c.strategy_version, ''),
+	       c.embedded_at, c.attempt_count, COALESCE(c.last_error, ''),
+	       c.created_at, c.updated_at
+	FROM catalog_items c
+	LEFT JOIN objects o ON o.namespace = c.namespace AND o.object_id = c.object_id`
 
 // ListCatalogItems returns a paginated browse of catalog items. The state
 // filter accepts the canonical state names ("pending", "in_flight",
@@ -367,34 +372,36 @@ func (r *Repository) ListCatalogItems(ctx context.Context, namespace, state stri
 	}
 
 	args := []any{namespace}
-	conds := []string{"namespace = $1"}
+	conds := []string{"c.namespace = $1"}
 	if state != "" && state != "all" {
 		args = append(args, state)
-		conds = append(conds, fmt.Sprintf("state = $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("c.state = $%d", len(args)))
 	}
 	if objectIDFilter != "" {
 		args = append(args, "%"+objectIDFilter+"%")
-		conds = append(conds, fmt.Sprintf("object_id ILIKE $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("c.object_id ILIKE $%d", len(args)))
 	}
 	if authorFilter != "" {
 		args = append(args, authorFilter)
-		conds = append(conds, fmt.Sprintf("author_subject_id = $%d", len(args)))
+		conds = append(conds, fmt.Sprintf("o.author_subject_id = $%d", len(args)))
 	}
+	const catalogItemsFrom = `
+		FROM catalog_items c
+		LEFT JOIN objects o ON o.namespace = c.namespace AND o.object_id = c.object_id`
 	where := " WHERE " + strings.Join(conds, " AND ")
 
 	var total int
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM catalog_items`+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*)`+catalogItemsFrom+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count catalog items: %w", err)
 	}
 
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, object_id, COALESCE(author_subject_id, ''), LEFT(content, 240), state,
-		       COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
-		       attempt_count, COALESCE(last_error, ''),
-		       embedded_at, updated_at
-		FROM catalog_items`+where+
-		fmt.Sprintf(" ORDER BY updated_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)),
+		SELECT c.id, c.object_id, COALESCE(o.author_subject_id, ''), LEFT(c.content, 240), c.state,
+		       COALESCE(c.strategy_id, ''), COALESCE(c.strategy_version, ''),
+		       c.attempt_count, COALESCE(c.last_error, ''),
+		       c.embedded_at, c.updated_at`+catalogItemsFrom+where+
+		fmt.Sprintf(" ORDER BY c.updated_at DESC LIMIT $%d OFFSET $%d", len(args)-1, len(args)),
 		args...,
 	)
 	if err != nil {
@@ -430,7 +437,7 @@ func (r *Repository) GetCatalogItem(ctx context.Context, namespace string, id in
 		contentHash []byte
 	)
 	err := r.db.QueryRow(ctx, catalogItemSelectCols+`
-		WHERE namespace = $1 AND id = $2`,
+		WHERE c.namespace = $1 AND c.id = $2`,
 		namespace, id,
 	).Scan(
 		&d.ID, &d.Namespace, &d.ObjectID, &d.Content, &contentHash, &metadataRaw,
@@ -476,7 +483,9 @@ func (r *Repository) RedriveCatalogItem(ctx context.Context, namespace string, i
 		  AND id = $2
 		  AND state IN ('failed', 'dead_letter')
 		RETURNING id, namespace, object_id, content, content_hash, metadata,
-		          COALESCE(author_subject_id, ''),
+		          '' AS author_subject_id, -- RETURNING cannot join; the redrive
+		                                   -- response is a state echo, not a
+		                                   -- metadata read
 		          state, COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 		          embedded_at, attempt_count, COALESCE(last_error, ''),
 		          created_at, updated_at`,

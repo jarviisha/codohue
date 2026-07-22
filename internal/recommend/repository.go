@@ -79,14 +79,14 @@ var authoredObjectsCap = 5000
 // first, capped at authoredObjectsCap. The second return value reports
 // whether the cap truncated the result.
 //
-// This reads catalog_items, which only exists for catalog-mode namespaces —
-// every other dense_source returns an empty slice because no row carries an
-// author. Ordering by created_at means that when the cap does bite, the most
+// Reads the objects table (migration 021), which is independent of
+// dense_source — attribution works the same under item2vec, svd, byoe and
+// catalog. Ordering by created_at means that when the cap does bite, the most
 // recent objects (the ones most likely to surface in recommendations) are the
 // ones that get excluded.
 func (r *Repository) GetAuthoredObjects(ctx context.Context, namespace, subjectID string) (objectIDs []string, truncated bool, err error) {
 	rows, err := r.queryFn(ctx, `
-		SELECT object_id FROM catalog_items
+		SELECT object_id FROM objects
 		WHERE namespace         = $1
 		  AND author_subject_id = $2
 		ORDER BY created_at DESC

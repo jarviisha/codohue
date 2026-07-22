@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"strings"
@@ -15,22 +14,31 @@ import (
 
 // fakeRepo records calls and returns canned values.
 type fakeRepo struct {
-	res        *UpsertResult
-	err        error
-	called     int
-	lastNS     string
-	lastObj    string
-	lastHash   []byte
-	lastAuthor string
+	res      *UpsertResult
+	err      error
+	called   int
+	lastNS   string
+	lastObj  string
+	lastHash []byte
 }
 
-func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, author string, _ map[string]any) (*UpsertResult, error) {
+func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ map[string]any) (*UpsertResult, error) {
 	f.called++
 	f.lastNS = ns
 	f.lastObj = obj
 	f.lastHash = hash
-	f.lastAuthor = author
 	return f.res, f.err
+}
+
+// fakeAuthorWriter captures the write-through into the objects domain.
+type fakeAuthorWriter struct {
+	calls []string // "ns/object/author" per call
+	err   error
+}
+
+func (f *fakeAuthorWriter) SetAuthor(_ context.Context, ns, obj, author string) error {
+	f.calls = append(f.calls, ns+"/"+obj+"/"+author)
+	return f.err
 }
 
 // fakeNSConfig returns canned namespace configs.
@@ -157,48 +165,51 @@ func TestServiceIngest_ContentTooLarge(t *testing.T) {
 	}
 }
 
-// author_subject_id is optional ownership metadata: it reaches the repo
-// trimmed, and its absence is stored as the empty string (NULL in SQL).
-func TestServiceIngest_PassesTrimmedAuthorToRepo(t *testing.T) {
-	cases := map[string]string{
-		"u1":       "u1",
-		"  u1  ":   "u1",
-		"":         "",
-		"   \t\n ": "",
+// Attribution no longer lands on catalog_items — it is written through to
+// the objects domain so it works under every dense_source.
+func TestServiceIngest_WritesAuthorThroughToObjects(t *testing.T) {
+	writer := &fakeAuthorWriter{}
+	svc := newSvc(&fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	svc.SetAuthorWriter(writer)
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u1",
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
 	}
-	for in, want := range cases {
-		repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}, NeedsPublish: false}}
-		svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
-		if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
-			ObjectID: "o1", Content: "hello", AuthorSubjectID: in,
-		}); err != nil {
-			t.Fatalf("author=%q: Ingest: %v", in, err)
-		}
-		if repo.lastAuthor != want {
-			t.Errorf("author=%q: repo got %q, want %q", in, repo.lastAuthor, want)
-		}
+	if len(writer.calls) != 1 || writer.calls[0] != "ns/o1/u1" {
+		t.Errorf("author write-through: got %v", writer.calls)
 	}
 }
 
-// Author is ownership metadata, not embedding input: changing only the author
-// must not change the content hash, so no re-embed is triggered.
-func TestServiceIngest_AuthorDoesNotAffectContentHash(t *testing.T) {
-	authors := []string{"", "u1", "u2"}
-	hashes := make([][]byte, 0, len(authors))
-	for _, author := range authors {
-		repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}
-		svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
-		if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
-			ObjectID: "o1", Content: "same content", AuthorSubjectID: author,
-		}); err != nil {
-			t.Fatalf("Ingest: %v", err)
-		}
-		hashes = append(hashes, repo.lastHash)
+// Omitting the author must not call through at all — absence means
+// "unspecified", not "clear whatever the objects endpoint set".
+func TestServiceIngest_NoAuthorSkipsWriteThrough(t *testing.T) {
+	writer := &fakeAuthorWriter{}
+	svc := newSvc(&fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	svc.SetAuthorWriter(writer)
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "hello",
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
 	}
-	for i := 1; i < len(hashes); i++ {
-		if !bytes.Equal(hashes[0], hashes[i]) {
-			t.Fatalf("author changed the content hash: %x vs %x", hashes[0], hashes[i])
-		}
+	if len(writer.calls) != 0 {
+		t.Errorf("expected no write-through, got %v", writer.calls)
+	}
+}
+
+// The catalog row is already durable when attribution is attempted, so a
+// failure there must not fail the ingest.
+func TestServiceIngest_AuthorWriteFailureIsNotFatal(t *testing.T) {
+	writer := &fakeAuthorWriter{err: errors.New("objects table down")}
+	svc := newSvc(&fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	svc.SetAuthorWriter(writer)
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u1",
+	}); err != nil {
+		t.Fatalf("ingest must survive an attribution failure, got: %v", err)
 	}
 }
 

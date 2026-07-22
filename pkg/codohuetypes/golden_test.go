@@ -56,6 +56,11 @@ func TestGoldenWireContract(t *testing.T) {
 			Namespace: "feed", SubjectID: "subj-1", ObjectID: "obj-1", Action: codohuetypes.ActionLike,
 			OccurredAt: ts, ObjectCreatedAt: &objCreated, Metadata: map[string]string{"src": "web"},
 		}},
+		{"object_upsert_request", codohuetypes.ObjectUpsertRequest{AuthorSubjectID: "subj-1"}},
+		{"object_response", codohuetypes.ObjectResponse{
+			Namespace: "feed", ObjectID: "obj-1", AuthorSubjectID: "subj-1",
+			UpdatedAt: "2026-07-22T10:00:00Z",
+		}},
 		{"catalog_ingest_request", codohuetypes.CatalogIngestRequest{
 			ObjectID: "obj-1", Content: "hello world", AuthorSubjectID: "subj-1",
 			Metadata: map[string]any{"lang": "en"},

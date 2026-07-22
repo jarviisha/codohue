@@ -86,12 +86,12 @@ func setEmbeddedAtNil(dest any) error {
 	return nil
 }
 
-// fillScanRow populates the 16-field scan row used by Repository.Upsert.
+// fillScanRow populates the 15-field scan row used by Repository.Upsert.
 // Field positions match the SELECT in repository.go. Tests call this then
 // override specific fields they care about (state, content_hash, needsPublish).
-func fillScanRow(dest []any, contentHash, metadata []byte, author, state string, needsPublish bool, now time.Time) error {
-	if len(dest) != 16 {
-		return errors.New("expected 16 scan targets")
+func fillScanRow(dest []any, contentHash, metadata []byte, state string, needsPublish bool, now time.Time) error {
+	if len(dest) != 15 {
+		return errors.New("expected 15 scan targets")
 	}
 	if err := setInt64(dest[0], 42); err != nil {
 		return err
@@ -108,37 +108,34 @@ func fillScanRow(dest []any, contentHash, metadata []byte, author, state string,
 	if err := setBytes(dest[4], contentHash); err != nil {
 		return err
 	}
-	if err := setString(dest[5], author); err != nil {
+	if err := setBytes(dest[5], metadata); err != nil {
 		return err
 	}
-	if err := setBytes(dest[6], metadata); err != nil {
+	if err := setState(dest[6], state); err != nil {
 		return err
 	}
-	if err := setState(dest[7], state); err != nil {
+	if err := setString(dest[7], ""); err != nil {
 		return err
 	}
 	if err := setString(dest[8], ""); err != nil {
 		return err
 	}
-	if err := setString(dest[9], ""); err != nil {
+	if err := setEmbeddedAtNil(dest[9]); err != nil {
 		return err
 	}
-	if err := setEmbeddedAtNil(dest[10]); err != nil {
+	if err := setInt(dest[10], 0); err != nil {
 		return err
 	}
-	if err := setInt(dest[11], 0); err != nil {
+	if err := setString(dest[11], ""); err != nil {
 		return err
 	}
-	if err := setString(dest[12], ""); err != nil {
+	if err := setTime(dest[12], now); err != nil {
 		return err
 	}
 	if err := setTime(dest[13], now); err != nil {
 		return err
 	}
-	if err := setTime(dest[14], now); err != nil {
-		return err
-	}
-	return setBool(dest[15], needsPublish)
+	return setBool(dest[14], needsPublish)
 }
 
 func TestNewRepository(t *testing.T) {
@@ -172,7 +169,7 @@ func TestRepositoryUpsert_QueryError(t *testing.T) {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
 		},
 	}
-	_, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", ContentHash("hello"), "", nil)
+	_, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", ContentHash("hello"), nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -184,11 +181,11 @@ func TestRepositoryUpsert_FreshInsertNeedsPublish(t *testing.T) {
 	repo := &Repository{
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "", "pending", true, now)
+				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
 			}}
 		},
 	}
-	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello world", hash, "", nil)
+	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello world", hash, nil)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -209,11 +206,11 @@ func TestRepositoryUpsert_IdempotentSameContent(t *testing.T) {
 	repo := &Repository{
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "", "embedded", false, now)
+				return fillScanRow(dest, hash, []byte("{}"), "embedded", false, now)
 			}}
 		},
 	}
-	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello world", hash, "", nil)
+	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello world", hash, nil)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -231,11 +228,11 @@ func TestRepositoryUpsert_NewContentResetsState(t *testing.T) {
 	repo := &Repository{
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "", "pending", true, now)
+				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
 			}}
 		},
 	}
-	res, err := repo.Upsert(context.Background(), "ns", "obj1", "brand new content", hash, "", nil)
+	res, err := repo.Upsert(context.Background(), "ns", "obj1", "brand new content", hash, nil)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
@@ -250,7 +247,7 @@ func TestRepositoryUpsert_NewContentResetsState(t *testing.T) {
 	}
 }
 
-func TestRepositoryUpsert_MetadataAndAuthorRoundTrip(t *testing.T) {
+func TestRepositoryUpsert_MetadataRoundTrip(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello")
 	meta := []byte(`{"lang":"vi","tags":"news"}`)
@@ -259,45 +256,21 @@ func TestRepositoryUpsert_MetadataAndAuthorRoundTrip(t *testing.T) {
 		queryRowFn: func(_ context.Context, _ string, args ...any) rowScanner {
 			gotArgs = args
 			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, meta, "u1", "pending", true, now)
+				return fillScanRow(dest, hash, meta, "pending", true, now)
 			}}
 		},
 	}
-	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash, "u1",
+	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash,
 		map[string]any{"lang": "vi", "tags": "news"})
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
 	}
-	// The author travels as its own bind arg, not folded into the metadata blob.
-	if len(gotArgs) != 6 || gotArgs[4] != "u1" {
-		t.Errorf("expected author as 5th bind arg, got %v", gotArgs)
-	}
-	if res.Item.AuthorSubjectID != "u1" {
-		t.Errorf("author_subject_id: got %q", res.Item.AuthorSubjectID)
+	// Attribution moved to the objects table, so it must not appear here.
+	if len(gotArgs) != 5 {
+		t.Errorf("expected 5 bind args after author moved out, got %v", gotArgs)
 	}
 	if res.Item.Metadata["lang"] != "vi" || res.Item.Metadata["tags"] != "news" {
 		t.Errorf("metadata round-trip: got %v", res.Item.Metadata)
-	}
-}
-
-// An unattributed item stores NULL, which the query reads back via COALESCE
-// as the empty string — never a literal "NULL" or a nil deref.
-func TestRepositoryUpsert_EmptyAuthorRoundTrips(t *testing.T) {
-	now := time.Now()
-	hash := ContentHash("hello")
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "", "pending", true, now)
-			}}
-		},
-	}
-	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash, "", nil)
-	if err != nil {
-		t.Fatalf("Upsert: %v", err)
-	}
-	if res.Item.AuthorSubjectID != "" {
-		t.Errorf("expected empty author, got %q", res.Item.AuthorSubjectID)
 	}
 }
 
@@ -307,11 +280,11 @@ func TestRepositoryUpsert_MalformedMetadataReturnsError(t *testing.T) {
 	repo := &Repository{
 		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
 			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("not-json"), "", "pending", true, now)
+				return fillScanRow(dest, hash, []byte("not-json"), "pending", true, now)
 			}}
 		},
 	}
-	_, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash, "", nil)
+	_, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash, nil)
 	if err == nil {
 		t.Fatal("expected error on malformed metadata")
 	}

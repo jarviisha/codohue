@@ -29,6 +29,7 @@ import (
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	"github.com/jarviisha/codohue/internal/ingest"
 	"github.com/jarviisha/codohue/internal/nsconfig"
+	"github.com/jarviisha/codohue/internal/objects"
 	"github.com/jarviisha/codohue/internal/recommend"
 )
 
@@ -127,6 +128,12 @@ func run() error {
 	catalogSvc := catalog.NewService(catalogRepo, nsConfigSvc, redisClient)
 	catalogHandler := catalog.NewHandler(catalogSvc)
 
+	// per-object metadata, independent of embedding. Wired into catalog as an
+	// interface so catalog never imports this peer domain directly.
+	objectsSvc := objects.NewService(objects.NewRepository(db))
+	objectsHandler := objects.NewHandler(objectsSvc)
+	catalogSvc.SetAuthorWriter(objectsSvc)
+
 	// recommend
 	recommendRepo := recommend.NewRepository(db)
 	recommendSvc := recommend.NewService(recommendRepo, nsConfigSvc, idmapSvc, qdrantClient, redisClient)
@@ -165,6 +172,7 @@ func run() error {
 		r.Get("/v1/namespaces/{ns}/subjects/{id}/recommendations", recommendHandler.GetSubjectRecommendations)
 		r.Post("/v1/namespaces/{ns}/rankings", recommendHandler.Rank)
 		r.Get("/v1/namespaces/{ns}/trending", recommendHandler.GetTrending)
+		r.Put("/v1/namespaces/{ns}/objects/{id}", objectsHandler.Upsert)
 		r.Put("/v1/namespaces/{ns}/objects/{id}/embedding", recommendHandler.StoreObjectEmbedding)
 		r.Put("/v1/namespaces/{ns}/subjects/{id}/embedding", recommendHandler.StoreSubjectEmbedding)
 		r.Delete("/v1/namespaces/{ns}/objects/{id}", recommendHandler.DeleteObject)

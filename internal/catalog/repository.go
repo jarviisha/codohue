@@ -47,13 +47,12 @@ type UpsertResult struct {
 //     attempt_count=0, last_error=NULL; content + content_hash + metadata
 //     all replaced. NeedsPublish=true so the embedder picks up the new content.
 //
-// authorSubjectID is optional ownership metadata; the empty string is stored
-// as NULL. Like metadata it never affects the content hash, so re-ingesting
-// with only the author changed does not trigger a re-embed.
-//
 // strategy_id and strategy_version are NEVER touched by this method — they
 // are only written by the embedder on a successful embed.
-func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, authorSubjectID string, metadata map[string]any) (*UpsertResult, error) {
+//
+// Attribution is deliberately absent: author lives in the objects table
+// (migration 021) so it works under every dense_source, not only here.
+func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any) (*UpsertResult, error) {
 	metaBytes, err := marshalMetadata(metadata)
 	if err != nil {
 		return nil, err
@@ -76,14 +75,13 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 		),
 		upserted AS (
 			INSERT INTO catalog_items (
-				namespace, object_id, content, content_hash, author_subject_id, metadata,
+				namespace, object_id, content, content_hash, metadata,
 				state, attempt_count, last_error, created_at, updated_at
 			)
-			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, 'pending', 0, NULL, NOW(), NOW())
+			VALUES ($1, $2, $3, $4, $5, 'pending', 0, NULL, NOW(), NOW())
 			ON CONFLICT (namespace, object_id) DO UPDATE
 			SET content           = EXCLUDED.content,
 			    content_hash      = EXCLUDED.content_hash,
-			    author_subject_id = EXCLUDED.author_subject_id,
 			    metadata          = EXCLUDED.metadata,
 			    state         = CASE WHEN catalog_items.content_hash = EXCLUDED.content_hash
 			                         THEN catalog_items.state ELSE 'pending' END,
@@ -93,9 +91,7 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 			                         THEN catalog_items.last_error ELSE NULL END,
 			    updated_at    = NOW()
 			RETURNING
-				id, namespace, object_id, content, content_hash,
-				COALESCE(author_subject_id, '') AS author_subject_id,
-				metadata,
+				id, namespace, object_id, content, content_hash, metadata,
 				state,
 				COALESCE(strategy_id, '')      AS strategy_id,
 				COALESCE(strategy_version, '') AS strategy_version,
@@ -104,17 +100,15 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 				created_at, updated_at
 		)
 		SELECT
-			u.id, u.namespace, u.object_id, u.content, u.content_hash,
-			u.author_subject_id, u.metadata,
+			u.id, u.namespace, u.object_id, u.content, u.content_hash, u.metadata,
 			u.state, u.strategy_id, u.strategy_version,
 			u.embedded_at, u.attempt_count, u.last_error,
 			u.created_at, u.updated_at,
 			(NOT EXISTS (SELECT 1 FROM existing) OR (SELECT content_hash FROM existing) <> u.content_hash) AS needs_publish
 		FROM upserted u`,
-		namespace, objectID, content, contentHash, authorSubjectID, metaBytes,
+		namespace, objectID, content, contentHash, metaBytes,
 	).Scan(
-		&item.ID, &item.Namespace, &item.ObjectID, &item.Content, &item.ContentHash,
-		&item.AuthorSubjectID, &metaRaw,
+		&item.ID, &item.Namespace, &item.ObjectID, &item.Content, &item.ContentHash, &metaRaw,
 		&item.State, &item.StrategyID, &item.StrategyVersion,
 		&item.EmbeddedAt, &item.AttemptCount, &item.LastError,
 		&item.CreatedAt, &item.UpdatedAt,
