@@ -20,6 +20,10 @@ Ba mẫu lỗi gốc cần giữ trong đầu khi sửa từng task:
 
 ## Phase 1 — Chặn mất dữ liệu (làm ngay, trước mọi thứ khác)
 
+> **✅ HOÀN THÀNH 2026-07-22** — 1.1 `fix(idmap)`, 1.2 `fix(ingest)`,
+> 1.3 `feat(embedder)`. Unit test + lint xanh; AC tích hợp (e2e với hạ tầng
+> thật) sẽ chạy cùng đợt soak test sau Phase 2.
+
 ### 1.1 `id_mappings`: chuyển sang khóa composite `(namespace, entity_type, string_id)` — **L**
 
 **Vấn đề (F1):** `migrations/001_initial.up.sql:27` khai `string_id TEXT PRIMARY KEY`
