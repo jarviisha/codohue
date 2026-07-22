@@ -54,7 +54,7 @@ func TestGoldenWireContract(t *testing.T) {
 		{"embedding_request", codohuetypes.EmbeddingRequest{Vector: []float32{0.1, 0.2, 0.3, 0.4}, ObjectCreatedAt: &objCreated}},
 		{"event_payload", codohuetypes.EventPayload{
 			Namespace: "feed", SubjectID: "subj-1", ObjectID: "obj-1", Action: codohuetypes.ActionLike,
-			OccurredAt: ts, ObjectCreatedAt: &objCreated, Metadata: map[string]string{"src": "web"},
+			OccurredAt: ts, ObjectCreatedAt: &objCreated,
 		}},
 		{"object_upsert_request", codohuetypes.ObjectUpsertRequest{AuthorSubjectID: "subj-1"}},
 		{"object_response", codohuetypes.ObjectResponse{
