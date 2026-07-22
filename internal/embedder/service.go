@@ -244,7 +244,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	}
 
 	embeddedAt := s.clock().UTC()
-	if err := s.upsertVector(ctx, item.Namespace, item.ObjectID, pointID, vec, strategy, embeddedAt); err != nil {
+	if err := s.upsertVector(ctx, item, pointID, vec, strategy, embeddedAt); err != nil {
 		// The collection may have been dropped (namespace wipe + recreate):
 		// invalidate the ensure cache so the next attempt re-creates it
 		// instead of dead-lettering every item until a process restart.
@@ -477,9 +477,22 @@ func (s *Service) invalidateEnsured(ns string) {
 }
 
 // upsertVector writes the dense point to {ns}_objects_dense with the V1
-// payload conventions per data-model.md §4.
-func (s *Service) upsertVector(ctx context.Context, ns, objectID string, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
-	collection := ns + "_objects_dense"
+// payload conventions per data-model.md §4. created_at (the catalog item's
+// creation time) is what the recommend service's γ-freshness rerank reads —
+// without it, catalog-embedded items would never decay.
+func (s *Service) upsertVector(ctx context.Context, item *PendingItem, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
+	collection := item.Namespace + "_objects_dense"
+
+	payload := map[string]*qdrant.Value{
+		"object_id":        qdrant.NewValueString(item.ObjectID),
+		"namespace":        qdrant.NewValueString(item.Namespace),
+		"strategy_id":      qdrant.NewValueString(strategy.ID()),
+		"strategy_version": qdrant.NewValueString(strategy.Version()),
+		"embedded_at":      qdrant.NewValueString(embeddedAt.Format(time.RFC3339)),
+	}
+	if !item.CreatedAt.IsZero() {
+		payload["created_at"] = qdrant.NewValueString(item.CreatedAt.UTC().Format(time.RFC3339))
+	}
 
 	point := &qdrant.PointStruct{
 		Id: qdrant.NewIDNum(pointID),
@@ -492,13 +505,7 @@ func (s *Service) upsertVector(ctx context.Context, ns, objectID string, pointID
 				},
 			},
 		},
-		Payload: map[string]*qdrant.Value{
-			"object_id":        qdrant.NewValueString(objectID),
-			"namespace":        qdrant.NewValueString(ns),
-			"strategy_id":      qdrant.NewValueString(strategy.ID()),
-			"strategy_version": qdrant.NewValueString(strategy.Version()),
-			"embedded_at":      qdrant.NewValueString(embeddedAt.Format(time.RFC3339)),
-		},
+		Payload: payload,
 	}
 
 	return s.qdrantUpsertFn(ctx, &qdrant.UpsertPoints{

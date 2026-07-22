@@ -256,7 +256,7 @@ func TestUpsertItemDenseVectors_Success(t *testing.T) {
 	err := UpsertItemDenseVectors(context.Background(), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
 		"obj-1": {0.1, 0.2},
 		"obj-2": {0.3, 0.4},
-	})
+	}, map[string]string{"obj-1": "2026-07-01T00:00:00Z"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestUpsertDenseVectors_UpsertError(t *testing.T) {
 
 	err := upsertDenseVectors(context.Background(), nil, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", map[string][]float32{
 		"obj-1": {0.1, 0.2},
-	})
+	}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -433,7 +433,7 @@ func TestUpsertDenseVectors_EmptyIsNoOp(t *testing.T) {
 		return nil
 	}
 
-	if err := upsertDenseVectors(context.Background(), nil, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", nil); err != nil {
+	if err := upsertDenseVectors(context.Background(), nil, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if called {

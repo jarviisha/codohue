@@ -161,17 +161,19 @@ func NewService(
 // calls this once at startup.
 func (s *Service) SetObjectMetadataDeleter(d objectMetadataDeleter) { s.objectMeta = d }
 
-// StoreObjectEmbedding stores a BYOE dense vector for an object in {ns}_objects_dense.
-func (s *Service) StoreObjectEmbedding(ctx context.Context, ns, objectID string, vector []float32) error {
-	return s.storeEmbedding(ctx, ns, objectID, "object", vector)
+// StoreObjectEmbedding stores a BYOE dense vector for an object in
+// {ns}_objects_dense. createdAt (optional) lands in the point payload so the
+// γ-freshness rerank decays BYOE items like sparse-path ones.
+func (s *Service) StoreObjectEmbedding(ctx context.Context, ns, objectID string, vector []float32, createdAt *time.Time) error {
+	return s.storeEmbedding(ctx, ns, objectID, "object", vector, createdAt)
 }
 
 // StoreSubjectEmbedding stores a BYOE dense vector for a subject in {ns}_subjects_dense.
 func (s *Service) StoreSubjectEmbedding(ctx context.Context, ns, subjectID string, vector []float32) error {
-	return s.storeEmbedding(ctx, ns, subjectID, "subject", vector)
+	return s.storeEmbedding(ctx, ns, subjectID, "subject", vector, nil)
 }
 
-func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType string, vector []float32) error {
+func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType string, vector []float32, createdAt *time.Time) error {
 	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("get ns config: %w", err)
@@ -221,6 +223,15 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 		return fmt.Errorf("get numeric id: %w", err)
 	}
 
+	payload := map[string]*qdrant.Value{
+		idKey:        qdrant.NewValueString(entityID),
+		"strategy":   qdrant.NewValueString("byoe"),
+		"updated_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339)),
+	}
+	if createdAt != nil {
+		payload["created_at"] = qdrant.NewValueString(createdAt.UTC().Format(time.RFC3339))
+	}
+
 	err = s.qdrantUpsertFn(ctx, &qdrant.UpsertPoints{
 		CollectionName: collection,
 		Points: []*qdrant.PointStruct{
@@ -235,11 +246,7 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 						},
 					},
 				},
-				Payload: map[string]*qdrant.Value{
-					idKey:        qdrant.NewValueString(entityID),
-					"strategy":   qdrant.NewValueString("byoe"),
-					"updated_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339)),
-				},
+				Payload: payload,
 			},
 		},
 	})
@@ -302,7 +309,7 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 	}
 
 	if count == 0 {
-		return s.fallbackTrending(ctx, req, maxResults, cfg)
+		return s.fallbackTrending(ctx, req, maxResults, cfg, nil)
 	}
 	if count < coldStartThreshold {
 		return s.hybridCold(ctx, req, maxResults, cfg)
@@ -315,7 +322,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	if err != nil {
 		slog.Error("get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		req.degraded = true
-		return s.fallbackPopular(ctx, req, limit, cfg)
+		return s.fallbackPopular(ctx, req, limit, cfg, nil)
 	}
 
 	subjectVec, err := s.fetchSubjectVecFn(ctx, req.Namespace, subjectNumID)
@@ -327,7 +334,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 		if err != nil {
 			req.degraded = true
 		}
-		return s.fallbackPopular(ctx, req, limit, cfg)
+		return s.fallbackPopular(ctx, req, limit, cfg, nil)
 	}
 
 	seenItemsDays := 30
@@ -362,7 +369,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		req.degraded = true
-		return s.fallbackPopular(ctx, req, limit, cfg)
+		return s.fallbackPopular(ctx, req, limit, cfg, nil)
 	}
 
 	gamma := defaultGamma
@@ -420,7 +427,7 @@ func (s *Service) hybridRecommend(
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
-		return s.fallbackPopular(ctx, req, limit, cfg)
+		return s.fallbackPopular(ctx, req, limit, cfg, nil)
 	}
 
 	// Build per-item score maps.
@@ -624,8 +631,26 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 		Offset:    0,
 	}
 
+	// The CF sub-call filters seen items via the Qdrant MustNot; the
+	// trending share must drop them too, or the item the subject touched
+	// five minutes ago (likely trending) comes straight back in 70% of
+	// their recommendations.
+	seenItemsDays := 30
+	if cfg != nil && cfg.SeenItemsDays > 0 {
+		seenItemsDays = cfg.SeenItemsDays
+	}
+	var seen map[string]struct{}
+	if seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays); err != nil {
+		slog.Error("hybrid cold: get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+	} else if len(seenItems) > 0 {
+		seen = make(map[string]struct{}, len(seenItems))
+		for _, id := range seenItems {
+			seen[id] = struct{}{}
+		}
+	}
+
 	cfResp, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
-	popularResp, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg)
+	popularResp, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg, seen)
 	req.degraded = req.degraded || innerReq.degraded
 
 	if popErr != nil && cfErr != nil {
@@ -728,22 +753,24 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int)
 // The DB-popular fallback is used only when there is NO trending data at all
 // (or Redis is unavailable) — a merely empty page means the client paginated
 // past the end of trending and must get an empty page back, not a switch to a
-// differently-ordered list whose items were already served.
-func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
-	// With the author filter on, the exclusion has to happen before paging or
-	// the offset would count rows that are about to be dropped. Fetch from
-	// rank 0 with enough headroom to survive removing every authored object.
-	authored := s.authoredObjectSet(ctx, req, cfg)
+// differently-ordered list whose items were already served. exclude carries
+// extra object ids to drop (hybridCold passes the subject's seen items);
+// nil is the common case.
+func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}) (*Response, error) {
+	// Exclusions (authored and seen) have to happen before paging or the
+	// offset would count rows that are about to be dropped. Fetch from
+	// rank 0 with enough headroom to survive removing every excluded object.
+	excluded := mergeExclusions(s.authoredObjectSet(ctx, req, cfg), exclude)
 	fetchOffset, fetchLimit := req.Offset, limit
-	if len(authored) > 0 {
-		fetchOffset, fetchLimit = 0, req.Offset+limit+len(authored)
+	if len(excluded) > 0 {
+		fetchOffset, fetchLimit = 0, req.Offset+limit+len(excluded)
 	}
 
 	entries, err := s.getTrendingFn(ctx, req.Namespace, fetchOffset, fetchLimit)
 	if err != nil {
 		slog.Error("get trending failed, serving popular", "namespace", req.Namespace, "error", err)
 		req.degraded = true
-		return s.fallbackPopular(ctx, req, limit, cfg)
+		return s.fallbackPopular(ctx, req, limit, cfg, exclude)
 	}
 
 	hasTrending := len(entries) > 0
@@ -755,11 +782,11 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 		}
 	}
 	if !hasTrending {
-		return s.fallbackPopular(ctx, req, limit, cfg)
+		return s.fallbackPopular(ctx, req, limit, cfg, exclude)
 	}
 
-	if len(authored) > 0 {
-		entries = dropAuthoredEntries(entries, authored)
+	if len(excluded) > 0 {
+		entries = dropAuthoredEntries(entries, excluded)
 		if req.Offset < len(entries) {
 			entries = entries[req.Offset:]
 		} else {
@@ -793,16 +820,16 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	}, nil
 }
 
-func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
+func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}) (*Response, error) {
 	// Fetch enough rows to cover offset + limit so we can slice in-process,
-	// plus headroom for the authored objects about to be dropped — filtering
+	// plus headroom for the excluded objects about to be dropped — filtering
 	// has to happen before paging or the offset would count removed rows.
-	authored := s.authoredObjectSet(ctx, req, cfg)
-	rawItems, err := s.repo.GetPopularItems(ctx, req.Namespace, req.Offset+limit+len(authored))
+	excluded := mergeExclusions(s.authoredObjectSet(ctx, req, cfg), exclude)
+	rawItems, err := s.repo.GetPopularItems(ctx, req.Namespace, req.Offset+limit+len(excluded))
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
-	rawItems = dropAuthored(rawItems, authored)
+	rawItems = dropAuthored(rawItems, excluded)
 	total := len(rawItems)
 
 	// Apply offset.
@@ -1302,4 +1329,23 @@ func (s *Service) deleteFromCollection(ctx context.Context, collection string, i
 
 func recCacheKey(ns, subjectID string, limit, offset int) string {
 	return fmt.Sprintf("rec:%s:%s:limit=%d:offset=%d", ns, subjectID, limit, offset)
+}
+
+// mergeExclusions unions two exclusion sets, returning nil when both are
+// empty so the fast path stays allocation-free.
+func mergeExclusions(a, b map[string]struct{}) map[string]struct{} {
+	if len(b) == 0 {
+		return a
+	}
+	if len(a) == 0 {
+		return b
+	}
+	merged := make(map[string]struct{}, len(a)+len(b))
+	for id := range a {
+		merged[id] = struct{}{}
+	}
+	for id := range b {
+		merged[id] = struct{}{}
+	}
+	return merged
 }

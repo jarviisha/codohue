@@ -570,3 +570,23 @@ func TestServiceInvalidateEnsured(t *testing.T) {
 		t.Error("other namespaces' entries must be untouched")
 	}
 }
+
+func TestServiceProcessItem_PayloadCarriesCreatedAt(t *testing.T) {
+	svc, repo, _, _, _, upserts := newSvc(t)
+	repo.markInFlightAttempt = 1
+	repo.loadItem = &PendingItem{
+		ID: 7, Namespace: "ns", ObjectID: "obj1", Content: "hello world",
+		CreatedAt: time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC),
+	}
+
+	if _, err := svc.ProcessItem(context.Background(), 7); err != nil {
+		t.Fatalf("ProcessItem: %v", err)
+	}
+	if len(*upserts) != 1 {
+		t.Fatalf("expected 1 upsert, got %d", len(*upserts))
+	}
+	got, ok := (*upserts)[0].points[0].Payload["created_at"]
+	if !ok || got.GetStringValue() != "2026-03-04T05:06:07Z" {
+		t.Fatalf("created_at payload: got %v", got)
+	}
+}

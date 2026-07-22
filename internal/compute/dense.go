@@ -337,16 +337,20 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 }
 
 // UpsertItemDenseVectors upserts item dense vectors into {ns}_objects_dense.
-func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, itemVecs map[string][]float32) error {
-	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, namespace+"_objects_dense", namespace, "object", strategy, itemVecs)
+// createdAt carries per-object RFC3339 creation timestamps for the payload;
+// entries may be absent (payload key omitted). The recommend service's
+// γ-freshness rerank reads this key — without it, items surfaced only by the
+// dense path would never decay while sparse-path items do.
+func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, itemVecs map[string][]float32, createdAt map[string]string) error {
+	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, namespace+"_objects_dense", namespace, "object", strategy, itemVecs, createdAt)
 }
 
 // UpsertSubjectDenseVectors upserts subject dense vectors into {ns}_subjects_dense.
 func UpsertSubjectDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, subjectVecs map[string][]float32) error {
-	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, namespace+"_subjects_dense", namespace, "subject", strategy, subjectVecs)
+	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, namespace+"_subjects_dense", namespace, "subject", strategy, subjectVecs, nil)
 }
 
-func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, collection, namespace, entityType, strategy string, vecs map[string][]float32) error {
+func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, collection, namespace, entityType, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
 	// Sort entity IDs for deterministic batching.
 	ids := make([]string, 0, len(vecs))
 	for id := range vecs {
@@ -389,6 +393,14 @@ func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapS
 			continue
 		}
 
+		payload := map[string]*qdrant.Value{
+			idKey:        qdrant.NewValueString(entityID),
+			"strategy":   qdrant.NewValueString(strategy),
+			"updated_at": qdrant.NewValueString(updatedAt),
+		}
+		if t, ok := createdAt[entityID]; ok {
+			payload["created_at"] = qdrant.NewValueString(t)
+		}
 		batch = append(batch, &qdrant.PointStruct{
 			Id: qdrant.NewIDNum(numID),
 			Vectors: &qdrant.Vectors{
@@ -400,11 +412,7 @@ func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapS
 					},
 				},
 			},
-			Payload: map[string]*qdrant.Value{
-				idKey:        qdrant.NewValueString(entityID),
-				"strategy":   qdrant.NewValueString(strategy),
-				"updated_at": qdrant.NewValueString(updatedAt),
-			},
+			Payload: payload,
 		})
 
 		if len(batch) >= denseBatchSize {

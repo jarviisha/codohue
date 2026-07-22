@@ -43,7 +43,7 @@ func (f *fakeSvc) Rank(_ context.Context, _ *RankRequest, namespace string) (*Ra
 	return f.rankResp, f.rankErr
 }
 
-func (f *fakeSvc) StoreObjectEmbedding(_ context.Context, _, _ string, _ []float32) error {
+func (f *fakeSvc) StoreObjectEmbedding(_ context.Context, _, _ string, _ []float32, _ *time.Time) error {
 	return f.storeErr
 }
 

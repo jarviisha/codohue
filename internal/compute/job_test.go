@@ -65,7 +65,7 @@ func newTestJob(svc recomputer, nsCfg jobNsConfigReader, repo jobComputeRepo) *J
 
 		ensureCollectionsFn:      func(_ context.Context, _ string) error { return nil },
 		ensureDenseCollectionsFn: func(_ context.Context, _ string, _ uint64, _ string) error { return nil },
-		upsertItemDenseFn:        func(_ context.Context, _, _ string, _ map[string][]float32) error { return nil },
+		upsertItemDenseFn:        func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error { return nil },
 		upsertSubjectDenseFn:     func(_ context.Context, _, _ string, _ map[string][]float32) error { return nil },
 		fetchItemDenseFn: func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
 			return nil, nil
@@ -140,7 +140,7 @@ func TestRunOnce_Phase2_SkippedForBYOE(t *testing.T) {
 		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "byoe"}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		phase2Called = true
 		return nil
 	}
@@ -159,7 +159,7 @@ func TestRunOnce_Phase2_SkippedForDisabled(t *testing.T) {
 		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "disabled"}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		phase2Called = true
 		return nil
 	}
@@ -198,7 +198,7 @@ func TestRunOnce_Phase2_CatalogPoolsSubjectsWithoutUpsertingItems(t *testing.T) 
 			"o2": {2, 0},
 		}, nil
 	}
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		itemUpsert = true
 		return nil
 	}
@@ -297,7 +297,7 @@ func TestRunOnce_Phase2_SkippedWhenNoConfig(t *testing.T) {
 		&fakeNsConfigReader{cfg: nil},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		phase2Called = true
 		return nil
 	}
@@ -370,7 +370,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 	itemCalled := false
 	subjectCalled := false
 
-	job.upsertItemDenseFn = func(_ context.Context, ns, strategy string, vecs map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, ns, strategy string, vecs map[string][]float32, _ map[string]string) error {
 		itemCalled = true
 		if ns != "ns1" || strategy != "item2vec" {
 			t.Fatalf("unexpected item upsert args: ns=%s strategy=%s", ns, strategy)
@@ -421,7 +421,7 @@ func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
 		gotDistance = distance
 		return nil
 	}
-	job.upsertItemDenseFn = func(_ context.Context, _, strategy string, vecs map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, strategy string, vecs map[string][]float32, _ map[string]string) error {
 		itemCalled = true
 		if strategy != "svd" {
 			t.Fatalf("strategy: got %s want svd", strategy)
@@ -452,7 +452,7 @@ func TestRunPhase2Dense_NoEvents_SkipsUpserts(t *testing.T) {
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{events: nil})
 	itemCalled := false
 	subjectCalled := false
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		itemCalled = true
 		return nil
 	}
@@ -496,7 +496,7 @@ func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
 		{SubjectID: "u5", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 	}
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{events: events})
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		return errors.New("item upsert failed")
 	}
 

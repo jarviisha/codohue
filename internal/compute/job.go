@@ -89,7 +89,7 @@ type Job struct {
 	finalizeOrphansFn        func(ctx context.Context, cutoff time.Time) (int64, error)
 	ensureCollectionsFn      func(ctx context.Context, ns string) error
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
-	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
+	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error
 	upsertSubjectDenseFn     func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
 	cleanupItemDenseFn       func(ctx context.Context, ns string, keepIDs []string) (int, error)
 	cleanupSubjectDenseFn    func(ctx context.Context, ns string, keepIDs []string) (int, error)
@@ -122,8 +122,8 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		ensureDenseCollectionsFn: func(ctx context.Context, ns string, dim uint64, distance string) error {
 			return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, ns, dim, distance)
 		},
-		upsertItemDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
-			return UpsertItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs)
+		upsertItemDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
+			return UpsertItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs, createdAt)
 		},
 		upsertSubjectDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
 			return UpsertSubjectDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs)
@@ -616,7 +616,10 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 
 	if trained {
 		capture.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
-		if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseSource, itemVecs); err != nil {
+		// created_at mirrors phase 1's sparse payload rule (explicit
+		// object_created_at, else newest occurred_at) so the γ-freshness
+		// rerank decays dense-only items the same way as sparse ones.
+		if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseSource, itemVecs, objectCreatedAtLookup(events)); err != nil {
 			return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
 		}
 	}
@@ -726,6 +729,33 @@ func mapKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
+	}
+	return out
+}
+
+// objectCreatedAtLookup derives a per-object RFC3339 creation timestamp from
+// the event stream: the explicit object_created_at when any event carried
+// one, otherwise the newest occurred_at — the same rule phase 1 uses for the
+// sparse payload's created_at.
+func objectCreatedAtLookup(events []*RawEvent) map[string]string {
+	maxSeen := make(map[string]int64)
+	explicit := make(map[string]int64)
+	for _, e := range events {
+		if e.OccurredAt > maxSeen[e.ObjectID] {
+			maxSeen[e.ObjectID] = e.OccurredAt
+		}
+		if e.ObjectCreatedAt != nil && *e.ObjectCreatedAt > explicit[e.ObjectID] {
+			explicit[e.ObjectID] = *e.ObjectCreatedAt
+		}
+	}
+	out := make(map[string]string, len(maxSeen))
+	for id, t := range maxSeen {
+		if et := explicit[id]; et > 0 {
+			t = et
+		}
+		if t > 0 {
+			out[id] = time.Unix(t, 0).UTC().Format(time.RFC3339)
+		}
 	}
 	return out
 }

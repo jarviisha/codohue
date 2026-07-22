@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
@@ -24,7 +25,7 @@ type recommendSvc interface {
 	Recommend(ctx context.Context, req *Request) (*Response, error)
 	GetTrending(ctx context.Context, ns string, limit, offset int) (*TrendingResponse, error)
 	Rank(ctx context.Context, req *RankRequest, namespace string) (*RankResponse, error)
-	StoreObjectEmbedding(ctx context.Context, namespace, objectID string, vector []float32) error
+	StoreObjectEmbedding(ctx context.Context, namespace, objectID string, vector []float32, createdAt *time.Time) error
 	StoreSubjectEmbedding(ctx context.Context, namespace, subjectID string, vector []float32) error
 	DeleteObject(ctx context.Context, namespace, objectID string) error
 }
@@ -207,7 +208,7 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 
 	var storeErr error
 	if entityType == "object" {
-		storeErr = h.service.StoreObjectEmbedding(r.Context(), ns, id, req.Vector)
+		storeErr = h.service.StoreObjectEmbedding(r.Context(), ns, id, req.Vector, req.ObjectCreatedAt)
 	} else {
 		storeErr = h.service.StoreSubjectEmbedding(r.Context(), ns, id, req.Vector)
 	}

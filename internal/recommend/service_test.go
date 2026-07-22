@@ -433,7 +433,7 @@ func TestStoreEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 
 	// Send a 128-dim vector when config expects 64.
 	vector := make([]float32, 128)
-	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", vector)
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", vector, nil)
 	if err == nil {
 		t.Fatal("expected dim mismatch error, got nil")
 	}
@@ -447,7 +447,7 @@ func TestStoreEmbedding_NsConfigError_ReturnsError(t *testing.T) {
 		err: errors.New("db error"),
 	}, newFakeIDMapper())
 
-	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2})
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, nil)
 	if err == nil {
 		t.Error("expected error from namespace config lookup, got nil")
 	}
@@ -460,7 +460,7 @@ func TestStoreEmbedding_NoDimConfig_NoDimCheck(t *testing.T) {
 	}, newFakeIDMapper())
 
 	// We expect an error from qdrant (nil client), NOT from dim validation.
-	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2})
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, nil)
 	if isDimMismatch(err) {
 		t.Error("expected NO dim mismatch error when EmbeddingDim=0, but got one")
 	}
@@ -493,7 +493,7 @@ func TestStoreObjectEmbedding_CatalogEnabled_ReturnsErrCatalogActive(t *testing.
 		},
 	}, newFakeIDMapper())
 
-	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2, 0.3, 0.4})
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2, 0.3, 0.4}, nil)
 	if !errors.Is(err, ErrCatalogActive) {
 		t.Fatalf("expected ErrCatalogActive, got %v", err)
 	}
@@ -551,7 +551,7 @@ func TestStoreEmbedding_Success(t *testing.T) {
 		return nil
 	}
 
-	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2, 0.3}); err != nil {
+	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2, 0.3}, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !called {
@@ -593,7 +593,7 @@ func TestStoreEmbedding_EnsureDenseCollectionsError(t *testing.T) {
 		return errors.New("ensure failed")
 	}
 
-	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2})
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -1271,7 +1271,7 @@ func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
 
 	resp, err := svc.fallbackTrending(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1", Offset: 1}, 2,
-		&namespace.Config{ExcludeAuthored: true})
+		&namespace.Config{ExcludeAuthored: true}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1294,7 +1294,7 @@ func TestFallbackPopular_ExcludesAuthored(t *testing.T) {
 
 	resp, err := svc.fallbackPopular(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1"}, 10,
-		&namespace.Config{ExcludeAuthored: true})
+		&namespace.Config{ExcludeAuthored: true}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1487,7 +1487,7 @@ func TestFallbackTrending_PastEndReturnsEmptyPageNotPopular(t *testing.T) {
 		return all[offset:end], nil
 	}
 
-	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Offset: 10}, 5, nil)
+	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Offset: 10}, 5, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1501,7 +1501,7 @@ func TestFallbackTrending_NoTrendingAtAllFallsToPopular(t *testing.T) {
 	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	// default getTrendingFn returns empty at every offset
 
-	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 5, nil)
+	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 5, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1539,5 +1539,53 @@ func TestRank_ReturnsAllCandidatesIncludingUnscored(t *testing.T) {
 	}
 	if resp.Items[2].Rank != 3 {
 		t.Errorf("rank: got %d, want 3", resp.Items[2].Rank)
+	}
+}
+
+func TestHybridCold_TrendingShareDropsSeenItems(t *testing.T) {
+	repo := &fakeRepo{count: 2, seenItems: []string{"t1"}}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+		all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 3}, {ObjectID: "t2", Score: 2}, {ObjectID: "t3", Score: 1}}
+		if offset >= len(all) {
+			return nil, nil
+		}
+		end := offset + limit
+		if end > len(all) {
+			end = len(all)
+		}
+		return all[offset:end], nil
+	}
+
+	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &namespace.Config{Gamma: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, it := range resp.Items {
+		if it.ObjectID == "t1" {
+			t.Fatalf("seen item t1 must be dropped from the trending share, got %+v", resp.Items)
+		}
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("expected [t2 t3], got %+v", resp.Items)
+	}
+}
+
+func TestStoreObjectEmbedding_WritesCreatedAtPayload(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	var payload map[string]*qdrant.Value
+	s.qdrantUpsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+		payload = points.Points[0].Payload
+		return nil
+	}
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+
+	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{1, 2}, &created); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got, ok := payload["created_at"]
+	if !ok || got.GetStringValue() != "2026-01-02T03:04:05Z" {
+		t.Fatalf("created_at payload: got %v", got)
 	}
 }

@@ -55,14 +55,14 @@ func (r *Repository) LoadByID(ctx context.Context, id int64) (*PendingItem, erro
 	err := r.queryRowFn(ctx, `
 		SELECT id, namespace, object_id, state, content, content_hash,
 		       COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
-		       attempt_count
+		       attempt_count, created_at
 		FROM catalog_items
 		WHERE id = $1`,
 		id,
 	).Scan(
 		&item.ID, &item.Namespace, &item.ObjectID, &state, &item.Content, &item.ContentHash,
 		&strategyID, &strategyV,
-		&item.AttemptCount,
+		&item.AttemptCount, &item.CreatedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrItemNotFound

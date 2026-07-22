@@ -71,4 +71,9 @@ type TrendingResponse struct {
 // EmbeddingRequest is the payload for BYOE (bring-your-own-embedding) endpoints.
 type EmbeddingRequest struct {
 	Vector []float32 `json:"vector"`
+
+	// ObjectCreatedAt optionally records when the object was created so the
+	// γ-freshness rerank can decay it like sparse-path items. Only read by
+	// the object-embedding endpoint; ignored for subject embeddings.
+	ObjectCreatedAt *time.Time `json:"object_created_at,omitempty"`
 }

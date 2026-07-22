@@ -39,6 +39,7 @@ type PendingItem struct {
 	StrategyID      string // strategy id LAST USED to embed this row, may be empty for never-embedded
 	StrategyVersion string // strategy version LAST USED, may be empty for never-embedded
 	AttemptCount    int
+	CreatedAt       time.Time // catalog_items.created_at; written to the Qdrant payload for γ-freshness
 }
 
 // StreamEntry is the decoded form of an XMessage from catalog:embed:{ns}.
