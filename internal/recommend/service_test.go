@@ -23,6 +23,11 @@ type fakeRepo struct {
 	seenItemsErr error
 	popularItems []string
 	popularErr   error
+
+	authored          []string
+	authoredTruncated bool
+	authoredErr       error
+	authoredCalls     int
 }
 
 func (f *fakeRepo) CountInteractions(_ context.Context, _, _ string) (int, error) {
@@ -31,6 +36,11 @@ func (f *fakeRepo) CountInteractions(_ context.Context, _, _ string) (int, error
 
 func (f *fakeRepo) GetSeenItems(_ context.Context, _, _ string, _ int) ([]string, error) {
 	return f.seenItems, f.seenItemsErr
+}
+
+func (f *fakeRepo) GetAuthoredObjects(_ context.Context, _, _ string) (objectIDs []string, truncated bool, err error) {
+	f.authoredCalls++
+	return f.authored, f.authoredTruncated, f.authoredErr
 }
 
 func (f *fakeRepo) GetPopularItems(_ context.Context, _ string, _ int) ([]string, error) {
@@ -1158,5 +1168,140 @@ func TestRecCacheKey(t *testing.T) {
 	wantWithOffset := "rec:ns_feed:user123:limit=20:offset=10"
 	if keyWithOffset != wantWithOffset {
 		t.Errorf("got %q, want %q", keyWithOffset, wantWithOffset)
+	}
+}
+
+// ─── exclude_authored ─────────────────────────────────────────────────────────
+
+func TestAuthoredObjectSet_OffByDefault(t *testing.T) {
+	repo := &fakeRepo{authored: []string{"o1"}}
+	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+
+	got := svc.authoredObjectSet(context.Background(),
+		&Request{Namespace: "ns", SubjectID: "u1"}, &namespace.Config{})
+
+	if got != nil {
+		t.Errorf("expected nil set when exclude_authored is off, got %v", got)
+	}
+	if repo.authoredCalls != 0 {
+		t.Errorf("repo must not be queried when the flag is off, got %d calls", repo.authoredCalls)
+	}
+}
+
+// A query failure must degrade to unfiltered results, never fail the request.
+func TestAuthoredObjectSet_QueryErrorDegrades(t *testing.T) {
+	repo := &fakeRepo{authoredErr: errors.New("db down")}
+	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+
+	got := svc.authoredObjectSet(context.Background(),
+		&Request{Namespace: "ns", SubjectID: "u1"}, &namespace.Config{ExcludeAuthored: true})
+
+	if got != nil {
+		t.Errorf("expected nil set on query error, got %v", got)
+	}
+}
+
+func TestExcludedObjectIDs_MergesAndDedupes(t *testing.T) {
+	// o2 is both seen and authored — it must appear exactly once.
+	repo := &fakeRepo{authored: []string{"o2", "o3"}}
+	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+
+	got := svc.excludedObjectIDs(context.Background(),
+		&Request{Namespace: "ns", SubjectID: "u1"},
+		&namespace.Config{ExcludeAuthored: true},
+		[]string{"o1", "o2"})
+
+	counts := map[string]int{}
+	for _, id := range got {
+		counts[id]++
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 unique ids, got %v", got)
+	}
+	for _, id := range []string{"o1", "o2", "o3"} {
+		if counts[id] != 1 {
+			t.Errorf("id %q appears %d times, want 1", id, counts[id])
+		}
+	}
+}
+
+func TestExcludedObjectIDs_PassesThroughWhenNoAuthors(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, &fakeIDMapper{})
+	seen := []string{"o1", "o2"}
+
+	got := svc.excludedObjectIDs(context.Background(),
+		&Request{Namespace: "ns", SubjectID: "u1"},
+		&namespace.Config{ExcludeAuthored: true}, seen)
+
+	if len(got) != 2 || got[0] != "o1" || got[1] != "o2" {
+		t.Errorf("expected the seen list unchanged, got %v", got)
+	}
+}
+
+func TestDropAuthored(t *testing.T) {
+	authored := map[string]struct{}{"b": {}, "d": {}}
+	got := dropAuthored([]string{"a", "b", "c", "d", "e"}, authored)
+	if len(got) != 3 || got[0] != "a" || got[1] != "c" || got[2] != "e" {
+		t.Errorf("got %v, want [a c e]", got)
+	}
+	// A nil set must leave the slice untouched.
+	same := dropAuthored([]string{"a", "b"}, nil)
+	if len(same) != 2 {
+		t.Errorf("nil set should not filter, got %v", same)
+	}
+}
+
+// Trending must exclude before paging, otherwise the offset counts rows that
+// are about to be dropped and page 2 skips real results.
+func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
+	repo := &fakeRepo{authored: []string{"t2", "t4"}}
+	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+
+	var gotOffset, gotLimit int
+	svc.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+		gotOffset, gotLimit = offset, limit
+		return []infraredis.TrendingEntry{
+			{ObjectID: "t1", Score: 9}, {ObjectID: "t2", Score: 8},
+			{ObjectID: "t3", Score: 7}, {ObjectID: "t4", Score: 6},
+			{ObjectID: "t5", Score: 5},
+		}, nil
+	}
+
+	resp, err := svc.fallbackTrending(context.Background(),
+		&Request{Namespace: "ns", SubjectID: "u1", Offset: 1}, 2,
+		&namespace.Config{ExcludeAuthored: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Fetch must start at rank 0 with headroom, not at the caller's offset.
+	if gotOffset != 0 || gotLimit != 1+2+2 {
+		t.Errorf("fetch args = offset %d limit %d, want 0/5", gotOffset, gotLimit)
+	}
+	// Surviving order is t1,t3,t5 → offset 1, limit 2 → t3,t5.
+	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "t3" || resp.Items[1].ObjectID != "t5" {
+		t.Errorf("got %+v, want [t3 t5]", resp.Items)
+	}
+}
+
+func TestFallbackPopular_ExcludesAuthored(t *testing.T) {
+	repo := &fakeRepo{
+		popularItems: []string{"p1", "p2", "p3"},
+		authored:     []string{"p2"},
+	}
+	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+
+	resp, err := svc.fallbackPopular(context.Background(),
+		&Request{Namespace: "ns", SubjectID: "u1"}, 10,
+		&namespace.Config{ExcludeAuthored: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, it := range resp.Items {
+		if it.ObjectID == "p2" {
+			t.Fatalf("authored object leaked into popular fallback: %+v", resp.Items)
+		}
+	}
+	if len(resp.Items) != 2 {
+		t.Errorf("expected 2 items, got %+v", resp.Items)
 	}
 }

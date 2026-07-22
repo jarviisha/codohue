@@ -11,6 +11,7 @@ export type NamespaceConfig = {
   alpha: number
   max_results: number
   seen_items_days: number
+  exclude_authored: boolean
   dense_source: string
   embedding_dim: number
   dense_distance: string
@@ -35,6 +36,7 @@ export type NamespaceUpsertRequest = {
   alpha?: number
   max_results?: number
   seen_items_days?: number
+  exclude_authored?: boolean
   dense_source?: string
   embedding_dim?: number
   dense_distance?: string

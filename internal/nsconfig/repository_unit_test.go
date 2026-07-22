@@ -54,6 +54,15 @@ func setInt(dest any, value int) error {
 	return nil
 }
 
+func setBool(dest any, value bool) error {
+	ptr, ok := dest.(*bool)
+	if !ok {
+		return errors.New("expected *bool")
+	}
+	*ptr = value
+	return nil
+}
+
 func setTime(dest any, value time.Time) error {
 	ptr, ok := dest.(*time.Time)
 	if !ok {
@@ -70,7 +79,7 @@ func setTime(dest any, value time.Time) error {
 // repository.go; tests that need to inject a malformed value at a specific position
 // can call this helper and then overwrite the field they care about.
 func fillScanRow(dest []any, weightsRaw, paramsRaw []byte, now time.Time) error {
-	if len(dest) < 21 {
+	if len(dest) < 22 {
 		return errors.New("scan dest too short")
 	}
 	if err := setString(dest[0], "ns"); err != nil {
@@ -91,49 +100,52 @@ func fillScanRow(dest []any, weightsRaw, paramsRaw []byte, now time.Time) error 
 	if err := setInt(dest[5], 7); err != nil {
 		return err
 	}
-	if err := setString(dest[6], ""); err != nil {
+	if err := setBool(dest[6], false); err != nil {
 		return err
 	}
-	if err := setFloat64(dest[7], 0.7); err != nil {
+	if err := setString(dest[7], ""); err != nil {
 		return err
 	}
-	if err := setString(dest[8], "disabled"); err != nil {
+	if err := setFloat64(dest[8], 0.7); err != nil {
 		return err
 	}
-	if err := setInt(dest[9], 64); err != nil {
+	if err := setString(dest[9], "disabled"); err != nil {
 		return err
 	}
-	if err := setString(dest[10], "cosine"); err != nil {
+	if err := setInt(dest[10], 64); err != nil {
 		return err
 	}
-	if err := setInt(dest[11], 24); err != nil {
+	if err := setString(dest[11], "cosine"); err != nil {
 		return err
 	}
-	if err := setInt(dest[12], 600); err != nil {
+	if err := setInt(dest[12], 24); err != nil {
 		return err
 	}
-	if err := setFloat64(dest[13], 0.1); err != nil {
+	if err := setInt(dest[13], 600); err != nil {
 		return err
 	}
-	if err := setString(dest[14], ""); err != nil {
+	if err := setFloat64(dest[14], 0.1); err != nil {
 		return err
 	}
 	if err := setString(dest[15], ""); err != nil {
 		return err
 	}
-	if err := setBytes(dest[16], paramsRaw); err != nil {
+	if err := setString(dest[16], ""); err != nil {
 		return err
 	}
-	if err := setInt(dest[17], 5); err != nil {
+	if err := setBytes(dest[17], paramsRaw); err != nil {
 		return err
 	}
-	if err := setInt(dest[18], 32768); err != nil {
+	if err := setInt(dest[18], 5); err != nil {
 		return err
 	}
-	if err := setTime(dest[19], now); err != nil {
+	if err := setInt(dest[19], 32768); err != nil {
 		return err
 	}
-	return setTime(dest[20], now)
+	if err := setTime(dest[20], now); err != nil {
+		return err
+	}
+	return setTime(dest[21], now)
 }
 
 func TestNewRepository(t *testing.T) {
@@ -259,13 +271,13 @@ func TestRepositoryGet_PopulatesCatalogFields(t *testing.T) {
 				}
 				// Override the catalog defaults set by fillScanRow with a
 				// catalog-mode namespace so we can assert population.
-				if err := setString(dest[8], "catalog"); err != nil {
+				if err := setString(dest[9], "catalog"); err != nil {
 					return err
 				}
-				if err := setString(dest[14], "internal-hashing-ngrams"); err != nil {
+				if err := setString(dest[15], "internal-hashing-ngrams"); err != nil {
 					return err
 				}
-				return setString(dest[15], "v1")
+				return setString(dest[16], "v1")
 			}}
 		},
 	}

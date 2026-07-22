@@ -12,6 +12,7 @@ import {
   Select,
   Skeleton,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -242,6 +243,16 @@ function ConfigForm({
                 onChange={(e) => setDraft({ ...draft, seen_items_days: Number(e.target.value) })}
               />
             </FormField>
+            <FormField
+              label="Exclude authored"
+              helpText="Drop objects the subject authored from their own recommendations. Needs author_subject_id on catalog items — inert without it."
+            >
+              <Switch
+                checked={draft.exclude_authored ?? false}
+                onChange={(e) => setDraft({ ...draft, exclude_authored: e.target.checked })}
+                label={draft.exclude_authored ? 'on' : 'off'}
+              />
+            </FormField>
           </SectionCard>
 
           <SectionCard
@@ -466,6 +477,11 @@ function diffConfig(
     { key: 'trending_ttl', initial: initial.trending_ttl, draft: draft.trending_ttl },
     { key: 'lambda_trending', initial: initial.lambda_trending, draft: draft.lambda_trending },
   ]
+  // Booleans stay out of scalarFields, whose diff is typed number | string.
+  if ((draft.exclude_authored ?? false) !== (initial.exclude_authored ?? false)) {
+    body.exclude_authored = draft.exclude_authored ?? false
+  }
+
   for (const f of scalarFields) {
     if (f.draft !== f.initial) {
       // The pointer-style body accepts numbers and strings as-is — assignment

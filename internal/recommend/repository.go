@@ -66,6 +66,57 @@ func (r *Repository) GetSeenItems(ctx context.Context, namespace, subjectID stri
 	return items, nil
 }
 
+// authoredObjectsCap bounds the exclusion list a single request can build.
+// The list is materialised into a Qdrant MustNot filter, so it costs one
+// point id per row on every query — a prolific author would otherwise send a
+// six-figure filter. Callers are expected to report truncation rather than
+// silently under-filter.
+// Declared as a var, not a const, so tests can lower it and exercise the
+// truncation branch without inserting five thousand rows.
+var authoredObjectsCap = 5000
+
+// GetAuthoredObjects returns the object ids the subject authored, newest
+// first, capped at authoredObjectsCap. The second return value reports
+// whether the cap truncated the result.
+//
+// This reads catalog_items, which only exists for catalog-mode namespaces —
+// every other dense_source returns an empty slice because no row carries an
+// author. Ordering by created_at means that when the cap does bite, the most
+// recent objects (the ones most likely to surface in recommendations) are the
+// ones that get excluded.
+func (r *Repository) GetAuthoredObjects(ctx context.Context, namespace, subjectID string) (objectIDs []string, truncated bool, err error) {
+	rows, err := r.queryFn(ctx, `
+		SELECT object_id FROM catalog_items
+		WHERE namespace         = $1
+		  AND author_subject_id = $2
+		ORDER BY created_at DESC
+		LIMIT $3`,
+		namespace, subjectID, authoredObjectsCap+1,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("query authored objects: %w", err)
+	}
+	defer rows.Close()
+
+	var items []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, false, fmt.Errorf("scan authored object: %w", err)
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterate authored objects: %w", err)
+	}
+
+	// One extra row was requested purely to detect truncation.
+	if len(items) > authoredObjectsCap {
+		return items[:authoredObjectsCap], true, nil
+	}
+	return items, false, nil
+}
+
 // GetPopularItems returns the top items by interaction weight in the last 7 days.
 func (r *Repository) GetPopularItems(ctx context.Context, namespace string, limit int) ([]string, error) {
 	rows, err := r.queryFn(ctx, `

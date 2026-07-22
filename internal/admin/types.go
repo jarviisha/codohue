@@ -19,6 +19,7 @@ type NamespaceConfig struct {
 	Alpha                  float64            `json:"alpha"`
 	MaxResults             int                `json:"max_results"`
 	SeenItemsDays          int                `json:"seen_items_days"`
+	ExcludeAuthored        bool               `json:"exclude_authored"`
 	DenseSource            string             `json:"dense_source"`
 	EmbeddingDim           int                `json:"embedding_dim"`
 	DenseDistance          string             `json:"dense_distance"`
@@ -307,18 +308,19 @@ type CreateSessionResponse struct {
 
 // NamespaceUpsertRequest is the payload for PUT /api/admin/v1/namespaces/{ns}.
 type NamespaceUpsertRequest struct {
-	ActionWeights  map[string]float64 `json:"action_weights"`
-	Lambda         *float64           `json:"lambda"`
-	Gamma          *float64           `json:"gamma"`
-	Alpha          *float64           `json:"alpha"`
-	MaxResults     *int               `json:"max_results"`
-	SeenItemsDays  *int               `json:"seen_items_days"`
-	DenseSource    *string            `json:"dense_source"`
-	EmbeddingDim   *int               `json:"embedding_dim"`
-	DenseDistance  *string            `json:"dense_distance"`
-	TrendingWindow *int               `json:"trending_window"`
-	TrendingTTL    *int               `json:"trending_ttl"`
-	LambdaTrending *float64           `json:"lambda_trending"`
+	ActionWeights   map[string]float64 `json:"action_weights"`
+	Lambda          *float64           `json:"lambda"`
+	Gamma           *float64           `json:"gamma"`
+	Alpha           *float64           `json:"alpha"`
+	MaxResults      *int               `json:"max_results"`
+	SeenItemsDays   *int               `json:"seen_items_days"`
+	ExcludeAuthored *bool              `json:"exclude_authored"`
+	DenseSource     *string            `json:"dense_source"`
+	EmbeddingDim    *int               `json:"embedding_dim"`
+	DenseDistance   *string            `json:"dense_distance"`
+	TrendingWindow  *int               `json:"trending_window"`
+	TrendingTTL     *int               `json:"trending_ttl"`
+	LambdaTrending  *float64           `json:"lambda_trending"`
 }
 
 // NamespaceUpsertResponse is the response for PUT /api/admin/v1/namespaces/{ns}.

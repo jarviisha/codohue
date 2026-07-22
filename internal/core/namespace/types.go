@@ -12,6 +12,11 @@ type Config struct {
 	MaxResults    int                `json:"max_results"`
 	SeenItemsDays int                `json:"seen_items_days"`
 
+	// ExcludeAuthored drops objects whose catalog_items.author_subject_id
+	// equals the requesting subject. Opt-in: author attribution alone does
+	// not imply the namespace wants it filtered.
+	ExcludeAuthored bool `json:"exclude_authored"`
+
 	// Auth.
 	APIKeyHash string `json:"-"`
 

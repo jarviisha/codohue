@@ -71,17 +71,19 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	err = r.queryRowFn(ctx, `
 		INSERT INTO namespace_configs (
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			exclude_authored,
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
 			updated_at
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
 		ON CONFLICT (namespace) DO UPDATE
 		  SET action_weights    = EXCLUDED.action_weights,
 		      time_decay_factor = EXCLUDED.time_decay_factor,
 		      gamma             = EXCLUDED.gamma,
 		      max_results       = EXCLUDED.max_results,
 		      seen_items_days   = EXCLUDED.seen_items_days,
+		      exclude_authored  = EXCLUDED.exclude_authored,
 		      alpha             = EXCLUDED.alpha,
 		      dense_source      = CASE WHEN namespace_configs.dense_source = 'catalog' THEN 'catalog' ELSE EXCLUDED.dense_source END,
 		      embedding_dim     = EXCLUDED.embedding_dim,
@@ -92,6 +94,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		      updated_at        = NOW()
 		RETURNING
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			exclude_authored,
 			COALESCE(api_key_hash, ''),
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
@@ -99,10 +102,12 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 			catalog_strategy_params, catalog_max_attempts, catalog_max_content_bytes,
 			created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
+		req.ExcludeAuthored,
 		req.Alpha, denseSource, req.EmbeddingDim, req.DenseDistance,
 		req.TrendingWindow, req.TrendingTTL, req.LambdaTrending,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
+		&cfg.ExcludeAuthored,
 		&cfg.APIKeyHash,
 		&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
@@ -150,6 +155,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 	err := r.queryRowFn(ctx, `
 		SELECT
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			exclude_authored,
 			COALESCE(api_key_hash, ''),
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
@@ -161,6 +167,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 		ns,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
+		&cfg.ExcludeAuthored,
 		&cfg.APIKeyHash,
 		&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
@@ -201,6 +208,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 	rows, err := r.db.Query(ctx, `
 		SELECT
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			exclude_authored,
 			COALESCE(api_key_hash, ''),
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
@@ -223,6 +231,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 		var paramsRaw []byte
 		err := rows.Scan(
 			&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
+			&cfg.ExcludeAuthored,
 			&cfg.APIKeyHash,
 			&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 			&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
@@ -304,6 +313,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		WHERE namespace = $1
 		RETURNING
 			namespace, action_weights, time_decay_factor, gamma, max_results, seen_items_days,
+			exclude_authored,
 			COALESCE(api_key_hash, ''),
 			alpha, dense_source, embedding_dim, dense_distance,
 			trending_window, trending_ttl, lambda_trending,
@@ -313,6 +323,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		ns, req.Enabled, strategyID, strategyVer, paramsJSON, maxAttempts, maxBytes,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
+		&cfg.ExcludeAuthored,
 		&cfg.APIKeyHash,
 		&cfg.Alpha, &cfg.DenseSource, &cfg.EmbeddingDim, &cfg.DenseDistance,
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,

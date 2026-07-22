@@ -43,6 +43,7 @@ var ErrCatalogActive = errors.New("recommend: namespace uses catalog auto-embedd
 type recommendRepo interface {
 	CountInteractions(ctx context.Context, namespace, subjectID string) (int, error)
 	GetSeenItems(ctx context.Context, namespace, subjectID string, seenItemsDays int) ([]string, error)
+	GetAuthoredObjects(ctx context.Context, namespace, subjectID string) (objectIDs []string, truncated bool, err error)
 	GetPopularItems(ctx context.Context, namespace string, limit int) ([]string, error)
 }
 
@@ -286,13 +287,13 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, req.Namespace)
 	if err != nil {
 		slog.Error("get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		return s.fallbackPopular(ctx, req, limit)
+		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
 	subjectVec, err := s.fetchSubjectVecFn(ctx, req.Namespace, subjectNumID)
 	if err != nil || subjectVec == nil {
 		slog.Error("fetch subject vector failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		return s.fallbackPopular(ctx, req, limit)
+		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
 	seenItemsDays := 30
@@ -303,7 +304,8 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	if err != nil {
 		slog.Error("get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 	}
-	seenFilter := s.buildSeenItemsFilter(ctx, req.Namespace, seenItems)
+	seenFilter := s.buildSeenItemsFilter(ctx, req.Namespace,
+		s.excludedObjectIDs(ctx, req, cfg, seenItems))
 
 	// Use hybrid scoring when alpha < 1.0 and dense strategy is active.
 	// Note: subject dense vectors are computed during the cron batch run and may be up
@@ -325,7 +327,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	results, err := s.searchObjectsFn(ctx, req.Namespace, subjectVec, seenFilter, fetchLimit)
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		return s.fallbackPopular(ctx, req, limit)
+		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
 	gamma := defaultGamma
@@ -381,7 +383,7 @@ func (s *Service) hybridRecommend(
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
-		return s.fallbackPopular(ctx, req, limit)
+		return s.fallbackPopular(ctx, req, limit, cfg)
 	}
 
 	// Build per-item score maps.
@@ -679,7 +681,27 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset, win
 // fallbackTrending serves trending items from Redis as the cold-start response.
 // When the trending cache is empty or unavailable, falls back to DB popular items.
 func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
-	entries, err := s.getTrendingFn(ctx, req.Namespace, req.Offset, limit)
+	// With the author filter on, the exclusion has to happen before paging or
+	// the offset would count rows that are about to be dropped. Fetch from
+	// rank 0 with enough headroom to survive removing every authored object.
+	authored := s.authoredObjectSet(ctx, req, cfg)
+	fetchOffset, fetchLimit := req.Offset, limit
+	if len(authored) > 0 {
+		fetchOffset, fetchLimit = 0, req.Offset+limit+len(authored)
+	}
+
+	entries, err := s.getTrendingFn(ctx, req.Namespace, fetchOffset, fetchLimit)
+	if len(authored) > 0 && err == nil {
+		entries = dropAuthoredEntries(entries, authored)
+		if req.Offset < len(entries) {
+			entries = entries[req.Offset:]
+		} else {
+			entries = nil
+		}
+		if len(entries) > limit {
+			entries = entries[:limit]
+		}
+	}
 	if err == nil && len(entries) > 0 {
 		items := make([]RecommendedItem, len(entries))
 		for i, e := range entries {
@@ -702,15 +724,19 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 		}, nil
 	}
 	// Trending cache empty or unavailable — fall back to DB popular items.
-	return s.fallbackPopular(ctx, req, limit)
+	return s.fallbackPopular(ctx, req, limit, cfg)
 }
 
-func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int) (*Response, error) {
-	// Fetch enough rows to cover offset + limit so we can slice in-process.
-	rawItems, err := s.repo.GetPopularItems(ctx, req.Namespace, req.Offset+limit)
+func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
+	// Fetch enough rows to cover offset + limit so we can slice in-process,
+	// plus headroom for the authored objects about to be dropped — filtering
+	// has to happen before paging or the offset would count removed rows.
+	authored := s.authoredObjectSet(ctx, req, cfg)
+	rawItems, err := s.repo.GetPopularItems(ctx, req.Namespace, req.Offset+limit+len(authored))
 	if err != nil {
 		return nil, fmt.Errorf("get popular items: %w", err)
 	}
+	rawItems = dropAuthored(rawItems, authored)
 	total := len(rawItems)
 
 	// Apply offset.
@@ -782,12 +808,19 @@ func (s *Service) searchObjects(ctx context.Context, ns string, queryVec *qdrant
 	return results, nil
 }
 
-func (s *Service) buildSeenItemsFilter(ctx context.Context, ns string, seenStringIDs []string) *qdrant.Filter {
-	if len(seenStringIDs) == 0 {
+// buildSeenItemsFilter builds the MustNot point-id filter applied to every
+// object search. Both exclusion reasons — already seen, and (when
+// exclude_authored is on) authored by the requester — collapse into a single
+// HasID condition, which is what lets the same filter cover the sparse
+// ({ns}_objects) and dense ({ns}_objects_dense) collections alike. Filtering
+// on a payload field instead would only work for the dense collection, since
+// cmd/cron writes the sparse points and knows nothing about authorship.
+func (s *Service) buildSeenItemsFilter(ctx context.Context, ns string, excludedStringIDs []string) *qdrant.Filter {
+	if len(excludedStringIDs) == 0 {
 		return nil
 	}
-	ids := make([]*qdrant.PointId, 0, len(seenStringIDs))
-	for _, sid := range seenStringIDs {
+	ids := make([]*qdrant.PointId, 0, len(excludedStringIDs))
+	for _, sid := range excludedStringIDs {
 		numID, err := s.idmapSvc.GetOrCreateObjectID(ctx, sid, ns)
 		if err != nil {
 			continue
@@ -802,6 +835,98 @@ func (s *Service) buildSeenItemsFilter(ctx context.Context, ns string, seenStrin
 			qdrant.NewHasID(ids...),
 		},
 	}
+}
+
+// authoredObjectSet returns the objects the subject authored, as a set, or
+// nil when the namespace has the filter switched off. A nil return means
+// "apply no author filtering" and is the normal case.
+//
+// Query errors degrade to nil rather than failing the request: serving a
+// recommendation that includes the subject's own objects beats serving none.
+func (s *Service) authoredObjectSet(ctx context.Context, req *Request, cfg *namespace.Config) map[string]struct{} {
+	if cfg == nil || !cfg.ExcludeAuthored {
+		return nil
+	}
+
+	authored, truncated, err := s.repo.GetAuthoredObjects(ctx, req.Namespace, req.SubjectID)
+	if err != nil {
+		slog.Error("exclude authored: query failed, serving unfiltered",
+			"namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		return nil
+	}
+	if truncated {
+		slog.Warn("exclude authored: hit the cap, older authored objects may still be recommended",
+			"namespace", req.Namespace, "subject_id", req.SubjectID, "cap", authoredObjectsCap)
+	}
+	if len(authored) == 0 {
+		return nil
+	}
+
+	set := make(map[string]struct{}, len(authored))
+	for _, id := range authored {
+		set[id] = struct{}{}
+	}
+	return set
+}
+
+// excludedObjectIDs merges the seen-items list with the subject's own authored
+// objects. De-duplicated because an author who interacted with their own
+// object appears in both lists and would otherwise be sent to Qdrant twice.
+func (s *Service) excludedObjectIDs(ctx context.Context, req *Request, cfg *namespace.Config, seenItems []string) []string {
+	authored := s.authoredObjectSet(ctx, req, cfg)
+	if len(authored) == 0 {
+		return seenItems
+	}
+
+	merged := make([]string, 0, len(seenItems)+len(authored))
+	dup := make(map[string]struct{}, len(seenItems)+len(authored))
+	for _, id := range seenItems {
+		if _, ok := dup[id]; ok {
+			continue
+		}
+		dup[id] = struct{}{}
+		merged = append(merged, id)
+	}
+	for id := range authored {
+		if _, ok := dup[id]; ok {
+			continue
+		}
+		dup[id] = struct{}{}
+		merged = append(merged, id)
+	}
+	return merged
+}
+
+// dropAuthored removes authored ids from an ordered candidate list. Used by
+// the trending / popular fallbacks, which cannot push the exclusion down into
+// the store the way the Qdrant paths can.
+func dropAuthored(ids []string, authored map[string]struct{}) []string {
+	if len(authored) == 0 {
+		return ids
+	}
+	out := ids[:0:0]
+	for _, id := range ids {
+		if _, skip := authored[id]; skip {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// dropAuthoredEntries is dropAuthored for the Redis trending ZSET rows.
+func dropAuthoredEntries(entries []infraredis.TrendingEntry, authored map[string]struct{}) []infraredis.TrendingEntry {
+	if len(authored) == 0 {
+		return entries
+	}
+	out := entries[:0:0]
+	for _, e := range entries {
+		if _, skip := authored[e.ObjectID]; skip {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 type scoredItem struct {

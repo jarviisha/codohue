@@ -41,6 +41,9 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 	if req.SeenItemsDays != nil {
 		nsReq.SeenItemsDays = *req.SeenItemsDays
 	}
+	if req.ExcludeAuthored != nil {
+		nsReq.ExcludeAuthored = *req.ExcludeAuthored
+	}
 	if req.DenseSource != nil {
 		nsReq.DenseSource = *req.DenseSource
 	}

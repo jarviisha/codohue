@@ -13,6 +13,10 @@ type UpsertRequest struct {
 	MaxResults    int                `json:"max_results"`
 	SeenItemsDays int                `json:"seen_items_days"`
 
+	// ExcludeAuthored drops the subject's own authored objects from their
+	// recommendations. Defaults to false — see migration 020.
+	ExcludeAuthored bool `json:"exclude_authored"`
+
 	// Dense hybrid
 	Alpha         float64 `json:"alpha"`
 	DenseSource   string  `json:"dense_source"`

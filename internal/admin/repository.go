@@ -25,7 +25,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 const nsSelectCols = `
 	SELECT namespace, action_weights, time_decay_factor, gamma, alpha, max_results,
-	       seen_items_days, dense_source, embedding_dim, dense_distance,
+	       seen_items_days, exclude_authored, dense_source, embedding_dim, dense_distance,
 	       trending_window, trending_ttl, lambda_trending,
 	       api_key_hash IS NOT NULL AS has_api_key,
 	       COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
@@ -41,7 +41,7 @@ func scanNamespaceConfigRow(scan func(...any) error) (*NamespaceConfig, error) {
 	)
 	err := scan(
 		&ns.Namespace, &weightsJSON, &ns.Lambda, &ns.Gamma, &ns.Alpha,
-		&ns.MaxResults, &ns.SeenItemsDays, &ns.DenseSource, &ns.EmbeddingDim,
+		&ns.MaxResults, &ns.SeenItemsDays, &ns.ExcludeAuthored, &ns.DenseSource, &ns.EmbeddingDim,
 		&ns.DenseDistance, &ns.TrendingWindow, &ns.TrendingTTL, &ns.LambdaTrending,
 		&ns.HasAPIKey,
 		&ns.CatalogStrategyID, &ns.CatalogStrategyVersion,
