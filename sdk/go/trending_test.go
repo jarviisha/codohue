@@ -24,8 +24,10 @@ func TestNamespaceTrending(t *testing.T) {
 		if q.Get("offset") != "10" {
 			t.Errorf("offset = %q", q.Get("offset"))
 		}
-		if q.Get("window_hours") != "48" {
-			t.Errorf("window_hours = %q", q.Get("window_hours"))
+		// The look-back window is namespace config, not a request param — the
+		// SDK must never send window_hours (the server ignores it).
+		if _, ok := q["window_hours"]; ok {
+			t.Errorf("window_hours must not be sent, got %q", q.Get("window_hours"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(codohuetypes.TrendingResponse{
@@ -41,7 +43,6 @@ func TestNamespaceTrending(t *testing.T) {
 	resp, err := c.Namespace("feed", "k").Trending(context.Background(),
 		WithLimit(25),
 		WithOffset(10),
-		WithWindowHours(48),
 	)
 	if err != nil {
 		t.Fatalf("Trending: %v", err)

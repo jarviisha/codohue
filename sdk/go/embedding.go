@@ -5,14 +5,25 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
+// EmbeddingOption configures a BYOE embedding write.
+type EmbeddingOption func(*codohuetypes.EmbeddingRequest)
+
+// WithObjectCreatedAt records when the object was created so the server can
+// apply γ-based object-freshness reranking. Applies to StoreObjectEmbedding
+// only; it is a no-op for subject embeddings.
+func WithObjectCreatedAt(t time.Time) EmbeddingOption {
+	return func(r *codohuetypes.EmbeddingRequest) { r.ObjectCreatedAt = &t }
+}
+
 // StoreObjectEmbedding stores a dense vector (BYOE) for an object in this namespace.
 // A dimension mismatch returns an error that matches ErrDimMismatch via errors.Is.
-func (n *Namespace) StoreObjectEmbedding(ctx context.Context, objectID string, vector []float32) error {
-	return n.storeEmbedding(ctx, "objects", objectID, vector)
+func (n *Namespace) StoreObjectEmbedding(ctx context.Context, objectID string, vector []float32, opts ...EmbeddingOption) error {
+	return n.storeEmbedding(ctx, "objects", objectID, vector, opts...)
 }
 
 // StoreSubjectEmbedding stores a dense vector (BYOE) for a subject in this namespace.
@@ -32,7 +43,7 @@ func (n *Namespace) DeleteObject(ctx context.Context, objectID string) error {
 	return n.client.do(ctx, http.MethodDelete, path, n.apiKey, nil, nil, nil)
 }
 
-func (n *Namespace) storeEmbedding(ctx context.Context, entity, id string, vector []float32) error {
+func (n *Namespace) storeEmbedding(ctx context.Context, entity, id string, vector []float32, opts ...EmbeddingOption) error {
 	if id == "" {
 		return fmt.Errorf("codohue: id is required")
 	}
@@ -40,6 +51,9 @@ func (n *Namespace) storeEmbedding(ctx context.Context, entity, id string, vecto
 		return fmt.Errorf("codohue: vector is required")
 	}
 	body := codohuetypes.EmbeddingRequest{Vector: vector}
+	for _, opt := range opts {
+		opt(&body)
+	}
 	path := fmt.Sprintf("/v1/namespaces/%s/%s/%s/embedding",
 		url.PathEscape(n.namespace), entity, url.PathEscape(id))
 	return n.client.do(ctx, http.MethodPut, path, n.apiKey, nil, body, nil)

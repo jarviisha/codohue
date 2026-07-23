@@ -10,7 +10,8 @@ import (
 )
 
 // Trending returns the trending items for this namespace from the Redis ZSET.
-// Use WithLimit, WithOffset, and WithWindowHours to customize the query.
+// Use WithLimit and WithOffset to customize the query. The look-back window is
+// namespace configuration (one ZSET per namespace), not a per-request param.
 func (n *Namespace) Trending(ctx context.Context, opts ...ListOption) (*codohuetypes.TrendingResponse, error) {
 	o := buildListOptions(opts)
 
@@ -20,9 +21,6 @@ func (n *Namespace) Trending(ctx context.Context, opts ...ListOption) (*codohuet
 	}
 	if o.offset > 0 {
 		q.Set("offset", strconv.Itoa(o.offset))
-	}
-	if o.windowHours > 0 {
-		q.Set("window_hours", strconv.Itoa(o.windowHours))
 	}
 
 	path := "/v1/namespaces/" + url.PathEscape(n.namespace) + "/trending"

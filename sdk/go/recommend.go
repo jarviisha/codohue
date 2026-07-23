@@ -14,9 +14,8 @@ import (
 type ListOption func(*listOptions)
 
 type listOptions struct {
-	limit       int
-	offset      int
-	windowHours int
+	limit  int
+	offset int
 }
 
 // WithLimit caps the number of items returned. Applies to Recommend and Trending.
@@ -24,9 +23,6 @@ func WithLimit(n int) ListOption { return func(o *listOptions) { o.limit = n } }
 
 // WithOffset skips the first n items. Applies to Recommend and Trending.
 func WithOffset(n int) ListOption { return func(o *listOptions) { o.offset = n } }
-
-// WithWindowHours overrides the trending look-back window in hours. Applies to Trending.
-func WithWindowHours(n int) ListOption { return func(o *listOptions) { o.windowHours = n } }
 
 func buildListOptions(opts []ListOption) listOptions {
 	var o listOptions

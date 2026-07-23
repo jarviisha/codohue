@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
@@ -37,6 +38,36 @@ func TestStoreObjectEmbedding(t *testing.T) {
 	c, _ := New(srv.URL)
 	err := c.Namespace("feed", "k").StoreObjectEmbedding(
 		context.Background(), "item-42", []float32{0.1, 0.2, 0.3},
+	)
+	if err != nil {
+		t.Fatalf("StoreObjectEmbedding: %v", err)
+	}
+}
+
+func TestStoreObjectEmbedding_WithObjectCreatedAt(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body codohuetypes.EmbeddingRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body.ObjectCreatedAt == nil {
+			t.Fatal("expected object_created_at to be sent")
+		}
+		if got := body.ObjectCreatedAt.Format(time.RFC3339); got != "2026-04-21T00:00:00Z" {
+			t.Errorf("object_created_at = %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	created := time.Date(2026, 4, 21, 0, 0, 0, 0, time.UTC)
+	c, _ := New(srv.URL)
+	err := c.Namespace("feed", "k").StoreObjectEmbedding(
+		context.Background(), "item-42", []float32{0.1, 0.2, 0.3},
+		WithObjectCreatedAt(created),
 	)
 	if err != nil {
 		t.Fatalf("StoreObjectEmbedding: %v", err)

@@ -63,19 +63,19 @@ func main() {
         log.Printf("rank=%d object=%s score=%.4f", it.Rank, it.ObjectID, it.Score)
     }
 
-    // Trending
+    // Trending. The look-back window is namespace configuration, not a
+    // per-request param — there is one trending ZSET per namespace.
     tr, _ := ns.Trending(ctx,
-        codohue.WithWindowHours(24),
         codohue.WithLimit(50),
     )
     _ = tr
 
     // HTTP ingest (single event). For bulk traffic prefer the Streams producer.
     _ = ns.IngestEvent(ctx, codohuetypes.EventPayload{
-        SubjectID: "user-123",
-        ObjectID:  "item-a",
-        Action:    codohuetypes.ActionLike,
-        Timestamp: time.Now().UTC(),
+        SubjectID:  "user-123",
+        ObjectID:   "item-a",
+        Action:     codohuetypes.ActionLike,
+        OccurredAt: time.Now().UTC(),
     })
 
     // BYOE embeddings
