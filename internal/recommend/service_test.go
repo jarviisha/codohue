@@ -1613,3 +1613,30 @@ func TestStoreObjectEmbedding_WritesCreatedAtPayload(t *testing.T) {
 		t.Fatalf("created_at payload: got %v", got)
 	}
 }
+
+// An object can carry an objects-table metadata row (author set via
+// PUT /objects/{id}) without ever being referenced by an event, so it has no
+// id_mapping. DELETE must still drop that metadata row — skipping it when the
+// mapping is absent was a Phase 6 regression from switching to Lookup.
+func TestDeleteObject_NoMappingStillDropsMetadata(t *testing.T) {
+	meta := &fakeObjectMetaDeleter{}
+	idmap := newFakeIDMapper()
+	idmap.lookupMiss = true // LookupObjectID reports not-found for unknown ids
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
+	svc.SetObjectMetadataDeleter(meta)
+	qdrantCalled := false
+	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error {
+		qdrantCalled = true
+		return nil
+	}
+
+	if err := svc.DeleteObject(context.Background(), "ns", "never-ingested"); err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if qdrantCalled {
+		t.Error("no id_mapping means no Qdrant points — deletion must be skipped, not attempted")
+	}
+	if len(meta.deleted) != 1 || meta.deleted[0] != "ns/never-ingested" {
+		t.Errorf("metadata must still be dropped without a mapping, got %v", meta.deleted)
+	}
+}

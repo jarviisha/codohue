@@ -165,9 +165,10 @@ func (j *Job) Run(ctx context.Context) {
 }
 
 // orphanRunCutoff is how old an open batch_run_logs row must be before the
-// orphan sweep finalizes it. Must exceed the longest plausible run so an
-// in-flight run in another process is never closed under it.
-const orphanRunCutoff = time.Hour
+// orphan sweep finalizes it. Must exceed the longest plausible run — kept
+// strictly above admin's manualRunTimeout (1h) so the ~10s finalize window
+// of a run that hit its own timeout can't race a competing reaper UPDATE.
+const orphanRunCutoff = 90 * time.Minute
 
 func (j *Job) runOnce(ctx context.Context) {
 	slog.Info("batch run started")

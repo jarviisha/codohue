@@ -256,3 +256,38 @@ func TestNegativeCache_ExpiresEntries(t *testing.T) {
 		t.Fatal("expired entry must miss — a rotated key has to become usable")
 	}
 }
+
+// An infra error during the hash lookup must NOT negatively cache the token:
+// a correct key presented during a DB blip would otherwise be rejected for
+// the full TTL after the DB recovers.
+func TestRequireNamespace_TransientHashErrorNotCached(t *testing.T) {
+	callN := 0
+	getHash := func(_ context.Context, _ string) (string, error) {
+		callN++
+		if callN == 1 {
+			return "", errors.New("db blip")
+		}
+		return "", nil // recovered: no ns key, so the admin key is the fallback
+	}
+	mw := RequireNamespace("admin-key", getHash, func(*http.Request) string { return "ns" })
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	// First request during the blip → 401, but must NOT be cached.
+	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/namespaces/ns/trending", http.NoBody)
+	req1.Header.Set("Authorization", "Bearer admin-key")
+	rec1 := httptest.NewRecorder()
+	h.ServeHTTP(rec1, req1)
+	if rec1.Code != http.StatusUnauthorized {
+		t.Fatalf("during blip: got %d, want 401", rec1.Code)
+	}
+
+	// Second request after recovery with the SAME (correct) token must pass —
+	// a cached negative would have rejected it.
+	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/namespaces/ns/trending", http.NoBody)
+	req2.Header.Set("Authorization", "Bearer admin-key")
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("after recovery: got %d, want 200 — a transient error must not be negatively cached", rec2.Code)
+	}
+}

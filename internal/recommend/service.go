@@ -1281,34 +1281,38 @@ func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 // by individual objects.
 func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
 	// Lookup, not GetOrCreate: deleting a never-ingested object must be an
-	// idempotent no-op, not a write that mints a mapping for it.
+	// idempotent no-op on the vector store, not a write that mints a mapping
+	// for it. A missing mapping only means there are no Qdrant points — the
+	// object may still carry an objects-table metadata row (e.g. an author
+	// set via PUT /objects/{id} on an object never referenced by an event),
+	// which must still be dropped below.
 	numID, found, err := s.idmapSvc.LookupObjectID(ctx, objectID, ns)
 	if err != nil {
 		return fmt.Errorf("get numeric id: %w", err)
 	}
-	if !found {
-		return nil
+
+	if found {
+		pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}
+
+		if err := s.deleteFromCollectionFn(ctx, ns+"_objects", pointIDs); err != nil {
+			return err
+		}
+
+		// Dense collection is optional — it may not exist when dense_source is "disabled"
+		// or no embeddings have been pushed yet. Treat cleanup errors as best-effort.
+		if err := s.deleteFromCollectionFn(ctx, ns+"_objects_dense", pointIDs); err != nil {
+			slog.Debug("delete object: dense collection cleanup skipped", "namespace", ns, "object_id", objectID, "error", err)
+		}
 	}
 
-	pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}
-
-	if err := s.deleteFromCollectionFn(ctx, ns+"_objects", pointIDs); err != nil {
-		return err
-	}
-
-	// Dense collection is optional — it may not exist when dense_source is "disabled"
-	// or no embeddings have been pushed yet. Treat cleanup errors as best-effort.
-	if err := s.deleteFromCollectionFn(ctx, ns+"_objects_dense", pointIDs); err != nil {
-		slog.Debug("delete object: dense collection cleanup skipped", "namespace", ns, "object_id", objectID, "error", err)
-	}
-
-	// Drop the metadata row too. Without this the attribution outlives the
-	// object, so re-creating the same object_id later silently inherits the
-	// old author — and until then it inflates author coverage and pads the
-	// exclude_authored filter with a dead id.
+	// Drop the metadata row regardless of whether a mapping existed. Without
+	// this the attribution outlives the object, so re-creating the same
+	// object_id later silently inherits the old author — and until then it
+	// inflates author coverage and pads the exclude_authored filter with a
+	// dead id.
 	//
-	// Best-effort: the vectors are already gone, which is what the caller
-	// asked for, and a stale metadata row is recoverable by re-deleting.
+	// Best-effort: the vectors (if any) are already gone, which is what the
+	// caller asked for, and a stale metadata row is recoverable by re-deleting.
 	if s.objectMeta != nil {
 		if err := s.objectMeta.Delete(ctx, ns, objectID); err != nil {
 			slog.Error("delete object: metadata row cleanup failed",

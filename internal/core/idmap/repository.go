@@ -73,12 +73,24 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 	if len(stringIDs) == 0 {
 		return map[string]uint64{}, nil
 	}
+	// Deduplicate before unnest: ON CONFLICT DO UPDATE errors with "cannot
+	// affect row a second time" if the same key appears twice in one INSERT,
+	// and callers (e.g. Rank candidates) may legitimately pass duplicates.
+	distinct := make([]string, 0, len(stringIDs))
+	seen := make(map[string]struct{}, len(stringIDs))
+	for _, id := range stringIDs {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		distinct = append(distinct, id)
+	}
 	rows, err := r.db.Query(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
 		SELECT unnest($1::text[]), $2, $3
 		ON CONFLICT (namespace, entity_type, string_id) DO UPDATE SET string_id = EXCLUDED.string_id
 		RETURNING string_id, numeric_id`,
-		stringIDs, namespace, entityType,
+		distinct, namespace, entityType,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("batch get or create id mappings: %w", err)

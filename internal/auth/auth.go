@@ -47,18 +47,30 @@ func ConstantTimeEqual(a, b string) bool {
 //   - When the hash lookup fails, the request is denied: authorization that
 //     cannot be established is not granted.
 func ValidateNamespaceKey(ctx context.Context, token, adminKey string, getHash KeyHashFn, namespace string) bool {
+	valid, _ := validateNamespaceKey(ctx, token, adminKey, getHash, namespace)
+	return valid
+}
+
+// validateNamespaceKey also reports whether the outcome is a DEFINITIVE
+// credential rejection (definitive=true) versus an indeterminate one — an
+// infra failure where the hash could not be looked up. Only definitive
+// rejections may be negatively cached: caching an infra blip would reject a
+// correct key for the full TTL after the DB recovers.
+func validateNamespaceKey(ctx context.Context, token, adminKey string, getHash KeyHashFn, namespace string) (valid, definitive bool) {
 	if token == "" {
-		return false
+		return false, true
 	}
 
 	hash, err := getHash(ctx, namespace)
 	if err != nil {
-		return false
+		// Authorization that cannot be established is denied, but the denial
+		// is NOT definitive — don't cache it.
+		return false, false
 	}
 	if hash == "" {
-		return adminKey != "" && ConstantTimeEqual(token, adminKey)
+		return adminKey != "" && ConstantTimeEqual(token, adminKey), true
 	}
-	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil, true
 }
 
 // negativeCacheTTL bounds how long a rejected (token, namespace) pair is
@@ -134,8 +146,13 @@ func RequireNamespace(adminKey string, getHash KeyHashFn, extractNamespace func(
 				httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 				return
 			}
-			if !ValidateNamespaceKey(r.Context(), token, adminKey, getHash, namespace) {
-				neg.put(token, namespace)
+			valid, definitive := validateNamespaceKey(r.Context(), token, adminKey, getHash, namespace)
+			if !valid {
+				// Cache only a definitive rejection: an infra blip during the
+				// hash lookup must not lock out a correct key for the TTL.
+				if definitive {
+					neg.put(token, namespace)
+				}
 				httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 				return
 			}
