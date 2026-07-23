@@ -133,9 +133,13 @@ func TestSSEStress_100Clients_1kEventsPerSec(t *testing.T) {
 	// starts firing — otherwise late connectors miss the early events and
 	// dominate the loss numbers.
 	connectedWg.Wait()
-	for i, s := range stats {
-		if !s.connectOK {
-			t.Fatalf("client %d failed to connect: %v", i, s.err)
+	// Index access, not `range stats`: a value copy would read every field of
+	// clientStats — including the latencies slice header the client goroutine
+	// keeps writing after Done() — which only connectedWg (covering connectOK)
+	// synchronizes. Read just the connect fields it does synchronize.
+	for i := range stats {
+		if !stats[i].connectOK {
+			t.Fatalf("client %d failed to connect: %v", i, stats[i].err)
 		}
 	}
 	// One extra grace period so each handler has subscribed to the bus
