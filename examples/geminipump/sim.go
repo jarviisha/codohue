@@ -150,11 +150,12 @@ func (s *simulator) weightedCategory(u *user, snap catalogSnapshot) string {
 }
 
 func (s *simulator) event(subjectID string, it catalogItem, action codohuetypes.Action) codohuetypes.EventPayload {
+	// Event metadata was dropped from the wire contract (the events table
+	// never stored it); category lives on the catalog item, not the event.
 	ev := codohuetypes.EventPayload{
 		SubjectID: subjectID,
 		ObjectID:  it.ObjectID,
 		Action:    action,
-		Metadata:  map[string]string{"category": it.Category},
 	}
 	if !it.CreatedAt.IsZero() {
 		created := it.CreatedAt

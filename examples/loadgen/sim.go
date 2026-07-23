@@ -139,11 +139,12 @@ func (s *simulator) weightedCategory(u user) string {
 }
 
 func (s *simulator) event(subjectID string, it catalogItem, action codohuetypes.Action) codohuetypes.EventPayload {
+	// Event metadata was dropped from the wire contract; category lives on
+	// the catalog item, not the event.
 	return codohuetypes.EventPayload{
 		SubjectID: subjectID,
 		ObjectID:  it.ObjectID,
 		Action:    action,
-		Metadata:  map[string]string{"category": it.Category},
 	}
 }
 
