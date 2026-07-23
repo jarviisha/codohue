@@ -3,6 +3,7 @@ package nsconfig
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // Validation sentinels. The admin adapter maps these onto admin-side errors
@@ -48,9 +49,12 @@ func validateUpsert(req *UpsertRequest) error {
 	if req == nil {
 		return nil
 	}
+	// action_weights are deliberately unconstrained in sign: a negative
+	// weight is the intended way to express a negative signal (SKIP/dislike
+	// pushes an item away in the CF vector), so only NaN/Inf are rejected.
 	for action, w := range req.ActionWeights {
-		if w < 0 {
-			return fmt.Errorf("%w: action_weights[%s] must be >= 0, got %v", ErrInvalidConfig, action, w)
+		if math.IsNaN(w) || math.IsInf(w, 0) {
+			return fmt.Errorf("%w: action_weights[%s] must be a finite number, got %v", ErrInvalidConfig, action, w)
 		}
 	}
 	if req.Lambda != nil && *req.Lambda <= 0 {

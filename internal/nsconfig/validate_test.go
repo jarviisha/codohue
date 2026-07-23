@@ -3,6 +3,7 @@ package nsconfig
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -27,7 +28,7 @@ func TestValidateUpsert_RangeChecks(t *testing.T) {
 			DenseSource: sptr("item2vec"), EmbeddingDim: iptr(64), DenseDistance: sptr("cosine"),
 			TrendingWindow: iptr(24), TrendingTTL: iptr(600), LambdaTrending: fptr(0.1),
 		}, true},
-		{"negative action weight", &UpsertRequest{ActionWeights: map[string]float64{"click": -1}}, false},
+		{"negative action weight (valid signal)", &UpsertRequest{ActionWeights: map[string]float64{"SKIP": -2}}, true},
 		{"zero lambda", &UpsertRequest{Lambda: fptr(0)}, false},
 		{"negative gamma", &UpsertRequest{Gamma: fptr(-0.1)}, false},
 		{"zero max_results", &UpsertRequest{MaxResults: iptr(0)}, false},
@@ -119,5 +120,22 @@ func TestUpsert_SameDimSkipsCollectionCheck(t *testing.T) {
 	}
 	if checker.calls != 0 {
 		t.Fatal("no-op dim must not pay the Qdrant round-trip")
+	}
+}
+
+func TestValidateUpsert_ActionWeightNaNInfRejected(t *testing.T) {
+	for name, w := range map[string]float64{
+		"NaN":  math.NaN(),
+		"+Inf": math.Inf(1),
+		"-Inf": math.Inf(-1),
+	} {
+		err := validateUpsert(&UpsertRequest{ActionWeights: map[string]float64{"VIEW": w}})
+		if !errors.Is(err, ErrInvalidConfig) {
+			t.Errorf("%s weight must be rejected, got %v", name, err)
+		}
+	}
+	// Ordinary negative weights (dislike signals) must pass.
+	if err := validateUpsert(&UpsertRequest{ActionWeights: map[string]float64{"SKIP": -2, "LIKE": 5}}); err != nil {
+		t.Errorf("negative + positive weights must pass: %v", err)
 	}
 }
