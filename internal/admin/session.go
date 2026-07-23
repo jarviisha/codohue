@@ -186,33 +186,48 @@ func newLoginRateLimiter() *loginRateLimiter {
 	return &loginRateLimiter{buckets: make(map[string]*loginBucket), now: time.Now}
 }
 
-// Allow consumes one attempt for ip, reporting false when the bucket is dry.
-func (l *loginRateLimiter) Allow(ip string) bool {
+// Blocked reports whether ip has exhausted its login budget, WITHOUT
+// consuming a token. Only failed logins consume the budget (RecordFailure),
+// so a legitimate admin presenting the correct key is never throttled no
+// matter how often they log in — the budget exists to slow key GUESSING,
+// which is by definition a stream of failures.
+func (l *loginRateLimiter) Blocked(ip string) bool {
 	now := l.now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	b := l.bucketLocked(ip, now)
+	return b.tokens < 1
+}
 
+// RecordFailure consumes one token for ip after a failed login attempt.
+func (l *loginRateLimiter) RecordFailure(ip string) {
+	now := l.now()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.bucketLocked(ip, now)
+	if b.tokens >= 1 {
+		b.tokens--
+	}
+}
+
+// bucketLocked returns ip's bucket with lazy refill applied. Caller holds mu.
+func (l *loginRateLimiter) bucketLocked(ip string, now time.Time) *loginBucket {
 	b, ok := l.buckets[ip]
 	if !ok {
 		b = &loginBucket{tokens: loginBurst, last: now}
 		l.buckets[ip] = b
 	}
-	// Refill lazily; also prune buckets that have sat full for a while so
-	// the map stays bounded by recent-client count.
 	refill := now.Sub(b.last).Seconds() / loginRefillEvery.Seconds()
 	b.tokens = min(loginBurst, b.tokens+refill)
 	b.last = now
+	// Prune buckets that have sat full for a while so the map stays bounded
+	// by recent-client count.
 	for k, other := range l.buckets {
 		if k != ip && other.tokens >= loginBurst && now.Sub(other.last) > time.Hour {
 			delete(l.buckets, k)
 		}
 	}
-
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
+	return b
 }
 
 // clientIP extracts the caller's IP for rate-limiting. RemoteAddr is the

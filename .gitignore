@@ -59,3 +59,9 @@ uploads/
 # go build artifact when built inside the module dir
 examples/geminipump/geminipump
 reports/
+
+# stray root binaries from `go build ./cmd/<x>` (use make build → tmp/)
+/api
+/cron
+/admin
+/embedder

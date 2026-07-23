@@ -14,10 +14,20 @@ type rowScanner interface {
 	Scan(dest ...any) error
 }
 
+// rowsIterator is the subset of pgx.Rows the multi-row queries use; the seam
+// lets GetOrCreateBatch be unit-tested without a live DB.
+type rowsIterator interface {
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+	Close()
+}
+
 // Repository manages the mapping from string IDs to numeric IDs in the id_mappings table.
 type Repository struct {
 	db         *pgxpool.Pool
 	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
+	queryFn    func(ctx context.Context, sql string, args ...any) (rowsIterator, error)
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
@@ -26,6 +36,13 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 		db: db,
 		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
 			return db.QueryRow(ctx, sql, args...)
+		},
+		queryFn: func(ctx context.Context, sql string, args ...any) (rowsIterator, error) {
+			// The sole caller (GetOrCreateBatch) defers rows.Close(); this is
+			// byte-identical to internal/compute's queryFn seam, which passes
+			// the same check. sqlclosecheck false-positives on the
+			// single-caller field-indirection shape here.
+			return db.Query(ctx, sql, args...) //nolint:sqlclosecheck // caller defers rows.Close()
 		},
 	}
 }
@@ -85,7 +102,7 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 		seen[id] = struct{}{}
 		distinct = append(distinct, id)
 	}
-	rows, err := r.db.Query(ctx, `
+	rows, err := r.queryFn(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
 		SELECT unnest($1::text[]), $2, $3
 		ON CONFLICT (namespace, entity_type, string_id) DO UPDATE SET string_id = EXCLUDED.string_id

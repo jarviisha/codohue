@@ -1771,3 +1771,19 @@ func TestRotateNamespaceAPIKey_NotFound(t *testing.T) {
 		t.Fatalf("expected 404, got %d", rec.Code)
 	}
 }
+
+// The rate limit must never throttle a legitimate operator: only failed
+// attempts consume the budget, so any number of correct logins succeed.
+func TestCreateSession_SuccessfulLoginsNotThrottled(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	for i := 0; i < loginBurst*3; i++ {
+		rec := httptest.NewRecorder()
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions",
+			bytes.NewBufferString(`{"api_key":"test-secret"}`))
+		r.RemoteAddr = "192.0.2.9:1234"
+		h.CreateSession(rec, r)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("login %d with the correct key must succeed, got %d", i, rec.Code)
+		}
+	}
+}

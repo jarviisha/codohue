@@ -113,19 +113,33 @@ func run() error {
 	slog.Info("cron shutting down")
 	cancel()
 
-	shutdownTimer := time.NewTimer(30 * time.Second)
-	defer shutdownTimer.Stop()
-	for _, done := range []<-chan struct{}{jobDone, retentionDone} {
+	timer := time.NewTimer(shutdownDrainTimeout)
+	defer timer.Stop()
+	if drainDone([]<-chan struct{}{jobDone, retentionDone}, timer.C) {
+		slog.Info("cron stopped")
+	} else {
+		slog.Warn("cron shutdown timed out waiting for background jobs")
+	}
+	return nil
+}
+
+// shutdownDrainTimeout bounds how long shutdown waits for the job + retention
+// goroutines to finish so a hung goroutine can't block exit forever.
+const shutdownDrainTimeout = 30 * time.Second
+
+// drainDone waits for every channel in dones to close, or for timeout to
+// fire. Returns true when all drained cleanly, false on timeout. Extracted
+// from run() so the shutdown join is unit-tested rather than buried in
+// unreachable main wiring.
+func drainDone(dones []<-chan struct{}, timeout <-chan time.Time) bool {
+	for _, done := range dones {
 		select {
 		case <-done:
-		case <-shutdownTimer.C:
-			slog.Warn("cron shutdown timed out waiting for background jobs")
-			return nil
+		case <-timeout:
+			return false
 		}
 	}
-
-	slog.Info("cron stopped")
-	return nil
+	return true
 }
 
 func initLogger(format string) {

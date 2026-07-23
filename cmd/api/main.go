@@ -117,12 +117,7 @@ func run() error {
 	tailPublisher := ingest.NewRedisEventTailPublisher(redisClient, 0)
 	ingestSvc.SetTailPublisher(tailPublisher)
 	ingestHandler := ingest.NewHandler(ingestSvc)
-	consumerName := cfg.IngestReplicaName
-	if consumerName == "" {
-		if h, err := hostnameFn(); err == nil {
-			consumerName = h
-		}
-	}
+	consumerName := resolveConsumerName(cfg.IngestReplicaName, hostnameFn)
 	ingestWorker := ingest.NewWorker(redisClient, ingestSvc, consumerName)
 
 	if err := ingestWorker.Init(ctx); err != nil {
@@ -255,6 +250,20 @@ func initLogger(format string) {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 	slog.SetDefault(slog.New(handler))
+}
+
+// resolveConsumerName picks the ingest worker's Redis Streams consumer name:
+// the configured replica name, else the OS hostname, else empty (the worker
+// falls back to its own default). Extracted so the resolution is unit-tested
+// rather than buried in run().
+func resolveConsumerName(configured string, hostname func() (string, error)) string {
+	if configured != "" {
+		return configured
+	}
+	if h, err := hostname(); err == nil {
+		return h
+	}
+	return ""
 }
 
 func pingHandler() http.HandlerFunc {

@@ -96,26 +96,28 @@ func TestSessionManager_TamperedClaimsRejected(t *testing.T) {
 	}
 }
 
-func TestLoginRateLimiter_BlocksAfterBurst(t *testing.T) {
+func TestLoginRateLimiter_BlocksAfterFailureBurst(t *testing.T) {
 	l := newLoginRateLimiter()
 	now := time.Now()
 	l.now = func() time.Time { return now }
 
+	// Only failures consume the budget.
 	for i := 0; i < loginBurst; i++ {
-		if !l.Allow("10.0.0.1") {
-			t.Fatalf("attempt %d within burst must be allowed", i)
+		if l.Blocked("10.0.0.1") {
+			t.Fatalf("failure %d within burst must not be blocked yet", i)
 		}
+		l.RecordFailure("10.0.0.1")
 	}
-	if l.Allow("10.0.0.1") {
-		t.Fatal("attempt past the burst must be blocked")
+	if !l.Blocked("10.0.0.1") {
+		t.Fatal("past the burst of failures must be blocked")
 	}
 	// A different IP has its own bucket.
-	if !l.Allow("10.0.0.2") {
+	if l.Blocked("10.0.0.2") {
 		t.Fatal("other IPs must not share the drained bucket")
 	}
 	// Refill restores capacity over time.
 	now = now.Add(loginRefillEvery * 2)
-	if !l.Allow("10.0.0.1") {
+	if l.Blocked("10.0.0.1") {
 		t.Fatal("bucket must refill after the refill interval")
 	}
 }

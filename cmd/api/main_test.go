@@ -187,3 +187,15 @@ func withAPITestHooks(t *testing.T) {
 	closePoolFn = func(_ *pgxpool.Pool) {}
 	closeRedisFn = func(_ *goredis.Client) error { return nil }
 }
+
+func TestResolveConsumerName(t *testing.T) {
+	if got := resolveConsumerName("replica-a", func() (string, error) { return "host", nil }); got != "replica-a" {
+		t.Errorf("configured name wins: got %q", got)
+	}
+	if got := resolveConsumerName("", func() (string, error) { return "host-x", nil }); got != "host-x" {
+		t.Errorf("hostname fallback: got %q", got)
+	}
+	if got := resolveConsumerName("", func() (string, error) { return "", errors.New("no hostname") }); got != "" {
+		t.Errorf("hostname error falls back to empty: got %q", got)
+	}
+}

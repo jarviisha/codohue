@@ -101,9 +101,11 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusServiceUnavailable, "sessions_unavailable", "session manager is not wired")
 		return
 	}
-	// Rate-limit BEFORE the key compare: this public endpoint is the online
-	// guessing surface for the admin key.
-	if !h.loginLimiter.Allow(clientIP(r)) {
+	// Throttle the online guessing surface for the admin key: reject once the
+	// IP has burned its budget of FAILED attempts. Successful logins never
+	// consume the budget, so a legitimate operator is never throttled.
+	ip := clientIP(r)
+	if h.loginLimiter.Blocked(ip) {
 		httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts, retry later")
 		return
 	}
@@ -114,6 +116,7 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !constantTimeEqual(req.APIKey, h.apiKey) {
+		h.loginLimiter.RecordFailure(ip)
 		httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 		return
 	}
