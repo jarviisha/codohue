@@ -40,10 +40,13 @@ func ConstantTimeEqual(a, b string) bool {
 
 // ValidateNamespaceKey returns true if the token is authorized for the given namespace.
 //
-//   - When the namespace has a provisioned key, ONLY that key is accepted —
-//     the global admin key is deliberately rejected so provisioning a
-//     namespace key actually narrows the blast radius of an admin-key leak.
-//   - When the namespace has no key, the global admin key is the fallback.
+//   - The global admin key is accepted for EVERY namespace. It is the
+//     credential the admin server proxies data-plane reads with, and it
+//     already grants full control through the admin-plane login, so
+//     restricting its data-plane reach bought little while breaking the admin
+//     panel's proxied recommendations/trending for any provisioned namespace.
+//   - Otherwise, when the namespace has a provisioned key, that key is
+//     accepted; when it has none, only the admin key is.
 //   - When the hash lookup fails, the request is denied: authorization that
 //     cannot be established is not granted.
 func ValidateNamespaceKey(ctx context.Context, token, adminKey string, getHash KeyHashFn, namespace string) bool {
@@ -61,6 +64,12 @@ func validateNamespaceKey(ctx context.Context, token, adminKey string, getHash K
 		return false, true
 	}
 
+	// Admin key first: a constant-time compare that never touches the DB, so
+	// the admin server's proxy calls stay cheap and work for every namespace.
+	if adminKey != "" && ConstantTimeEqual(token, adminKey) {
+		return true, true
+	}
+
 	hash, err := getHash(ctx, namespace)
 	if err != nil {
 		// Authorization that cannot be established is denied, but the denial
@@ -68,7 +77,8 @@ func validateNamespaceKey(ctx context.Context, token, adminKey string, getHash K
 		return false, false
 	}
 	if hash == "" {
-		return adminKey != "" && ConstantTimeEqual(token, adminKey), true
+		// No namespace key, and the token wasn't the admin key.
+		return false, true
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(token)) == nil, true
 }

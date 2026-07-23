@@ -69,12 +69,13 @@ func TestValidateNamespaceKey(t *testing.T) {
 		}
 	})
 
-	t.Run("admin key rejected when namespace has its own key", func(t *testing.T) {
-		// Provisioning a namespace key must narrow the blast radius of an
-		// admin-key leak — the fallback only applies while no key exists.
+	t.Run("admin key accepted even when namespace has its own key", func(t *testing.T) {
+		// The admin server proxies data-plane reads with the global key and
+		// must reach every namespace — so the admin key is accepted
+		// regardless of whether the namespace has its own key.
 		ok := ValidateNamespaceKey(context.Background(), adminKey, adminKey, getHashWith(string(hash)), "ns")
-		if ok {
-			t.Error("expected admin key to be rejected once the namespace has its own key")
+		if !ok {
+			t.Error("expected admin key to be accepted even when the namespace has its own key")
 		}
 	})
 
@@ -199,11 +200,14 @@ func TestRequireNamespace(t *testing.T) {
 	})
 }
 
-func TestValidateNamespaceKey_HashLookupErrorDeniesEveryone(t *testing.T) {
+func TestValidateNamespaceKey_HashLookupErrorDeniesNamespaceToken(t *testing.T) {
 	failing := func(_ context.Context, _ string) (string, error) {
 		return "", errors.New("db down")
 	}
-	if ValidateNamespaceKey(context.Background(), "admin-key", "admin-key", failing, "ns") {
+	// A non-admin token can't be validated when the hash lookup fails —
+	// authorization that cannot be established is not granted. (The admin key
+	// itself is a DB-free constant-time compare and stays accepted.)
+	if ValidateNamespaceKey(context.Background(), "some-ns-token", "admin-key", failing, "ns") {
 		t.Fatal("authorization that cannot be established must not be granted")
 	}
 }
@@ -261,30 +265,37 @@ func TestNegativeCache_ExpiresEntries(t *testing.T) {
 // a correct key presented during a DB blip would otherwise be rejected for
 // the full TTL after the DB recovers.
 func TestRequireNamespace_TransientHashErrorNotCached(t *testing.T) {
+	// Use a NAMESPACE key (not the admin key, which is a DB-free compare that
+	// never hits getHash) so the request actually exercises the hash lookup.
+	nsToken := "ns-token"
+	hash, err := bcrypt.GenerateFromPassword([]byte(nsToken), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("generate hash: %v", err)
+	}
 	callN := 0
 	getHash := func(_ context.Context, _ string) (string, error) {
 		callN++
 		if callN == 1 {
 			return "", errors.New("db blip")
 		}
-		return "", nil // recovered: no ns key, so the admin key is the fallback
+		return string(hash), nil // recovered
 	}
 	mw := RequireNamespace("admin-key", getHash, func(*http.Request) string { return "ns" })
 	h := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	// First request during the blip → 401, but must NOT be cached.
 	req1 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/namespaces/ns/trending", http.NoBody)
-	req1.Header.Set("Authorization", "Bearer admin-key")
+	req1.Header.Set("Authorization", "Bearer "+nsToken)
 	rec1 := httptest.NewRecorder()
 	h.ServeHTTP(rec1, req1)
 	if rec1.Code != http.StatusUnauthorized {
 		t.Fatalf("during blip: got %d, want 401", rec1.Code)
 	}
 
-	// Second request after recovery with the SAME (correct) token must pass —
+	// Second request after recovery with the SAME (correct) key must pass —
 	// a cached negative would have rejected it.
 	req2 := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/namespaces/ns/trending", http.NoBody)
-	req2.Header.Set("Authorization", "Bearer admin-key")
+	req2.Header.Set("Authorization", "Bearer "+nsToken)
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {

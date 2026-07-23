@@ -335,3 +335,27 @@ func TestAdmin_BatchRunLifecycleCreatesAndExposesRun(t *testing.T) {
 		t.Fatalf("detail namespace = %q, want %q", got.Namespace, namespace)
 	}
 }
+
+// TestAdmin_ProxyReadsReachKeyedNamespace guards the admin panel's proxied
+// data-plane reads. testNS has a provisioned api key, and the admin server
+// proxies to cmd/api with the global admin key — which must be accepted for
+// every namespace, or the subject-recommendations / trending panels 401 for
+// any properly provisioned namespace.
+func TestAdmin_ProxyReadsReachKeyedNamespace(t *testing.T) {
+	cookie := adminLogin(t)
+
+	for _, path := range []string{
+		"/api/admin/v1/namespaces/" + testNS + "/subjects/proxy_probe_subj/recommendations?limit=20&debug=true",
+		"/api/admin/v1/namespaces/" + testNS + "/trending?limit=20",
+	} {
+		resp := adminRequest(t, http.MethodGet, path, cookie, nil)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode == http.StatusUnauthorized {
+			t.Fatalf("%s: proxied read 401'd for a keyed namespace — the admin global key must reach it: %s", path, body)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: expected 200, got %d: %s", path, resp.StatusCode, body)
+		}
+	}
+}
