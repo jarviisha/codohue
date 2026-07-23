@@ -1,4 +1,4 @@
-# Builds images and deploys after CI: main pushes -> dev, v* tags -> production.
+# Builds images and deploys after CI: main pushes -> development, v* tags -> production.
 name: CD
 
 on:
@@ -16,7 +16,7 @@ jobs:
   build-push:
     # event == 'push' pins this to push-triggered CI runs — without it a PR
     # from any branch whose name starts with "v" would also build and deploy.
-    # main pushes produce dev images; v* tag pushes produce release images.
+    # main pushes produce development images; v* tag pushes produce release images.
     if: |
       github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
@@ -34,8 +34,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
-      # main   → version=dev-<sha7>, alias=dev,    GHCR only
-      # v* tag → version=<tag>,      alias=latest, GHCR + Docker Hub
+      # main   → version=development-<sha7>, alias=development, GHCR only
+      # v* tag → version=<tag>,              alias=latest,      GHCR + Docker Hub
       # Emits one <image>_tags output per image with the full tag list so the
       # build steps stay registry-agnostic.
       - name: Compute image tags
@@ -45,7 +45,7 @@ jobs:
           HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if [ "$HEAD_BRANCH" = "main" ]; then
-            version="dev-${HEAD_SHA:0:7}" alias="dev" release=false
+            version="development-${HEAD_SHA:0:7}" alias="development" release=false
           else
             version="$HEAD_BRANCH" alias="latest" release=true
           fi
@@ -137,11 +137,14 @@ jobs:
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
-    # main deploys to the dev environment, v* tags to production. VPS_* secrets
-    # are environment-scoped; both environments may point at the same host, so
-    # each stack gets its own directory (compose derives the project name from
-    # the directory, keeping containers/volumes/networks separate).
-    environment: ${{ github.event.workflow_run.head_branch == 'main' && 'dev' || 'production' }}
+    # main deploys to the development environment, v* tags to production. VPS_*
+    # secrets are environment-scoped; both environments may point at the same
+    # host, so each stack gets its own directory (compose derives the project
+    # name from the directory, keeping containers/volumes/networks separate).
+    # DEPLOY_DIR keeps its /opt/codohue-dev path on purpose — renaming it would
+    # start a fresh compose project with empty volumes; the dir is internal and
+    # decoupled from the environment name.
+    environment: ${{ github.event.workflow_run.head_branch == 'main' && 'development' || 'production' }}
     env:
       DEPLOY_DIR: ${{ github.event.workflow_run.head_branch == 'main' && '/opt/codohue-dev' || '/opt/codohue-prod' }}
     steps:
