@@ -57,7 +57,7 @@ Other compose layouts:
 | ---- | ------- |
 | [docker-compose.yml](docker-compose.yml)         | Dev — builds from source, infra included, auto-migrate |
 | [docker-compose.app.yml](docker-compose.app.yml) | App-only — builds from source, host networking to external infra |
-| [docker-compose.prod.yml](docker-compose.prod.yml) | Prod — prebuilt GHCR images; supply external DB via `CODOHUE_DATABASE_URL` + `CODOHUE_ADMIN_API_KEY` |
+| [docker-compose.prod.yml](docker-compose.prod.yml) | Prod — prebuilt GHCR images; each infra service is optional: run it in-compose via `COMPOSE_PROFILES` (`local-db`, `local-redis`, `local-qdrant`) or point at an external one via `CODOHUE_DATABASE_URL` / `CODOHUE_REDIS_URL` / `CODOHUE_QDRANT_HOST` |
 
 ## Quickstart — binaries against Docker infra
 

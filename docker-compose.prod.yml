@@ -6,9 +6,9 @@ services:
       - "${CODOHUE_API_PUBLISHED_PORT:-2001}:2001"
     environment:
       - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
-      - REDIS_URL=redis://redis:6379
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6334
+      - REDIS_URL=${CODOHUE_REDIS_URL:-redis://redis:6379}
+      - QDRANT_HOST=${CODOHUE_QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${CODOHUE_QDRANT_PORT:-6334}
       - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
       - CODOHUE_LOG_FORMAT=json
       - CODOHUE_BATCH_INTERVAL_MINUTES=${CODOHUE_BATCH_INTERVAL_MINUTES:-5}
@@ -18,8 +18,12 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+        # Ignored when the local-redis profile is off (external Redis mode).
+        required: false
       qdrant:
         condition: service_healthy
+        # Ignored when the local-qdrant profile is off (external Qdrant mode).
+        required: false
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:2001/healthz"]
       interval: 10s
@@ -32,9 +36,9 @@ services:
     restart: unless-stopped
     environment:
       - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
-      - REDIS_URL=redis://redis:6379
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6334
+      - REDIS_URL=${CODOHUE_REDIS_URL:-redis://redis:6379}
+      - QDRANT_HOST=${CODOHUE_QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${CODOHUE_QDRANT_PORT:-6334}
       - CODOHUE_LOG_FORMAT=json
       - CODOHUE_BATCH_INTERVAL_MINUTES=${CODOHUE_BATCH_INTERVAL_MINUTES:-5}
       - CODOHUE_BATCH_RUN_RETENTION_DAYS=${CODOHUE_BATCH_RUN_RETENTION_DAYS:-30}
@@ -45,8 +49,10 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+        required: false
       qdrant:
         condition: service_healthy
+        required: false
 
   embedder:
     image: ghcr.io/jarviisha/codohue/embedder:${IMAGE_TAG:-latest}
@@ -55,9 +61,9 @@ services:
       - "127.0.0.1:${CODOHUE_EMBEDDER_PUBLISHED_PORT:-2003}:2003"
     environment:
       - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
-      - REDIS_URL=redis://redis:6379
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6334
+      - REDIS_URL=${CODOHUE_REDIS_URL:-redis://redis:6379}
+      - QDRANT_HOST=${CODOHUE_QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${CODOHUE_QDRANT_PORT:-6334}
       - CODOHUE_LOG_FORMAT=json
       - CODOHUE_CATALOG_MAX_CONTENT_BYTES=${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}
       - CODOHUE_EMBED_MAX_ATTEMPTS=${CODOHUE_EMBED_MAX_ATTEMPTS:-5}
@@ -66,8 +72,10 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
+        required: false
       qdrant:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:2003/healthz"]
       interval: 10s
@@ -82,9 +90,9 @@ services:
       - "${CODOHUE_ADMIN_PUBLISHED_PORT:-2002}:2002"
     environment:
       - DATABASE_URL=${CODOHUE_DATABASE_URL:-postgres://codohue:${CODOHUE_POSTGRES_PASSWORD:-}@postgres:5432/codohue?sslmode=disable}
-      - REDIS_URL=redis://redis:6379
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6334
+      - REDIS_URL=${CODOHUE_REDIS_URL:-redis://redis:6379}
+      - QDRANT_HOST=${CODOHUE_QDRANT_HOST:-qdrant}
+      - QDRANT_PORT=${CODOHUE_QDRANT_PORT:-6334}
       - CODOHUE_ADMIN_API_KEY=${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the production admin API key}
       - CODOHUE_API_URL=http://api:2001
       - CODOHUE_ADMIN_PORT=2002
@@ -103,8 +111,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+        required: false
       qdrant:
         condition: service_healthy
+        required: false
 
   migrate:
     image: ghcr.io/jarviisha/codohue/migrate:${IMAGE_TAG:-latest}
@@ -117,11 +127,20 @@ services:
         # Ignored when the local-db profile is off (external Postgres mode).
         required: false
 
-  # Optional in-compose Postgres. Two modes, chosen via .env:
-  #   external DB (default): set CODOHUE_DATABASE_URL to the managed Postgres URL.
-  #   in-compose DB:         set COMPOSE_PROFILES=local-db and
-  #                          CODOHUE_POSTGRES_PASSWORD=<secret>; DATABASE_URL
-  #                          then defaults to this postgres service.
+  # ── Infra placement ────────────────────────────────────────────────────────
+  # Each infra service is optional and gated by a compose profile; where the
+  # apps connect is a separate env var with an in-compose default. Pick any
+  # combination via .env:
+  #
+  #   in-compose:  add the profile to COMPOSE_PROFILES (e.g.
+  #                COMPOSE_PROFILES=local-db,local-redis,local-qdrant for the
+  #                full self-contained stack) and leave the URL var unset.
+  #   external:    omit the profile and point the URL var at the external
+  #                instance (CODOHUE_DATABASE_URL / CODOHUE_REDIS_URL /
+  #                CODOHUE_QDRANT_HOST+CODOHUE_QDRANT_PORT).
+  #
+  # All four binaries must share ONE Postgres + ONE Redis + ONE Qdrant — they
+  # coordinate through them (streams, pub/sub bridges, heartbeats).
   postgres:
     image: postgres:16-alpine
     profiles: ["local-db"]
@@ -142,6 +161,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    profiles: ["local-redis"]
     restart: unless-stopped
     # volatile-lru evicts only TTL'd keys (recommendation cache, trending
     # ZSETs) under memory pressure. Stream keys (codohue:events ingest
@@ -159,6 +179,7 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.17.1
+    profiles: ["local-qdrant"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:${CODOHUE_QDRANT_HTTP_PUBLISHED_PORT:-6333}:6333"
