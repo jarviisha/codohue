@@ -1271,6 +1271,134 @@ func TestRank_AlphaFromConfigDecidesBalance(t *testing.T) {
 	}
 }
 
+// mustNotCount extracts the number of MustNot conditions from a filter.
+func mustNotCount(f *qdrant.Filter) int {
+	if f == nil {
+		return 0
+	}
+	return len(f.MustNot)
+}
+
+func TestRank_ExcludesSeenItems(t *testing.T) {
+	repo := &fakeRepo{seenItems: []string{"obj-seen"}}
+	cfg := &namespace.Config{SeenItemsDays: 30}
+	s := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if mustNotCount(filter) != 1 {
+			t.Fatalf("expected seen-items MustNot on the candidate filter, got %#v", filter)
+		}
+		// The store honours the filter: obj-seen is not returned.
+		return []*qdrant.ScoredPoint{
+			{Score: 6, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-fresh")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-fresh", "obj-seen"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	byID := map[string]RankedItem{}
+	for _, it := range resp.Items {
+		byID[it.ObjectID] = it
+	}
+	if it := byID["obj-fresh"]; !it.Scored || it.Score <= 0 {
+		t.Fatalf("obj-fresh must be scored: %+v", it)
+	}
+	if it := byID["obj-seen"]; it.Scored || it.Score != 0 {
+		t.Fatalf("excluded obj-seen must come back unscored, not dropped: %+v", it)
+	}
+}
+
+func TestRank_ExcludesAuthoredObjectsWhenEnabled(t *testing.T) {
+	repo := &fakeRepo{authored: []string{"obj-mine"}}
+	cfg := &namespace.Config{ExcludeAuthored: true}
+	s := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if mustNotCount(filter) != 1 {
+			t.Fatalf("expected authored MustNot on the candidate filter, got %#v", filter)
+		}
+		return []*qdrant.ScoredPoint{
+			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-other")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-other", "obj-mine"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.authoredCalls != 1 {
+		t.Fatalf("authored query calls: got %d want 1", repo.authoredCalls)
+	}
+	byID := map[string]RankedItem{}
+	for _, it := range resp.Items {
+		byID[it.ObjectID] = it
+	}
+	if it := byID["obj-mine"]; it.Scored || it.Score != 0 {
+		t.Fatalf("authored obj-mine must come back unscored: %+v", it)
+	}
+	if it := byID["obj-other"]; !it.Scored {
+		t.Fatalf("obj-other must be scored: %+v", it)
+	}
+}
+
+func TestRank_AuthoredFilterOffByDefault(t *testing.T) {
+	repo := &fakeRepo{authored: []string{"obj-mine"}}
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{}}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if mustNotCount(filter) != 0 {
+			t.Fatalf("no exclusions expected with the flag off, got %#v", filter)
+		}
+		return []*qdrant.ScoredPoint{
+			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-mine")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-mine"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.authoredCalls != 0 {
+		t.Fatalf("authored query must not run with the flag off, got %d calls", repo.authoredCalls)
+	}
+	if !resp.Items[0].Scored {
+		t.Fatalf("obj-mine must rank normally with the flag off: %+v", resp.Items)
+	}
+}
+
+func TestRank_ExclusionLookupFailureDegradesToUnfiltered(t *testing.T) {
+	repo := &fakeRepo{seenItemsErr: errors.New("db down"), authoredErr: errors.New("db down")}
+	cfg := &namespace.Config{SeenItemsDays: 30, ExcludeAuthored: true}
+	s := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if mustNotCount(filter) != 0 {
+			t.Fatalf("exclusion lookup failure must degrade to unfiltered, got %#v", filter)
+		}
+		return []*qdrant.ScoredPoint{
+			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !resp.Items[0].Scored || resp.Items[0].Score <= 0 {
+		t.Fatalf("degraded request must still score: %+v", resp.Items)
+	}
+}
+
 func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
 	// Before the scored flag, "no subject vector", "candidate not indexed"
 	// and "indexed but zero overlap" were all Score:0 + hybrid_rank.

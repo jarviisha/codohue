@@ -124,13 +124,13 @@ still parses the response
 **Independent Test**: Enable `exclude_authored`, attribute an object to the subject, send
 it as a rankings candidate → present in response, `scored:false` (SC-004)
 
-- [ ] T016 [US3] Build the exclusion set in `Rank` via the existing `excludedObjectIDs`
+- [x] T016 [US3] Build the exclusion set in `Rank` via the existing `excludedObjectIDs`
       (internal/recommend/service.go:974) and merge its `MustNot` conditions into the
       candidate `HasID` filter (:1210-1214) for both sparse and dense searches.
-- [ ] T017 [US3] Return excluded candidates as `scored:false` in request order (never
+- [x] T017 [US3] Return excluded candidates as `scored:false` in request order (never
       dropped); on exclusion-set lookup failure, degrade to unfiltered scoring — same
       posture `Recommend` takes today.
-- [ ] T018 [US3] Tests in internal/recommend/service_test.go: seen-item excluded,
+- [x] T018 [US3] Tests in internal/recommend/service_test.go: seen-item excluded,
       authored-object excluded (flag on), flag off → scored normally, eligibility parity
       with `Recommend` for identical config, lookup-failure degradation.
 

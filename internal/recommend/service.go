@@ -1257,6 +1257,24 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		},
 	}
 
+	// Same eligibility as Recommend: seen items plus (when enabled) the
+	// subject's own authored objects, via the same excludedObjectIDs path.
+	// The MustNot rides on the candidate filter, so an excluded candidate
+	// drops out of both searches and comes back Scored=false instead of
+	// carrying a relevance score. Lookup failures degrade to unfiltered.
+	seenItemsDays := 30
+	if cfg != nil && cfg.SeenItemsDays > 0 {
+		seenItemsDays = cfg.SeenItemsDays
+	}
+	seenItems, err := s.repo.GetSeenItems(ctx, ns, req.SubjectID, seenItemsDays)
+	if err != nil {
+		slog.Error("rank: get seen items failed, serving unfiltered", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+	}
+	excluded := s.excludedObjectIDs(ctx, &Request{SubjectID: req.SubjectID, Namespace: ns}, cfg, seenItems)
+	if exclusionFilter := s.buildSeenItemsFilter(ctx, ns, excluded); exclusionFilter != nil {
+		filter.MustNot = exclusionFilter.MustNot
+	}
+
 	var sparseResults, denseResults []*qdrant.ScoredPoint
 	sparseOK, denseOK := false, false
 	if sparseVec != nil {
