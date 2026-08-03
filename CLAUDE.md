@@ -64,7 +64,7 @@ Live reload in development uses `air` (configured in `.air.toml`), auto-rebuilds
 
 ### Four Binaries
 
-- **`cmd/api`** — HTTP API server (port **2001**) + Redis Streams ingest worker goroutine
+- **`cmd/api`** — HTTP API server (port **2001**) + two Redis Streams worker goroutines: the events ingest worker (`codohue:events`) and the catalog ingest worker (`codohue:catalog`, feeding `internal/catalog` through a `cmd/api` adapter)
 - **`cmd/cron`** — Batch job daemon that recomputes sparse and dense vectors plus trending data on a configurable interval (default: 5 min)
 - **`cmd/admin`** — Admin server (port **2002**) that serves the embedded `web/admin` SPA, the session-cookie auth API, and the `/api/admin/v1/*` operational dashboard endpoints
 - **`cmd/embedder`** — Catalog auto-embedding worker (port **2003** for `/healthz` + `/metrics`); consumes raw catalog content from per-namespace `catalog:embed:{ns}` Redis streams, embeds it via the configured `embedstrategy.Strategy`, and upserts dense vectors into `{ns}_objects_dense`. Also runs the re-embed completion watcher that closes admin-triggered batch runs when the namespace's catalog backlog drains, the recovery sweeper that re-publishes rows whose stream entry was lost, and the liveness heartbeat (`codohue:embedder:heartbeat`, TTL 90s) the admin overview reads.
@@ -77,7 +77,7 @@ The repo is a Go workspace ([go.work](go.work)) with four modules; lint/test/cov
 | ------------------------ | ------------------------------------------------------------------------------------ |
 | `.`                      | Server application — all four binaries, all `internal/` domains, e2e suite           |
 | `./pkg/codohuetypes`     | Shared wire types so SDK consumers do not pull in pgx/qdrant/prometheus dependencies |
-| `./sdk/go`               | Public Go SDK for clients embedding Codohue                                          |
+| `./sdk/go`               | Public Go SDK for clients embedding Codohue; includes the `sdk/go/admin` package (bearer admin client, `ProvisionCatalogNamespace`) |
 | `./sdk/go/redistream`    | Redis Streams transport helper for the SDK                                           |
 
 ### Data Flow
@@ -95,7 +95,11 @@ Main Backend → Redis Streams ────────────────�
                                                                ↓
                                                Recommend Service → Main Backend
 
-Main Backend → HTTP POST /v1/namespaces/{ns}/catalog ──→ catalog_items (PostgreSQL)
+Main Backend → HTTP POST /v1/namespaces/{ns}/catalog[/batch] ──┐
+                                                                │
+Main Backend → Redis Stream codohue:catalog (untrimmed) ────────┤ (catalog worker → adapter)
+                                                                ▼
+                                                       catalog_items (PostgreSQL)
                                                                ↓ (XADD catalog:embed:{ns})
                                                        Embedder Worker (embedder binary)
                                                                ↓ (per-item embed → upsert)
@@ -110,7 +114,7 @@ Each feature domain lives in `internal/<domain>/` with a consistent `handler.go`
 
 | Domain            | Responsibility                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------------------- |
-| `ingest`               | HTTP and Redis Streams event ingestion — validates events, stores to `events` table                              |
+| `ingest`               | HTTP and Redis Streams event ingestion — validates events, stores to `events` table. Also hosts the `CatalogWorker` consuming the durable `codohue:catalog` stream (items reach `internal/catalog` via a `cmd/api` adapter, never a peer import) |
 | `compute`              | Batch recomputes sparse + dense vectors with time decay, upserts to Qdrant; logs to `batch_run_logs`              |
 | `recommend`            | Serves CF recommendations, hybrid dense/sparse, trending, rank, BYOE embeddings, object deletion                  |
 | `nsconfig`             | CRUD for per-namespace configuration (action weights, decay params, dense hybrid config, catalog config)          |
