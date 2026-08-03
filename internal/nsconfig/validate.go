@@ -15,12 +15,13 @@ var (
 	ErrInvalidConfig = errors.New("nsconfig: invalid configuration")
 
 	// ErrCatalogViaUpsert rejects dense_source="catalog" on the generic
-	// upsert → 422. Catalog mode requires a strategy whose Dim matches
-	// embedding_dim; only the catalog endpoint runs that validation, so
-	// letting the generic PATCH flip the flag wedged the namespace: the
-	// embedder dead-lettered every item at strategy_resolve while BYOE
-	// writes started returning 409.
-	ErrCatalogViaUpsert = errors.New("nsconfig: dense_source=catalog must be set via the catalog config endpoint")
+	// upsert when the catalog strategy fields are absent → 422. Catalog mode
+	// requires a strategy whose Dim matches embedding_dim; flipping the flag
+	// without that validation wedged the namespace (the embedder
+	// dead-lettered every item at strategy_resolve while BYOE writes started
+	// returning 409). Supplying catalog_strategy_id + catalog_strategy_version
+	// in the same request runs the full validation and is accepted.
+	ErrCatalogViaUpsert = errors.New("nsconfig: dense_source=catalog requires catalog_strategy_id and catalog_strategy_version in the same request")
 
 	// ErrEmbeddingDimLocked rejects changing embedding_dim while dense
 	// collections already exist → 409. Qdrant collections keep their
@@ -78,10 +79,15 @@ func validateUpsert(req *UpsertRequest) error {
 	}
 	if req.DenseSource != nil {
 		if *req.DenseSource == codohuetypes.DenseSourceCatalog {
-			return ErrCatalogViaUpsert
-		}
-		if !upsertDenseSources[*req.DenseSource] {
-			return fmt.Errorf("%w: dense_source must be one of disabled|item2vec|svd|byoe, got %q", ErrInvalidConfig, *req.DenseSource)
+			// The core mode is settable here since 006 — but only with its
+			// strategy alongside, so the dim validation the dedicated catalog
+			// endpoint performs can run in the same request.
+			if req.CatalogStrategyID == nil || *req.CatalogStrategyID == "" ||
+				req.CatalogStrategyVersion == nil || *req.CatalogStrategyVersion == "" {
+				return ErrCatalogViaUpsert
+			}
+		} else if !upsertDenseSources[*req.DenseSource] {
+			return fmt.Errorf("%w: dense_source must be one of disabled|item2vec|svd|byoe|catalog, got %q", ErrInvalidConfig, *req.DenseSource)
 		}
 	}
 	if req.EmbeddingDim != nil && *req.EmbeddingDim <= 0 {

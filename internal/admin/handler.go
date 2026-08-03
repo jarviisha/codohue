@@ -227,7 +227,7 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteError(w, statusCode, "invalid_config", err.Error())
 		case errors.Is(err, ErrCatalogSourceViaUpsert):
 			httpapi.WriteError(w, statusCode, "catalog_via_upsert",
-				"dense_source=catalog is enabled via PUT .../catalog, which validates the strategy against embedding_dim")
+				"dense_source=catalog requires catalog_strategy_id and catalog_strategy_version in the same request")
 		case errors.Is(err, ErrEmbeddingDimLocked):
 			httpapi.WriteError(w, statusCode, "embedding_dim_locked", err.Error())
 		default:

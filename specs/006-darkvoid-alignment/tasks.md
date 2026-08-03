@@ -199,18 +199,18 @@ SDK provisioning call (FR-014–FR-016)
 catalog namespace (SC-007); dim mismatch rejected identically to the catalog endpoint;
 repeated bad bearers throttled, correct key never
 
-- [ ] T027 [P] [US5] Bearer auth on `/api/admin/v1/*` in internal/admin: accept
+- [x] T027 [P] [US5] Bearer auth on `/api/admin/v1/*` in internal/admin: accept
       `Authorization: Bearer <CODOHUE_ADMIN_API_KEY>` beside the session cookie
       (constant-time compare; documented precedence: bearer wins when both present), with
       a per-IP failed-attempts rate limiter reusing the login limiter's shape (FR-014).
-- [ ] T028 [US5] Accept `dense_source="catalog"` on `PUT /api/admin/v1/namespaces/{ns}`
+- [x] T028 [US5] Accept `dense_source="catalog"` on `PUT /api/admin/v1/namespaces/{ns}`
       when catalog strategy id/version accompany it, running the same dim-vs-embedding_dim
       validation as the catalog endpoint; absent fields → reject naming them (replaces the
       blanket `ErrCatalogSourceViaUpsert` at internal/admin/types.go:195,
       handler.go:228-230, service.go:275) (FR-015).
-- [ ] T029 [US5] New sdk/go/admin package: bearer-authenticated admin client with
+- [x] T029 [US5] New sdk/go/admin package: bearer-authenticated admin client with
       `ProvisionCatalogNamespace` (one call: upsert with strategy fields) (FR-016).
-- [ ] T030 [US5] Tests: internal/admin auth (bearer valid/invalid/throttled/cookie
+- [x] T030 [US5] Tests: internal/admin auth (bearer valid/invalid/throttled/cookie
       precedence), upsert validation matrix (catalog + fields ok / catalog − fields
       rejected / dim mismatch), sdk/go/admin against a stub server; admin-plane e2e
       (`make test-e2e-heavy`). Update the affected CLAUDE.md admin-route rows (auth

@@ -366,6 +366,14 @@ type NamespaceUpsertRequest struct {
 	TrendingWindow  *int               `json:"trending_window"`
 	TrendingTTL     *int               `json:"trending_ttl"`
 	LambdaTrending  *float64           `json:"lambda_trending"`
+
+	// Catalog strategy fields — honoured only with dense_source="catalog",
+	// which is accepted on this route when they accompany it (one-request
+	// provisioning of the core mode; same dim validation as the catalog
+	// endpoint). Absent strategy fields + catalog → 422 naming them.
+	CatalogStrategyID      *string        `json:"catalog_strategy_id"`
+	CatalogStrategyVersion *string        `json:"catalog_strategy_version"`
+	CatalogStrategyParams  map[string]any `json:"catalog_strategy_params"`
 }
 
 // NamespaceUpsertResponse is the response for PUT /api/admin/v1/namespaces/{ns}.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/jarviisha/codohue/internal/admin"
+	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/nsconfig"
 )
 
@@ -42,6 +43,10 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 		TrendingWindow:  req.TrendingWindow,
 		TrendingTTL:     req.TrendingTTL,
 		LambdaTrending:  req.LambdaTrending,
+
+		CatalogStrategyID:      req.CatalogStrategyID,
+		CatalogStrategyVersion: req.CatalogStrategyVersion,
+		CatalogStrategyParams:  req.CatalogStrategyParams,
 	}
 
 	resp, err := a.svc.Upsert(ctx, namespace, nsReq)
@@ -78,12 +83,18 @@ func (a *nsConfigAdapter) RotateAPIKey(ctx context.Context, namespace string) (*
 // domain's equivalents, preserving the detail message so the operator sees
 // which field failed. Unknown errors pass through (→ 500).
 func mapNsConfigError(err error) error {
+	var dimErr *nsconfig.DimensionMismatchError
 	switch {
 	case errors.Is(err, nsconfig.ErrCatalogViaUpsert):
 		return fmt.Errorf("%w: %s", admin.ErrCatalogSourceViaUpsert, err.Error())
 	case errors.Is(err, nsconfig.ErrEmbeddingDimLocked):
 		return fmt.Errorf("%w: %s", admin.ErrEmbeddingDimLocked, err.Error())
 	case errors.Is(err, nsconfig.ErrInvalidConfig):
+		return fmt.Errorf("%w: %s", admin.ErrNamespaceConfigInvalid, err.Error())
+	case errors.As(err, &dimErr), errors.Is(err, embedstrategy.ErrUnknownStrategy):
+		// Catalog-on-upsert strategy validation failures → 400 with both
+		// dims (or the unknown strategy) in the message, matching what the
+		// dedicated catalog endpoint reports.
 		return fmt.Errorf("%w: %s", admin.ErrNamespaceConfigInvalid, err.Error())
 	default:
 		return err
