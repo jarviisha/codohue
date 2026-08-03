@@ -7,8 +7,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 type fakeIngester struct {
@@ -17,12 +20,34 @@ type fakeIngester struct {
 
 	lastNS  string
 	lastReq *IngestRequest
+
+	batchResp *codohuetypes.CatalogBatchIngestResponse
+	batchErr  error
+	lastBatch *BatchIngestRequest
+
+	listResp  *codohuetypes.CatalogObjectsResponse
+	listErr   error
+	lastSince *time.Time
+	lastLimit int
 }
 
 func (f *fakeIngester) Ingest(_ context.Context, ns string, req *IngestRequest) (*Item, error) {
 	f.lastNS = ns
 	f.lastReq = req
 	return f.item, f.err
+}
+
+func (f *fakeIngester) IngestBatch(_ context.Context, ns string, req *BatchIngestRequest) (*codohuetypes.CatalogBatchIngestResponse, error) {
+	f.lastNS = ns
+	f.lastBatch = req
+	return f.batchResp, f.batchErr
+}
+
+func (f *fakeIngester) ListObjects(_ context.Context, ns string, changedSince *time.Time, limit, _ int) (*codohuetypes.CatalogObjectsResponse, error) {
+	f.lastNS = ns
+	f.lastSince = changedSince
+	f.lastLimit = limit
+	return f.listResp, f.listErr
 }
 
 func newCatalogRequest(body, namespace string) *http.Request {
@@ -151,5 +176,93 @@ func TestHandlerIngest_UnknownServiceError_500(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "internal_error") {
 		t.Errorf("expected error code internal_error, got %s", rec.Body.String())
+	}
+}
+
+func newCatalogPathRequest(method, path, body, namespace string) *http.Request {
+	req := httptest.NewRequestWithContext(
+		context.Background(),
+		method,
+		"/v1/namespaces/"+namespace+path,
+		strings.NewReader(body),
+	)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("ns", namespace)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+}
+
+func TestHandlerBatchIngest_ReturnsPerItemResults(t *testing.T) {
+	fake := &fakeIngester{batchResp: &codohuetypes.CatalogBatchIngestResponse{
+		Namespace: "ns", Accepted: 1, Rejected: 1,
+		Results: []codohuetypes.CatalogBatchItemResult{
+			{ObjectID: "o1", Accepted: true},
+			{ObjectID: "o2", Accepted: false, Error: "empty_content"},
+		},
+	}}
+	h := &Handler{service: fake}
+	rec := httptest.NewRecorder()
+	h.BatchIngest(rec, newCatalogPathRequest(http.MethodPost, "/catalog/batch",
+		`{"items":[{"object_id":"o1","content":"hi"},{"object_id":"o2","content":" "}]}`, "ns"))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastBatch == nil || len(fake.lastBatch.Items) != 2 {
+		t.Fatalf("service did not receive the batch: %+v", fake.lastBatch)
+	}
+	if !strings.Contains(rec.Body.String(), `"empty_content"`) {
+		t.Errorf("per-item error missing from body: %s", rec.Body.String())
+	}
+}
+
+func TestHandlerBatchIngest_InvalidBody_400(t *testing.T) {
+	h := &Handler{service: &fakeIngester{}}
+	rec := httptest.NewRecorder()
+	h.BatchIngest(rec, newCatalogPathRequest(http.MethodPost, "/catalog/batch", `{"items": nope`, "ns"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandlerBatchIngest_NamespaceNotFound_404(t *testing.T) {
+	h := &Handler{service: &fakeIngester{batchErr: ErrNamespaceNotFound}}
+	rec := httptest.NewRecorder()
+	h.BatchIngest(rec, newCatalogPathRequest(http.MethodPost, "/catalog/batch",
+		`{"items":[{"object_id":"o1","content":"hi"}]}`, "ns"))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandlerListObjects_ParsesParams(t *testing.T) {
+	fake := &fakeIngester{listResp: &codohuetypes.CatalogObjectsResponse{
+		Namespace: "ns", Total: 1, Limit: 50, Offset: 0,
+		Items: []codohuetypes.CatalogObjectSummary{{ObjectID: "o1", UpdatedAt: "2026-01-02T03:04:05Z"}},
+	}}
+	h := &Handler{service: fake}
+	rec := httptest.NewRecorder()
+	req := newCatalogPathRequest(http.MethodGet, "/catalog/objects?changed_since=2026-01-01T00:00:00Z&limit=50", "", "ns")
+	h.ListObjects(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if fake.lastSince == nil || !fake.lastSince.Equal(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("changed_since not parsed: %v", fake.lastSince)
+	}
+	if fake.lastLimit != 50 {
+		t.Fatalf("limit not passed: %d", fake.lastLimit)
+	}
+	if !strings.Contains(rec.Body.String(), `"o1"`) {
+		t.Errorf("items missing from body: %s", rec.Body.String())
+	}
+}
+
+func TestHandlerListObjects_BadChangedSince_400(t *testing.T) {
+	h := &Handler{service: &fakeIngester{}}
+	rec := httptest.NewRecorder()
+	h.ListObjects(rec, newCatalogPathRequest(http.MethodGet, "/catalog/objects?changed_since=yesterday", "", "ns"))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }

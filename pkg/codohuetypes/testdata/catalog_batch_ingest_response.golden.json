@@ -1,0 +1,16 @@
+{
+  "namespace": "feed",
+  "accepted": 1,
+  "rejected": 1,
+  "results": [
+    {
+      "object_id": "obj-1",
+      "accepted": true
+    },
+    {
+      "object_id": "obj-2",
+      "accepted": false,
+      "error": "empty_content"
+    }
+  ]
+}

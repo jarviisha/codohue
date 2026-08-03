@@ -65,6 +65,28 @@ func TestGoldenWireContract(t *testing.T) {
 			ObjectID: "obj-1", Content: "hello world", AuthorSubjectID: "subj-1",
 			Metadata: map[string]any{"lang": "en"},
 		}},
+		{"catalog_stream_item", codohuetypes.CatalogStreamItem{
+			Namespace: "feed", ObjectID: "obj-1", Content: "hello world",
+			AuthorSubjectID: "subj-1", Metadata: map[string]any{"lang": "en"},
+		}},
+		{"catalog_batch_ingest_request", codohuetypes.CatalogBatchIngestRequest{
+			Items: []codohuetypes.CatalogIngestRequest{
+				{ObjectID: "obj-1", Content: "hello world"},
+			},
+		}},
+		{"catalog_batch_ingest_response", codohuetypes.CatalogBatchIngestResponse{
+			Namespace: "feed", Accepted: 1, Rejected: 1,
+			Results: []codohuetypes.CatalogBatchItemResult{
+				{ObjectID: "obj-1", Accepted: true},
+				{ObjectID: "obj-2", Accepted: false, Error: "empty_content"},
+			},
+		}},
+		{"catalog_objects_response", codohuetypes.CatalogObjectsResponse{
+			Namespace: "feed", Total: 1, Limit: 100, Offset: 0,
+			Items: []codohuetypes.CatalogObjectSummary{
+				{ObjectID: "obj-1", UpdatedAt: "2026-01-02T03:04:05Z"},
+			},
+		}},
 		{"error_detail", codohuetypes.ErrorDetail{Code: "invalid_request", Message: "invalid request body"}},
 		{"error_response", codohuetypes.ErrorResponse{
 			Error: codohuetypes.ErrorDetail{Code: "unauthorized", Message: "missing bearer token"},

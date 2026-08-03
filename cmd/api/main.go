@@ -138,6 +138,14 @@ func run() error {
 	objectsHandler := objects.NewHandler(objectsSvc)
 	catalogSvc.SetAuthorWriter(objectsSvc)
 
+	// Durable catalog transport: the ingest worker consumes codohue:catalog
+	// and hands entries to catalog.Service through the adapter (the import
+	// rule keeps ingest and catalog apart).
+	catalogWorker := ingest.NewCatalogWorker(redisClient, &catalogStreamAdapter{svc: catalogSvc}, consumerName)
+	if err := catalogWorker.Init(ctx); err != nil {
+		return fmt.Errorf("init catalog ingest worker: %w", err)
+	}
+
 	// recommend
 	recommendRepo := recommend.NewRepository(db)
 	recommendSvc := recommend.NewService(recommendRepo, nsConfigSvc, idmapSvc, qdrantClient, redisClient)
@@ -174,6 +182,8 @@ func run() error {
 		}))
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
 		r.Post("/v1/namespaces/{ns}/catalog", catalogHandler.Ingest)
+		r.Post("/v1/namespaces/{ns}/catalog/batch", catalogHandler.BatchIngest)
+		r.Get("/v1/namespaces/{ns}/catalog/objects", catalogHandler.ListObjects)
 		r.Get("/v1/namespaces/{ns}/subjects/{id}/recommendations", recommendHandler.GetSubjectRecommendations)
 		r.Post("/v1/namespaces/{ns}/rankings", recommendHandler.Rank)
 		r.Get("/v1/namespaces/{ns}/trending", recommendHandler.GetTrending)
@@ -186,10 +196,14 @@ func run() error {
 	// Goroutines. Joined on shutdown before the deferred pool/redis closes
 	// fire, so in-flight events finish their write + XACK against live clients.
 	var workerWG sync.WaitGroup
-	workerWG.Add(2)
+	workerWG.Add(3)
 	go func() {
 		defer workerWG.Done()
 		ingestWorker.Run(ctx)
+	}()
+	go func() {
+		defer workerWG.Done()
+		catalogWorker.Run(ctx)
 	}()
 	go func() {
 		defer workerWG.Done()

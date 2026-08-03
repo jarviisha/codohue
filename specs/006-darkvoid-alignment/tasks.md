@@ -147,16 +147,16 @@ worker), batch HTTP ingest, reconciliation read (FR-009–FR-013)
 it; content is embedded with zero producer retries (SC-005); 10k-item repair ≤ 100
 requests (SC-006)
 
-- [ ] T019 [P] [US4] Define the stream contract: stream name (`codohue:catalog`, namespace
+- [x] T019 [P] [US4] Define the stream contract: stream name (`codohue:catalog`, namespace
       inside the payload — same reasoning as events) and a `CatalogStreamItem` wire type in
       pkg/codohuetypes/catalog.go; add the golden-test case + snapshot. Trim policy is
       explicit and symmetric with `codohue:events`: no producer-side MAXLEN (durability is
       the point — entries live until consumed and acked; the internal `catalog:embed:{ns}`
       stream keeps its existing approximate cap of 100k downstream, see
       internal/catalog/service.go:179).
-- [ ] T020 [P] [US4] Catalog publisher in sdk/go/redistream mirroring the event
+- [x] T020 [P] [US4] Catalog publisher in sdk/go/redistream mirroring the event
       publisher's ergonomics (+ tests) (FR-010).
-- [ ] T021 [US4] Consume the catalog stream in the ingest worker (internal/ingest):
+- [x] T021 [US4] Consume the catalog stream in the ingest worker (internal/ingest):
       XREADGROUP with the existing consumer-name convention, validation identical to the
       HTTP path (namespace in catalog mode, size caps, required fields), invalid items
       observably rejected, redelivery idempotent by object id (FR-013). "Observably
@@ -166,21 +166,21 @@ requests (SC-006)
       unknown namespace), so they surface in the admin failures-summary, never silently
       dropped. The worker calls a narrow `CatalogIngestor` interface — internal/ingest
       must NOT import internal/catalog.
-- [ ] T022 [US4] Wire the adapter in cmd/api: inject the internal/catalog service into the
+- [x] T022 [US4] Wire the adapter in cmd/api: inject the internal/catalog service into the
       ingest worker behind the T021 interface (same pattern as
       cmd/admin/nsconfig_adapter.go); update internal/ingest/docs.go and worker tests.
-- [ ] T023 [US4] Batch HTTP ingest on internal/catalog: accept an item array on the
+- [x] T023 [US4] Batch HTTP ingest on internal/catalog: accept an item array on the
       catalog path (new wire request/response types in pkg/codohuetypes/catalog.go +
       golden cases, `DecodeStrict`, per-item results so one bad item doesn't fail the
       batch), capped at 100 items per request (100 × the 32KB per-item content cap ≈
       3.2MB request bound; satisfies SC-006's ≥100 batch size) (FR-011). Add the
       endpoint's REST API table row to CLAUDE.md in the same change (constitution III:
       the row ships with the endpoint's PR, not in polish).
-- [ ] T024 [US4] Data-plane reconciliation read in internal/catalog: list held object ids
+- [x] T024 [US4] Data-plane reconciliation read in internal/catalog: list held object ids
       / changed-since-timestamp for the namespace, paginated; wire type + golden case
       (FR-012). Add the endpoint's CLAUDE.md REST API table row in the same change.
-- [ ] T025 [US4] Batch + reconciliation SDK wrappers in sdk/go/catalog_http.go (+ tests).
-- [ ] T026 [US4] Tests: internal/ingest worker (stream consume, validation parity,
+- [x] T025 [US4] Batch + reconciliation SDK wrappers in sdk/go/catalog_http.go (+ tests).
+- [x] T026 [US4] Tests: internal/ingest worker (stream consume, validation parity,
       idempotent redelivery), internal/catalog service/repository (batch, reconciliation);
       e2e outage scenario in the `make test-e2e-heavy` subset (publish during downtime →
       recover → embedded).
