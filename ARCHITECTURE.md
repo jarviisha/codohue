@@ -7,16 +7,17 @@ This document describes Codohue's current architecture: the processes, communica
 Codohue is a **hybrid sparse + dense collaborative filtering** recommendation service for multi-tenant behavioral personalization. The system is organized around four small binaries that run independently, a four-module Go workspace, and three infrastructure components (PostgreSQL, Redis, Qdrant).
 
 - **Sparse CF** is built from the event log (view, like, comment, share, skip, …) by a cron job and stored in Qdrant `{ns}_subjects` / `{ns}_objects` collections (sparse dot product).
-- **Dense vectors** have exactly one producer per namespace, named by the `dense_source` enum: `disabled`, `item2vec`, `svd`, `byoe`, or `catalog`. Stored in `{ns}_subjects_dense` / `{ns}_objects_dense` (cosine).
+- **Dense vectors** have exactly one producer per namespace, named by the `dense_source` enum: `disabled`, `item2vec`, `svd`, `byoe`, or `catalog` (exported as `codohuetypes.DenseSource*`; **`catalog` is the core, recommended mode** — the only one where both dense collections have an in-system owner). Stored in `{ns}_subjects_dense` / `{ns}_objects_dense` (cosine).
 - **Hybrid blending** mixes sparse and dense scores at serve time, while applying time-decay and γ-freshness at rerank.
 - **Multi-tenant** by `namespace`; each namespace owns its config, Qdrant collections, Redis keys, and API key.
 
 ```
-┌──────────────┐    HTTP / Redis Streams       ┌──────────────────────┐
-│ Main Backend │ ─────────────────────────────▶│ cmd/api  (port 2001) │
-└──────────────┘                               │  + ingest worker     │
+┌──────────────┐  HTTP / Redis Streams         ┌──────────────────────┐
+│ Main Backend │  (events + catalog)           │ cmd/api  (port 2001) │
+│              │ ─────────────────────────────▶│  + ingest workers    │
+└──────────────┘                               │    (events, catalog) │
        │                                       │  + events-tail pub   │
-       │  POST /catalog                        └──────────┬───────────┘
+       │  POST /catalog (+/batch)              └──────────┬───────────┘
        │                                                  │ writes
        │                                                  ▼
        │                                          ┌────────────────┐
@@ -57,9 +58,9 @@ All four binaries are built from the same repo, each with a clearly scoped role.
 
 | Binary          | Port | Role |
 | --------------- | ---- | ---- |
-| [cmd/api](cmd/api)           | 2001 | HTTP data-plane (events, catalog, recommendations, rankings, trending, object metadata, BYOE) plus two goroutines: the `ingest` worker consuming the Redis Stream `codohue:events`, and the events-tail publisher that fans ingested events onto `codohue:events-tail:{ns}` for the admin live tail |
+| [cmd/api](cmd/api)           | 2001 | HTTP data-plane (events, catalog + batch + reconciliation read, recommendations, rankings, trending, object metadata, BYOE) plus three goroutines: the `ingest` worker consuming `codohue:events`, the catalog worker consuming `codohue:catalog` (durable catalog transport, fed into `internal/catalog` via a `cmd/api` adapter), and the events-tail publisher fanning ingested events onto `codohue:events-tail:{ns}` |
 | [cmd/cron](cmd/cron)         | —    | Batch daemon driven by `CODOHUE_BATCH_INTERVAL_MINUTES` (default 5 min); each tick runs three phases per namespace. Also runs the retention prune job and publishes run lifecycle events to `codohue:batchrun-events` so `cmd/admin` can stream cron runs live |
-| [cmd/admin](cmd/admin)       | 2002 | Admin server: session-cookie auth, `/api/admin/v1/*`, SSE streams over an in-process event bus fed by three Redis pub/sub bridges (batch runs, catalog signals, events tail). Embeds the `web/admin` SPA (Vite + React 19 + Tailwind v4) via the `embedui` build tag |
+| [cmd/admin](cmd/admin)       | 2002 | Admin server: session-cookie **or** bearer (`CODOHUE_ADMIN_API_KEY`) auth, `/api/admin/v1/*`, SSE streams over an in-process event bus fed by three Redis pub/sub bridges (batch runs, catalog signals, events tail). Embeds the `web/admin` SPA (Vite + React 19 + Tailwind v4) via the `embedui` build tag |
 | [cmd/embedder](cmd/embedder) | 2003 | Catalog worker: consumes `catalog:embed:{ns}` streams, embeds via `embedstrategy.Strategy`, upserts the dense vector. Also runs the re-embed completion watcher, the backlog sampler (writes `catalog_backlog_samples`), the recovery sweeper (re-publishes rows whose stream entry was lost), and the liveness heartbeat (`codohue:embedder:heartbeat`, TTL 90s) |
 
 ### 2.1 Process ↔ storage matrix
@@ -67,7 +68,7 @@ All four binaries are built from the same repo, each with a clearly scoped role.
 | Storage             | api | cron | admin | embedder |
 | ------------------- | :-: | :--: | :---: | :------: |
 | PostgreSQL          | RW  | RW (compute + retention prune) | RW | RW |
-| Redis               | R (consume `codohue:events`), W (reco cache, `codohue:events-tail:{ns}`) | W (trending ZSET, `codohue:batchrun-events`) | R (trending, heartbeats), SUB (three bridges) | RW (consume `catalog:embed:{ns}`, heartbeat, `codohue:catalog-events:{ns}`) |
+| Redis               | R (consume `codohue:events` + `codohue:catalog`), W (reco cache, `catalog:embed:{ns}`, `codohue:events-tail:{ns}`) | W (trending ZSET, `codohue:batchrun-events`) | R (trending, heartbeats), SUB (three bridges) | RW (consume `catalog:embed:{ns}`, heartbeat, `codohue:catalog-events:{ns}`) |
 | Qdrant              | R (search), W (BYOE upsert, object delete) | RW (sparse + dense upsert; reads back object vectors under `catalog`) | R (counts) | W (`{ns}_objects_dense` upsert) |
 
 ## 3. Go Workspace
@@ -78,7 +79,7 @@ The repo is a Go workspace ([go.work](go.work)) with **four modules**. `make lin
 | ---------------------------------------------------- | ---- |
 | `github.com/jarviisha/codohue` (`.`)                 | Server application — four binaries, every `internal/` domain, the e2e suite |
 | `github.com/jarviisha/codohue/pkg/codohuetypes`      | Shared wire types so the SDK doesn't pull pgx/qdrant/prometheus deps |
-| `github.com/jarviisha/codohue/sdk/go`                | Public Go SDK for clients embedding Codohue |
+| `github.com/jarviisha/codohue/sdk/go`                | Public Go SDK for clients embedding Codohue; includes the `sdk/go/admin` package (bearer-authenticated admin client, `ProvisionCatalogNamespace`) |
 | `github.com/jarviisha/codohue/sdk/go/redistream`     | Redis Streams transport helper for the SDK |
 
 The server module targets Go `1.26.1`. The SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) deliberately stay on Go `1.24.13` for broader downstream adoption.
@@ -89,7 +90,7 @@ Each feature domain lives at `internal/<domain>/` with a consistent file set: `h
 
 | Package                              | Responsibility |
 | ------------------------------------ | -------------- |
-| [internal/ingest](internal/ingest)             | Accepts events via HTTP and Redis Streams, validates, persists to `events`; publishes the tail feed |
+| [internal/ingest](internal/ingest)             | Accepts events via HTTP and Redis Streams, validates, persists to `events`; publishes the tail feed. Also hosts the `CatalogWorker` consuming `codohue:catalog` (hands items to `internal/catalog` through a `cmd/api` adapter) |
 | [internal/compute](internal/compute)           | Batch: sparse + dense recompute, trending |
 | [internal/recommend](internal/recommend)       | CF, hybrid dense/sparse, rank, trending, BYOE embeddings, object delete |
 | [internal/nsconfig](internal/nsconfig)         | CRUD for per-namespace config (weights, decay, dense hybrid, catalog) |
@@ -115,7 +116,7 @@ Enforced by [internal/architecture/imports_test.go](internal/architecture/import
 
 - Packages under `internal/` may import only `internal/config`, `internal/core/...`, `internal/infra/...`, and their own subpackages (e.g. `internal/admin` may import `internal/admin/sse`).
 - Peer-domain imports are **forbidden** (for example, `recommend` may not import `ingest`).
-- Cross-domain coordination happens at the wiring layer in `cmd/api` and `cmd/admin` (see [cmd/admin/nsconfig_adapter.go](cmd/admin/nsconfig_adapter.go)). `internal/catalog` accepting an author and writing it to `objects` works the same way: `cmd/api` injects the interface.
+- Cross-domain coordination happens at the wiring layer in `cmd/api` and `cmd/admin` (see [cmd/admin/nsconfig_adapter.go](cmd/admin/nsconfig_adapter.go)). `internal/catalog` accepting an author and writing it to `objects` works the same way, as does the catalog stream: `internal/ingest`'s `CatalogWorker` calls a narrow interface that [cmd/api/catalog_stream_adapter.go](cmd/api/catalog_stream_adapter.go) implements around `catalog.Service` — ingest and catalog never import each other.
 
 This shape lets any domain be split into a separate microservice later without untangling coupling.
 
@@ -165,6 +166,7 @@ Schema evolution after `001_initial`:
 | Key                                | Kind        | Producer        | Consumer / TTL |
 | ---------------------------------- | ----------- | --------------- | -------------- |
 | `codohue:events`                   | Stream      | Main Backend    | `cmd/api` ingest worker (consumer group, `CODOHUE_INGEST_REPLICA_NAME`) |
+| `codohue:catalog`                  | Stream      | Main Backend (SDK `redistream.CatalogProducer`) | `cmd/api` catalog worker (consumer group, same replica name). **Not producer-trimmed** — entries persist until consumed and acked, so content published during a Codohue outage is ingested on recovery |
 | `catalog:embed:{ns}`               | Stream      | `internal/catalog` (publishes on POST catalog) | `cmd/embedder` (consumer group, `CODOHUE_EMBEDDER_REPLICA_NAME`) |
 | `trending:{ns}`                    | Sorted set  | `cmd/cron` phase 3 | `recommend` service; TTL = `trending_ttl` |
 | `rec:{ns}:{subject}:limit=N:offset=M` | String   | `recommend`     | `recommend`; TTL 5 minutes |
@@ -219,9 +221,10 @@ Lets callers submit raw content instead of computing embeddings themselves. The 
 ### 7.1 Pipeline
 
 ```
-POST /v1/namespaces/{ns}/catalog
-        │   (internal/catalog)
-        ▼
+POST /v1/namespaces/{ns}/catalog (+/batch)      XADD codohue:catalog
+        │   (internal/catalog)                        │ (cmd/api catalog worker
+        │                                             │  → adapter → internal/catalog)
+        ▼                                             ▼
    catalog_items.insert(state=pending)
         │   XADD catalog:embed:{ns}
         ▼
@@ -269,12 +272,12 @@ An optional `author_subject_id` on the ingest body is **not** stored on `catalog
 Active when `0 < alpha < 1.0` and `dense_source ∉ {"", "disabled"}`:
 
 ```
-score_final = alpha · normalize(score_sparse) + (1 - alpha) · normalize(score_dense)
+score_final = alpha · saturate(score_sparse) + (1 - alpha) · bound(score_dense)
 ```
 
-Min-max normalization is applied **per request** over each score set independently before merging. Sparse search runs against `{ns}_objects`, dense search against `{ns}_objects_dense` using the subject's dense vector. Sparse over-fetches 5× the page, dense 3×.
+Normalization is **batch-independent** (one shared helper, `blendHybridScores`, used by both recommendations and rankings): sparse dot products go through the fixed saturating curve `x/(x+k)` (`k`=5, a single global constant — a per-namespace or per-request value would reintroduce cross-request incomparability), and dense scores are bounded to [0, 1] (cosine clamped; dot-distance namespaces saturate like sparse). This replaced per-request min-max, whose scores anchored to whatever else was in the batch. Sparse search runs against `{ns}_objects`, dense against `{ns}_objects_dense`; recommendations over-fetch 5×/3× the page.
 
-`POST /rankings` does **not** take this path: it scores the caller's candidate set against the sparse collection only, and reports `source: "hybrid_rank"` regardless. See [specs/006-darkvoid-alignment/design.md](specs/006-darkvoid-alignment/design.md) for the proposal to align it.
+`POST /rankings` takes the **same blend** over the caller's candidate set (a `HasID` filter instead of top-K search, no paging): namespace `alpha` decides the balance, a missing side degrades to the surviving side at full weight (dense-only replaces the old whole-list zero fallback), and the same eligibility exclusions apply (§8.4). Every candidate comes back with a `scored` boolean — `false` means "returned unscored" (never indexed, or excluded), not "irrelevant" — and a subject with no vector at all gets the whole list back unscored with `source: "no_subject_vector"`. Because normalization is batch-independent, scores are comparable across calls: chunked rankings requests merge into the same ordering as one call over the union. Background: [specs/006-darkvoid-alignment/design.md](specs/006-darkvoid-alignment/design.md); cap measurement: [specs/006-darkvoid-alignment/benchmarks.md](specs/006-darkvoid-alignment/benchmarks.md).
 
 ### 8.3 Time decay & freshness rerank
 
@@ -290,6 +293,8 @@ Two exclusions are merged into the same Qdrant `MustNot`, so one filter covers t
 
 The trending and popular fallbacks cannot push the filter into the store, so they over-fetch by the exclusion size and drop authored ids **before** paging.
 
+`POST /rankings` applies the **same** exclusion set unconditionally (same `excludedObjectIDs` path, merged as `MustNot` onto its candidate filter), so one code path defines "eligible object" for both read surfaces; excluded candidates return `scored: false` rather than being dropped. Exclusion-lookup failures degrade to unfiltered scoring on both surfaces.
+
 ### 8.5 Cache
 
 Responses are cached in Redis for 5 minutes per `(namespace, subject_id, limit, offset)`. BYOE PUT / object delete do **not** invalidate the cache — changes appear after the TTL expires or after the next cron tick.
@@ -299,7 +304,8 @@ Responses are cached in Redis for 5 minutes per `(namespace, subject_id, limit, 
 - `collaborative_filtering`
 - `hybrid` — sparse + dense blend
 - `hybrid_cold` — trending + CF blend (cold start)
-- `hybrid_rank` — `/rankings` endpoint (including its fallback path)
+- `hybrid_rank` — `/rankings` endpoint, subject was scored
+- `no_subject_vector` — `/rankings` whole-response fallback: the subject has neither a sparse nor a dense vector; every item is `scored: false` in request order
 - `fallback_popular`
 
 ## 9. Authentication
@@ -308,7 +314,7 @@ A **two-tier** model.
 
 | Plane            | Auth                                                                              | Token storage |
 | ---------------- | --------------------------------------------------------------------------------- | ------------- |
-| Admin (`cmd/admin`) | Session cookie `codohue_admin_session`. Login = `POST /api/v1/auth/sessions` with `CODOHUE_ADMIN_API_KEY` | HMAC-signed JWT carrying a random `jti`; logout revokes the `jti` server-side until its natural expiry |
+| Admin (`cmd/admin`) | Session cookie `codohue_admin_session` (login = `POST /api/v1/auth/sessions` with `CODOHUE_ADMIN_API_KEY`) **or** `Authorization: Bearer <CODOHUE_ADMIN_API_KEY>` directly on `/api/admin/v1/*` — the automation path (`sdk/go/admin`), no cookie dance. A bearer header, when present, is authoritative and the cookie is ignored | Sessions: HMAC-signed JWT carrying a random `jti`; logout revokes the `jti` server-side until its natural expiry. Bearer: the static key itself |
 | Data (`cmd/api`) | `Authorization: Bearer <namespace-key>` — bcrypt-hashed in `namespace_configs.api_key_hash` | Plaintext returned **once**, on creation or rotation |
 
 `CODOHUE_ADMIN_API_KEY` is accepted for **every** namespace on the data plane, via a DB-free constant-time compare checked before the hash lookup. The admin server needs to reach all namespaces through it, and it already grants full control via the admin-plane login — restricting its data-plane reach bought little while breaking the admin panel. Namespace **configuration mutation** still lives only on the admin plane.
@@ -316,7 +322,7 @@ A **two-tier** model.
 Hardening in the request path:
 
 - All plain-string credential compares are constant-time.
-- The public admin login endpoint is per-IP rate-limited on **failed** attempts only; a correct key is never throttled.
+- The public admin login endpoint **and** the admin bearer path are per-IP rate-limited on **failed** attempts only; a correct key is never throttled. An empty configured admin key disables the bearer path entirely rather than matching empty tokens.
 - Repeated bad data-plane tokens hit a 30s negative cache keyed on `(token, namespace)` — only definitive rejections are cached, never infra blips — so a brute-force loop does not cost a bcrypt compare per attempt.
 - The session signing secret comes from `CODOHUE_ADMIN_SESSION_SECRET`, or fresh random material each boot (a restart then logs everyone out).
 - A namespace key is rotated via `POST /api/admin/v1/namespaces/{ns}/api-key`; the old key stops working immediately.
@@ -341,15 +347,17 @@ Every business capability has **exactly one canonical path**. Legacy duplicate p
 | ------ | ---------------------------------------------------- | ----------- |
 | POST   | `/v1/namespaces/{ns}/events`                         | Ingest event (202 + `{"event_id":N}`; `namespace` in body is ignored). Also fans onto `codohue:events-tail:{ns}` |
 | POST   | `/v1/namespaces/{ns}/catalog`                        | Ingest raw content (202; only when `dense_source="catalog"`). Optional `author_subject_id` is written through to `objects` |
+| POST   | `/v1/namespaces/{ns}/catalog/batch`                  | Batch ingest, ≤100 items, validated independently with per-item results (202) |
+| GET    | `/v1/namespaces/{ns}/catalog/objects`                | Reconciliation read (`?changed_since=&limit=&offset=`): held object ids by `updated_at` ascending, so repair passes re-send only the gap |
 | GET    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`  | CF recommendations (`?limit=&offset=`) |
-| POST   | `/v1/namespaces/{ns}/rankings`                       | Score + rank up to 500 candidates (200) |
+| POST   | `/v1/namespaces/{ns}/rankings`                       | Score + rank up to 500 candidates with the hybrid blend + shared exclusions (200); per-item `scored` flag, `no_subject_vector` whole-response fallback, chunk-comparable scores (§8.2) |
 | GET    | `/v1/namespaces/{ns}/trending`                       | Trending (`?limit=&offset=`); `window_hours` in the response reports the namespace's configured window |
 | PUT    | `/v1/namespaces/{ns}/objects/{id}`                   | Per-object metadata — currently `author_subject_id` (idempotent 200; accepted under every `dense_source`; empty value clears) |
 | PUT    | `/v1/namespaces/{ns}/objects/{id}/embedding`         | BYOE object vector (204; **409** when `dense_source="catalog"`) |
 | PUT    | `/v1/namespaces/{ns}/subjects/{id}/embedding`        | BYOE subject vector (204; not catalog-guarded) |
 | DELETE | `/v1/namespaces/{ns}/objects/{id}`                   | Remove from every Qdrant collection **and** drop the `objects` row (idempotent 204) |
 
-### 10.2 Admin plane — `cmd/admin` (port 2002, session cookie)
+### 10.2 Admin plane — `cmd/admin` (port 2002, session cookie or bearer)
 
 Sessions are modeled as a resource: login = create, logout = delete current. The API is shaped for a monitoring UI rather than plain REST CRUD: **aggregate** endpoints (one payload per view), **SSE** streams (`text/event-stream`, `event: <kind>` frames, `event: ping` heartbeat, `X-Accel-Buffering: no`), and **lifecycle** endpoints for batch runs. SSE rows are marked **(SSE)**.
 
@@ -364,7 +372,7 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | GET    | `/api/admin/v1/stream`                                            | **(SSE)** Global ops bus: `batch_run.*`, `catalog.dead_letter_grew`, `catalog.reembed_progress` |
 | GET    | `/api/admin/v1/namespaces`                                        | List configs |
 | GET    | `/api/admin/v1/namespaces/{ns}`                                   | Get config |
-| PUT    | `/api/admin/v1/namespaces/{ns}`                                   | Create/update (200/201). **PATCH semantics** — an omitted field leaves that column untouched |
+| PUT    | `/api/admin/v1/namespaces/{ns}`                                   | Create/update (200/201). **PATCH semantics** — an omitted field leaves that column untouched. `dense_source="catalog"` is accepted when `catalog_strategy_id`/`_version` accompany it (same dim validation as the catalog endpoint — one-request core-mode provisioning); without them → 422 naming the missing fields |
 | DELETE | `/api/admin/v1/namespaces/{ns}`                                   | Wipe namespace + all its data (200 summary; 404 when missing) |
 | POST   | `/api/admin/v1/namespaces/{ns}/api-key`                           | Rotate the namespace data-plane key (plaintext returned once) |
 | GET    | `/api/admin/v1/namespaces/{ns}/dashboard`                         | Per-namespace aggregate: config + last 12 runs + backlog + events + qdrant counts + trending TTL + author coverage |
@@ -461,6 +469,8 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 - **Prometheus** — collectors in `internal/infra/metrics`, exposed at `GET /metrics` from both `cmd/api` (2001) and `cmd/embedder` (2003).
 - **Batch run history** — `batch_run_logs` records every cron tick and admin re-embed; the `log_lines` JSONB column captures the run's slog output, surfaced through the admin API and streamed live over SSE.
 - **Liveness** — `cmd/embedder` writes `codohue:embedder:heartbeat` (TTL 90s); cron liveness is derived from the most recent `batch_run_logs` row. Both feed the admin overview's alert rules.
+- **Dense-downgrade alert** — the overview flags any namespace configured for hybrid (`alpha < 1`, dense on) whose `{ns}_subjects_dense` is empty: the config says hybrid while requests silently serve sparse-only (the standing state of `byoe` namespaces that never push subject vectors). The serving path logs the per-request warning.
+- **Catalog stream rejects** — stream-delivered catalog items that are permanently rejected before any `catalog_items` row exists are counted in `codohue_catalog_stream_rejects_total` (by namespace + reason) and warned in the log; rejections that do reach a row surface through the item's failure state instead.
 - **Rolling metrics** — `internal/admin/metricsroll` maintains in-process 1m/5m windows behind `/api/admin/v1/metrics/summary`.
 - **Backlog timeline** — `catalog_backlog_samples`, written by the embedder's sampler, backs `/catalog/backlog-history`.
 - **slog format** — `CODOHUE_LOG_FORMAT=text` (default) or `json` (the prod compose defaults to `json`).
@@ -474,7 +484,11 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 | Full recompute every cron tick | Avoids race conditions in get→merge→upsert; item2vec retraining avoids catastrophic forgetting |
 | ID mapping via DB (BIGSERIAL), keyed `(namespace, entity_type, string_id)` | Avoids hash collisions for Qdrant point IDs; the composite key stops two namespaces (or a subject and an object) from sharing one row |
 | Sparse + dense as separate collections | Different distance/algorithm (Dot vs Cosine); search runs independently before blending |
-| Hybrid blend with min-max normalize | Sparse scores and dense cosine live on different scales; min-max over the candidate pool normalizes to [0, 1] |
+| Batch-independent normalization (`x/(x+k)` sparse, bounded dense) | Per-request min-max anchored scores to the batch, so chunked rankings calls could not be merged; a fixed map keeps scores comparable across requests. `k` is one global constant on purpose |
+| Rankings share Recommend's blend and eligibility | One helper, one exclusion path — the same namespace config cannot mean two different things depending on which endpoint is asked |
+| Every rankings candidate returns, with a `scored` flag | "No vector", "not indexed" and "zero overlap" were indistinguishable `score: 0`; the flag + `no_subject_vector` source let callers compute coverage and skip unknown subjects |
+| Client-facing catalog stream is not producer-trimmed | Durability is the point: content published during an outage must survive until consumed. The internal `catalog:embed:{ns}` stream keeps its 100k cap — it is re-derivable from Postgres, the client stream is not |
+| Admin bearer auth reuses the admin key, failed-only rate limit | The key already grants full control via login, so bearer widens no privilege — it removes the cookie handshake automation had to fake. Acceptable while there is one internal consumer |
 | One `dense_source` enum, not `dense_strategy` + `catalog_enabled` | Two independent fields could describe a contradictory state (two producers writing `{ns}_objects_dense`); one enum makes it unrepresentable and deletes the cross-field validation |
 | `byoe` / `disabled` skip phase 2; `catalog` does not | Phase 2 also fills `{ns}_subjects_dense`, which the embedder never writes — skipping it under `catalog` would leave subject vectors empty and silently degrade every request to sparse CF |
 | `dense_source="catalog"` ⇒ BYOE object PUT returns 409 | One source of truth for the object vector avoids ping-pong overwrites |
@@ -491,12 +505,12 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 ## 14. Directory layout
 
 ```text
-cmd/api                          HTTP data-plane + ingest worker + tail publisher (2001)
+cmd/api                          HTTP data-plane + ingest/catalog workers + tail publisher (2001)
 cmd/cron                         Batch recompute daemon + retention prune
 cmd/admin                        Admin server + embedded SPA + pub/sub bridges (2002)
 cmd/embedder                     Catalog worker + sampler + sweeper + heartbeat (2003)
 
-internal/ingest                  HTTP + Redis Streams ingest, events tail
+internal/ingest                  HTTP + Redis Streams ingest (events + catalog), events tail
 internal/compute                 Sparse + dense recompute, trending
 internal/recommend               CF, hybrid, rank, BYOE, object delete
 internal/nsconfig                Namespace configuration CRUD
@@ -520,8 +534,8 @@ migrations/                      SQL migrations (001 … 023)
 e2e/                             End-to-end tests (build tag `e2e`)
 specs/                           Feature specs and design docs
 pkg/codohuetypes                 Shared wire types module
-sdk/go                           Public Go SDK
-sdk/go/redistream                Redis Streams producer SDK
+sdk/go                           Public Go SDK (+ sdk/go/admin: bearer admin client)
+sdk/go/redistream                Redis Streams producer SDK (events + catalog)
 web/admin                        Vite + React 19 + Tailwind v4 SPA
 docker/                          Auxiliary Dockerfiles
 ```
