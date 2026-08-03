@@ -449,3 +449,28 @@ func TestServiceListObjects_NamespaceNotFound(t *testing.T) {
 		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
 	}
 }
+
+func TestItemErrorCode_Mapping(t *testing.T) {
+	cases := map[error]string{
+		ErrEmptyContent:                  "empty_content",
+		ErrContentTooLarge:               "content_too_large",
+		ErrInvalidRequest:                "invalid_request",
+		errors.New("something exploded"): "internal_error",
+	}
+	for err, want := range cases {
+		if got := itemErrorCode(err); got != want {
+			t.Errorf("itemErrorCode(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+func TestNewServiceAndSetters(t *testing.T) {
+	svc := NewService(nil, &fakeNSConfig{}, &fakeXAdder{})
+	svc.SetDefaultMaxContentBytes(1024)
+	if svc.defaultMaxContentBytes != 1024 {
+		t.Fatalf("default max content bytes not wired: %d", svc.defaultMaxContentBytes)
+	}
+	if NewHandler(svc) == nil {
+		t.Fatal("NewHandler returned nil")
+	}
+}

@@ -266,3 +266,54 @@ func TestHandlerListObjects_BadChangedSince_400(t *testing.T) {
 		t.Fatalf("expected 400, got %d", rec.Code)
 	}
 }
+
+func TestHandlerListObjects_BadLimitAndOffset_400(t *testing.T) {
+	h := &Handler{service: &fakeIngester{}}
+	for _, q := range []string{"?limit=zero", "?limit=-3", "?offset=x", "?offset=-1"} {
+		rec := httptest.NewRecorder()
+		h.ListObjects(rec, newCatalogPathRequest(http.MethodGet, "/catalog/objects"+q, "", "ns"))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("query %q: expected 400, got %d", q, rec.Code)
+		}
+	}
+}
+
+func TestHandlerListObjects_MissingNamespace_400(t *testing.T) {
+	h := &Handler{service: &fakeIngester{}}
+	rec := httptest.NewRecorder()
+	h.ListObjects(rec, newCatalogPathRequest(http.MethodGet, "/catalog/objects", "", ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+func TestHandlerListObjects_NamespaceNotFound_404(t *testing.T) {
+	h := &Handler{service: &fakeIngester{listErr: ErrNamespaceNotFound}}
+	rec := httptest.NewRecorder()
+	h.ListObjects(rec, newCatalogPathRequest(http.MethodGet, "/catalog/objects", "", "ghost"))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rec.Code)
+	}
+}
+
+func TestHandlerListObjects_LimitCappedAt1000(t *testing.T) {
+	fake := &fakeIngester{listResp: &codohuetypes.CatalogObjectsResponse{Namespace: "ns"}}
+	h := &Handler{service: fake}
+	rec := httptest.NewRecorder()
+	h.ListObjects(rec, newCatalogPathRequest(http.MethodGet, "/catalog/objects?limit=99999", "", "ns"))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if fake.lastLimit != 1000 {
+		t.Fatalf("limit must cap at 1000, got %d", fake.lastLimit)
+	}
+}
+
+func TestHandlerBatchIngest_MissingNamespace_400(t *testing.T) {
+	h := &Handler{service: &fakeIngester{}}
+	rec := httptest.NewRecorder()
+	h.BatchIngest(rec, newCatalogPathRequest(http.MethodPost, "/catalog/batch", `{"items":[]}`, ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}

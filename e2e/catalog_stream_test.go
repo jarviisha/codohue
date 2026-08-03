@@ -101,7 +101,10 @@ func TestCatalogBatchIngest_AndReconciliation(t *testing.T) {
 			Error    string `json:"error"`
 		} `json:"results"`
 	}
-	decodeJSON(t, resp, &batch)
+	if err := json.NewDecoder(resp.Body).Decode(&batch); err != nil {
+		t.Fatalf("decode batch response: %v", err)
+	}
+	resp.Body.Close()
 	if batch.Accepted != 2 || batch.Rejected != 1 {
 		t.Fatalf("batch counts: %+v", batch)
 	}

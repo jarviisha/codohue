@@ -78,7 +78,7 @@ two 500-item chunks merge into the same ordering as one union call (SC-001, SC-0
 - [x] T008 [US1] Unit tests in internal/recommend/service_test.go: hybrid blend in Rank
       (both sides), dense-only path, sparse-only path, chunk-comparability (rank 1000
       candidates as 2×500 vs 1×1000 → same merged ordering), α respected from cfg.
-- [ ] T009 [US1] Extend the rank e2e flow (e2e/, `make test-e2e-api` subset) with a hybrid
+- [x] T009 [US1] Extend the rank e2e flow (e2e/, `make test-e2e-api` subset) with a hybrid
       case: catalog-embedded objects + events → rank returns differentiated non-zero
       scores.
 
@@ -250,18 +250,18 @@ overview shows the alert (SC-008); populate vectors → alert clears
 
 ## Final Phase: Polish & Cross-Cutting
 
-- [ ] T035 [P] Update CLAUDE.md: rankings row annotations (`scored` +
+- [x] T035 [P] Update CLAUDE.md: rankings row annotations (`scored` +
       `no_subject_vector` + filters) and Key Design Decisions (catalog-as-core,
       batch-independent normalization, shared eligibility). New-endpoint table rows are
       NOT here — they ship inside T023/T024/T030 per constitution III.
-- [ ] T036 [P] D4 measurement gate: benchmark `Rank` with `HasID` filters at 500/1000/2000
+- [x] T036 [P] D4 measurement gate: benchmark `Rank` with `HasID` filters at 500/1000/2000
       points against a real Qdrant; record results + cap decision in
       specs/006-darkvoid-alignment/benchmarks.md. Cap changes only from this data
       (FR-007).
-- [ ] T037 Release: regenerate/verify goldens once, release notes calling out the one-time
+- [ ] T037 (awaiting release decision — tags/pushes are operator actions) Release: regenerate/verify goldens once, release notes calling out the one-time
       score-value shift on `/recommendations`, coordinated module tags per the release
       process (push v* tag alone — >3 tags at once suppresses CI).
-- [ ] T038 Full gate: `make lint`, `make coverage-check-all`, `make test-e2e` green across
+- [x] T038 Full gate: `make lint`, `make coverage-check-all`, `make test-e2e` green across
       all modules.
 
 ---

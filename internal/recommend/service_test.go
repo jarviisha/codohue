@@ -2110,3 +2110,97 @@ func TestDeleteObject_NoMappingStillDropsMetadata(t *testing.T) {
 		t.Errorf("metadata must still be dropped without a mapping, got %v", meta.deleted)
 	}
 }
+
+func TestRank_BothSearchesFail_FallsBack(t *testing.T) {
+	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, errors.New("qdrant down")
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, errors.New("qdrant down")
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceNoSubjectVector || resp.Items[0].Scored {
+		t.Fatalf("both searches failing must degrade to the unscored fallback: %+v", resp)
+	}
+}
+
+func TestRank_DenseSearchFailureKeepsSparseAtFullWeight(t *testing.T) {
+	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: float32(sparseNormK), Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, errors.New("dense collection missing")
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The surviving side keeps full weight: sat(k)=0.5, NOT 0.5*alpha.
+	if resp.Source != SourceHybridRank || math.Abs(resp.Items[0].Score-0.5) > 1e-6 {
+		t.Fatalf("dense failure must not scale the sparse side down: %+v", resp.Items)
+	}
+}
+
+func TestRank_SparseFetchErrorFallsThroughToDense(t *testing.T) {
+	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "catalog"}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return nil, errors.New("sparse collection unavailable")
+	}
+	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 0.7, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceHybridRank || !resp.Items[0].Scored || math.Abs(resp.Items[0].Score-0.7) > 1e-6 {
+		t.Fatalf("sparse fetch failure must degrade to dense-only scoring: %+v", resp.Items)
+	}
+}
+
+func TestMergeExclusions(t *testing.T) {
+	a := map[string]struct{}{"x": {}, "y": {}}
+	b := map[string]struct{}{"y": {}, "z": {}}
+	if got := mergeExclusions(nil, nil); got != nil {
+		t.Fatalf("nil+nil must stay nil, got %v", got)
+	}
+	if got := mergeExclusions(a, nil); len(got) != 2 {
+		t.Fatalf("a+nil must return a, got %v", got)
+	}
+	if got := mergeExclusions(nil, b); len(got) != 2 {
+		t.Fatalf("nil+b must return b, got %v", got)
+	}
+	if got := mergeExclusions(a, b); len(got) != 3 {
+		t.Fatalf("union must dedupe to 3, got %v", got)
+	}
+}

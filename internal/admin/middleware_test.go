@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,7 +17,7 @@ func bearerTestHandler(t *testing.T, adminKey string) http.Handler {
 
 func TestRequireSessionOrBearer_ValidBearerPasses(t *testing.T) {
 	h := bearerTestHandler(t, "secret-key")
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/v1/overview", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/admin/v1/overview", http.NoBody)
 	req.Header.Set("Authorization", "Bearer secret-key")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -27,7 +28,7 @@ func TestRequireSessionOrBearer_ValidBearerPasses(t *testing.T) {
 
 func TestRequireSessionOrBearer_InvalidBearer401(t *testing.T) {
 	h := bearerTestHandler(t, "secret-key")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer wrong")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -41,7 +42,7 @@ func TestRequireSessionOrBearer_BearerWinsOverCookie(t *testing.T) {
 	// cookie is also present — deterministic precedence, never a silent
 	// fallback to the other credential.
 	h := bearerTestHandler(t, "secret-key")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer wrong")
 	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "some-session"})
 	rec := httptest.NewRecorder()
@@ -55,7 +56,7 @@ func TestRequireSessionOrBearer_FailedAttemptsThrottled(t *testing.T) {
 	h := bearerTestHandler(t, "secret-key")
 	var lastCode int
 	for range loginBurst + 1 {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 		req.RemoteAddr = "10.1.2.3:5555"
 		req.Header.Set("Authorization", "Bearer wrong")
 		rec := httptest.NewRecorder()
@@ -68,7 +69,7 @@ func TestRequireSessionOrBearer_FailedAttemptsThrottled(t *testing.T) {
 
 	// The correct key from the same IP is never throttled — the budget only
 	// meters failures.
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	req.RemoteAddr = "10.9.9.9:1234"
 	req.Header.Set("Authorization", "Bearer secret-key")
 	rec := httptest.NewRecorder()
@@ -80,7 +81,7 @@ func TestRequireSessionOrBearer_FailedAttemptsThrottled(t *testing.T) {
 
 func TestRequireSessionOrBearer_EmptyKeyDisablesBearerPath(t *testing.T) {
 	h := bearerTestHandler(t, "")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	req.Header.Set("Authorization", "Bearer ")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -91,7 +92,7 @@ func TestRequireSessionOrBearer_EmptyKeyDisablesBearerPath(t *testing.T) {
 
 func TestRequireSessionOrBearer_NoBearerFallsBackToSession(t *testing.T) {
 	h := bearerTestHandler(t, "secret-key")
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {

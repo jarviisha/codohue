@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type fakeRow struct {
@@ -297,5 +300,61 @@ func TestMarshalMetadata_NilProducesEmptyObject(t *testing.T) {
 	}
 	if string(b) != "{}" {
 		t.Fatalf("expected '{}', got %q", string(b))
+	}
+}
+
+func openCatalogTestDB(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	u := os.Getenv("DATABASE_URL")
+	if u == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	db, err := pgxpool.New(context.Background(), u)
+	if err != nil {
+		t.Fatalf("connect postgres: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
+	db := openCatalogTestDB(t)
+	repo := NewRepository(db)
+	ns := "catalog_listobjects_test"
+	t.Cleanup(func() {
+		db.Exec(context.Background(), //nolint:errcheck // test cleanup
+			`DELETE FROM catalog_items WHERE namespace = $1`, ns)
+	})
+
+	ctx := context.Background()
+	for _, obj := range []string{"o1", "o2", "o3"} {
+		if _, err := repo.Upsert(ctx, ns, obj, "content "+obj, ContentHash("content "+obj), nil); err != nil {
+			t.Fatalf("seed %s: %v", obj, err)
+		}
+	}
+
+	rows, total, err := repo.ListObjects(ctx, ns, nil, 2, 0)
+	if err != nil {
+		t.Fatalf("ListObjects: %v", err)
+	}
+	if total != 3 || len(rows) != 2 {
+		t.Fatalf("paging wrong: total=%d rows=%d", total, len(rows))
+	}
+	rows2, _, err := repo.ListObjects(ctx, ns, nil, 2, 2)
+	if err != nil {
+		t.Fatalf("ListObjects offset: %v", err)
+	}
+	if len(rows2) != 1 {
+		t.Fatalf("offset page wrong: %d", len(rows2))
+	}
+
+	// changed_since after every row's updated_at → empty.
+	future := time.Now().Add(time.Hour)
+	rows3, total3, err := repo.ListObjects(ctx, ns, &future, 10, 0)
+	if err != nil {
+		t.Fatalf("ListObjects changed_since: %v", err)
+	}
+	if total3 != 0 || len(rows3) != 0 {
+		t.Fatalf("future changed_since must be empty: total=%d rows=%d", total3, len(rows3))
 	}
 }
