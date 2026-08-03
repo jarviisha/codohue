@@ -32,6 +32,24 @@ func (n *Namespace) StoreSubjectEmbedding(ctx context.Context, subjectID string,
 	return n.storeEmbedding(ctx, "subjects", subjectID, vector)
 }
 
+// PutObject stores per-object metadata that is independent of embedding —
+// currently the author attribution that feeds the namespace's
+// exclude_authored filter. It works under every dense_source (catalog-mode
+// callers can also send author_subject_id on catalog ingest instead). An
+// empty AuthorSubjectID clears the attribution; the write is idempotent.
+func (n *Namespace) PutObject(ctx context.Context, objectID string, req codohuetypes.ObjectUpsertRequest) (*codohuetypes.ObjectResponse, error) {
+	if objectID == "" {
+		return nil, fmt.Errorf("codohue: objectID is required")
+	}
+	path := fmt.Sprintf("/v1/namespaces/%s/objects/%s",
+		url.PathEscape(n.namespace), url.PathEscape(objectID))
+	var out codohuetypes.ObjectResponse
+	if err := n.client.do(ctx, http.MethodPut, path, n.apiKey, nil, req, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // DeleteObject removes an object from all Qdrant collections for this namespace.
 // The operation is idempotent: deleting a non-existent object is not an error.
 func (n *Namespace) DeleteObject(ctx context.Context, objectID string) error {

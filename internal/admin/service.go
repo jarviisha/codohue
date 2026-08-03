@@ -157,6 +157,11 @@ type Service struct {
 	eventRate       eventRateReader
 	nowFn           func() time.Time
 	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
+
+	// collectionStatsFn backs the overview's dense-downgrade alert; wired to
+	// qdrantCollection in NewService, replaceable in tests (the concrete
+	// qdrant.Client cannot be faked).
+	collectionStatsFn func(ctx context.Context, name string) QdrantCollection
 }
 
 // NewService creates a new Service.
@@ -178,6 +183,7 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 	if qdrantClient != nil {
 		s.qdrantDeleter = newQdrantClientPointDeleter(qdrantClient)
 	}
+	s.collectionStatsFn = s.qdrantCollection
 	return s
 }
 

@@ -374,7 +374,13 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 			return s.hybridRecommend(ctx, req, limit, cfg, subjectVec, denseVec, seenFilter)
 		}
 		// Subject has no dense vector yet — fall through to pure sparse CF.
-		slog.Debug("hybrid: no subject dense vector, using pure CF", "namespace", req.Namespace, "subject_id", req.SubjectID)
+		// Warn, not Debug: a namespace-wide empty {ns}_subjects_dense means
+		// the config says hybrid while every request silently serves
+		// sparse-only (the standing failure mode of BYOE namespaces that
+		// never push subject vectors). The admin overview raises the
+		// fleet-level alert; this is the per-request trace.
+		slog.Warn("hybrid: no subject dense vector, serving pure sparse CF despite dense config",
+			"namespace", req.Namespace, "subject_id", req.SubjectID, "dense_source", cfg.DenseSource, "error", err)
 	}
 
 	// Over-fetch enough to cover offset + limit after reranking.
@@ -1226,6 +1232,11 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		if err != nil {
 			slog.Error("rank: fetch subject dense vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			denseVec = nil
+		} else if denseVec == nil && sparseVec != nil {
+			// Same silent-downgrade trace as Recommend: dense is configured
+			// but this subject has no dense vector, so only sparse scores.
+			slog.Warn("rank: no subject dense vector, scoring sparse-only despite dense config",
+				"namespace", ns, "subject_id", req.SubjectID, "dense_source", cfg.DenseSource)
 		}
 	}
 

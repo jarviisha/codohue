@@ -161,3 +161,44 @@ func TestDeleteObjectValidation(t *testing.T) {
 		t.Error("expected error on empty id")
 	}
 }
+
+func TestNamespacePutObject(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/v1/namespaces/feed/objects/item-7" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		var body codohuetypes.ObjectUpsertRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if body.AuthorSubjectID != "user-1" {
+			t.Errorf("author_subject_id = %q", body.AuthorSubjectID)
+		}
+		_ = json.NewEncoder(w).Encode(codohuetypes.ObjectResponse{
+			Namespace: "feed", ObjectID: "item-7", AuthorSubjectID: "user-1",
+			UpdatedAt: "2026-08-03T00:00:00Z",
+		})
+	})
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	c, _ := New(srv.URL)
+	resp, err := c.Namespace("feed", "k").PutObject(context.Background(), "item-7",
+		codohuetypes.ObjectUpsertRequest{AuthorSubjectID: "user-1"})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+	if resp.AuthorSubjectID != "user-1" || resp.ObjectID != "item-7" {
+		t.Errorf("unexpected response: %+v", resp)
+	}
+}
+
+func TestNamespacePutObject_RequiresObjectID(t *testing.T) {
+	t.Parallel()
+	c, _ := New("http://localhost:0")
+	if _, err := c.Namespace("feed", "k").PutObject(context.Background(), "", codohuetypes.ObjectUpsertRequest{}); err == nil {
+		t.Fatal("expected validation error")
+	}
+}

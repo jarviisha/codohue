@@ -229,14 +229,14 @@ warnings + admin alerts; SDK reaches object metadata; optional readiness read
 **Independent Test**: Configure hybrid scoring with an empty `{ns}_subjects_dense` → admin
 overview shows the alert (SC-008); populate vectors → alert clears
 
-- [ ] T031 [P] [US6] Upgrade the silent fallback to warning level in
+- [x] T031 [P] [US6] Upgrade the silent fallback to warning level in
       internal/recommend/service.go (the Debug at :365 and the equivalent Rank path once
       US1 lands) (FR-017).
-- [ ] T032 [US6] Admin overview alert in internal/admin: flag namespaces with
+- [x] T032 [US6] Admin overview alert in internal/admin: flag namespaces with
       `alpha < 1 && dense_source != disabled` and zero points in `{ns}_subjects_dense`
       (the overview already aggregates per-namespace Qdrant counts + an alerts list);
       service + repository tests. No new Prometheus metric (decided tier).
-- [ ] T033 [P] [US6] `PutObject` wrapper in sdk/go (`PUT /v1/namespaces/{ns}/objects/{id}`,
+- [x] T033 [P] [US6] `PutObject` wrapper in sdk/go (`PUT /v1/namespaces/{ns}/objects/{id}`,
       `ObjectUpsertRequest`/`ObjectResponse` already exist in pkg/codohuetypes) in
       sdk/go/embedding.go + tests (FR-018).
 - [ ] T034 [US6] **Deferred — build only when DarkVoid commits to gating on it** (FR-019):
