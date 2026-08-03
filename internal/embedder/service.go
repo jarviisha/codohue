@@ -18,6 +18,7 @@ import (
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // denseVectorName is the named vector key inside Qdrant points. MUST match
@@ -174,7 +175,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("load namespace config: %w", err)
 	}
-	if cfg == nil || cfg.DenseSource != "catalog" {
+	if cfg == nil || cfg.DenseSource != codohuetypes.DenseSourceCatalog {
 		// Namespace was switched off catalog (or deleted) between enqueue and
 		// processing. ACK the entry; do not touch the row.
 		return OutcomeSkipped, nil

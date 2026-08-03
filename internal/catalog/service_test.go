@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // fakeRepo records calls and returns canned values.
@@ -20,6 +21,13 @@ type fakeRepo struct {
 	lastNS   string
 	lastObj  string
 	lastHash []byte
+
+	listRows   []ObjectRow
+	listTotal  int
+	listErr    error
+	lastSince  *time.Time
+	lastLimit  int
+	lastOffset int
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ map[string]any) (*UpsertResult, error) {
@@ -28,6 +36,13 @@ func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ m
 	f.lastObj = obj
 	f.lastHash = hash
 	return f.res, f.err
+}
+
+func (f *fakeRepo) ListObjects(_ context.Context, _ string, since *time.Time, limit, offset int) ([]ObjectRow, int, error) {
+	f.lastSince = since
+	f.lastLimit = limit
+	f.lastOffset = offset
+	return f.listRows, f.listTotal, f.listErr
 }
 
 // fakeAuthorWriter captures the write-through into the objects domain.
@@ -355,5 +370,107 @@ func TestServiceIngest_ZeroMaxContentBytesMeansNoCheck(t *testing.T) {
 func TestStreamName(t *testing.T) {
 	if got := streamName("foo"); got != "catalog:embed:foo" {
 		t.Errorf("streamName(foo): %q", got)
+	}
+}
+
+func TestServiceIngestBatch_PerItemResultsAndCounts(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: false}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+	resp, err := svc.IngestBatch(context.Background(), "ns", &BatchIngestRequest{Items: []IngestRequest{
+		{ObjectID: "o1", Content: "hello"},
+		{ObjectID: "o2", Content: "   "}, // empty after trim → per-item rejection
+		{ObjectID: "", Content: "hi"},    // missing object_id → per-item rejection
+	}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Accepted != 1 || resp.Rejected != 2 || len(resp.Results) != 3 {
+		t.Fatalf("counts wrong: %+v", resp)
+	}
+	if !resp.Results[0].Accepted || resp.Results[0].Error != "" {
+		t.Fatalf("first item should be accepted: %+v", resp.Results[0])
+	}
+	if resp.Results[1].Error != "empty_content" || resp.Results[2].Error != "invalid_request" {
+		t.Fatalf("per-item codes wrong: %+v", resp.Results)
+	}
+}
+
+func TestServiceIngestBatch_NamespaceErrorAbortsWholeBatch(t *testing.T) {
+	svc := newSvc(&fakeRepo{}, &fakeNSConfig{cfg: nil}, &fakeXAdder{})
+	_, err := svc.IngestBatch(context.Background(), "ghost", &BatchIngestRequest{Items: []IngestRequest{
+		{ObjectID: "o1", Content: "hello"},
+	}})
+	if !errors.Is(err, ErrNamespaceNotFound) {
+		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
+	}
+}
+
+func TestServiceIngestBatch_CapAndEmptyRejected(t *testing.T) {
+	svc := newSvc(&fakeRepo{}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	if _, err := svc.IngestBatch(context.Background(), "ns", &BatchIngestRequest{}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("empty batch must be ErrInvalidRequest, got %v", err)
+	}
+	over := make([]IngestRequest, codohuetypes.CatalogBatchMaxItems+1)
+	for i := range over {
+		over[i] = IngestRequest{ObjectID: "o", Content: "c"}
+	}
+	if _, err := svc.IngestBatch(context.Background(), "ns", &BatchIngestRequest{Items: over}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("oversized batch must be ErrInvalidRequest, got %v", err)
+	}
+}
+
+func TestServiceListObjects_MapsRows(t *testing.T) {
+	repo := &fakeRepo{
+		listRows:  []ObjectRow{{ObjectID: "o1", UpdatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}},
+		listTotal: 7,
+	}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	since := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	resp, err := svc.ListObjects(context.Background(), "ns", &since, 50, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Total != 7 || resp.Limit != 50 || resp.Offset != 10 {
+		t.Fatalf("paging meta wrong: %+v", resp)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "o1" || resp.Items[0].UpdatedAt != "2026-01-02T03:04:05Z" {
+		t.Fatalf("items wrong: %+v", resp.Items)
+	}
+	if repo.lastSince == nil || !repo.lastSince.Equal(since) || repo.lastLimit != 50 || repo.lastOffset != 10 {
+		t.Fatalf("repo args wrong: since=%v limit=%d offset=%d", repo.lastSince, repo.lastLimit, repo.lastOffset)
+	}
+}
+
+func TestServiceListObjects_NamespaceNotFound(t *testing.T) {
+	svc := newSvc(&fakeRepo{}, &fakeNSConfig{cfg: nil}, &fakeXAdder{})
+	if _, err := svc.ListObjects(context.Background(), "ghost", nil, 100, 0); !errors.Is(err, ErrNamespaceNotFound) {
+		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
+	}
+}
+
+func TestItemErrorCode_Mapping(t *testing.T) {
+	cases := map[error]string{
+		ErrEmptyContent:                  "empty_content",
+		ErrContentTooLarge:               "content_too_large",
+		ErrInvalidRequest:                "invalid_request",
+		errors.New("something exploded"): "internal_error",
+	}
+	for err, want := range cases {
+		if got := itemErrorCode(err); got != want {
+			t.Errorf("itemErrorCode(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+func TestNewServiceAndSetters(t *testing.T) {
+	svc := NewService(nil, &fakeNSConfig{}, &fakeXAdder{})
+	svc.SetDefaultMaxContentBytes(1024)
+	if svc.defaultMaxContentBytes != 1024 {
+		t.Fatalf("default max content bytes not wired: %d", svc.defaultMaxContentBytes)
+	}
+	if NewHandler(svc) == nil {
+		t.Fatal("NewHandler returned nil")
 	}
 }

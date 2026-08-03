@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -10,11 +11,13 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // catalogRepository abstracts Repository for tests.
 type catalogRepository interface {
 	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any) (*UpsertResult, error)
+	ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int) ([]ObjectRow, int, error)
 }
 
 // nsConfigGetter abstracts nsconfig.Service.Get for tests.
@@ -102,7 +105,7 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 	if cfg == nil {
 		return nil, ErrNamespaceNotFound
 	}
-	if cfg.DenseSource != "catalog" {
+	if cfg.DenseSource != codohuetypes.DenseSourceCatalog {
 		return nil, ErrNamespaceNotEnabled
 	}
 
@@ -166,6 +169,93 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 	}
 
 	return res.Item, nil
+}
+
+// IngestBatch runs the single-item ingest for every entry of a batch and
+// reports per-item outcomes, so one invalid item does not fail the rest.
+// Namespace-level failures (namespace missing / catalog mode off) abort the
+// whole batch instead — they are identical for every item, and a partial
+// response would just repeat the same error N times.
+func (s *Service) IngestBatch(ctx context.Context, ns string, req *BatchIngestRequest) (*codohuetypes.CatalogBatchIngestResponse, error) {
+	if req == nil || len(req.Items) == 0 {
+		return nil, fmt.Errorf("%w: items is required", ErrInvalidRequest)
+	}
+	if len(req.Items) > codohuetypes.CatalogBatchMaxItems {
+		return nil, fmt.Errorf("%w: at most %d items per batch, got %d",
+			ErrInvalidRequest, codohuetypes.CatalogBatchMaxItems, len(req.Items))
+	}
+
+	resp := &codohuetypes.CatalogBatchIngestResponse{
+		Namespace: ns,
+		Results:   make([]codohuetypes.CatalogBatchItemResult, 0, len(req.Items)),
+	}
+	for i := range req.Items {
+		item := req.Items[i]
+		_, err := s.Ingest(ctx, ns, &item)
+		switch {
+		case err == nil:
+			resp.Accepted++
+			resp.Results = append(resp.Results, codohuetypes.CatalogBatchItemResult{ObjectID: item.ObjectID, Accepted: true})
+		case errors.Is(err, ErrNamespaceNotFound), errors.Is(err, ErrNamespaceNotEnabled):
+			return nil, err
+		default:
+			resp.Rejected++
+			resp.Results = append(resp.Results, codohuetypes.CatalogBatchItemResult{
+				ObjectID: item.ObjectID, Accepted: false, Error: itemErrorCode(err),
+			})
+		}
+	}
+	return resp, nil
+}
+
+// itemErrorCode maps a per-item ingest error to the machine-readable code the
+// single-item endpoint uses, so batch consumers reuse one error vocabulary.
+func itemErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrEmptyContent):
+		return "empty_content"
+	case errors.Is(err, ErrContentTooLarge):
+		return "content_too_large"
+	case errors.Is(err, ErrInvalidRequest):
+		return "invalid_request"
+	default:
+		return "internal_error"
+	}
+}
+
+// ListObjects is the data-plane reconciliation read: which object ids does
+// this namespace already hold (optionally: changed since a timestamp). A
+// repair pass diffs this against its own corpus and re-sends only the gap.
+func (s *Service) ListObjects(ctx context.Context, ns string, changedSince *time.Time, limit, offset int) (*codohuetypes.CatalogObjectsResponse, error) {
+	if ns == "" {
+		return nil, fmt.Errorf("%w: namespace is required", ErrInvalidRequest)
+	}
+	cfg, err := s.nsConfigSvc.Get(ctx, ns)
+	if err != nil {
+		return nil, fmt.Errorf("load namespace config: %w", err)
+	}
+	if cfg == nil {
+		return nil, ErrNamespaceNotFound
+	}
+
+	rows, total, err := s.repo.ListObjects(ctx, ns, changedSince, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog objects: %w", err)
+	}
+	resp := &codohuetypes.CatalogObjectsResponse{
+		Namespace: ns,
+		Items:     make([]codohuetypes.CatalogObjectSummary, len(rows)),
+		Total:     total,
+		Limit:     limit,
+		Offset:    offset,
+	}
+	for i, row := range rows {
+		resp.Items[i] = codohuetypes.CatalogObjectSummary{
+			ObjectID:  row.ObjectID,
+			UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339),
+		}
+	}
+	return resp, nil
 }
 
 // streamName returns the per-namespace embed stream name. Per data-model.md

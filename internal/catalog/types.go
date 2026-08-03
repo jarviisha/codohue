@@ -32,6 +32,9 @@ const (
 // `metadata` field is stored verbatim and ignored by the embedder.
 type IngestRequest = codohuetypes.CatalogIngestRequest
 
+// BatchIngestRequest re-exports the batch wire type.
+type BatchIngestRequest = codohuetypes.CatalogBatchIngestRequest
+
 // Item is the in-memory representation of a row in catalog_items.
 type Item struct {
 	ID              int64

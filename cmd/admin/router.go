@@ -15,10 +15,11 @@ import (
 // extracted from main.run() so cmd/admin/main_test.go can assert that all
 // expected paths are registered without spinning up the full binary.
 //
-// sessions backs the session-cookie middleware. allowDevOrigin enables
+// sessions backs the session-cookie middleware; adminKey additionally opens
+// the bearer path for automation (see RequireSessionOrBearer). allowDevOrigin enables
 // credentialed CORS for the Vite dev server when non-empty (dev mode); empty
 // in production where the SPA is embedded same-origin.
-func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, allowDevOrigin string) chi.Router {
+func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, allowDevOrigin string) chi.Router {
 	r := chi.NewRouter()
 	r.Use(admin.CORSMiddleware(allowDevOrigin))
 	r.Use(middleware.Logger)
@@ -36,7 +37,7 @@ func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, allowDevOr
 
 	// Protected admin API routes
 	r.Group(func(r chi.Router) {
-		r.Use(admin.RequireSession(sessions))
+		r.Use(admin.RequireSessionOrBearer(sessions, adminKey))
 		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
 
 		r.Get("/api/admin/v1/health", h.GetHealth)

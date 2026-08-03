@@ -429,3 +429,64 @@ func TestServiceRotateAPIKey_UnknownNamespace(t *testing.T) {
 		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
 	}
 }
+
+func strPtr(s string) *string { return &s }
+
+func TestServiceUpsert_CatalogWithoutStrategyRejected(t *testing.T) {
+	svc := &Service{repo: &fakeRepo{}, registry: embedstrategy.NewRegistry()}
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource: strPtr("catalog"),
+	})
+	if !errors.Is(err, ErrCatalogViaUpsert) {
+		t.Fatalf("expected ErrCatalogViaUpsert, got %v", err)
+	}
+}
+
+func TestServiceUpsert_CatalogWithStrategyRunsFullValidation(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg, upsertCatalogCfg: cfg}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.upsertCatalogCalledWith == nil || !repo.upsertCatalogCalledWith.Enabled ||
+		repo.upsertCatalogCalledWith.StrategyID != "hash" {
+		t.Fatalf("catalog config not applied through UpdateCatalogConfig: %+v", repo.upsertCatalogCalledWith)
+	}
+}
+
+func TestServiceUpsert_CatalogDimMismatchRejected(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 64}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	})
+	var dimErr *DimensionMismatchError
+	if !errors.As(err, &dimErr) {
+		t.Fatalf("expected DimensionMismatchError, got %v", err)
+	}
+	if dimErr.StrategyDim != 64 || dimErr.NamespaceEmbeddingDim != 128 {
+		t.Fatalf("dims not carried: %+v", dimErr)
+	}
+	if repo.upsertCatalogCalledWith != nil {
+		t.Fatal("catalog config must not be persisted on dim mismatch")
+	}
+}

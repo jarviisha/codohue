@@ -41,8 +41,8 @@ func TestNamespaceRank(t *testing.T) {
 			SubjectID: "user-1",
 			Namespace: "feed",
 			Items: []codohuetypes.RankedItem{
-				{ObjectID: "a", Score: 0.9},
-				{ObjectID: "b", Score: 0.1},
+				{ObjectID: "a", Score: 0.9, Scored: true},
+				{ObjectID: "b", Score: 0, Scored: false},
 			},
 			Source: "hybrid_rank",
 		})
@@ -57,5 +57,35 @@ func TestNamespaceRank(t *testing.T) {
 	}
 	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "a" {
 		t.Errorf("unexpected response: %+v", resp)
+	}
+	if !resp.Items[0].Scored || resp.Items[1].Scored {
+		t.Errorf("scored flags not surfaced: %+v", resp.Items)
+	}
+}
+
+func TestNamespaceRank_NoSubjectVectorFallback(t *testing.T) {
+	t.Parallel()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(codohuetypes.RankResponse{
+			SubjectID: "ghost",
+			Namespace: "feed",
+			Items: []codohuetypes.RankedItem{
+				{ObjectID: "a", Score: 0, Rank: 1, Scored: false},
+			},
+			Source: "no_subject_vector",
+		})
+	})
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	c, _ := New(srv.URL)
+	resp, err := c.Namespace("feed", "k").Rank(context.Background(), "ghost", []string{"a"})
+	if err != nil {
+		t.Fatalf("Rank: %v", err)
+	}
+	if resp.Source != "no_subject_vector" || resp.Items[0].Scored {
+		t.Errorf("fallback response not surfaced: source=%q items=%+v", resp.Source, resp.Items)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // GetOverview returns the full payload that drives the Fleet overview page.
@@ -36,6 +37,7 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 
 	cron := deriveCronHeartbeat(lastRuns, now)
 	alerts := buildAlerts(namespaces, lastRuns, now)
+	alerts = append(alerts, s.denseDowngradeAlerts(ctx, namespaces)...)
 
 	nsOut := make([]NamespaceOverview, 0, len(namespaces))
 	for _, ns := range namespaces {
@@ -45,7 +47,7 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 			Events24h:       eventCounts[ns.Namespace],
 			EventsPerMinNow: s.eventsPerMin(ns.Namespace),
 			Catalog: NamespaceOverviewCatalog{
-				Enabled: ns.DenseSource == "catalog",
+				Enabled: ns.DenseSource == codohuetypes.DenseSourceCatalog,
 			},
 		}
 		if row.Catalog.Enabled && s.catalogBacklog != nil {
@@ -196,6 +198,37 @@ func deriveNamespaceStatus(lastRuns map[string]BatchRunLog, eventCounts map[stri
 		return NSStatusActive
 	}
 	return NSStatusIdle
+}
+
+// denseDowngradeAlerts flags namespaces configured for hybrid scoring whose
+// {ns}_subjects_dense collection is empty or missing: the config says hybrid
+// while every request silently serves sparse-only (the standing failure mode
+// of BYOE namespaces that never push subject vectors). The recommend path
+// logs the per-request warning; this is the operator-facing fleet view.
+func (s *Service) denseDowngradeAlerts(ctx context.Context, namespaces []NamespaceConfig) []Alert {
+	if s.collectionStatsFn == nil {
+		return nil
+	}
+	var alerts []Alert
+	for _, ns := range namespaces {
+		hybridConfigured := ns.Alpha > 0 && ns.Alpha < 1 &&
+			ns.DenseSource != "" && ns.DenseSource != codohuetypes.DenseSourceDisabled
+		if !hybridConfigured {
+			continue
+		}
+		stat := s.collectionStatsFn(ctx, ns.Namespace+"_subjects_dense")
+		if stat.Exists && stat.PointsCount > 0 {
+			continue
+		}
+		alerts = append(alerts, Alert{
+			Level:     "warn",
+			Namespace: ns.Namespace,
+			Kind:      "dense_downgrade",
+			Message: fmt.Sprintf("dense_source=%s with alpha=%.2f configured but %s_subjects_dense is empty — requests serve sparse-only",
+				ns.DenseSource, ns.Alpha, ns.Namespace),
+		})
+	}
+	return alerts
 }
 
 // buildAlerts evaluates the Phase 1 alert rules. Thresholds are pinned in

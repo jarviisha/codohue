@@ -57,10 +57,15 @@ func main() {
     page2, _ := ns.Recommend(ctx, "user-123", codohue.WithLimit(20), codohue.WithOffset(20))
     _ = page2
 
-    // Rank candidates
+    // Rank candidates (hybrid sparse+dense, same eligibility filters as
+    // recommendations). Check Scored before treating a score as a verdict:
+    // false means "returned unscored" (never indexed, or excluded), and a
+    // response with Source == "no_subject_vector" means the subject has no
+    // vector at all — keep your own ordering for that subject. Scores are
+    // comparable across calls, so chunked requests merge into one ordering.
     rk, _ := ns.Rank(ctx, "user-123", []string{"item-a", "item-b", "item-c"})
     for _, it := range rk.Items {
-        log.Printf("rank=%d object=%s score=%.4f", it.Rank, it.ObjectID, it.Score)
+        log.Printf("rank=%d object=%s score=%.4f scored=%t", it.Rank, it.ObjectID, it.Score, it.Scored)
     }
 
     // Trending. The look-back window is namespace configuration, not a
@@ -82,14 +87,49 @@ func main() {
     _ = ns.StoreObjectEmbedding(ctx, "item-a", []float32{0.1, 0.2, 0.3 /* … */})
     _ = ns.StoreSubjectEmbedding(ctx, "user-123", []float32{ /* … */ })
 
+    // Catalog auto-embedding (dense_source="catalog"): send raw content,
+    // the server embeds it. Batch for repair walks; the reconciliation read
+    // tells you what the namespace already holds so you re-send only the gap.
+    _ = ns.IngestCatalog(ctx, codohuetypes.CatalogIngestRequest{
+        ObjectID: "item-a", Content: "post text …", AuthorSubjectID: "user-123",
+    })
+    batch, _ := ns.IngestCatalogBatch(ctx, []codohuetypes.CatalogIngestRequest{ /* ≤100 items */ })
+    _ = batch // per-item results: Accepted / Error code
+    held, _ := ns.ListCatalogObjects(ctx, "2026-01-01T00:00:00Z", 100, 0)
+    _ = held
+
+    // Per-object metadata (any dense_source): author attribution feeding the
+    // namespace's exclude_authored filter. Empty value clears it.
+    _, _ = ns.PutObject(ctx, "item-a", codohuetypes.ObjectUpsertRequest{AuthorSubjectID: "user-123"})
+
     // Idempotent delete
     _ = ns.DeleteObject(ctx, "item-a")
 }
 ```
 
+### Admin client (provisioning)
+
+`sdk/go/admin` talks to the admin server (port 2002) with
+`CODOHUE_ADMIN_API_KEY` as a bearer token — no session-cookie dance. The paved
+road is one-call provisioning of the core catalog mode:
+
+```go
+import codohueadmin "github.com/jarviisha/codohue/sdk/go/admin"
+
+a, _ := codohueadmin.New("http://localhost:2002", os.Getenv("CODOHUE_ADMIN_API_KEY"))
+res, err := a.ProvisionCatalogNamespace(ctx, "feed", codohueadmin.ProvisionCatalogRequest{
+    EmbeddingDim: 128, // strategy defaults to internal-hashing-ngrams@v1
+})
+// res.APIKey is the namespace's data-plane key, returned once on first create.
+```
+
 ### Redis Streams producer
 
-For bulk event ingestion, use the separate Redis Streams producer module:
+For bulk ingestion, use the separate Redis Streams producer module — it has
+producers for **both durable transports**: `Producer` (behavioral events →
+`codohue:events`) and `CatalogProducer` (raw catalog content →
+`codohue:catalog`). Neither stream is producer-trimmed, so anything published
+while Codohue is down is ingested on recovery with zero retries on your side.
 
 ```bash
 go get github.com/jarviisha/codohue/sdk/go/redistream

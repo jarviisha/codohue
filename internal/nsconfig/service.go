@@ -9,6 +9,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -76,9 +77,37 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 		return nil, err
 	}
 
+	// dense_source=catalog rides the upsert only together with its strategy
+	// (validateUpsert enforces that); the column itself is written by
+	// UpdateCatalogConfig below so the registry + dim validation runs the
+	// same code path as the dedicated catalog endpoint. The base upsert goes
+	// first so a brand-new namespace exists (with its embedding_dim from
+	// this same body) before the strategy dim is checked against it.
+	catalogRequested := req.DenseSource != nil && *req.DenseSource == codohuetypes.DenseSourceCatalog
+	if catalogRequested {
+		stripped := *req
+		stripped.DenseSource = nil
+		req = &stripped
+	}
+
 	cfg, err := s.repo.Upsert(ctx, ns, req)
 	if err != nil {
 		return nil, fmt.Errorf("upsert namespace config: %w", err)
+	}
+
+	if catalogRequested {
+		// Not transactional with the base upsert: a dim mismatch leaves the
+		// namespace created/updated with its previous dense_source, and a
+		// corrected retry converges. Same end state as the old two-request
+		// provisioning dance, minus a request.
+		if _, err := s.UpdateCatalogConfig(ctx, ns, &UpdateCatalogRequest{
+			Enabled:         true,
+			StrategyID:      *req.CatalogStrategyID,
+			StrategyVersion: *req.CatalogStrategyVersion,
+			Params:          req.CatalogStrategyParams,
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	resp := &UpsertResponse{

@@ -48,4 +48,10 @@ const (
 	SourceHybridCold             = "hybrid_cold"
 	SourceHybridRank             = "hybrid_rank"
 	SourceHybrid                 = "hybrid" // sparse CF + dense blend
+
+	// SourceNoSubjectVector marks a whole-response rank fallback: the subject
+	// has neither a sparse nor a dense vector, so every candidate returns
+	// unscored in request order. Distinct from a per-item Scored=false, which
+	// can also mean "not indexed" or "excluded by a filter".
+	SourceNoSubjectVector = "no_subject_vector"
 )

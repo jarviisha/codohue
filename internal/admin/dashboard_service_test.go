@@ -177,3 +177,37 @@ func TestGetOverview_EmbedderHeartbeatNotFakedWhenUnknown(t *testing.T) {
 		t.Fatal("embedder heartbeat must not report OK without a liveness signal")
 	}
 }
+
+func TestDenseDowngradeAlerts(t *testing.T) {
+	counts := map[string]uint64{
+		"hybrid-empty_subjects_dense": 0,
+		"hybrid-ok_subjects_dense":    42,
+	}
+	s := &Service{collectionStatsFn: func(_ context.Context, name string) QdrantCollection {
+		n, ok := counts[name]
+		return QdrantCollection{Exists: ok, PointsCount: n}
+	}}
+
+	namespaces := []NamespaceConfig{
+		{Namespace: "hybrid-empty", Alpha: 0.5, DenseSource: "byoe"},     // configured hybrid, no vectors → alert
+		{Namespace: "hybrid-ok", Alpha: 0.5, DenseSource: "catalog"},     // healthy → no alert
+		{Namespace: "sparse-only", Alpha: 1.0, DenseSource: "byoe"},      // alpha leaves no dense weight → no alert
+		{Namespace: "dense-off", Alpha: 0.5, DenseSource: "disabled"},    // dense off → no alert
+		{Namespace: "missing-coll", Alpha: 0.3, DenseSource: "item2vec"}, // collection absent entirely → alert
+	}
+
+	alerts := s.denseDowngradeAlerts(context.Background(), namespaces)
+	if len(alerts) != 2 {
+		t.Fatalf("expected 2 alerts, got %d: %+v", len(alerts), alerts)
+	}
+	got := map[string]bool{}
+	for _, a := range alerts {
+		if a.Kind != "dense_downgrade" || a.Level != "warn" {
+			t.Fatalf("unexpected alert shape: %+v", a)
+		}
+		got[a.Namespace] = true
+	}
+	if !got["hybrid-empty"] || !got["missing-coll"] {
+		t.Fatalf("wrong namespaces flagged: %+v", alerts)
+	}
+}

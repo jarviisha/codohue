@@ -29,6 +29,15 @@ type UpsertRequest struct {
 	EmbeddingDim  *int     `json:"embedding_dim,omitempty"`
 	DenseDistance *string  `json:"dense_distance,omitempty"`
 
+	// Catalog strategy fields, honoured ONLY when DenseSource is "catalog":
+	// they let the core mode be provisioned in one request instead of the
+	// old upsert-then-catalog-endpoint dance. The same registry + dim
+	// validation as UpdateCatalogConfig applies. Selecting catalog without
+	// strategy id+version is rejected with an error naming them.
+	CatalogStrategyID      *string        `json:"catalog_strategy_id,omitempty"`
+	CatalogStrategyVersion *string        `json:"catalog_strategy_version,omitempty"`
+	CatalogStrategyParams  map[string]any `json:"catalog_strategy_params,omitempty"`
+
 	// Trending
 	TrendingWindow *int     `json:"trending_window,omitempty"`
 	TrendingTTL    *int     `json:"trending_ttl,omitempty"`

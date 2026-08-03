@@ -73,6 +73,18 @@ var (
 		Help: "Total ingest errors by namespace + reason.",
 	}, []string{"namespace", "reason"})
 
+	// CatalogStreamRejectsTotal counts stream-delivered catalog items that
+	// were permanently rejected (acked off the stream without a catalog_items
+	// row), by reason: "malformed" (undecodable payload or missing namespace,
+	// namespace label empty) or "invalid" (failed the same validation as HTTP
+	// ingest — empty content, size cap, unknown namespace, catalog mode off).
+	// Rejections that DO reach a catalog_items row surface through the item's
+	// failure state instead, not here.
+	CatalogStreamRejectsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_catalog_stream_rejects_total",
+		Help: "Stream-delivered catalog items permanently rejected before persistence, by namespace + reason.",
+	}, []string{"namespace", "reason"})
+
 	// Catalog auto-embedding metrics (feature 004-catalog-embedder).
 
 	// CatalogItemsEmbeddedTotal counts catalog items successfully embedded
@@ -183,6 +195,7 @@ func Register() {
 		TrendingRequestsTotal,
 		EventsIngestedTotal,
 		IngestErrorsTotal,
+		CatalogStreamRejectsTotal,
 		CatalogItemsEmbeddedTotal,
 		CatalogEmbedDuration,
 		CatalogEmbedFailuresTotal,

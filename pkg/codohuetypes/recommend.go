@@ -33,15 +33,25 @@ type RankRequest struct {
 }
 
 // RankedItem pairs an object ID with its computed relevance score and rank.
-// Score is 0 when the subject has no interaction history (fallback — original
-// order preserved). Rank is 1-based position in the response.
+// Rank is 1-based position in the response.
+//
+// Scored distinguishes the two reasons a candidate can come back: true means
+// the engine evaluated it (a low or zero score is a real relevance verdict),
+// false means it was returned unscored so the caller's candidate list comes
+// back whole — the subject has no vector at all (see the response Source),
+// the candidate was never indexed, or an eligibility filter excluded it.
 type RankedItem struct {
 	ObjectID string  `json:"object_id"`
 	Score    float64 `json:"score"`
 	Rank     int     `json:"rank"`
+	Scored   bool    `json:"scored"`
 }
 
 // RankResponse is returned after ranking candidates.
+//
+// Source is "hybrid_rank" when the subject was scored, or
+// "no_subject_vector" when the subject has no sparse and no dense vector —
+// every item then carries Scored=false and the original request order.
 type RankResponse struct {
 	SubjectID   string       `json:"subject_id"`
 	Namespace   string       `json:"namespace"`

@@ -2,7 +2,7 @@
 
 Codohue is a hybrid (sparse + dense) collaborative-filtering recommendation service for behavioral personalization.
 
-It ingests events over HTTP and Redis Streams, persists them in PostgreSQL, recomputes sparse/dense vectors on a schedule, optionally auto-embeds raw catalog content, and serves recommendations through HTTP APIs backed by Qdrant.
+It ingests events and raw catalog content over HTTP and durable Redis Streams, persists them in PostgreSQL, recomputes sparse/dense vectors on a schedule, auto-embeds catalog content (the recommended core mode), and serves recommendations and candidate rankings through HTTP APIs backed by Qdrant.
 
 > **Architecture details, data model, API surface, design decisions:** see [ARCHITECTURE.md](ARCHITECTURE.md).
 > **Contributor conventions:** see [AGENTS.md](AGENTS.md).
@@ -12,7 +12,7 @@ It ingests events over HTTP and Redis Streams, persists them in PostgreSQL, reco
 
 - Ingest events via `POST /v1/namespaces/{ns}/events` or Redis Stream `codohue:events`
 - Sparse CF + dense (`item2vec` / `svd` / `byoe` / `disabled`) blended at serve time
-- Optional auto-embedding of raw catalog content per namespace
+- Auto-embedding of raw catalog content per namespace (`dense_source="catalog"` — the core mode; `item2vec`/`svd`/`byoe` remain as options)
 - Time-decayed trending ZSET in Redis; 5-minute recommendation cache
 - Multi-tenant: each namespace owns its config, Qdrant collections, Redis streams, and API key
 - Operational SPA on port `2002` (session-cookie auth)
@@ -23,7 +23,7 @@ It ingests events over HTTP and Redis Streams, persists them in PostgreSQL, reco
 | ---------------- | ----- | ------- |
 | `cmd/api`        | 2001  | Data-plane HTTP API + Redis Streams ingest worker |
 | `cmd/cron`       | —     | Batch daemon: sparse + dense + trending recompute |
-| `cmd/admin`      | 2002  | Admin server: `/api/admin/v1/*` + embedded SPA |
+| `cmd/admin`      | 2002  | Admin server: `/api/admin/v1/*` (session cookie or admin-key bearer) + embedded SPA |
 | `cmd/embedder`   | 2003  | Catalog auto-embedding worker |
 
 ## Requirements
@@ -57,7 +57,7 @@ Other compose layouts:
 | ---- | ------- |
 | [docker-compose.yml](docker-compose.yml)         | Dev — builds from source, infra included, auto-migrate |
 | [docker-compose.app.yml](docker-compose.app.yml) | App-only — builds from source, host networking to external infra |
-| [docker-compose.prod.yml](docker-compose.prod.yml) | Prod — prebuilt GHCR images; supply external DB via `CODOHUE_DATABASE_URL` + `CODOHUE_ADMIN_API_KEY` |
+| [docker-compose.prod.yml](docker-compose.prod.yml) | Prod — prebuilt GHCR images; each infra service is optional: run it in-compose via `COMPOSE_PROFILES` (`local-db`, `local-redis`, `local-qdrant`) or point at an external one via `CODOHUE_DATABASE_URL` / `CODOHUE_REDIS_URL` / `CODOHUE_QDRANT_HOST` |
 
 ## Quickstart — binaries against Docker infra
 
