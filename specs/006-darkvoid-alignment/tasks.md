@@ -27,7 +27,7 @@ already fully mode-aware; nothing below depends on when this happens, but US1 is
 
 **Purpose**: Freeze current behaviour so the refactor is provably ordering-neutral (SC-009)
 
-- [ ] T001 Add an ordering-fixture test to internal/recommend/service_test.go: fixed
+- [x] T001 Add an ordering-fixture test to internal/recommend/service_test.go: fixed
       sparse+dense inputs through `hybridRecommend`, asserting the exact result ordering
       (not score values). Commit it green against current code *before* any refactor —
       T004/T005 must keep it green.
@@ -38,10 +38,10 @@ already fully mode-aware; nothing below depends on when this happens, but US1 is
 
 **Purpose**: Shared constants every later story references
 
-- [ ] T002 [P] Export `DenseSource` string constants (`disabled`, `item2vec`, `svd`,
+- [x] T002 [P] Export `DenseSource` string constants (`disabled`, `item2vec`, `svd`,
       `byoe`, `catalog`) from pkg/codohuetypes (new file pkg/codohuetypes/densesource.go
       with doc comment; additive, no golden snapshot — not a marshaled wire type) (FR-008)
-- [ ] T003 Replace bare dense-source string literals across internal/ with the
+- [x] T003 Replace bare dense-source string literals across internal/ with the
       codohuetypes constants: internal/recommend/service.go (:188, :359),
       internal/compute/job.go (`phase2Runs` :512), internal/compute/cleanup.go,
       internal/nsconfig (validation), internal/admin (catalog-source checks). No behaviour

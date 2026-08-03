@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // Validation sentinels. The admin adapter maps these onto admin-side errors
@@ -31,10 +33,10 @@ var (
 // upsertDenseSources are the dense_source values the generic upsert accepts.
 // "catalog" is deliberately absent — see ErrCatalogViaUpsert.
 var upsertDenseSources = map[string]bool{
-	"disabled": true,
-	"item2vec": true,
-	"svd":      true,
-	"byoe":     true,
+	codohuetypes.DenseSourceDisabled: true,
+	codohuetypes.DenseSourceItem2Vec: true,
+	codohuetypes.DenseSourceSVD:      true,
+	codohuetypes.DenseSourceBYOE:     true,
 }
 
 // denseDistances mirrors infra/qdrant's resolveDenseDistance vocabulary.
@@ -75,7 +77,7 @@ func validateUpsert(req *UpsertRequest) error {
 		return fmt.Errorf("%w: alpha must be within [0, 1], got %v", ErrInvalidConfig, *req.Alpha)
 	}
 	if req.DenseSource != nil {
-		if *req.DenseSource == "catalog" {
+		if *req.DenseSource == codohuetypes.DenseSourceCatalog {
 			return ErrCatalogViaUpsert
 		}
 		if !upsertDenseSources[*req.DenseSource] {

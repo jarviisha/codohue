@@ -18,6 +18,7 @@ import (
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -185,7 +186,7 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 	// BYOE writes for OBJECT dense vectors are rejected so the catalog stays
 	// the single source of truth. Subject embeddings are NOT guarded — subject
 	// vectors keep flowing through the cron mean-pool / BYOE path regardless.
-	if cfg != nil && cfg.DenseSource == "catalog" && entityType == "object" {
+	if cfg != nil && cfg.DenseSource == codohuetypes.DenseSourceCatalog && entityType == "object" {
 		return ErrCatalogActive
 	}
 
@@ -356,7 +357,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	// in the dense component. The sparse CF component is unaffected — it queries Qdrant
 	// against vectors recomputed in the same batch. To reduce staleness, decrease
 	// CODOHUE_BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
-	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != "disabled" {
+	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
 		denseVec, err := s.fetchSubjectDenseVecFn(ctx, req.Namespace, subjectNumID)
 		if err == nil && denseVec != nil {
 			return s.hybridRecommend(ctx, req, limit, cfg, subjectVec, denseVec, seenFilter)

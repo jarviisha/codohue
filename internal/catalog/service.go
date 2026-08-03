@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // catalogRepository abstracts Repository for tests.
@@ -102,7 +103,7 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 	if cfg == nil {
 		return nil, ErrNamespaceNotFound
 	}
-	if cfg.DenseSource != "catalog" {
+	if cfg.DenseSource != codohuetypes.DenseSourceCatalog {
 		return nil, ErrNamespaceNotEnabled
 	}
 

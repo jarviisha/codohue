@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // GetOverview returns the full payload that drives the Fleet overview page.
@@ -45,7 +46,7 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 			Events24h:       eventCounts[ns.Namespace],
 			EventsPerMinNow: s.eventsPerMin(ns.Namespace),
 			Catalog: NamespaceOverviewCatalog{
-				Enabled: ns.DenseSource == "catalog",
+				Enabled: ns.DenseSource == codohuetypes.DenseSourceCatalog,
 			},
 		}
 		if row.Catalog.Enabled && s.catalogBacklog != nil {

@@ -3,6 +3,8 @@ package admin
 import (
 	"crypto/sha256"
 	"time"
+
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 const demoNamespace = "demo"
@@ -50,7 +52,7 @@ var demoNamespaceConfig = NamespaceUpsertRequest{
 	Alpha:          floatPtr(0.65),
 	MaxResults:     intPtr(20),
 	SeenItemsDays:  intPtr(30),
-	DenseSource:    stringPtr("disabled"),
+	DenseSource:    stringPtr(codohuetypes.DenseSourceDisabled),
 	EmbeddingDim:   intPtr(demoCatalogStrategyDim),
 	DenseDistance:  stringPtr("cosine"),
 	TrendingWindow: intPtr(72),

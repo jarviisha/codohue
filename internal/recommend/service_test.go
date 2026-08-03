@@ -848,6 +848,49 @@ func TestHybridRecommend_AppliesFreshnessDecay(t *testing.T) {
 	}
 }
 
+func TestHybridRecommend_OrderingFixture(t *testing.T) {
+	// SC-009 safety net: fixed inputs whose blended ordering must survive both
+	// the blend-helper extraction and the normalization change. The four
+	// objects rank identically on the sparse and dense sides and the
+	// created_at gaps widen the margins, so the expected order does not
+	// depend on which normalization anchors the scores.
+	now := time.Now().UTC()
+	ts := func(daysAgo int) *qdrant.Value {
+		return qdrant.NewValueString(now.Add(-time.Duration(daysAgo) * 24 * time.Hour).Format(time.RFC3339))
+	}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 12, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-a"), "created_at": ts(0)}},
+			{Score: 8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b"), "created_at": ts(0)}},
+			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-c"), "created_at": ts(10)}},
+			{Score: 1, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-d"), "created_at": ts(40)}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-a"), "created_at": ts(0)}},
+			{Score: 0.7, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b"), "created_at": ts(0)}},
+			{Score: 0.4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-c"), "created_at": ts(10)}},
+			{Score: 0.2, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-d"), "created_at": ts(40)}},
+		}, nil
+	}
+
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &namespace.Config{Alpha: 0.6, Gamma: 0.1}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceHybrid || resp.Total != 4 {
+		t.Fatalf("unexpected response meta: source=%q total=%d", resp.Source, resp.Total)
+	}
+	want := []string{"obj-a", "obj-b", "obj-c", "obj-d"}
+	for i, w := range want {
+		if resp.Items[i].ObjectID != w {
+			t.Fatalf("ordering fixture broken at rank %d: got %q want %q (items: %+v)", i+1, resp.Items[i].ObjectID, w, resp.Items)
+		}
+	}
+}
+
 func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
 	s := newTestService(&fakeRepo{popularItems: []string{"popular-1"}}, &fakeNsConfig{}, newFakeIDMapper())
 	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {

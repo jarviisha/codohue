@@ -16,6 +16,7 @@ import (
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 type recomputer interface {
@@ -512,7 +513,7 @@ const item2vecLargeEventThreshold = 500_000
 // "byoe" and "disabled" leave both collections to the client.
 func phase2Runs(denseSource string) bool {
 	switch denseSource {
-	case "item2vec", "svd", "catalog":
+	case codohuetypes.DenseSourceItem2Vec, codohuetypes.DenseSourceSVD, codohuetypes.DenseSourceCatalog:
 		return true
 	default:
 		return false
@@ -568,7 +569,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	trained := true
 
 	switch cfg.DenseSource {
-	case "item2vec":
+	case codohuetypes.DenseSourceItem2Vec:
 		if len(events) > item2vecLargeEventThreshold {
 			slog.Warn("phase 2 item2vec: large event corpus — full retrain may be slow; consider increasing CODOHUE_BATCH_INTERVAL_MINUTES or switching to SVD",
 				"namespace", ns, "events", len(events), "threshold", item2vecLargeEventThreshold)
@@ -578,7 +579,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		i2vCfg := Item2VecConfig{Dim: embeddingDim, Window: 5, MinCount: 5, Epochs: 10, NegSamples: 5}
 		itemVecs = TrainItem2Vec(seqs, i2vCfg)
 
-	case "svd":
+	case codohuetypes.DenseSourceSVD:
 		lambda := defaultLambda
 		if cfg.Lambda > 0 {
 			lambda = cfg.Lambda
@@ -588,7 +589,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 			return 0, 0, fmt.Errorf("svd embeddings: %w", err)
 		}
 
-	case "catalog":
+	case codohuetypes.DenseSourceCatalog:
 		// cmd/embedder owns {ns}_objects_dense here. Only the items that were
 		// actually interacted with can contribute to a subject's mean, so we
 		// load exactly those rather than scanning the whole collection.

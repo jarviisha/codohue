@@ -9,6 +9,7 @@ import (
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/nsconfig"
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // nsCatalogConfigSvc is the slice of nsconfig.Service this adapter calls.
@@ -45,7 +46,7 @@ func (a *catalogConfigAdapter) GetCatalog(ctx context.Context, ns string) (*admi
 	}
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
-		Enabled:         cfg.DenseSource == "catalog",
+		Enabled:         cfg.DenseSource == codohuetypes.DenseSourceCatalog,
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,
 		Params:          cfg.CatalogStrategyParams,
@@ -98,7 +99,7 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req
 
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
-		Enabled:         cfg.DenseSource == "catalog",
+		Enabled:         cfg.DenseSource == codohuetypes.DenseSourceCatalog,
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,
 		Params:          cfg.CatalogStrategyParams,
@@ -118,7 +119,7 @@ func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, ns string
 	if err != nil {
 		return "", "", false, fmt.Errorf("get namespace: %w", err)
 	}
-	if cfg == nil || cfg.DenseSource != "catalog" {
+	if cfg == nil || cfg.DenseSource != codohuetypes.DenseSourceCatalog {
 		return "", "", false, nil
 	}
 	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil
