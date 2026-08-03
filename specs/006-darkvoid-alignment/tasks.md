@@ -149,25 +149,36 @@ requests (SC-006)
 
 - [ ] T019 [P] [US4] Define the stream contract: stream name (`codohue:catalog`, namespace
       inside the payload — same reasoning as events) and a `CatalogStreamItem` wire type in
-      pkg/codohuetypes/catalog.go; add the golden-test case + snapshot.
+      pkg/codohuetypes/catalog.go; add the golden-test case + snapshot. Trim policy is
+      explicit and symmetric with `codohue:events`: no producer-side MAXLEN (durability is
+      the point — entries live until consumed and acked; the internal `catalog:embed:{ns}`
+      stream keeps its existing approximate cap of 100k downstream, see
+      internal/catalog/service.go:179).
 - [ ] T020 [P] [US4] Catalog publisher in sdk/go/redistream mirroring the event
       publisher's ergonomics (+ tests) (FR-010).
 - [ ] T021 [US4] Consume the catalog stream in the ingest worker (internal/ingest):
       XREADGROUP with the existing consumer-name convention, validation identical to the
       HTTP path (namespace in catalog mode, size caps, required fields), invalid items
-      observably rejected, redelivery idempotent by object id (FR-013). The worker calls a
-      narrow `CatalogIngestor` interface — internal/ingest must NOT import
-      internal/catalog.
+      observably rejected, redelivery idempotent by object id (FR-013). "Observably
+      rejected" is concrete: invalid items are acked off the stream and recorded through
+      the existing catalog failure machinery (`last_error` + dead-letter state where a
+      `catalog_items` row exists; warning log + ingest failure metric where none can — e.g.
+      unknown namespace), so they surface in the admin failures-summary, never silently
+      dropped. The worker calls a narrow `CatalogIngestor` interface — internal/ingest
+      must NOT import internal/catalog.
 - [ ] T022 [US4] Wire the adapter in cmd/api: inject the internal/catalog service into the
       ingest worker behind the T021 interface (same pattern as
       cmd/admin/nsconfig_adapter.go); update internal/ingest/docs.go and worker tests.
 - [ ] T023 [US4] Batch HTTP ingest on internal/catalog: accept an item array on the
       catalog path (new wire request/response types in pkg/codohuetypes/catalog.go +
       golden cases, `DecodeStrict`, per-item results so one bad item doesn't fail the
-      batch) (FR-011).
+      batch), capped at 100 items per request (100 × the 32KB per-item content cap ≈
+      3.2MB request bound; satisfies SC-006's ≥100 batch size) (FR-011). Add the
+      endpoint's REST API table row to CLAUDE.md in the same change (constitution III:
+      the row ships with the endpoint's PR, not in polish).
 - [ ] T024 [US4] Data-plane reconciliation read in internal/catalog: list held object ids
       / changed-since-timestamp for the namespace, paginated; wire type + golden case
-      (FR-012).
+      (FR-012). Add the endpoint's CLAUDE.md REST API table row in the same change.
 - [ ] T025 [US4] Batch + reconciliation SDK wrappers in sdk/go/catalog_http.go (+ tests).
 - [ ] T026 [US4] Tests: internal/ingest worker (stream consume, validation parity,
       idempotent redelivery), internal/catalog service/repository (batch, reconciliation);
@@ -202,7 +213,8 @@ repeated bad bearers throttled, correct key never
 - [ ] T030 [US5] Tests: internal/admin auth (bearer valid/invalid/throttled/cookie
       precedence), upsert validation matrix (catalog + fields ok / catalog − fields
       rejected / dim mismatch), sdk/go/admin against a stub server; admin-plane e2e
-      (`make test-e2e-heavy`).
+      (`make test-e2e-heavy`). Update the affected CLAUDE.md admin-route rows (auth
+      column + upsert semantics) in the same change.
 
 **Checkpoint**: The recommended configuration is the paved road
 
@@ -238,10 +250,10 @@ overview shows the alert (SC-008); populate vectors → alert clears
 
 ## Final Phase: Polish & Cross-Cutting
 
-- [ ] T035 [P] Update CLAUDE.md: REST API tables (rankings row: `scored` +
-      `no_subject_vector` + filters; new batch/reconciliation rows; admin bearer + upsert
-      rows) and Key Design Decisions (catalog-as-core, batch-independent normalization,
-      shared eligibility).
+- [ ] T035 [P] Update CLAUDE.md: rankings row annotations (`scored` +
+      `no_subject_vector` + filters) and Key Design Decisions (catalog-as-core,
+      batch-independent normalization, shared eligibility). New-endpoint table rows are
+      NOT here — they ship inside T023/T024/T030 per constitution III.
 - [ ] T036 [P] D4 measurement gate: benchmark `Rank` with `HasID` filters at 500/1000/2000
       points against a real Qdrant; record results + cap decision in
       specs/006-darkvoid-alignment/benchmarks.md. Cap changes only from this data

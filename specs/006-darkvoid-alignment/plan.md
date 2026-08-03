@@ -42,7 +42,11 @@ prerequisite, not a task in this repo.
 | **I. Code Quality** — domain in `internal/<domain>/`, `docs.go` present, import boundaries respected, English-only comments | ☑ | No new domains. Catalog-stream consumption lands in the `ingest` worker calling `internal/catalog` machinery **via `cmd/api` wiring** (D5) — peer import stays forbidden; same adapter pattern as `cmd/admin/nsconfig_adapter.go`. |
 | **II. Testing Standards** — `_test.go` for every `service.go`/`repository.go`/`worker.go` touched | ☑ | Extend `internal/recommend/service_test.go` (blend helper, filters, scored flag, fallback source), `internal/ingest` worker tests (catalog stream), `internal/admin` (bearer auth, upsert validation, overview alert). E2e: rank path in `make test-e2e-api`, catalog stream in `make test-e2e-heavy`. |
 | **III. API Consistency** — `/v1/<resource>`, two-tier auth, REST API table in CLAUDE.md updated | ☑ | New rows: batch catalog ingest, reconciliation read, readiness read (phases 2/4). Admin-plane changes (bearer, catalog-on-upsert) update existing rows. `RankedItem.scored` + `no_subject_vector` documented on the rankings row. |
-| **IV. Performance** — Redis cache plan, batch phases non-blocking, cold-start fallback | ☑ | `Rank` is uncached by design (background caller, computed response). Cold start untouched — zero-event subjects keep `rankFallback`, now visibly via `no_subject_vector`. Cron phases unchanged. |
+| **IV. Performance** — Redis cache plan, batch phases non-blocking, cold-start fallback | ☑ | `Rank` is uncached by design (background caller, computed response) — restate this rationale in the US1 PR description per the constitution's perf-rationale rule. Cold start untouched — zero-event subjects keep `rankFallback`, now visibly via `no_subject_vector`. Cron phases unchanged. |
+
+> No ☒ violations. Note: the constitution's "exactly two binaries" clause is already
+> superseded by the live four-binary architecture documented in CLAUDE.md (same note as
+> the 005 plan); this feature adds no binary.
 
 ## Project Structure
 

@@ -251,13 +251,18 @@ alert must clear.
 - **FR-010**: The SDK's stream transport module MUST offer a catalog publisher with the
   same ergonomics as the existing event publisher.
 - **FR-011**: The HTTP catalog path MUST accept batched ingest so a corpus repair walk
-  costs O(corpus / batch size) requests.
+  costs O(corpus / batch size) requests. Batches are capped at 100 items per request
+  (bounding request size at 100 × the per-item content cap), with per-item results so one
+  invalid item does not fail the batch.
 - **FR-012**: A data-plane read MUST let an authenticated consumer enumerate which object
   ids the namespace holds (or which changed since a timestamp) so repairs re-send only
   the gap.
 - **FR-013**: Stream-delivered catalog content MUST be validated identically to
   HTTP-delivered content (namespace mode, size caps, required fields); invalid items MUST
-  be observably rejected, not silently dropped, and redelivery MUST be idempotent.
+  be observably rejected, not silently dropped — concretely: recorded through the existing
+  catalog failure surfaces (failure state + failure reason, visible in the admin failures
+  summary) where a catalog record exists, and via warning log + failure metric where none
+  can (e.g. unknown namespace) — and redelivery MUST be idempotent.
 
 **Provisioning and admin access (Story 5)**
 
@@ -313,9 +318,10 @@ alert must clear.
   alone, with zero additional round trips.
 - **SC-004**: An item excluded on the recommendations surface is never scored on the
   rankings surface for the same subject and config, across 100% of eligibility cases.
-- **SC-005**: Catalog content produced during a full Codohue outage of any duration within
-  the stream's retention is embedded after recovery with zero producer retries and zero
-  operator action.
+- **SC-005**: Catalog content produced during a full Codohue outage of any duration is
+  embedded after recovery with zero producer retries and zero operator action — the
+  client-facing stream is not producer-trimmed (symmetric with the events stream); entries
+  persist until consumed and acknowledged.
 - **SC-006**: A full-corpus repair pass of 10,000 items completes in ≤ 100 ingest requests
   (batch ≥ 100), and an incremental repair re-sends only the differing items.
 - **SC-007**: Provisioning a catalog-mode namespace succeeds with exactly one
