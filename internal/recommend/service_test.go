@@ -3,7 +3,9 @@ package recommend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"sort"
 	"testing"
 	"time"
 
@@ -646,8 +648,8 @@ func TestRankFallback(t *testing.T) {
 
 	resp := svc.rankFallback(req, "ns_feed")
 
-	if resp.Source != SourceHybridRank {
-		t.Errorf("source = %q, want %q", resp.Source, SourceHybridRank)
+	if resp.Source != SourceNoSubjectVector {
+		t.Errorf("source = %q, want %q", resp.Source, SourceNoSubjectVector)
 	}
 	if len(resp.Items) != len(req.Candidates) {
 		t.Fatalf("items length = %d, want %d", len(resp.Items), len(req.Candidates))
@@ -661,6 +663,9 @@ func TestRankFallback(t *testing.T) {
 		}
 		if item.Rank != i+1 {
 			t.Errorf("items[%d].Rank = %d, want %d", i, item.Rank, i+1)
+		}
+		if item.Scored {
+			t.Errorf("items[%d].Scored = true, want false in fallback", i)
 		}
 	}
 }
@@ -769,29 +774,37 @@ func TestBlendItemsExactRatio(t *testing.T) {
 	}
 }
 
-func TestNormalizeScores(t *testing.T) {
-	scores := map[string]float64{"a": 10, "b": 0, "c": 5}
-	norm := normalizeScores(scores)
-	if math.Abs(norm["a"]-1.0) > 1e-6 {
-		t.Errorf("max item = %f, want ~1.0", norm["a"])
+func TestSaturateScores(t *testing.T) {
+	norm := saturateScores(map[string]float64{"mid": sparseNormK, "neg": -3, "zero": 0, "big": 1e6})
+	if math.Abs(norm["mid"]-0.5) > 1e-9 {
+		t.Errorf("score k = %f, want 0.5", norm["mid"])
 	}
-	if math.Abs(norm["b"]-0.0) > 1e-4 {
-		t.Errorf("min item = %f, want ~0.0", norm["b"])
+	if norm["neg"] != 0 || norm["zero"] != 0 {
+		t.Errorf("non-positive scores must map to 0, got neg=%f zero=%f", norm["neg"], norm["zero"])
 	}
-}
-
-func TestNormalizeScoresAllEqual(t *testing.T) {
-	norm := normalizeScores(map[string]float64{"x": 7, "y": 7, "z": 7})
-	for id, v := range norm {
-		if math.Abs(v-1.0) > 1e-6 {
-			t.Errorf("%q = %f, want 1.0", id, v)
-		}
+	if norm["big"] >= 1 || norm["big"] < 0.99 {
+		t.Errorf("large score = %f, want just below 1", norm["big"])
 	}
 }
 
-func TestNormalizeScoresEmpty(t *testing.T) {
-	if result := normalizeScores(nil); len(result) != 0 {
-		t.Error("expected empty result for nil input")
+func TestSaturateScores_BatchIndependent(t *testing.T) {
+	// The same raw score must map identically regardless of what else is in
+	// the request — the property chunked Rank callers rely on.
+	alone := saturateScores(map[string]float64{"a": 4})
+	together := saturateScores(map[string]float64{"a": 4, "b": 400, "c": 0.1})
+	if alone["a"] != together["a"] {
+		t.Errorf("score for a depends on batch: %f vs %f", alone["a"], together["a"])
+	}
+}
+
+func TestBoundDenseScores(t *testing.T) {
+	cos := boundDenseScores(map[string]float64{"neg": -0.4, "in": 0.7, "over": 1.3}, "")
+	if cos["neg"] != 0 || cos["in"] != 0.7 || cos["over"] != 1 {
+		t.Errorf("cosine bounds wrong: %+v", cos)
+	}
+	dot := boundDenseScores(map[string]float64{"x": sparseNormK}, denseDistanceDot)
+	if math.Abs(dot["x"]-0.5) > 1e-9 {
+		t.Errorf("dot-distance score = %f, want saturated 0.5", dot["x"])
 	}
 }
 
@@ -799,14 +812,14 @@ func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
-			{Score: 10, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
+			{Score: 15, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 			{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 		}, nil
 	}
 	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
-			{Score: 20, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
-			{Score: 15, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
+			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
+			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 		}, nil
 	}
 
@@ -1095,6 +1108,292 @@ func TestRank_FallsBackWhenAllCandidateIDsFail(t *testing.T) {
 	}
 	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "obj-1" || resp.Items[1].ObjectID != "obj-2" {
 		t.Fatalf("unexpected fallback ranking: %+v", resp.Items)
+	}
+}
+
+// hasIDNums extracts the numeric point ids from a Rank candidate filter.
+func hasIDNums(f *qdrant.Filter) []uint64 {
+	var out []uint64
+	if f == nil {
+		return out
+	}
+	for _, c := range f.Must {
+		if h := c.GetHasId(); h != nil {
+			for _, pid := range h.GetHasId() {
+				out = append(out, pid.GetNum())
+			}
+		}
+	}
+	return out
+}
+
+func TestRank_HybridBlendsSparseAndDense(t *testing.T) {
+	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1, 2}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) != 3 {
+			t.Fatalf("sparse search must carry the candidate HasID filter, got %#v", filter)
+		}
+		return []*qdrant.ScoredPoint{
+			{Score: 15, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-s")}},
+			{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b")}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) != 3 {
+			t.Fatalf("dense search must carry the candidate HasID filter, got %#v", filter)
+		}
+		return []*qdrant.ScoredPoint{
+			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-d")}},
+			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-s", "obj-b", "obj-d"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// sat(15)=.75, sat(5)=.5; blend α=.5: obj-b=.25+.25=.5, obj-d=.45, obj-s=.375.
+	want := []string{"obj-b", "obj-d", "obj-s"}
+	for i, w := range want {
+		if resp.Items[i].ObjectID != w {
+			t.Fatalf("hybrid rank order at %d: got %q want %q (%+v)", i, resp.Items[i].ObjectID, w, resp.Items)
+		}
+		if resp.Items[i].Score <= 0 {
+			t.Fatalf("expected positive blended score for %q, got %f", w, resp.Items[i].Score)
+		}
+	}
+}
+
+func TestRank_DenseOnly_WhenNoSparseVector(t *testing.T) {
+	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "catalog"}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return nil, nil
+	}
+	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1}, nil
+	}
+	sparseSearched := false
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		sparseSearched = true
+		return nil, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 0.8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+			{Score: 0.4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-2")}},
+		}, nil
+	}
+
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1", "obj-2"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sparseSearched {
+		t.Fatal("sparse search must not run without a sparse subject vector")
+	}
+	// Dense-only keeps full weight: scores are the bounded cosine values,
+	// not scaled down by (1-alpha).
+	if resp.Items[0].ObjectID != "obj-1" || math.Abs(resp.Items[0].Score-0.8) > 1e-6 {
+		t.Fatalf("dense-only scoring wrong: %+v", resp.Items)
+	}
+	if resp.Items[1].ObjectID != "obj-2" || math.Abs(resp.Items[1].Score-0.4) > 1e-6 {
+		t.Fatalf("dense-only scoring wrong: %+v", resp.Items)
+	}
+}
+
+func TestRank_DenseGateClosed_WhenAlphaOne(t *testing.T) {
+	cfg := &namespace.Config{Alpha: 1.0, DenseSource: "byoe"}
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	denseFetched := false
+	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		denseFetched = true
+		return []float32{1}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+		}, nil
+	}
+
+	if _, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1"}}, "ns"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if denseFetched {
+		t.Fatal("dense vector must not be fetched when alpha leaves no dense weight")
+	}
+}
+
+func TestRank_AlphaFromConfigDecidesBalance(t *testing.T) {
+	// obj-sp is sparse-strong, obj-dn dense-strong; the winner must follow
+	// the namespace alpha (D1: no per-request override).
+	run := func(alpha float64) []RankedItem {
+		cfg := &namespace.Config{Alpha: alpha, DenseSource: "byoe"}
+		s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+		s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+			return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+		}
+		s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+			return []float32{1}, nil
+		}
+		s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+			return []*qdrant.ScoredPoint{
+				{Score: 20, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sp")}},
+			}, nil
+		}
+		s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+			return []*qdrant.ScoredPoint{
+				{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dn")}},
+			}, nil
+		}
+		resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-sp", "obj-dn"}}, "ns")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return resp.Items
+	}
+
+	if items := run(0.8); items[0].ObjectID != "obj-sp" {
+		t.Fatalf("alpha 0.8 must favour sparse, got %+v", items)
+	}
+	if items := run(0.2); items[0].ObjectID != "obj-dn" {
+		t.Fatalf("alpha 0.2 must favour dense, got %+v", items)
+	}
+}
+
+func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
+	// Before the scored flag, "no subject vector", "candidate not indexed"
+	// and "indexed but zero overlap" were all Score:0 + hybrid_rank.
+
+	// Outcome 1: subject unknown → whole-response no_subject_vector marker.
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "ghost", Candidates: []string{"obj-1"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceNoSubjectVector || resp.Items[0].Scored {
+		t.Fatalf("unknown subject must report %q with unscored items, got source=%q items=%+v", SourceNoSubjectVector, resp.Source, resp.Items)
+	}
+
+	// Outcomes 2+3: known subject; obj-zero is indexed with zero overlap
+	// (a real relevance verdict), obj-missing was never indexed.
+	s = newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-hit")}},
+			{Score: 0, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-zero")}},
+		}, nil
+	}
+
+	resp, err = s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-hit", "obj-zero", "obj-missing"}}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceHybridRank {
+		t.Fatalf("scored response source: got %q want %q", resp.Source, SourceHybridRank)
+	}
+	byID := map[string]RankedItem{}
+	for _, it := range resp.Items {
+		byID[it.ObjectID] = it
+	}
+	if it := byID["obj-hit"]; !it.Scored || it.Score <= 0 {
+		t.Fatalf("obj-hit must be scored positive: %+v", it)
+	}
+	if it := byID["obj-zero"]; !it.Scored || it.Score != 0 {
+		t.Fatalf("obj-zero must be a scored zero (real verdict): %+v", it)
+	}
+	if it := byID["obj-missing"]; it.Scored || it.Score != 0 {
+		t.Fatalf("obj-missing must come back unscored: %+v", it)
+	}
+}
+
+func TestRank_ChunkedCallsMatchUnionOrdering(t *testing.T) {
+	// SC-002: scoring 1000 candidates as two 500-item requests must produce
+	// scores that merge into the same ordering as one 1000-item request.
+	// This only holds because saturateScores is batch-independent.
+	const n = 1000
+	candidates := make([]string, n)
+	for i := range candidates {
+		candidates[i] = fmt.Sprintf("obj-%04d", i)
+	}
+
+	idmap := newFakeIDMapper()
+	byNum := func() map[uint64]string {
+		rev := make(map[uint64]string, len(idmap.ids))
+		for id, num := range idmap.ids {
+			rev[num] = id
+		}
+		return rev
+	}
+	rawScore := func(objectID string) float32 {
+		var i int
+		fmt.Sscanf(objectID, "obj-%d", &i)
+		return float32((i*37)%1009) + 1
+	}
+
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		rev := byNum()
+		var out []*qdrant.ScoredPoint
+		for _, num := range hasIDNums(filter) {
+			objectID, ok := rev[num]
+			if !ok {
+				continue
+			}
+			out = append(out, &qdrant.ScoredPoint{
+				Score:   rawScore(objectID),
+				Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString(objectID)},
+			})
+		}
+		return out, nil
+	}
+
+	rank := func(cands []string) []RankedItem {
+		resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: cands}, "ns")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		return resp.Items
+	}
+
+	union := rank(candidates)
+	chunkA := rank(candidates[:n/2])
+	chunkB := rank(candidates[n/2:])
+
+	merged := append(append([]RankedItem{}, chunkA...), chunkB...)
+	sort.Slice(merged, func(i, j int) bool {
+		if merged[i].Score != merged[j].Score {
+			return merged[i].Score > merged[j].Score
+		}
+		return merged[i].ObjectID < merged[j].ObjectID
+	})
+
+	if len(union) != n || len(merged) != n {
+		t.Fatalf("lengths: union=%d merged=%d want %d", len(union), len(merged), n)
+	}
+	for i := range union {
+		if union[i].ObjectID != merged[i].ObjectID {
+			t.Fatalf("chunked ordering diverges from union at %d: %q vs %q", i, merged[i].ObjectID, union[i].ObjectID)
+		}
+		if math.Abs(union[i].Score-merged[i].Score) > 1e-12 {
+			t.Fatalf("score for %q differs between union and chunked call: %f vs %f", union[i].ObjectID, union[i].Score, merged[i].Score)
+		}
 	}
 }
 

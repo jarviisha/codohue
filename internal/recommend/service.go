@@ -31,7 +31,18 @@ const (
 	denseVectorName      = "dense_interactions"
 	cfOverFetchFactor    = 5
 	denseOverFetchFactor = 3
-	normEpsilon          = 1e-9
+
+	// sparseNormK is the half-saturation constant of the batch-independent
+	// sparse-score map x/(x+k): a raw dot product of k maps to 0.5. It is a
+	// single global constant on purpose — a per-namespace or per-batch value
+	// would reintroduce the cross-request incomparability the map exists to
+	// remove. k=5 puts the demo dataset's typical sparse scores (low single
+	// digits) on the steep part of the curve; the exact value only shapes
+	// the sparse/dense balance, which alpha already tunes per namespace.
+	sparseNormK = 5.0
+
+	// denseDistanceDot mirrors infra/qdrant's distance vocabulary.
+	denseDistanceDot = "dot"
 )
 
 // ErrCatalogActive is returned by StoreObjectEmbedding when the namespace
@@ -433,55 +444,7 @@ func (s *Service) hybridRecommend(
 		return s.fallbackPopular(ctx, req, limit, cfg, nil)
 	}
 
-	// Build per-item score maps.
-	sparseScores := extractScores(sparseResults)
-	denseScores := extractScores(denseResults)
-
-	// Normalize each score set independently.
-	normSparse := normalizeScores(sparseScores)
-	normDense := normalizeScores(denseScores)
-
-	// Collect all candidate object IDs.
-	candidateSet := make(map[string]struct{}, len(normSparse)+len(normDense))
-	for id := range normSparse {
-		candidateSet[id] = struct{}{}
-	}
-	for id := range normDense {
-		candidateSet[id] = struct{}{}
-	}
-
-	// Blend scores and apply time decay.
-	gamma := defaultGamma
-	if cfg.Gamma > 0 {
-		gamma = cfg.Gamma
-	}
-	now := time.Now().UTC()
-
-	type candidate struct {
-		objectID string
-		score    float64
-	}
-	candidates := make([]candidate, 0, len(candidateSet))
-
-	// Build lookup for created_at from Qdrant payload.
-	createdAt := buildCreatedAtLookup(sparseResults, denseResults)
-
-	for objectID := range candidateSet {
-		sp := normSparse[objectID]
-		dp := normDense[objectID]
-		blended := alpha*sp + (1-alpha)*dp
-
-		// Apply freshness decay if created_at is available.
-		if t, ok := createdAt[objectID]; ok {
-			daysSince := now.Sub(t).Hours() / 24
-			blended *= math.Exp(-gamma * daysSince)
-		}
-		candidates = append(candidates, candidate{objectID: objectID, score: blended})
-	}
-
-	sort.Slice(candidates, func(i, j int) bool {
-		return candidates[i].score > candidates[j].score
-	})
+	candidates := blendHybridScores(sparseResults, denseResults, alpha, resolveGamma(cfg), cfg.DenseDistance, time.Now().UTC())
 
 	total := len(candidates)
 
@@ -568,35 +531,95 @@ func extractScores(points []*qdrant.ScoredPoint) map[string]float64 {
 	return m
 }
 
-// normalizeScores applies min-max normalization to a score map.
-// When all scores are equal (max == min), every item receives 1.0.
-func normalizeScores(scores map[string]float64) map[string]float64 {
-	if len(scores) == 0 {
-		return scores
-	}
-	var mn, mx float64
-	first := true
-	for _, v := range scores {
-		switch {
-		case first:
-			mn, mx = v, v
-			first = false
-		case v < mn:
-			mn = v
-		case v > mx:
-			mx = v
-		}
-	}
-	rng := mx - mn
+// saturateScores maps raw sparse dot products through the fixed saturating
+// curve x/(x+sparseNormK). Unlike the min-max normalization it replaced, the
+// mapping does not depend on the other scores in the request, so scores from
+// separate calls stay comparable — chunked Rank callers merge results from
+// multiple requests into one ordering. Non-positive scores map to 0.
+func saturateScores(scores map[string]float64) map[string]float64 {
 	result := make(map[string]float64, len(scores))
 	for id, v := range scores {
-		if rng < normEpsilon {
-			result[id] = 1.0
-		} else {
-			result[id] = (v - mn) / (rng + normEpsilon)
+		if v <= 0 {
+			result[id] = 0
+			continue
+		}
+		result[id] = v / (v + sparseNormK)
+	}
+	return result
+}
+
+// boundDenseScores puts dense similarities on a fixed [0, 1] scale. Cosine
+// scores are already bounded — negatives clamp to 0 (dissimilar must not drag
+// the blend below "no signal") and rounding artifacts above 1 clamp to 1.
+// Dot-product namespaces have unbounded scores, so they go through the same
+// saturating curve as sparse.
+func boundDenseScores(scores map[string]float64, distance string) map[string]float64 {
+	result := make(map[string]float64, len(scores))
+	for id, v := range scores {
+		switch {
+		case v <= 0:
+			result[id] = 0
+		case distance == denseDistanceDot:
+			result[id] = v / (v + sparseNormK)
+		case v > 1:
+			result[id] = 1
+		default:
+			result[id] = v
 		}
 	}
 	return result
+}
+
+// blendedCandidate is one object scored by the shared hybrid blend.
+type blendedCandidate struct {
+	objectID string
+	score    float64
+}
+
+// blendHybridScores is the single blend definition shared by Recommend and
+// Rank: normalize each side batch-independently, α-blend, apply γ freshness
+// decay, sort descending with object id as the deterministic tie-break.
+// Callers with only one side available pass alpha 1 (sparse-only) or 0
+// (dense-only) so the present side keeps full weight.
+func blendHybridScores(sparseResults, denseResults []*qdrant.ScoredPoint, alpha, gamma float64, denseDistance string, now time.Time) []blendedCandidate {
+	normSparse := saturateScores(extractScores(sparseResults))
+	normDense := boundDenseScores(extractScores(denseResults), denseDistance)
+
+	candidateSet := make(map[string]struct{}, len(normSparse)+len(normDense))
+	for id := range normSparse {
+		candidateSet[id] = struct{}{}
+	}
+	for id := range normDense {
+		candidateSet[id] = struct{}{}
+	}
+
+	createdAt := buildCreatedAtLookup(sparseResults, denseResults)
+
+	candidates := make([]blendedCandidate, 0, len(candidateSet))
+	for objectID := range candidateSet {
+		blended := alpha*normSparse[objectID] + (1-alpha)*normDense[objectID]
+		if t, ok := createdAt[objectID]; ok {
+			daysSince := now.Sub(t).Hours() / 24
+			blended *= math.Exp(-gamma * daysSince)
+		}
+		candidates = append(candidates, blendedCandidate{objectID: objectID, score: blended})
+	}
+
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].objectID < candidates[j].objectID
+	})
+	return candidates
+}
+
+// resolveGamma returns the namespace's freshness decay or the default.
+func resolveGamma(cfg *namespace.Config) float64 {
+	if cfg != nil && cfg.Gamma > 0 {
+		return cfg.Gamma
+	}
+	return defaultGamma
 }
 
 // buildCreatedAtLookup extracts created_at timestamps from Qdrant payloads.
@@ -1159,9 +1182,12 @@ func blendItems(popular, cf []string, popularRatio float64, limit int) []string 
 	return result
 }
 
-// Rank scores a list of candidate items for a subject using sparse CF vectors
-// and returns them in descending score order. If the subject has no interaction
-// history, candidates are returned in their original order.
+// Rank scores a list of candidate items for a subject with the same hybrid
+// sparse+dense blend Recommend uses (namespace alpha decides the balance) and
+// returns them in descending score order. A missing side degrades rather than
+// falls back: no dense vector → sparse-only, no sparse vector → dense-only at
+// full weight. Only a subject with neither vector gets the whole candidate
+// list back unscored in request order.
 func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankResponse, error) {
 	if len(req.Candidates) == 0 {
 		return &RankResponse{
@@ -1185,8 +1211,25 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		return s.rankFallback(req, ns), nil
 	}
 
-	subjectVec, err := s.fetchSubjectVecFn(ctx, ns, subjectNumID)
-	if err != nil || subjectVec == nil {
+	sparseVec, err := s.fetchSubjectVecFn(ctx, ns, subjectNumID)
+	if err != nil {
+		slog.Error("rank: fetch subject sparse vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+		sparseVec = nil
+	}
+
+	// The dense side participates under the same gate as Recommend's hybrid
+	// path, and shares its staleness caveat: subject dense vectors refresh on
+	// the cron tick.
+	var denseVec []float32
+	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
+		denseVec, err = s.fetchSubjectDenseVecFn(ctx, ns, subjectNumID)
+		if err != nil {
+			slog.Error("rank: fetch subject dense vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+			denseVec = nil
+		}
+	}
+
+	if sparseVec == nil && denseVec == nil {
 		slog.Info("rank: no subject vector, returning original order", "namespace", ns, "subject_id", req.SubjectID)
 		return s.rankFallback(req, ns), nil
 	}
@@ -1214,34 +1257,63 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		},
 	}
 
-	results, err := s.searchObjectsFn(ctx, ns, subjectVec, filter, uint64(len(ids)))
-	if err != nil {
-		slog.Error("rank: search objects failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+	var sparseResults, denseResults []*qdrant.ScoredPoint
+	sparseOK, denseOK := false, false
+	if sparseVec != nil {
+		sparseResults, err = s.searchObjectsFn(ctx, ns, sparseVec, filter, uint64(len(ids)))
+		if err != nil {
+			slog.Error("rank: sparse search failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+			sparseResults = nil
+		} else {
+			sparseOK = true
+		}
+	}
+	if denseVec != nil {
+		denseResults, err = s.searchObjectsDenseFn(ctx, ns, denseVec, filter, uint64(len(ids)))
+		if err != nil {
+			slog.Error("rank: dense search failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
+			denseResults = nil
+		} else {
+			denseOK = true
+		}
+	}
+	if !sparseOK && !denseOK {
 		return s.rankFallback(req, ns), nil
 	}
 
-	gamma := defaultGamma
-	if cfg != nil && cfg.Gamma > 0 {
-		gamma = cfg.Gamma
+	// Effective alpha: the namespace blend when both sides answered, full
+	// weight to the surviving side otherwise — scaling a lone side by alpha
+	// would just shrink every score for no reason.
+	alpha := 1.0
+	switch {
+	case sparseOK && denseOK:
+		alpha = cfg.Alpha
+	case denseOK:
+		alpha = 0.0
 	}
-	scored := rerankScored(results, gamma, len(req.Candidates))
 
-	// Every candidate the caller sent comes back: items with no sparse
-	// overlap (or never upserted) score 0 and trail the scored ones in
+	denseDistance := ""
+	if cfg != nil {
+		denseDistance = cfg.DenseDistance
+	}
+	candidates := blendHybridScores(sparseResults, denseResults, alpha, resolveGamma(cfg), denseDistance, time.Now().UTC())
+
+	// Every candidate the caller sent comes back: items with no overlap on
+	// either side (or never upserted) score 0 and trail the scored ones in
 	// request order — consistent with rankFallback, which returns the full
 	// list when no subject vector exists.
 	ranked := make([]RankedItem, 0, len(req.Candidates))
 	present := make(map[string]struct{}, len(req.Candidates))
-	for _, sc := range scored {
-		present[sc.objectID] = struct{}{}
-		ranked = append(ranked, RankedItem{ObjectID: sc.objectID, Score: sc.finalScore, Rank: len(ranked) + 1})
+	for _, c := range candidates {
+		present[c.objectID] = struct{}{}
+		ranked = append(ranked, RankedItem{ObjectID: c.objectID, Score: c.score, Rank: len(ranked) + 1, Scored: true})
 	}
 	for _, c := range req.Candidates {
 		if _, ok := present[c]; ok {
 			continue
 		}
 		present[c] = struct{}{}
-		ranked = append(ranked, RankedItem{ObjectID: c, Score: 0, Rank: len(ranked) + 1})
+		ranked = append(ranked, RankedItem{ObjectID: c, Score: 0, Rank: len(ranked) + 1, Scored: false})
 	}
 
 	metrics.RecommendRequests.WithLabelValues(ns, SourceHybridRank).Inc()
@@ -1255,18 +1327,21 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	}, nil
 }
 
-// rankFallback returns candidates in their original order when CF scoring is unavailable.
-// Score is set to 0 to signal to callers that no relevance information is available.
+// rankFallback returns candidates unscored in their original order when no
+// scoring could run at all. The source is SourceNoSubjectVector — named for
+// its overwhelmingly common cause (the subject has neither vector); the rare
+// infra-failure paths land here too because the caller-visible outcome is
+// identical: keep your own ordering, nothing here is a relevance verdict.
 func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 	items := make([]RankedItem, len(req.Candidates))
 	for i, c := range req.Candidates {
-		items[i] = RankedItem{ObjectID: c, Score: 0, Rank: i + 1}
+		items[i] = RankedItem{ObjectID: c, Score: 0, Rank: i + 1, Scored: false}
 	}
 	return &RankResponse{
 		SubjectID:   req.SubjectID,
 		Namespace:   ns,
 		Items:       items,
-		Source:      SourceHybridRank,
+		Source:      SourceNoSubjectVector,
 		Total:       len(items),
 		GeneratedAt: time.Now().UTC(),
 	}

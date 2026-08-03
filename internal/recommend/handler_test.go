@@ -259,7 +259,7 @@ func TestRank_Success(t *testing.T) {
 	fake := &fakeSvc{
 		rankResp: &RankResponse{
 			SubjectID: "u1", Namespace: "ns",
-			Items:  []RankedItem{{ObjectID: "p1", Score: 0.9, Rank: 1}},
+			Items:  []RankedItem{{ObjectID: "p1", Score: 0.9, Rank: 1, Scored: true}},
 			Source: SourceHybridRank, GeneratedAt: time.Now(),
 		},
 	}
@@ -281,11 +281,14 @@ func TestRank_Success(t *testing.T) {
 	if fake.rankNamespace != "ns" {
 		t.Errorf("service did not receive path namespace, got %q", fake.rankNamespace)
 	}
+	if !strings.Contains(rec.Body.String(), `"scored":true`) {
+		t.Errorf("scored flag missing from wire response: %s", rec.Body.String())
+	}
 	var resp RankResponse
 	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "p1" {
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "p1" || !resp.Items[0].Scored {
 		t.Errorf("items: got %v", resp.Items)
 	}
 }

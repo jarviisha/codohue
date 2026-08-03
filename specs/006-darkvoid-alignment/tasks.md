@@ -60,22 +60,22 @@ with batch-independent normalization so chunked calls stay comparable (FR-001–
 with 2–3 likes; rank a mixed candidate list → liked-similar items outscore unrelated ones;
 two 500-item chunks merge into the same ordering as one union call (SC-001, SC-002)
 
-- [ ] T004 [US1] Extract the blend body of `hybridRecommend`
+- [x] T004 [US1] Extract the blend body of `hybridRecommend`
       (internal/recommend/service.go:436-479 — normalize → union candidates → α-blend →
       γ-decay) into a shared helper taking sparse/dense score maps + cfg; `hybridRecommend`
       delegates to it. T001 fixture must stay green.
-- [ ] T005 [US1] Replace min-max sparse normalization with the fixed saturating map
+- [x] T005 [US1] Replace min-max sparse normalization with the fixed saturating map
       `x/(x+k)` (`k` = package-level constant, decided global; document the tuning basis
       in a comment) inside the shared helper; dense cosine scores pass through unscaled
       (FR-003). Update `normalizeScores` call sites; T001 ordering fixture stays green.
-- [ ] T006 [US1] Wire the dense side into `Rank` (internal/recommend/service.go:1163-1255):
+- [x] T006 [US1] Wire the dense side into `Rank` (internal/recommend/service.go:1163-1255):
       fetch subject dense vector via `fetchSubjectDenseVecFn`, search `{ns}_objects_dense`
       with the same `HasID` candidate filter via `searchObjectsDenseFn`, feed both result
       sets through the shared helper, keep `rerankScored`'s γ handling consistent with it.
-- [ ] T007 [US1] Define the one-sided degradations in `Rank` (FR-002): no dense vector →
+- [x] T007 [US1] Define the one-sided degradations in `Rank` (FR-002): no dense vector →
       sparse-only (as today); no sparse vector but dense present → dense-only scoring
       instead of `rankFallback`'s whole-list zero return.
-- [ ] T008 [US1] Unit tests in internal/recommend/service_test.go: hybrid blend in Rank
+- [x] T008 [US1] Unit tests in internal/recommend/service_test.go: hybrid blend in Rank
       (both sides), dense-only path, sparse-only path, chunk-comparability (rank 1000
       candidates as 2×500 vs 1×1000 → same merged ordering), α respected from cfg.
 - [ ] T009 [US1] Extend the rank e2e flow (e2e/, `make test-e2e-api` subset) with a hybrid
@@ -95,20 +95,20 @@ flag; every candidate still returned (D2, FR-004, FR-006)
 one never-indexed candidate → that item `scored:false`, others `scored:true`; old decoder
 still parses the response
 
-- [ ] T010 [P] [US2] Add `Scored bool \`json:"scored"\`` to `RankedItem` in
+- [x] T010 [P] [US2] Add `Scored bool \`json:"scored"\`` to `RankedItem` in
       pkg/codohuetypes/recommend.go and update the doc comment at :36-37 that currently
       collapses the three zero-score cases into one.
-- [ ] T011 [P] [US2] Add `SourceNoSubjectVector = "no_subject_vector"` beside the existing
+- [x] T011 [P] [US2] Add `SourceNoSubjectVector = "no_subject_vector"` beside the existing
       source constants in internal/recommend/types.go:46-50.
-- [ ] T012 [US2] Set the new semantics in internal/recommend/service.go: `rankFallback`
+- [x] T012 [US2] Set the new semantics in internal/recommend/service.go: `rankFallback`
       reports `SourceNoSubjectVector` with all items `Scored:false`; the scored/appended
       split in `Rank` (:1230-1245) marks scored items true, zero-fill appends false.
-- [ ] T013 [US2] Regenerate golden snapshots
+- [x] T013 [US2] Regenerate golden snapshots
       (`go test ./pkg/codohuetypes/... -run Golden -update`) and commit the
       pkg/codohuetypes/testdata/ diff for review (FR-006).
-- [ ] T014 [P] [US2] Surface `Scored` and document both source values in sdk/go/rank.go +
+- [x] T014 [P] [US2] Surface `Scored` and document both source values in sdk/go/rank.go +
       sdk/go/rank_test.go.
-- [ ] T015 [US2] Tests distinguishing the three former-ambiguous outcomes (no subject
+- [x] T015 [US2] Tests distinguishing the three former-ambiguous outcomes (no subject
       vector / not indexed / zero overlap) in internal/recommend/service_test.go and
       handler_test.go.
 
