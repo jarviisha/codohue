@@ -384,6 +384,7 @@ func TestBulkRedriveDeadletter_Service_EmptyOK(t *testing.T) {
 
 func TestDeleteCatalogItem_Service_HappyPath(t *testing.T) {
 	repo := &fakeRepo{
+		getCatalogItem:          &CatalogItemDetail{CatalogItemSummary: CatalogItemSummary{ID: 7, ObjectID: "o7"}, Namespace: "ns"},
 		deleteCatalogItemFound:  true,
 		deleteCatalogItemObject: "o7",
 		numericObjectID:         123,
@@ -418,7 +419,10 @@ func TestDeleteCatalogItem_Service_PostgresMissIsIdempotent(t *testing.T) {
 }
 
 func TestDeleteCatalogItem_Service_PostgresErrorBubbles(t *testing.T) {
-	repo := &fakeRepo{deleteCatalogItemErr: fmt.Errorf("db down")}
+	repo := &fakeRepo{
+		getCatalogItem:       &CatalogItemDetail{CatalogItemSummary: CatalogItemSummary{ID: 1, ObjectID: "o1"}, Namespace: "ns"},
+		deleteCatalogItemErr: fmt.Errorf("db down"),
+	}
 	svc, _, _ := withCatalogPlumbing(t, repo, nil)
 
 	if err := svc.DeleteCatalogItem(context.Background(), "ns", 1); err == nil {
@@ -426,8 +430,9 @@ func TestDeleteCatalogItem_Service_PostgresErrorBubbles(t *testing.T) {
 	}
 }
 
-func TestDeleteCatalogItem_Service_QdrantMissIsBestEffort(t *testing.T) {
+func TestDeleteCatalogItem_Service_QdrantFailureIsRetryable(t *testing.T) {
 	repo := &fakeRepo{
+		getCatalogItem:          &CatalogItemDetail{CatalogItemSummary: CatalogItemSummary{ID: 7, ObjectID: "o7"}, Namespace: "ns"},
 		deleteCatalogItemFound:  true,
 		deleteCatalogItemObject: "o7",
 		numericObjectID:         99,
@@ -436,8 +441,11 @@ func TestDeleteCatalogItem_Service_QdrantMissIsBestEffort(t *testing.T) {
 	svc, _, del := withCatalogPlumbing(t, repo, nil)
 	del.err = errors.New("qdrant down")
 
-	if err := svc.DeleteCatalogItem(context.Background(), "ns", 7); err != nil {
-		t.Fatalf("qdrant failure must NOT bubble up: %v", err)
+	if err := svc.DeleteCatalogItem(context.Background(), "ns", 7); err == nil {
+		t.Fatal("qdrant failure must bubble up so the caller can retry")
+	}
+	if repo.deleteCatalogItemCalled != 0 {
+		t.Fatal("postgres row must remain until qdrant cleanup succeeds")
 	}
 }
 
@@ -486,6 +494,9 @@ func TestReembedResetSQL_StateFilters(t *testing.T) {
 		}
 		if strings.Contains(sql, tc.onlyState) && tc.onlyState == "bogus" {
 			t.Errorf("only_state=%q leaked into SQL text", tc.onlyState)
+		}
+		if !strings.Contains(sql, "strategy_version = NULL") {
+			t.Errorf("only_state=%q: reset must invalidate the previous strategy version", tc.onlyState)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package recommend
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -291,7 +292,8 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	cacheKey := recCacheKey(req.Namespace, req.SubjectID, maxResults, req.Offset)
 	if cached, err := s.getCacheFn(ctx, cacheKey); err == nil {
 		var resp Response
-		if json.Unmarshal([]byte(cached), &resp) == nil {
+		if json.Unmarshal([]byte(cached), &resp) == nil &&
+			resp.Namespace == req.Namespace && resp.SubjectID == req.SubjectID {
 			metrics.RedisCacheRequests.WithLabelValues("hit").Inc()
 			return &resp, nil
 		}
@@ -1451,7 +1453,12 @@ func (s *Service) deleteFromCollection(ctx context.Context, collection string, i
 }
 
 func recCacheKey(ns, subjectID string, limit, offset int) string {
-	return fmt.Sprintf("rec:%s:%s:limit=%d:offset=%d", ns, subjectID, limit, offset)
+	return fmt.Sprintf("rec:v2:%s:%s:limit=%d:offset=%d",
+		base64.RawURLEncoding.EncodeToString([]byte(ns)),
+		base64.RawURLEncoding.EncodeToString([]byte(subjectID)),
+		limit,
+		offset,
+	)
 }
 
 // mergeExclusions unions two exclusion sets, returning nil when both are

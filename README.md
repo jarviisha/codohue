@@ -108,7 +108,7 @@ curl -b cookies.txt -X PUT http://localhost:2002/api/admin/v1/namespaces/demo \
     "lambda": 0.01, "gamma": 0.5,
     "max_results": 20, "seen_items_days": 14,
     "alpha": 0.7,
-    "dense_strategy": "byoe", "embedding_dim": 4, "dense_distance": "cosine",
+    "dense_source": "byoe", "embedding_dim": 4, "dense_distance": "cosine",
     "trending_window": 24, "trending_ttl": 600, "lambda_trending": 0.1
   }'
 ```
@@ -126,7 +126,7 @@ curl -X POST http://localhost:2001/v1/namespaces/demo/events \
 
 # Redis Streams (no URL → namespace lives in the payload)
 redis-cli XADD codohue:events '*' payload \
-  '{"namespace":"demo","subject_id":"user-123","object_id":"item-456","action":"VIEW","timestamp":"2026-04-19T10:00:00Z"}'
+  '{"namespace":"demo","subject_id":"user-123","object_id":"item-456","action":"VIEW","occurred_at":"2026-04-19T10:00:00Z"}'
 ```
 
 Built-in actions: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP`. Custom actions are accepted when defined in `namespace_configs.action_weights`.
@@ -198,4 +198,4 @@ make build-admin-embed    # production admin binary with SPA
 - Namespace keys are returned in plaintext **only once**, on creation.
 - Do not commit `.env`, secrets, or plaintext namespace keys.
 - `make down-v` removes containers **and** volumes — full local reset.
-- Catalog ingest (`POST /v1/namespaces/{ns}/catalog`) only works when `catalog_enabled = true` on the namespace; in that mode, `PUT /v1/namespaces/{ns}/objects/{id}/embedding` returns `409 Conflict` because the catalog pipeline owns object vectors.
+- Catalog ingest (`POST /v1/namespaces/{ns}/catalog`) only works when the namespace uses `dense_source="catalog"`, configured through `PUT /api/admin/v1/namespaces/{ns}/catalog`; in that mode, `PUT /v1/namespaces/{ns}/objects/{id}/embedding` returns `409 Conflict` because the catalog pipeline owns object vectors.

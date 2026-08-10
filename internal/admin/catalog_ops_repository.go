@@ -201,6 +201,7 @@ func reembedResetSQL(onlyState string) string {
 		SET state = 'pending',
 		    attempt_count = 0,
 		    last_error = NULL,
+		    strategy_version = NULL,
 		    updated_at = NOW()
 		WHERE namespace = $1
 		  AND ` + stateCond + versionCond + `

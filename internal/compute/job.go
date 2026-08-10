@@ -87,6 +87,7 @@ type Job struct {
 	// injectable for testing — wired to real implementations in NewJob
 	tryLockFn                func(ctx context.Context, ns string) (release func(), ok bool, err error)
 	lockFn                   func(ctx context.Context, ns string) (release func(), err error)
+	lockAllFn                func(ctx context.Context) (release func(), err error)
 	finalizeOrphansFn        func(ctx context.Context, cutoff time.Time) (int64, error)
 	ensureCollectionsFn      func(ctx context.Context, ns string) error
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
@@ -116,6 +117,7 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 
 		tryLockFn:         repo.TryLockNamespace,
 		lockFn:            repo.LockNamespace,
+		lockAllFn:         repo.LockAllNamespaces,
 		finalizeOrphansFn: repo.FinalizeOrphanRuns,
 		ensureCollectionsFn: func(ctx context.Context, ns string) error {
 			return infraqdrant.EnsureCollections(ctx, qdrantClient, ns)
@@ -282,6 +284,16 @@ func (j *Job) LockNamespace(ctx context.Context, ns string) (release func(), err
 	return j.lockFn(ctx, ns)
 }
 
+// LockAllNamespaces acquires the exclusive compute maintenance lock. Every
+// namespace run holds the shared form, so acquisition waits for active runs
+// to finish and blocks new ones until release.
+func (j *Job) LockAllNamespaces(ctx context.Context) (release func(), err error) {
+	if j.lockAllFn == nil {
+		return func() {}, nil
+	}
+	return j.lockAllFn(ctx)
+}
+
 // runNamespaceLocked executes the three phases and finalizes the run row.
 // The caller must hold the namespace lock. logID > 0 means the row was
 // already inserted (async path); 0 inserts it here.
@@ -335,8 +347,12 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseSource), capture, func() (int, int, error) {
 			return j.runPhase2Dense(ctx, ns, cfg, capture)
 		})
-		// Phase 2 failure is logged but does not abort the run — phase 3 still
-		// runs because trending and dense are independent surfaces.
+		// Dense and trending are independent, so phase 3 still runs after a
+		// dense failure. The aggregate run must nevertheless report failure:
+		// an all-green run means every phase that ran succeeded.
+		if !phases.Phase2.OK {
+			runErr = errors.New(phases.Phase2.Error)
+		}
 	} else if !cancelled && cfg != nil {
 		capture.Info(fmt.Sprintf("phase 2 · dense skipped (dense_source: %s)", cfg.DenseSource))
 	}

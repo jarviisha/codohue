@@ -44,7 +44,7 @@ func main() {
         SubjectID: "user-123",
         ObjectID:  "item-a",
         Action:    codohuetypes.ActionView,
-        Timestamp: time.Now().UTC(),
+        OccurredAt: time.Now().UTC(),
     })
 }
 ```

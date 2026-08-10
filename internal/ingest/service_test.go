@@ -39,12 +39,19 @@ func (f *fakeTailPublisher) Publish(msg EventTailMessage) {
 
 // fakeNsConfig implements nsConfigGetter for testing.
 type fakeNsConfig struct {
-	cfg *namespace.Config
-	err error
+	cfg     *namespace.Config
+	err     error
+	missing bool
 }
 
 func (f *fakeNsConfig) Get(_ context.Context, _ string) (*namespace.Config, error) {
-	return f.cfg, f.err
+	if f.err != nil || f.missing {
+		return f.cfg, f.err
+	}
+	if f.cfg == nil {
+		return &namespace.Config{}, nil
+	}
+	return f.cfg, nil
 }
 
 func newTestService(repo eventInserter, ns nsConfigGetter) *Service {
@@ -83,7 +90,7 @@ func TestServiceProcess_Validation(t *testing.T) {
 
 func TestServiceProcess_DefaultWeight(t *testing.T) {
 	repo := &fakeRepo{}
-	svc := newTestService(repo, &fakeNsConfig{cfg: nil})
+	svc := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{}})
 
 	if _, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
@@ -120,19 +127,34 @@ func TestServiceProcess_CustomNamespaceWeight(t *testing.T) {
 	}
 }
 
-func TestServiceProcess_NsConfigError_FallsBackToDefault(t *testing.T) {
+func TestServiceProcess_NsConfigErrorIsTransient(t *testing.T) {
 	repo := &fakeRepo{}
 	svc := newTestService(repo, &fakeNsConfig{err: errors.New("db error")})
 
 	if _, err := svc.Process(context.Background(), &EventPayload{
 		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
 		Action: ActionView, OccurredAt: time.Now(),
-	}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	}); err == nil {
+		t.Fatal("config infrastructure error must be returned for retry")
 	}
+	if repo.insertCalled {
+		t.Fatal("event must not be inserted with an unverified default weight")
+	}
+}
 
-	if repo.lastEvent.Weight != DefaultActionWeights[ActionView] {
-		t.Errorf("weight: got %.1f, want %.1f", repo.lastEvent.Weight, DefaultActionWeights[ActionView])
+func TestServiceProcess_MissingNamespaceRejected(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newTestService(repo, &fakeNsConfig{missing: true})
+
+	_, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ghost", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionView, OccurredAt: time.Now(),
+	})
+	if !errors.Is(err, ErrNamespaceNotFound) {
+		t.Fatalf("expected ErrNamespaceNotFound, got %v", err)
+	}
+	if repo.insertCalled {
+		t.Fatal("event for missing namespace must not be inserted")
 	}
 }
 

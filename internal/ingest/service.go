@@ -20,6 +20,8 @@ var (
 	ErrInvalidPayload = errors.New("invalid payload")
 	// ErrUnknownAction indicates that the event action cannot be resolved to a configured or default weight.
 	ErrUnknownAction = errors.New("unknown action")
+	// ErrNamespaceNotFound indicates that an event targets a namespace that no longer exists.
+	ErrNamespaceNotFound = errors.New("namespace not found")
 )
 
 type eventInserter interface {
@@ -73,7 +75,13 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)
 	if err != nil {
-		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "unknown_action").Inc()
+		reason := "config"
+		if errors.Is(err, ErrUnknownAction) {
+			reason = "unknown_action"
+		} else if errors.Is(err, ErrNamespaceNotFound) {
+			reason = "unknown_namespace"
+		}
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, reason).Inc()
 		return 0, fmt.Errorf("resolve weight: %w", err)
 	}
 
@@ -109,10 +117,14 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 
 func (s *Service) resolveWeight(ctx context.Context, ns string, action Action) (float64, error) {
 	cfg, err := s.nsConfigSvc.Get(ctx, ns)
-	if err == nil && cfg != nil {
-		if w, ok := cfg.ActionWeights[string(action)]; ok {
-			return w, nil
-		}
+	if err != nil {
+		return 0, fmt.Errorf("get namespace config: %w", err)
+	}
+	if cfg == nil {
+		return 0, fmt.Errorf("%w: %s", ErrNamespaceNotFound, ns)
+	}
+	if w, ok := cfg.ActionWeights[string(action)]; ok {
+		return w, nil
 	}
 
 	if w, ok := DefaultActionWeights[action]; ok {

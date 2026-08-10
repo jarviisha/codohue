@@ -47,11 +47,11 @@ func RequireSessionOrBearer(sessions *SessionManager, adminKey string) func(http
 					return
 				}
 				ip := clientIP(r)
-				if limiter.Blocked(ip) {
-					httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many failed attempts; retry later")
-					return
-				}
 				if adminKey == "" || !constantTimeEqual(token, adminKey) {
+					if limiter.Blocked(ip) {
+						httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many failed attempts; retry later")
+						return
+					}
 					limiter.RecordFailure(ip)
 					httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid bearer token")
 					return

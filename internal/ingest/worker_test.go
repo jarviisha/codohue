@@ -94,7 +94,7 @@ func TestWorkerHandleMessage_TransientErrorLeavesEntryPending(t *testing.T) {
 }
 
 func TestWorkerHandleMessage_PermanentErrorAckedAndDropped(t *testing.T) {
-	for _, sentinel := range []error{ErrInvalidPayload, ErrUnknownAction} {
+	for _, sentinel := range []error{ErrInvalidPayload, ErrUnknownAction, ErrNamespaceNotFound} {
 		proc := &fakeProcessor{processErr: fmt.Errorf("wrapped: %w", sentinel)}
 		acked := []string{}
 		w := &Worker{service: proc, ackFn: ackRecorder(&acked)}

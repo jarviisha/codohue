@@ -741,9 +741,14 @@ func TestTriggerBatch_NamespaceNotFound(t *testing.T) {
 
 // fakeBatchRunner implements batchRunner for CreateBatchRun tests.
 type fakeBatchRunner struct {
-	runID    int64
-	startErr error
-	started  int
+	runID      int64
+	startErr   error
+	started    int
+	lockErr    error
+	locked     []string
+	released   []string
+	lockAll    int
+	releaseAll int
 }
 
 func (f *fakeBatchRunner) StartNamespaceRun(_ context.Context, _ string, _ batchrun.TriggerSource, _ time.Duration) (int64, error) {
@@ -751,8 +756,20 @@ func (f *fakeBatchRunner) StartNamespaceRun(_ context.Context, _ string, _ batch
 	return f.runID, f.startErr
 }
 
-func (f *fakeBatchRunner) LockNamespace(_ context.Context, _ string) (func(), error) {
-	return func() {}, nil
+func (f *fakeBatchRunner) LockNamespace(_ context.Context, namespace string) (func(), error) {
+	if f.lockErr != nil {
+		return nil, f.lockErr
+	}
+	f.locked = append(f.locked, namespace)
+	return func() { f.released = append(f.released, namespace) }, nil
+}
+
+func (f *fakeBatchRunner) LockAllNamespaces(_ context.Context) (func(), error) {
+	if f.lockErr != nil {
+		return nil, f.lockErr
+	}
+	f.lockAll++
+	return func() { f.releaseAll++ }, nil
 }
 
 func TestTriggerBatch_ConcurrentLock(t *testing.T) {
@@ -883,7 +900,7 @@ func TestDeleteNamespace_Success(t *testing.T) {
 	}
 }
 
-func TestDeleteNamespace_NotFound(t *testing.T) {
+func TestDeleteNamespace_NotFoundCleansOrphanedState(t *testing.T) {
 	repo := &fakeRepo{namespace: nil} // GetNamespace returns nil → 404 path
 	svc := newTestService(repo, "", "test-key")
 
@@ -894,8 +911,8 @@ func TestDeleteNamespace_NotFound(t *testing.T) {
 	if resp != nil {
 		t.Fatalf("expected nil response for missing namespace, got %+v", resp)
 	}
-	if len(repo.clearNamespaces) != 0 {
-		t.Fatalf("clear should not run when namespace missing, called for %v", repo.clearNamespaces)
+	if len(repo.clearNamespaces) != 1 || repo.clearNamespaces[0] != "missing" {
+		t.Fatalf("orphan cleanup should run when config is missing, called for %v", repo.clearNamespaces)
 	}
 }
 
@@ -911,6 +928,8 @@ func TestResetApp_TruncatesEverythingInOneCall(t *testing.T) {
 		truncateNamespaces: 3,
 	}
 	svc := newTestService(repo, "", "test-key")
+	runner := &fakeBatchRunner{}
+	svc.job = runner
 
 	resp, err := svc.ResetApp(context.Background())
 	if err != nil {
@@ -938,6 +957,12 @@ func TestResetApp_TruncatesEverythingInOneCall(t *testing.T) {
 		if resp.Namespaces[i] != ns {
 			t.Fatalf("Namespaces[%d]=%q, want %q", i, resp.Namespaces[i], ns)
 		}
+	}
+	if runner.lockAll != 1 {
+		t.Fatalf("maintenance lock calls=%d, want 1", runner.lockAll)
+	}
+	if runner.releaseAll != 1 {
+		t.Fatalf("maintenance lock releases=%d, want 1", runner.releaseAll)
 	}
 }
 
