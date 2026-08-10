@@ -7,8 +7,11 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
 
 ## Unreleased
 
-Planned server release: `v0.9.0`. Planned Go module maintenance release:
-`v0.5.1` for `pkg/codohuetypes`, `sdk/go`, and `sdk/go/redistream`.
+Nothing yet.
+
+## v0.5.1 — 2026-08-10
+
+Audit remediation maintenance release. Server tag: `v0.9.0`.
 
 ### Breaking
 
@@ -54,7 +57,7 @@ Planned server release: `v0.9.0`. Planned Go module maintenance release:
   processes use the same maintenance-lock and re-embed completion protocols.
 - Updated README, offline evaluation tooling, and Redis Streams SDK examples to
   use `dense_source`, `occurred_at`, and the current catalog configuration API.
-- No public Go API or `pkg/codohuetypes` wire type changed. The planned Go module
+- No public Go API or `pkg/codohuetypes` wire type changed. The Go module
   `v0.5.1` tags are maintenance releases for corrected published documentation.
 
 ## v0.5.0 — 2026-08-03
