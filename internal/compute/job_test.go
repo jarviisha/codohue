@@ -765,6 +765,43 @@ func TestRunNamespace_Phase3FailureFailsRun(t *testing.T) {
 	}
 }
 
+func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
+	logger := newFakeBatchLogger(10)
+	successCh := make(chan bool, 1)
+	loggerWithSuccess := &successCapturingLogger{fakeBatchLogger: logger, success: successCh}
+
+	job := newTestJob(
+		&fakeRecomputer{},
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "catalog", EmbeddingDim: 8}},
+		&fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}},
+	)
+	job.batchLog = loggerWithSuccess
+	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+		return errors.New("qdrant unavailable")
+	}
+	job.redis = &goredis.Client{}
+	phase3Called := false
+	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+		phase3Called = true
+		return nil
+	}
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !phase3Called {
+		t.Fatal("trending phase must still run after an independent dense failure")
+	}
+	select {
+	case ok := <-successCh:
+		if ok {
+			t.Fatal("a run whose dense phase failed must not be recorded as success")
+		}
+	default:
+		t.Fatal("run was not finalized")
+	}
+}
+
 // successCapturingLogger records the success flag passed to UpdateBatchRunLog.
 type successCapturingLogger struct {
 	*fakeBatchLogger

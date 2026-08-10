@@ -10,6 +10,11 @@ import (
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
+const defaultMaxJSONBodyBytes int64 = 8 << 20
+
+// ErrBodyTooLarge indicates that a JSON request exceeded the hard decoder cap.
+var ErrBodyTooLarge = errors.New("request body too large")
+
 // ErrorDetail is the machine-readable error payload returned by API handlers.
 // Re-exported from codohuetypes so SDK clients parse the same struct.
 type ErrorDetail = codohuetypes.ErrorDetail
@@ -24,15 +29,33 @@ type ErrorResponse = codohuetypes.ErrorResponse
 // field fails loudly with an error instead of being silently dropped. The
 // caller maps the returned error to its own 400 envelope and metrics.
 func DecodeStrict(r io.Reader, v any) error {
-	dec := json.NewDecoder(r)
+	return DecodeStrictMax(r, v, defaultMaxJSONBodyBytes)
+}
+
+// DecodeStrictMax is DecodeStrict with an explicit byte cap. The decoder reads
+// at most maxBytes+1, so an authenticated request cannot force an unbounded
+// string, slice, or map allocation before business validation runs.
+func DecodeStrictMax(r io.Reader, v any, maxBytes int64) error {
+	if maxBytes <= 0 {
+		return ErrBodyTooLarge
+	}
+	limited := &io.LimitedReader{R: r, N: maxBytes + 1}
+	dec := json.NewDecoder(limited)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
+		if limited.N == 0 {
+			return ErrBodyTooLarge
+		}
 		return fmt.Errorf("decode request body: %w", err)
 	}
-	// A well-formed request body is a single JSON value; reject anything that
-	// follows it (e.g. a second concatenated object).
-	if dec.More() {
+	var extra any
+	if err := dec.Decode(&extra); err == nil {
 		return errors.New("unexpected trailing data after JSON body")
+	} else if !errors.Is(err, io.EOF) {
+		if limited.N == 0 {
+			return ErrBodyTooLarge
+		}
+		return fmt.Errorf("decode trailing request data: %w", err)
 	}
 	return nil
 }

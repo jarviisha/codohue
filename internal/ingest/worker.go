@@ -203,7 +203,7 @@ func (w *Worker) handleMessage(ctx context.Context, msg redis.XMessage) {
 	}
 
 	if _, err := w.service.Process(ctx, payload); err != nil {
-		if errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction) {
+		if errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction) || errors.Is(err, ErrNamespaceNotFound) {
 			slog.Warn("ingest dropping unprocessable event", "entry_id", msg.ID, "error", err)
 			w.ack(ctx, msg.ID)
 			return

@@ -1787,3 +1787,21 @@ func TestCreateSession_SuccessfulLoginsNotThrottled(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateSession_CorrectCredentialBypassesExhaustedSharedIPBucket(t *testing.T) {
+	h := newTestHandler(&fakeSvc{})
+	ip := "192.0.2.10"
+	for range loginBurst {
+		h.loginLimiter.RecordFailure(ip)
+	}
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions",
+		bytes.NewBufferString(`{"api_key":"test-secret"}`))
+	r.RemoteAddr = ip + ":1234"
+	h.CreateSession(rec, r)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("correct credential must bypass failed-attempt bucket, got %d", rec.Code)
+	}
+}

@@ -2,7 +2,6 @@ package admin
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -101,21 +100,21 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusServiceUnavailable, "sessions_unavailable", "session manager is not wired")
 		return
 	}
-	// Throttle the online guessing surface for the admin key: reject once the
-	// IP has burned its budget of FAILED attempts. Successful logins never
-	// consume the budget, so a legitimate operator is never throttled.
+	// Correct credentials bypass the failed-attempt bucket. This matters when
+	// several operators share a reverse-proxy IP: guesses from one client must
+	// not lock a legitimate operator out of the admin plane.
 	ip := clientIP(r)
-	if h.loginLimiter.Blocked(ip) {
-		httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts, retry later")
-		return
-	}
 
 	var req CreateSessionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
 	if !constantTimeEqual(req.APIKey, h.apiKey) {
+		if h.loginLimiter.Blocked(ip) {
+			httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts, retry later")
+			return
+		}
 		h.loginLimiter.RecordFailure(ip)
 		httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 		return
@@ -273,7 +272,7 @@ func (h *Handler) UpdateCatalogConfig(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 
 	var req NamespaceCatalogUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
@@ -567,7 +566,7 @@ func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
 	ns := chi.URLParam(r, "ns")
 
 	var req InjectEventRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
@@ -708,7 +707,7 @@ func (h *Handler) RotateNamespaceAPIKey(w http.ResponseWriter, r *http.Request) 
 // with 400 so a misclick or stray curl can't wipe the install.
 func (h *Handler) ResetApp(w http.ResponseWriter, r *http.Request) {
 	var req ResetAppRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}

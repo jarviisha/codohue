@@ -173,3 +173,59 @@ func TestRepositoryGetNamespaceEventsInWindow(t *testing.T) {
 		t.Errorf("expected item-recent, got %q", events[0].ObjectID)
 	}
 }
+
+func TestRepositoryAdvisoryLocks(t *testing.T) {
+	db := openTestDB(t)
+	competingDB := openTestDB(t)
+	repo := NewRepository(db)
+	competingRepo := NewRepository(competingDB)
+	ctx := context.Background()
+
+	releaseNamespace, got, err := repo.TryLockNamespace(ctx, "compute_lock_test")
+	if err != nil {
+		t.Fatalf("TryLockNamespace: %v", err)
+	}
+	if !got {
+		t.Fatal("TryLockNamespace did not acquire an uncontended lock")
+	}
+
+	blockedRelease, blocked, err := competingRepo.TryLockNamespace(ctx, "compute_lock_test")
+	if err != nil {
+		t.Fatalf("second TryLockNamespace: %v", err)
+	}
+	if blocked {
+		blockedRelease()
+		t.Fatal("second TryLockNamespace acquired the same namespace lock")
+	}
+	releaseNamespace()
+
+	releaseBlocking, err := repo.LockNamespace(ctx, "compute_lock_test")
+	if err != nil {
+		t.Fatalf("LockNamespace after release: %v", err)
+	}
+	releaseBlocking()
+
+	releaseMaintenance, err := repo.LockAllNamespaces(ctx)
+	if err != nil {
+		t.Fatalf("LockAllNamespaces: %v", err)
+	}
+
+	blockedRelease, blocked, err = competingRepo.TryLockNamespace(ctx, "compute_lock_test")
+	if err != nil {
+		t.Fatalf("TryLockNamespace during maintenance: %v", err)
+	}
+	if blocked {
+		blockedRelease()
+		t.Fatal("TryLockNamespace acquired a shared lock during maintenance")
+	}
+	releaseMaintenance()
+
+	releaseAfterMaintenance, got, err := repo.TryLockNamespace(ctx, "compute_lock_test")
+	if err != nil {
+		t.Fatalf("TryLockNamespace after maintenance: %v", err)
+	}
+	if !got {
+		t.Fatal("TryLockNamespace did not acquire the lock after maintenance release")
+	}
+	releaseAfterMaintenance()
+}

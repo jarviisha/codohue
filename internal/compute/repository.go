@@ -230,18 +230,29 @@ func (r *Repository) TryLockNamespace(ctx context.Context, namespace string) (re
 	if err != nil {
 		return nil, false, fmt.Errorf("acquire conn for advisory lock: %w", err)
 	}
+	var maintenanceOK bool
+	if lockErr := conn.QueryRow(ctx,
+		`SELECT pg_try_advisory_lock_shared(hashtext('codohue:compute:maintenance'), 0)`,
+	).Scan(&maintenanceOK); lockErr != nil {
+		conn.Release()
+		return nil, false, fmt.Errorf("acquire shared maintenance lock: %w", lockErr)
+	}
+	if !maintenanceOK {
+		conn.Release()
+		return nil, false, nil
+	}
 	var got bool
 	if lockErr := conn.QueryRow(ctx,
 		`SELECT pg_try_advisory_lock(hashtext('codohue:compute'), hashtext($1))`, namespace,
 	).Scan(&got); lockErr != nil {
-		conn.Release()
+		releaseSharedMaintenanceLock(conn)
 		return nil, false, fmt.Errorf("advisory lock %s: %w", namespace, lockErr)
 	}
 	if !got {
-		conn.Release()
+		releaseSharedMaintenanceLock(conn)
 		return nil, false, nil
 	}
-	return releaseLockFunc(conn, namespace), true, nil
+	return releaseNamespaceLockFunc(conn, namespace), true, nil
 }
 
 // LockNamespace is the blocking variant of TryLockNamespace — it waits until
@@ -253,28 +264,76 @@ func (r *Repository) LockNamespace(ctx context.Context, namespace string) (relea
 		return nil, fmt.Errorf("acquire conn for advisory lock: %w", err)
 	}
 	if _, lockErr := conn.Exec(ctx,
-		`SELECT pg_advisory_lock(hashtext('codohue:compute'), hashtext($1))`, namespace,
+		`SELECT pg_advisory_lock_shared(hashtext('codohue:compute:maintenance'), 0)`,
 	); lockErr != nil {
 		conn.Release()
+		return nil, fmt.Errorf("acquire shared maintenance lock: %w", lockErr)
+	}
+	if _, lockErr := conn.Exec(ctx,
+		`SELECT pg_advisory_lock(hashtext('codohue:compute'), hashtext($1))`, namespace,
+	); lockErr != nil {
+		releaseSharedMaintenanceLock(conn)
 		return nil, fmt.Errorf("advisory lock %s: %w", namespace, lockErr)
 	}
-	return releaseLockFunc(conn, namespace), nil
+	return releaseNamespaceLockFunc(conn, namespace), nil
 }
 
-func releaseLockFunc(conn *pgxpool.Conn, namespace string) func() {
+// LockAllNamespaces acquires the exclusive maintenance lock. Namespace runs
+// and deletes hold its shared form, so this waits for all of them to drain
+// without pinning one pool connection per namespace.
+func (r *Repository) LockAllNamespaces(ctx context.Context) (release func(), err error) {
+	conn, err := r.db.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire conn for maintenance lock: %w", err)
+	}
+	if _, lockErr := conn.Exec(ctx,
+		`SELECT pg_advisory_lock(hashtext('codohue:compute:maintenance'), 0)`,
+	); lockErr != nil {
+		conn.Release()
+		return nil, fmt.Errorf("acquire maintenance lock: %w", lockErr)
+	}
+	return releaseMaintenanceLockFunc(conn), nil
+}
+
+func releaseNamespaceLockFunc(conn *pgxpool.Conn, namespace string) func() {
 	return func() {
 		// Unlock on a fresh context: the run's ctx may already be cancelled.
 		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, unlockErr := conn.Exec(unlockCtx,
+		_, namespaceErr := conn.Exec(unlockCtx,
 			`SELECT pg_advisory_unlock(hashtext('codohue:compute'), hashtext($1))`, namespace,
-		); unlockErr != nil {
+		)
+		_, maintenanceErr := conn.Exec(unlockCtx,
+			`SELECT pg_advisory_unlock_shared(hashtext('codohue:compute:maintenance'), 0)`,
+		)
+		if namespaceErr != nil || maintenanceErr != nil {
 			// A pooled connection keeps its session (and thus the lock) alive,
 			// so on unlock failure the connection must die with the lock.
 			conn.Conn().Close(unlockCtx) //nolint:errcheck,gosec // best-effort teardown; Release below discards the closed conn
 		}
 		conn.Release()
 	}
+}
+
+func releaseSharedMaintenanceLock(conn *pgxpool.Conn) {
+	releaseMaintenanceLock(conn, true)
+}
+
+func releaseMaintenanceLockFunc(conn *pgxpool.Conn) func() {
+	return func() { releaseMaintenanceLock(conn, false) }
+}
+
+func releaseMaintenanceLock(conn *pgxpool.Conn, shared bool) {
+	unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	query := `SELECT pg_advisory_unlock(hashtext('codohue:compute:maintenance'), 0)`
+	if shared {
+		query = `SELECT pg_advisory_unlock_shared(hashtext('codohue:compute:maintenance'), 0)`
+	}
+	if _, unlockErr := conn.Exec(unlockCtx, query); unlockErr != nil {
+		conn.Conn().Close(unlockCtx) //nolint:errcheck,gosec // discard session if its advisory lock could not be released
+	}
+	conn.Release()
 }
 
 // FinalizeOrphanRuns closes batch_run_logs rows whose owning process died

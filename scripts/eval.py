@@ -24,7 +24,7 @@ How it works (classic temporal leave-last-N-out protocol):
 REAL DATA: pass --from-namespace NS to evaluate genuine recorded behaviour
 instead of synthetic data. Its events are read via the admin API, temporal-
 split, and replayed into a SEPARATE eval namespace (the source is never
-touched). Config (action_weights, alpha, dense_strategy, ...) is inherited from
+touched). Config (action_weights, alpha, dense_source, ...) is inherited from
 the source namespace unless overridden by flags. This is the only number that
 reflects real-world quality; the synthetic mode validates the mechanism.
 
@@ -490,6 +490,7 @@ def main() -> int:
     )
     p.add_argument(
         "--dense-strategy",
+        dest="dense_source",
         default=None,
         choices=["disabled", "item2vec", "svd"],
         help="dense strategy trained during the batch run (needs alpha<1.0 to actually blend)",
@@ -534,12 +535,12 @@ def main() -> int:
         # Inherit source config; CLI flags override. BYOE can't be replayed (no
         # external vectors) so it degrades to pure sparse.
         action_weights = scfg.get("action_weights") or ACTION_WEIGHTS
-        src_dense = scfg.get("dense_strategy") or "disabled"
+        src_dense = scfg.get("dense_source") or "disabled"
         if src_dense not in ("item2vec", "svd"):
             src_dense = "disabled"
         alpha = args.alpha if args.alpha is not None else scfg.get("alpha", 1.0)
-        dense_strategy = (
-            args.dense_strategy if args.dense_strategy is not None else src_dense
+        dense_source = (
+            args.dense_source if args.dense_source is not None else src_dense
         )
         embedding_dim = (
             args.embedding_dim
@@ -564,8 +565,8 @@ def main() -> int:
         )
         action_weights = ACTION_WEIGHTS
         alpha = args.alpha if args.alpha is not None else 1.0
-        dense_strategy = (
-            args.dense_strategy if args.dense_strategy is not None else "disabled"
+        dense_source = (
+            args.dense_source if args.dense_source is not None else "disabled"
         )
         embedding_dim = args.embedding_dim if args.embedding_dim is not None else 64
         lam = 0.01
@@ -581,11 +582,11 @@ def main() -> int:
     for a in actions_present:
         action_weights.setdefault(a, 1.0)
 
-    dense_active = dense_strategy not in ("disabled", "byoe", "")
+    dense_active = dense_source not in ("disabled", "byoe", "")
     hybrid = dense_active and alpha < 1.0
     if dense_active and alpha >= 1.0:
         print(
-            f"{YELLOW}note:{RESET} dense_strategy={dense_strategy} but alpha>=1.0 — dense trained but unused (pure CF). Pass --alpha<1.0."
+            f"{YELLOW}note:{RESET} dense_source={dense_source} but alpha>=1.0 — dense trained but unused (pure CF). Pass --alpha<1.0."
         )
     if not dense_active and alpha is not None and alpha < 1.0:
         print(
@@ -594,18 +595,18 @@ def main() -> int:
 
     mode = "hybrid (sparse+dense)" if hybrid else "pure sparse CF"
     n_events_train = sum(len(v) for v in train.values())
-    note(f"mode={mode}  alpha={alpha}  dense_strategy={dense_strategy}")
+    note(f"mode={mode}  alpha={alpha}  dense_source={dense_source}")
     note(
         f"{len(train)} eligible users, {n_events_train} train events, {len(test)} test users, {n_items} items"
     )
 
     # 2. fresh eval namespace (wipe clears events + qdrant + rec cache)
-    section(f"Provision eval namespace ({mode}: alpha={alpha}, dense={dense_strategy})")
+    section(f"Provision eval namespace ({mode}: alpha={alpha}, dense={dense_source})")
     admin("DELETE", f"/api/admin/v1/namespaces/{EVAL_NS}")  # ignore 404
     cfg = {
         "action_weights": action_weights,
         "alpha": alpha,
-        "dense_strategy": dense_strategy,
+        "dense_source": dense_source,
         "embedding_dim": embedding_dim,
         "seen_items_days": 60,
         "max_results": max(100, args.k),

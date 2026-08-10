@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -49,5 +50,15 @@ func TestDecodeStrict_RejectsMalformedJSON(t *testing.T) {
 	}
 	if err := DecodeStrict(strings.NewReader(`not-json`), &out); err == nil {
 		t.Fatal("expected an error for malformed JSON, got nil")
+	}
+}
+
+func TestDecodeStrictMax_RejectsOversizedBody(t *testing.T) {
+	var out struct {
+		Value string `json:"value"`
+	}
+	err := DecodeStrictMax(strings.NewReader(`{"value":"123456789"}`), &out, 8)
+	if !errors.Is(err, ErrBodyTooLarge) {
+		t.Fatalf("expected ErrBodyTooLarge, got %v", err)
 	}
 }

@@ -62,5 +62,5 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 }
 
 func isClientPayloadError(err error) bool {
-	return errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction)
+	return errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction) || errors.Is(err, ErrNamespaceNotFound)
 }

@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -115,6 +116,9 @@ type batchRunner interface {
 	// LockNamespace blocks until the namespace's compute lock is free —
 	// taken by DeleteNamespace so a wipe never races a run in flight.
 	LockNamespace(ctx context.Context, namespace string) (release func(), err error)
+	// LockAllNamespaces waits for active compute/delete work to drain and
+	// blocks new work while ResetApp performs the app-wide wipe.
+	LockAllNamespaces(ctx context.Context) (release func(), err error)
 }
 
 // streamPublisher abstracts the Redis Streams write used by the catalog
@@ -882,10 +886,6 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 	if err != nil {
 		return nil, fmt.Errorf("get namespace: %w", err)
 	}
-	if cfg == nil {
-		return nil, nil
-	}
-
 	// Hold the namespace's compute lock for the whole wipe: a cron tick or
 	// manual run in flight would otherwise re-upsert Qdrant collections
 	// after the delete finishes, leaving orphans nothing ever cleans.
@@ -900,6 +900,9 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 	deleted, err := s.clearNamespaceEverywhere(ctx, namespace)
 	if err != nil {
 		return nil, err
+	}
+	if cfg == nil {
+		return nil, nil
 	}
 	return &NamespaceDeleteResponse{Namespace: namespace, EventsDeleted: deleted}, nil
 }
@@ -922,6 +925,16 @@ func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
 	names := make([]string, 0, len(namespaces))
 	for _, ns := range namespaces {
 		names = append(names, ns.Namespace)
+	}
+	// The exclusive maintenance lock waits for all shared compute/delete
+	// holders to drain and blocks new work until the wipe is complete. It uses
+	// one connection regardless of namespace count.
+	if s.job != nil {
+		release, lockErr := s.job.LockAllNamespaces(ctx)
+		if lockErr != nil {
+			return nil, fmt.Errorf("acquire maintenance lock: %w", lockErr)
+		}
+		defer release()
 	}
 
 	eventsDeleted, nsDeleted, err := s.repo.TruncateAllNamespaceData(ctx)
@@ -1040,7 +1053,8 @@ func (s *Service) clearNamespaceRedis(ctx context.Context, namespace string) err
 		"trending:" + namespace,
 		"catalog:embed:" + namespace,
 	}
-	iter := s.redisClient.Scan(ctx, 0, "rec:"+namespace+":*", 100).Iterator()
+	encodedNamespace := base64.RawURLEncoding.EncodeToString([]byte(namespace))
+	iter := s.redisClient.Scan(ctx, 0, "rec:v2:"+encodedNamespace+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
 	}

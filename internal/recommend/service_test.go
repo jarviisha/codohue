@@ -202,6 +202,22 @@ func TestRecommend_CacheHit(t *testing.T) {
 	}
 }
 
+func TestRecommend_IgnoresCacheEntryForDifferentIdentity(t *testing.T) {
+	repo := &fakeRepo{count: 0, popularItems: []string{"fresh-item"}}
+	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+		return `{"subject_id":"other","namespace":"tenant","items":[{"object_id":"cached-item","rank":1}]}`, nil
+	}
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 10})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "fresh-item" {
+		t.Fatalf("mismatched cache identity must be ignored, got %+v", resp.Items)
+	}
+}
+
 // ─── doRecommend: cold start (count=0) ───────────────────────────────────────
 
 func TestDoRecommend_ColdStart_NoTrending_FallsBackToPopular(t *testing.T) {
@@ -1655,15 +1671,23 @@ func TestDeleteFromCollection_Error(t *testing.T) {
 
 func TestRecCacheKey(t *testing.T) {
 	key := recCacheKey("ns_feed", "user123", 20, 0)
-	want := "rec:ns_feed:user123:limit=20:offset=0"
+	want := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=0"
 	if key != want {
 		t.Errorf("got %q, want %q", key, want)
 	}
 
 	keyWithOffset := recCacheKey("ns_feed", "user123", 20, 10)
-	wantWithOffset := "rec:ns_feed:user123:limit=20:offset=10"
+	wantWithOffset := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=10"
 	if keyWithOffset != wantWithOffset {
 		t.Errorf("got %q, want %q", keyWithOffset, wantWithOffset)
+	}
+}
+
+func TestRecCacheKey_DelimiterCannotCollide(t *testing.T) {
+	first := recCacheKey("a", "b:c", 20, 0)
+	second := recCacheKey("a:b", "c", 20, 0)
+	if first == second {
+		t.Fatalf("cache keys collided: %q", first)
 	}
 }
 

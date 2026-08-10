@@ -348,44 +348,33 @@ func (s *Service) BulkRedriveDeadletter(ctx context.Context, namespace string) (
 	}, nil
 }
 
-// DeleteCatalogItem removes a catalog item from Postgres and best-effort
-// removes the matching object dense vector from Qdrant. The path is
-// idempotent — deleting a non-existent item still returns 204 so retries
-// are safe.
+// DeleteCatalogItem removes the matching object dense vector before deleting
+// the catalog row. Keeping the durable row until external cleanup succeeds
+// makes a transient Qdrant failure retryable.
 func (s *Service) DeleteCatalogItem(ctx context.Context, namespace string, id int64) error {
-	objectID, found, err := s.repo.DeleteCatalogItem(ctx, namespace, id)
+	item, err := s.repo.GetCatalogItem(ctx, namespace, id)
 	if err != nil {
-		return fmt.Errorf("delete catalog item: %w", err)
+		return fmt.Errorf("get catalog item for delete: %w", err)
 	}
-	if !found {
-		// Idempotent — also try to delete by id directly so callers cannot
-		// break the API by referencing the row's id even after Postgres
-		// already lost it. This branch only matters for retries.
+	if item == nil {
 		return nil
 	}
 
-	if s.qdrantDeleter == nil {
-		return nil
+	if s.qdrantDeleter != nil {
+		numID, ok, lookupErr := s.repo.LookupNumericObjectID(ctx, namespace, item.ObjectID)
+		if lookupErr != nil {
+			return fmt.Errorf("lookup numeric object id: %w", lookupErr)
+		}
+		if ok {
+			if deleteErr := s.qdrantDeleter.DeletePoint(ctx, namespace+"_objects_dense", numID); deleteErr != nil {
+				return fmt.Errorf("delete qdrant point: %w", deleteErr)
+			}
+		}
 	}
-	numID, ok, err := s.repo.LookupNumericObjectID(ctx, namespace, objectID)
+
+	_, _, err = s.repo.DeleteCatalogItem(ctx, namespace, id)
 	if err != nil {
-		slog.WarnContext(ctx, "catalog delete: numeric id lookup failed; postgres row already deleted",
-			slog.String("namespace", namespace),
-			slog.String("object_id", objectID),
-			slog.String("error", err.Error()),
-		)
-		return nil
-	}
-	if !ok {
-		return nil
-	}
-	if err := s.qdrantDeleter.DeletePoint(ctx, namespace+"_objects_dense", numID); err != nil {
-		slog.WarnContext(ctx, "catalog delete: qdrant point removal failed; postgres row already deleted",
-			slog.String("namespace", namespace),
-			slog.String("object_id", objectID),
-			slog.String("collection", namespace+"_objects_dense"),
-			slog.String("error", err.Error()),
-		)
+		return fmt.Errorf("delete catalog item: %w", err)
 	}
 	return nil
 }
