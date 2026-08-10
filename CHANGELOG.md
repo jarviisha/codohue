@@ -7,7 +7,55 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
 
 ## Unreleased
 
-Nothing yet.
+Planned server release: `v0.9.0`. Planned Go module maintenance release:
+`v0.5.1` for `pkg/codohuetypes`, `sdk/go`, and `sdk/go/redistream`.
+
+### Breaking
+
+- **Event ingest now rejects unknown namespaces.** Events are no longer stored
+  with default action weights when the namespace is missing. Redis Stream
+  entries targeting a missing namespace are treated as permanently invalid,
+  acknowledged, and dropped.
+- **Catalog item deletion now reports Qdrant cleanup failures.** The endpoint
+  returns a server error and retains the PostgreSQL row so callers can retry,
+  instead of returning `204` after a best-effort external cleanup.
+- **JSON request bodies have an 8 MiB hard limit.** Oversized requests are
+  rejected before business validation. Admin request decoders also reject
+  unknown fields and trailing JSON data consistently.
+- **Dense phase failures now fail the aggregate batch run.** The independent
+  trending phase still runs, but `batch_run_logs.success` is `false` when the
+  dense phase fails.
+
+### Fixed
+
+- Prevent cross-namespace recommendation cache collisions by encoding each
+  cache-key component independently and validating cached response identity.
+- Prevent same-version catalog re-embed runs from completing before reset
+  items are processed. The watcher now uses the target strategy version frozen
+  on the batch run rather than mutable namespace configuration.
+- Make namespace cleanup retryable after partial PostgreSQL, Redis, or Qdrant
+  failure, including when the namespace configuration row is already gone.
+- Coordinate compute, namespace deletion, and app reset with shared/exclusive
+  PostgreSQL maintenance advisory locks. App reset waits for active runs to
+  drain and blocks new runs until cleanup completes.
+- Propagate namespace configuration lookup failures during ingest so transient
+  infrastructure errors are retried instead of silently changing event weight.
+- Delete catalog vectors before deleting their durable PostgreSQL rows, keeping
+  failed external cleanup retryable.
+- Allow valid admin credentials to bypass an exhausted failed-attempt bucket,
+  preventing failed logins from locking out operators behind a shared proxy IP.
+
+### Changed
+
+- Recommendation cache keys now use the `rec:v2:*` format. Existing entries
+  are ignored and expire naturally, causing a temporary increase in cache misses
+  after deployment.
+- Deploy `api`, `admin`, `cron`, and `embedder` together for this release so all
+  processes use the same maintenance-lock and re-embed completion protocols.
+- Updated README, offline evaluation tooling, and Redis Streams SDK examples to
+  use `dense_source`, `occurred_at`, and the current catalog configuration API.
+- No public Go API or `pkg/codohuetypes` wire type changed. The planned Go module
+  `v0.5.1` tags are maintenance releases for corrected published documentation.
 
 ## v0.5.0 — 2026-08-03
 
