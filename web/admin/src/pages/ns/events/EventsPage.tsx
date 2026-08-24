@@ -42,7 +42,6 @@ import NamespaceTag from '@/components/NamespaceTag'
 
 const TAIL_CAP = 1000
 const FLASH_MS = 1500
-const KNOWN_ACTIONS = ['view', 'like', 'comment', 'share', 'skip'] as const
 const WINDOWS: EventsSummaryWindow[] = ['1m', '5m', '1h']
 
 /**
@@ -58,6 +57,7 @@ export default function EventsPage() {
   const subjectId = searchParams.get('subject_id') ?? ''
 
   const [draftSubject, setDraftSubject] = useState(subjectId)
+  const [draftAction, setDraftAction] = useState(action)
   const [injectOpen, setInjectOpen] = useState(false)
   const [lastInjectedId, setLastInjectedId] = useState<number | null>(null)
 
@@ -66,6 +66,20 @@ export default function EventsPage() {
     if (next) params.set('action', next)
     else params.delete('action')
     setSearchParams(params, { replace: true })
+  }
+
+  // Free text, not a fixed vocabulary: action names are whatever the namespace
+  // sends (the bundled demo uses VIEW / LIKE / CART / PURCHASE) and the server
+  // compares them exactly, case included. A hard-coded lowercase chip row
+  // matched nothing in such a namespace and hid the actions it did use.
+  const applyAction = (e: FormEvent) => {
+    e.preventDefault()
+    setActionFilter(draftAction.trim())
+  }
+
+  const clearAction = () => {
+    setDraftAction('')
+    setActionFilter('')
   }
 
   const applySubject = (e: FormEvent) => {
@@ -114,25 +128,21 @@ export default function EventsPage() {
           )}
 
           <Inline align="center" wrap>
-            <Button
-              size="sm"
-              variant={action === '' ? 'solid' : 'outline'}
-              tone="neutral"
-              onClick={() => setActionFilter('')}
-            >
-              all
-            </Button>
-            {KNOWN_ACTIONS.map((a) => (
-              <Button
-                key={a}
+            <form onSubmit={applyAction} className="max-w-xs w-full">
+              <SearchInput
                 size="sm"
-                variant={action === a ? 'solid' : 'outline'}
-                tone="neutral"
-                onClick={() => setActionFilter(a)}
-              >
-                {a}
-              </Button>
-            ))}
+                value={draftAction}
+                onChange={(e) => setDraftAction(e.target.value)}
+                onClear={clearAction}
+                placeholder="Filter by action — exact, case-sensitive"
+                aria-label="Filter tail by action"
+              />
+            </form>
+            {action && (
+              <Badge variant="primary">
+                action = {action}
+              </Badge>
+            )}
             <form onSubmit={applySubject} className="max-w-xs w-full ml-auto">
               <SearchInput
                 size="sm"

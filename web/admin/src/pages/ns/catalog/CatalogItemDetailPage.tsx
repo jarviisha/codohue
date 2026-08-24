@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
   Alert,
@@ -17,6 +18,8 @@ import {
 } from '@/services/catalog'
 import MetaLine from '@/components/MetaLine'
 import PageHeader from '@/components/shell/PageHeader'
+import ConfirmDialog from '@/components/ConfirmDialog'
+import LinkButton from '@/components/LinkButton'
 
 const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'primary'> = {
   pending: 'neutral',
@@ -33,6 +36,7 @@ export default function CatalogItemDetailPage() {
   const q = useCatalogItem(ns ?? null, numericID)
   const redrive = useRedriveCatalogItem(ns ?? null)
   const remove = useDeleteCatalogItem(ns ?? null)
+  const [confirmOpen, setConfirmOpen] = useState(false)
 
   if (!ns) return null
 
@@ -113,11 +117,7 @@ export default function CatalogItemDetailPage() {
               size="sm"
               variant="outline"
               tone="danger"
-              onClick={() =>
-                remove.mutate(item.id, {
-                  onSuccess: () => navigate(`/ns/${encodeURIComponent(ns)}/catalog/items`),
-                })
-              }
+              onClick={() => setConfirmOpen(true)}
               disabled={remove.isPending}
             >
               {remove.isPending ? 'Deleting…' : 'Delete'}
@@ -193,13 +193,34 @@ export default function CatalogItemDetailPage() {
         )}
 
         <Inline justify="start">
-          <Link to={`/ns/${encodeURIComponent(ns)}/catalog/items`}>
-            <Button variant="ghost" tone="neutral" size="sm">
-              ← Back to items
-            </Button>
-          </Link>
+          <LinkButton
+            to={`/ns/${encodeURIComponent(ns)}/catalog/items`}
+            variant="ghost"
+            tone="neutral"
+            size="sm"
+          >
+            ← Back to items
+          </LinkButton>
         </Inline>
       </Stack>
+
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        title="Delete catalog item"
+        description={`Removes "${item.object_id}" from catalog_items and drops its dense vector from Qdrant. The object's events and metadata are untouched, but re-embedding it requires re-ingesting the content. This cannot be undone.`}
+        confirmLabel="Delete item"
+        pending={remove.isPending}
+        error={remove.error?.message}
+        onConfirm={() =>
+          remove.mutate(item.id, {
+            onSuccess: () => {
+              setConfirmOpen(false)
+              navigate(`/ns/${encodeURIComponent(ns)}/catalog/items`)
+            },
+          })
+        }
+      />
     </Container>
   )
 }

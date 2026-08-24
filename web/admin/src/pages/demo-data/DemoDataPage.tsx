@@ -15,6 +15,7 @@ import {
 } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 import NamespaceTag from '@/components/NamespaceTag'
+import SecretValue from '@/components/SecretValue'
 
 /**
  * DemoDataPage manages the bundled demo dataset — a single fixed namespace plus
@@ -110,6 +111,18 @@ function DemoCard({
               }
             />
           )}
+          {result?.api_key && (
+            // Seeding mints the demo namespace's data-plane key, and the
+            // backend returns the plaintext exactly once. Printing it here is
+            // the only way an operator gets to keep it — otherwise recovering
+            // it costs a key rotation.
+            <Stack gap="050">
+              <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+                API key — shown once
+              </span>
+              <SecretValue value={result.api_key} label="demo namespace API key" />
+            </Stack>
+          )}
           <Inline justify="end">
             <Button tone={tone === 'danger' ? 'danger' : undefined} onClick={onRun} disabled={loading}>
               {loading ? `${action.replace(/e$/, '')}ing…` : action}
@@ -127,6 +140,6 @@ function describeDemoResult(r: DemoDatasetResponse): string {
   if (r.events_deleted) bits.push(`${r.events_deleted.toLocaleString()} events deleted`)
   if (r.catalog_items_created)
     bits.push(`${r.catalog_items_created.toLocaleString()} catalog items created`)
-  if (r.api_key) bits.push('new api_key issued — copy from the response if you need it')
+  if (r.api_key) bits.push('new api_key issued — copy it below')
   return bits.join(', ')
 }

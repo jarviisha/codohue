@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
   Alert,
   Badge,
@@ -27,6 +27,7 @@ import {
 } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
 import MetaLine from '@/components/MetaLine'
+import LinkButton from '@/components/LinkButton'
 
 /**
  * SubjectInspectorPage is the operator's "why did user X get rec Y?" answer.
@@ -63,19 +64,25 @@ export default function SubjectInspectorPage() {
               onChange={(e) => setDebug(e.target.checked)}
               label="Debug"
             />
-            <Link to={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}>
-              <Button variant="outline" tone="neutral" size="sm">
-                View events →
-              </Button>
-            </Link>
+            <LinkButton
+              to={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
+              variant="outline"
+              tone="neutral"
+              size="sm"
+            >
+              View events →
+            </LinkButton>
             {/* Objects this subject authored — ownership metadata, unrelated to
                 the interactions above, which is why it links out rather than
                 folding into the profile card. */}
-            <Link to={`/ns/${encodeURIComponent(ns)}/catalog/items?author=${encodeURIComponent(id)}`}>
-              <Button variant="outline" tone="neutral" size="sm">
-                Authored objects →
-              </Button>
-            </Link>
+            <LinkButton
+              to={`/ns/${encodeURIComponent(ns)}/catalog/items?author=${encodeURIComponent(id)}`}
+              variant="outline"
+              tone="neutral"
+              size="sm"
+            >
+              Authored objects →
+            </LinkButton>
           </Inline>
         </Inline>
       </PageHeader>
@@ -96,18 +103,16 @@ export default function SubjectInspectorPage() {
             }
             actions={
               <Inline>
-                <Link
+                <LinkButton
                   to={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
+                  size="sm"
+                  variant="ghost"
                 >
-                  <Button size="sm" variant="ghost">
-                    Open events
-                  </Button>
-                </Link>
-                <Link to={`/ns/${encodeURIComponent(ns)}/batch-runs`}>
-                  <Button size="sm" variant="ghost">
-                    Batch runs
-                  </Button>
-                </Link>
+                  Open events
+                </LinkButton>
+                <LinkButton to={`/ns/${encodeURIComponent(ns)}/batch-runs`} size="sm" variant="ghost">
+                  Batch runs
+                </LinkButton>
               </Inline>
             }
           />

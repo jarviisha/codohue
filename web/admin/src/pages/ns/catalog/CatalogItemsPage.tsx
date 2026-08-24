@@ -28,6 +28,8 @@ import {
   type CatalogItemSummary,
 } from '@/services/catalog'
 import PageHeader from '@/components/shell/PageHeader'
+import ConfirmDialog from '@/components/ConfirmDialog'
+import LinkButton from '@/components/LinkButton'
 
 const PAGE_SIZE = 25
 const STATE_OPTIONS: Array<{ value: CatalogItemState | ''; label: string }> = [
@@ -76,6 +78,9 @@ export default function CatalogItemsPage() {
 
   const redrive = useRedriveCatalogItem(ns ?? null)
   const remove = useDeleteCatalogItem(ns ?? null)
+  // Deleting drops the Qdrant point as well as the row, with no undo, so the
+  // row button only stages a candidate — the dialog performs it.
+  const [pendingDelete, setPendingDelete] = useState<CatalogItemSummary | null>(null)
 
   if (!ns) return null
 
@@ -89,11 +94,14 @@ export default function CatalogItemsPage() {
               {items.data?.total ?? 0} matching. Click a row to open detail.
             </p>
           </Stack>
-          <Link to={`/ns/${encodeURIComponent(ns)}/catalog`}>
-            <Button variant="ghost" tone="neutral" size="sm">
-              ← Status
-            </Button>
-          </Link>
+          <LinkButton
+            to={`/ns/${encodeURIComponent(ns)}/catalog`}
+            variant="ghost"
+            tone="neutral"
+            size="sm"
+          >
+            ← Status
+          </LinkButton>
         </Inline>
       </PageHeader>
 
@@ -189,7 +197,7 @@ export default function CatalogItemsPage() {
                     item={it}
                     onFilterAuthor={applyAuthor}
                     onRedrive={() => redrive.mutate(it.id)}
-                    onDelete={() => remove.mutate(it.id)}
+                    onDelete={() => setPendingDelete(it)}
                     redriving={redrive.isPending && redrive.variables === it.id}
                     deleting={remove.isPending && remove.variables === it.id}
                   />
@@ -209,6 +217,28 @@ export default function CatalogItemsPage() {
           </Inline>
         )}
       </Stack>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null)
+        }}
+        title="Delete catalog item"
+        description={
+          pendingDelete
+            ? `Removes "${pendingDelete.object_id}" from catalog_items and drops its dense vector from Qdrant. The object's events and metadata are untouched, but re-embedding it requires re-ingesting the content. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete item"
+        pending={remove.isPending}
+        error={remove.error?.message}
+        onConfirm={() => {
+          if (!pendingDelete) return
+          remove.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(null),
+          })
+        }}
+      />
     </Container>
   )
 }

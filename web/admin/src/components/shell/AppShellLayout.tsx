@@ -15,6 +15,10 @@ import {
   BreadcrumbsList,
   BreadcrumbsSeparator,
   Button,
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -26,6 +30,7 @@ import { useTheme, type Theme } from '@jarviisha/davinci-react-theme-provider'
 import { useLogout, useSession } from '@/services/auth'
 import { recordRecentNamespace } from '@/services/recentNamespaces'
 import SidebarNav from '@/components/shell/SidebarNav'
+import useMediaQuery from '@/components/shell/useMediaQuery'
 import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
 import ReembedOverlay from '@/components/shell/ReembedOverlay'
 import RouteErrorBoundary from '@/components/shell/ErrorBoundary'
@@ -57,6 +62,13 @@ export default function AppShellLayout() {
   // when the slot mounts (avoids first-paint flash of empty header).
   const [pageHeaderSlot, setPageHeaderSlot] = useState<HTMLDivElement | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // Below the design system's 768px breakpoint the shell grid stacks the
+  // sidebar between header and main at full height, so every page starts with
+  // a screenful of navigation to scroll past. Mount it as a drawer there
+  // instead — a structural swap, which is why it keys off a media query rather
+  // than a CSS class.
+  const isWideViewport = useMediaQuery('(min-width: 768px)')
+  const [navOpen, setNavOpen] = useState(false)
 
   // Cmd+K (Mac) / Ctrl+K (everywhere else) opens the command palette from
   // any focused element. Skip when the user is mid-typing in an input or
@@ -72,13 +84,16 @@ export default function AppShellLayout() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // The search string rides along so the post-login bounce lands on the same
+  // view, filters and paging included, rather than its bare path.
   useEffect(() => {
     const handler = () => {
-      navigate(`/login?next=${encodeURIComponent(location.pathname)}`, { replace: true })
+      const target = `${location.pathname}${location.search}`
+      navigate(`/login?next=${encodeURIComponent(target)}`, { replace: true })
     }
     window.addEventListener('codohue:auth-expired', handler)
     return () => window.removeEventListener('codohue:auth-expired', handler)
-  }, [navigate, location.pathname])
+  }, [navigate, location.pathname, location.search])
 
   // Record /ns/{name} visits so the Sidebar "Recent" group + breadcrumb
   // dropdown surface frequently-visited namespaces without forcing operators
@@ -97,12 +112,25 @@ export default function AppShellLayout() {
   return (
     <AppShell>
       <AppShellTopBar>
-        <Link
-          to="/"
-          className="text-foreground uppercase font-extrabold tracking-tight no-underline"
-        >
-          codohue
-        </Link>
+        <Inline align="center">
+          {!isWideViewport && (
+            <Button
+              size="sm"
+              variant="outline"
+              tone="neutral"
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen(true)}
+            >
+              Menu
+            </Button>
+          )}
+          <Link
+            to="/"
+            className="text-foreground uppercase font-extrabold tracking-tight no-underline"
+          >
+            codohue
+          </Link>
+        </Inline>
         <PaletteTrigger onOpen={() => setPaletteOpen(true)} />
         <Inline align="center">
           <ThemeMenu />
@@ -117,9 +145,11 @@ export default function AppShellLayout() {
         </Inline>
       </AppShellTopBar>
 
-      <AppShellSidebar>
-        <SidebarNav />
-      </AppShellSidebar>
+      {isWideViewport && (
+        <AppShellSidebar>
+          <SidebarNav />
+        </AppShellSidebar>
+      )}
 
       <AppShellHeader>
         <Stack gap="100" className="w-full">
@@ -135,6 +165,17 @@ export default function AppShellLayout() {
           </RouteErrorBoundary>
         </PageHeaderSlotContext.Provider>
       </AppShellMain>
+
+      {!isWideViewport && (
+        <Drawer open={navOpen} onOpenChange={setNavOpen} side="left" size="sm">
+          <DrawerHeader>
+            <DrawerTitle>Navigation</DrawerTitle>
+          </DrawerHeader>
+          <DrawerContent>
+            <SidebarNav onNavigate={() => setNavOpen(false)} />
+          </DrawerContent>
+        </Drawer>
+      )}
 
       <ReembedOverlay />
       <OpsToastBridge />

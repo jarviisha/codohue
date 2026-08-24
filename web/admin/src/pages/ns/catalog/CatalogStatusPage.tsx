@@ -40,6 +40,7 @@ import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import CatalogConfigDialog from './CatalogConfigDialog'
 import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
+import LinkButton from '@/components/LinkButton'
 
 const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
 type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
@@ -433,11 +434,9 @@ export default function CatalogStatusPage() {
         </Stack>
 
         <Inline justify="end">
-          <Link to={`/ns/${encodeURIComponent(ns)}/catalog/items`}>
-            <Button variant="outline" tone="neutral">
-              Browse items →
-            </Button>
-          </Link>
+          <LinkButton to={`/ns/${encodeURIComponent(ns)}/catalog/items`} variant="outline" tone="neutral">
+            Browse items →
+          </LinkButton>
         </Inline>
       </Stack>
 

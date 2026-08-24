@@ -65,19 +65,29 @@ function isActive(pathname: string, entry: NavEntry): boolean {
  * The split matches the typical admin workflow: drill into one namespace to
  * debug, stay there, exit explicitly when done. Global controls don't compete
  * for sidebar space while namespace context is active.
+ *
+ * `onNavigate` fires after any entry navigates. The shell uses it to dismiss
+ * the mobile drawer — as an explicit callback rather than a click handler
+ * wrapped around the nav, which would also fire for the namespace switcher and
+ * close the drawer the moment it was opened.
  */
-export default function SidebarNav() {
+export default function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
   const { ns } = useParams<{ ns?: string }>()
 
   if (ns) {
-    return <NamespaceSidebar currentNs={ns} />
+    return <NamespaceSidebar currentNs={ns} onNavigate={onNavigate} />
   }
-  return <GlobalSidebar />
+  return <GlobalSidebar onNavigate={onNavigate} />
 }
 
-function GlobalSidebar() {
+function GlobalSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const location = useLocation()
   const navigate = useNavigate()
+
+  const go = (to: string) => {
+    navigate(to)
+    onNavigate?.()
+  }
 
   return (
     <Nav className="px-3 py-4">
@@ -86,7 +96,7 @@ function GlobalSidebar() {
           <NavItem
             key={entry.to}
             active={isActive(location.pathname, entry)}
-            onClick={() => navigate(entry.to)}
+            onClick={() => go(entry.to)}
           >
             {entry.label}
           </NavItem>
@@ -96,7 +106,13 @@ function GlobalSidebar() {
   )
 }
 
-function NamespaceSidebar({ currentNs }: { currentNs: string }) {
+function NamespaceSidebar({
+  currentNs,
+  onNavigate,
+}: {
+  currentNs: string
+  onNavigate?: () => void
+}) {
   const location = useLocation()
   const navigate = useNavigate()
   const nsList = useNamespaces()
@@ -129,12 +145,18 @@ function NamespaceSidebar({ currentNs }: { currentNs: string }) {
   const switchTo = (nextNs: string) => {
     if (!nextNs || nextNs === currentNs) return
     navigate(`/ns/${encodeURIComponent(nextNs)}${subPath}`)
+    onNavigate?.()
+  }
+
+  const go = (to: string) => {
+    navigate(to)
+    onNavigate?.()
   }
 
   return (
     <Nav className="px-3 py-4">
       <Stack>
-        <NavItem onClick={() => navigate('/')}>← Fleet</NavItem>
+        <NavItem onClick={() => go('/')}>← Fleet</NavItem>
         <div className="px-3">
           <Combobox
             size="sm"
@@ -152,7 +174,7 @@ function NamespaceSidebar({ currentNs }: { currentNs: string }) {
           <NavItem
             key={entry.to}
             active={isActive(location.pathname, entry)}
-            onClick={() => navigate(entry.to)}
+            onClick={() => go(entry.to)}
           >
             {entry.label}
           </NavItem>

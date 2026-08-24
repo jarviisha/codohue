@@ -28,8 +28,16 @@ import {
   type NamespaceConfig,
   type NamespaceUpsertRequest,
 } from '@/services/namespaces'
+import { useCatalogStrategies } from '@/services/catalog'
 import PageHeader from '@/components/shell/PageHeader'
 import DirtyFormGuard from '@/components/shell/DirtyFormGuard'
+import CatalogStrategyFields from '@/components/CatalogStrategyFields'
+
+// The form lives in the page body while Save/Reset are portalled into the
+// global header, i.e. outside the <form> element. `form={FORM_ID}` re-attaches
+// the submit button across that DOM gap so the browser runs native constraint
+// validation — calling handleSubmit from an onClick skips it entirely.
+const FORM_ID = 'namespace-config-form'
 
 const DENSE_SOURCES = [
   { value: 'disabled', label: 'disabled — sparse only' },
@@ -124,6 +132,9 @@ function ConfigForm({
   error: string | undefined
 }) {
   const [draft, setDraft] = useState<NamespaceConfig>(initial)
+  // Catalog strategy pickers, only used while switching *into* catalog mode.
+  const [strategyId, setStrategyId] = useState('')
+  const [strategyVersion, setStrategyVersion] = useState('')
   // Action weights kept as ordered entries so adds/removes don't reshuffle
   // existing rows on every keystroke. A freshly created namespace can come
   // back with action_weights = null, so coalesce before iterating.
@@ -135,10 +146,31 @@ function ConfigForm({
       })),
   )
 
-  const dirty = useMemo(() => diffConfig(initial, draft, weights).dirty, [initial, draft, weights])
+  // Once a namespace is in catalog mode the upsert cannot move it out — the
+  // repository pins dense_source='catalog' and leaving the mode belongs to the
+  // catalog endpoint (disable). Sending it anyway returned 200 and the UI
+  // toasted "saved" while the column never moved, so the picker is locked here
+  // and the operator is pointed at the Catalog tab instead.
+  const lockedInCatalog = initial.dense_source === 'catalog'
+  const switchingToCatalog = !lockedInCatalog && draft.dense_source === 'catalog'
+
+  const strategies = useCatalogStrategies(draft.embedding_dim, switchingToCatalog)
+  const descriptors = useMemo(() => strategies.data?.strategies ?? [], [strategies.data])
+
+  const catalogSelection = useMemo(
+    () => (switchingToCatalog ? { id: strategyId, version: strategyVersion } : undefined),
+    [switchingToCatalog, strategyId, strategyVersion],
+  )
+
+  const dirty = useMemo(
+    () => diffConfig(initial, draft, weights, catalogSelection).dirty,
+    [initial, draft, weights, catalogSelection],
+  )
 
   const reset = () => {
     setDraft(initial)
+    setStrategyId('')
+    setStrategyVersion('')
     setWeights(
       Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({
         name,
@@ -147,9 +179,13 @@ function ConfigForm({
     )
   }
 
+  // Blocks a submit the backend would reject: catalog mode needs its strategy
+  // in the same request (422 otherwise).
+  const catalogIncomplete = switchingToCatalog && (strategyId === '' || strategyVersion === '')
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
-    const { body } = diffConfig(initial, draft, weights)
+    const { body } = diffConfig(initial, draft, weights, catalogSelection)
     onSubmit(body, reset)
   }
 
@@ -168,17 +204,27 @@ function ConfigForm({
             </p>
           </Stack>
           <Inline align="center">
-            <Button variant="ghost" tone="neutral" disabled={!dirty || saving} onClick={reset}>
+            <Button
+              type="button"
+              variant="ghost"
+              tone="neutral"
+              disabled={!dirty || saving}
+              onClick={reset}
+            >
               Reset
             </Button>
-            <Button onClick={handleSubmit} disabled={!dirty || saving}>
+            <Button
+              type="submit"
+              form={FORM_ID}
+              disabled={!dirty || saving || catalogIncomplete}
+            >
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </Inline>
         </Inline>
       </PageHeader>
 
-      <form onSubmit={handleSubmit}>
+      <form id={FORM_ID} onSubmit={handleSubmit}>
         <Stack>
           {error && <Alert variant="danger" title="Save failed" description={error} />}
 
@@ -201,12 +247,13 @@ function ConfigForm({
             </FormField>
             <FormField
               label="Lambda (time decay)"
-              helpText="Higher = older events count less. Applied during sparse vector build."
+              helpText="Higher = older events count less. Applied during sparse vector build. Must be > 0."
             >
               <Input
                 type="number"
                 step="0.001"
-                min={0}
+                min={0.001}
+                required
                 value={draft.lambda}
                 onChange={(e) => setDraft({ ...draft, lambda: Number(e.target.value) })}
               />
@@ -264,11 +311,20 @@ function ConfigForm({
           >
             <FormField
               label="Dense source"
-              helpText="Single producer of object dense vectors: disabled (sparse only), byoe (you push embeddings), item2vec / svd (cron retrains from events), or catalog (auto-embed ingested content — set the strategy in the Catalog tab)."
+              helpText={
+                lockedInCatalog
+                  ? 'This namespace is in catalog mode. Leaving catalog mode is owned by the catalog endpoint — use Disable on the Catalog tab; changing it here would be silently ignored.'
+                  : 'Single producer of object dense vectors: disabled (sparse only), byoe (you push embeddings), item2vec / svd (cron retrains from events), or catalog (auto-embed ingested content — pick the strategy below).'
+              }
             >
               <Select
                 value={draft.dense_source}
-                onChange={(e) => setDraft({ ...draft, dense_source: e.target.value })}
+                disabled={lockedInCatalog}
+                onChange={(e) => {
+                  setDraft({ ...draft, dense_source: e.target.value })
+                  setStrategyId('')
+                  setStrategyVersion('')
+                }}
               >
                 {DENSE_SOURCES.map((s) => (
                   <option key={s.value} value={s.value}>
@@ -277,6 +333,22 @@ function ConfigForm({
                 ))}
               </Select>
             </FormField>
+
+            {switchingToCatalog && (
+              <CatalogStrategyFields
+                embeddingDim={draft.embedding_dim}
+                descriptors={descriptors}
+                loading={strategies.isLoading}
+                error={strategies.error?.message}
+                strategyId={strategyId}
+                strategyVersion={strategyVersion}
+                onStrategyId={(next) => {
+                  setStrategyId(next)
+                  setStrategyVersion(descriptors.find((s) => s.id === next)?.version ?? '')
+                }}
+                onStrategyVersion={setStrategyVersion}
+              />
+            )}
             <FormField
               label="Embedding dim"
               helpText="Width of dense vectors. Must match what your producer sends (BYOE) or what item2vec/svd is configured for."
@@ -286,7 +358,13 @@ function ConfigForm({
                 min={8}
                 max={2048}
                 value={draft.embedding_dim}
-                onChange={(e) => setDraft({ ...draft, embedding_dim: Number(e.target.value) })}
+                onChange={(e) => {
+                  setDraft({ ...draft, embedding_dim: Number(e.target.value) })
+                  // Strategies are listed per dim, so a dim change can
+                  // invalidate the current pick.
+                  setStrategyId('')
+                  setStrategyVersion('')
+                }}
               />
             </FormField>
             <FormField
@@ -334,12 +412,13 @@ function ConfigForm({
             </FormField>
             <FormField
               label="Lambda trending"
-              helpText="Time decay applied while building the trending ZSET. Independent of the sparse lambda."
+              helpText="Time decay applied while building the trending ZSET. Independent of the sparse lambda. Must be > 0."
             >
               <Input
                 type="number"
                 step="0.001"
-                min={0}
+                min={0.001}
+                required
                 value={draft.lambda_trending}
                 onChange={(e) => setDraft({ ...draft, lambda_trending: Number(e.target.value) })}
               />
@@ -461,6 +540,7 @@ function diffConfig(
   initial: NamespaceConfig,
   draft: NamespaceConfig,
   weights: Array<{ name: string; value: string }>,
+  catalog?: { id: string; version: string },
 ): { body: NamespaceUpsertRequest; dirty: boolean } {
   const body: NamespaceUpsertRequest = {}
   const scalarFields: Array<{
@@ -518,6 +598,16 @@ function diffConfig(
   }
   if (weightsChanged) {
     body.action_weights = nextMap
+  }
+
+  // dense_source="catalog" is only accepted with its strategy alongside, so the
+  // backend can validate the strategy dim against embedding_dim in the same
+  // request. Sent whenever the operator is switching into catalog mode, even
+  // before both pickers are filled — the submit itself is gated separately, and
+  // a partial selection still counts as dirty.
+  if (body.dense_source === 'catalog' && catalog) {
+    body.catalog_strategy_id = catalog.id
+    body.catalog_strategy_version = catalog.version
   }
 
   return { body, dirty: Object.keys(body).length > 0 }

@@ -25,6 +25,7 @@ const SubjectsListPage = lazy(() => import('@/pages/ns/subjects/SubjectsListPage
 const TrendingPage = lazy(() => import('@/pages/ns/trending/TrendingPage'))
 const NamespaceConfigPage = lazy(() => import('@/pages/ns/config/NamespaceConfigPage'))
 const NamespaceOverviewPage = lazy(() => import('@/pages/ns/NamespaceOverviewPage'))
+const NotFoundPage = lazy(() => import('@/pages/not-found/NotFoundPage'))
 
 // withSuspense wraps a lazy page in a Suspense boundary so each route gets
 // its own loading fallback. The fallback is intentionally generic — pages
@@ -72,8 +73,12 @@ const router = createBrowserRouter([
           { path: 'events', element: withSuspense(EventsPage) },
           { path: 'trending', element: withSuspense(TrendingPage) },
           { path: 'config', element: withSuspense(NamespaceConfigPage) },
+          // Unmatched sub-paths under a namespace resolve here rather than
+          // escaping the shell to React Router's default error screen.
+          { path: '*', element: withSuspense(NotFoundPage) },
         ],
       },
+      { path: '*', element: withSuspense(NotFoundPage) },
     ],
   },
 ])
