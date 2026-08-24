@@ -361,9 +361,11 @@ func (f *fakeNSConfig) Upsert(_ context.Context, namespace string, req *Namespac
 // ─── fake catalog configurator ───────────────────────────────────────────────
 
 type fakeCatalogConfig struct {
-	updateReq *NamespaceCatalogUpdateRequest
-	err       error
-	getResp   *NamespaceCatalogConfig
+	updateReq  *NamespaceCatalogUpdateRequest
+	err        error
+	getResp    *NamespaceCatalogConfig
+	strategies []CatalogStrategyDescriptor
+	askedDim   int
 }
 
 func (f *fakeCatalogConfig) GetCatalog(_ context.Context, _ string) (*NamespaceCatalogConfig, error) {
@@ -384,8 +386,9 @@ func (f *fakeCatalogConfig) UpdateCatalog(_ context.Context, namespace string, r
 	}, nil
 }
 
-func (f *fakeCatalogConfig) AvailableStrategies(_ int) []CatalogStrategyDescriptor {
-	return nil
+func (f *fakeCatalogConfig) AvailableStrategies(dim int) []CatalogStrategyDescriptor {
+	f.askedDim = dim
+	return f.strategies
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -399,6 +402,42 @@ func newTestServiceWithNS(repo adminRepo, apiURL, apiKey string, ns nsConfigUpse
 }
 
 // ─── tests ────────────────────────────────────────────────────────────────────
+
+func TestListCatalogStrategies_ForwardsDim(t *testing.T) {
+	cfg := &fakeCatalogConfig{strategies: []CatalogStrategyDescriptor{
+		{ID: "internal-hashing-ngrams", Version: "v1", Dim: 128},
+	}}
+	svc := newTestService(&fakeRepo{}, "", "")
+	svc.SetCatalogConfigurator(cfg)
+
+	got, err := svc.ListCatalogStrategies(128)
+	if err != nil {
+		t.Fatalf("ListCatalogStrategies returned error: %v", err)
+	}
+	if cfg.askedDim != 128 {
+		t.Errorf("expected dim 128 forwarded, got %d", cfg.askedDim)
+	}
+	if len(got) != 1 {
+		t.Errorf("expected 1 strategy, got %d", len(got))
+	}
+
+	// A negative dim is normalised to 0 ("every variant") rather than
+	// silently filtering everything out.
+	if _, err := svc.ListCatalogStrategies(-5); err != nil {
+		t.Fatalf("ListCatalogStrategies(-5) returned error: %v", err)
+	}
+	if cfg.askedDim != 0 {
+		t.Errorf("expected negative dim normalised to 0, got %d", cfg.askedDim)
+	}
+}
+
+func TestListCatalogStrategies_Unwired(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, "", "")
+
+	if _, err := svc.ListCatalogStrategies(0); !errors.Is(err, ErrCatalogConfiguratorUnavailable) {
+		t.Fatalf("expected ErrCatalogConfiguratorUnavailable, got %v", err)
+	}
+}
 
 func TestCreateDemoData_PublishesCatalogItemsWithIDs(t *testing.T) {
 	repo := &fakeRepo{

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { apiFetch } from './http'
+import { ApiError, apiFetch } from './http'
 import { queryKeys } from './queryKeys'
 import type { BatchRunSummary } from './batchRuns'
 
@@ -43,6 +43,13 @@ export type NamespaceUpsertRequest = {
   trending_window?: number
   trending_ttl?: number
   lambda_trending?: number
+  /**
+   * Only honoured with dense_source="catalog", where the backend requires
+   * both fields in the same request (422 otherwise) so it can run the
+   * registry + dim validation before flipping the namespace into catalog mode.
+   */
+  catalog_strategy_id?: string
+  catalog_strategy_version?: string
 }
 
 export type NamespaceUpsertResponse = {
@@ -92,6 +99,26 @@ export function useNamespaces() {
     queryFn: () => apiFetch<NamespacesListResponse>('/api/admin/v1/namespaces'),
     staleTime: 30_000,
   })
+}
+
+/**
+ * lookupNamespace resolves a namespace config, or null when it does not exist.
+ *
+ * The create-namespace form needs this because creation rides the same PUT
+ * upsert as an edit: without a pre-flight existence check, typing a name that
+ * is already taken silently overwrites that namespace's config and reports
+ * success. Any other failure re-throws — a broken lookup must not read as
+ * "name is free".
+ */
+export async function lookupNamespace(namespace: string): Promise<NamespaceConfig | null> {
+  try {
+    return await apiFetch<NamespaceConfig>(
+      `/api/admin/v1/namespaces/${encodeURIComponent(namespace)}`,
+    )
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
 }
 
 export function useNamespaceDashboard(ns: string | null) {

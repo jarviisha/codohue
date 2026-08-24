@@ -149,6 +149,7 @@ export type CatalogReEmbedResponse = {
 
 const catalogKeys = {
   config: (ns: string) => ['catalog', ns, 'config'] as const,
+  strategies: (dim: number) => ['catalog', 'strategies', dim] as const,
   backlogHistory: (ns: string, window: string) =>
     ['catalog', ns, 'backlog-history', window] as const,
   failures: (ns: string, window: string) => ['catalog', ns, 'failures', window] as const,
@@ -167,6 +168,32 @@ export function useCatalogConfig(ns: string | null) {
     queryFn: () => apiFetch<NamespaceCatalogResponse>(`/api/admin/v1/namespaces/${ns}/catalog`),
     enabled: ns != null && ns !== '',
     refetchInterval: 15_000,
+  })
+}
+
+export type CatalogStrategiesResponse = {
+  strategies: CatalogStrategyDescriptor[]
+}
+
+/**
+ * useCatalogStrategies reads the strategy registry without a namespace, so
+ * forms can offer a picker for a namespace that does not exist yet (the
+ * per-namespace catalog endpoint 404s until it does). `dim` narrows the list
+ * to strategies that fit that embedding_dim; 0 returns every variant.
+ *
+ * `enabled` lets callers skip the request until the operator actually selects
+ * catalog mode.
+ */
+export function useCatalogStrategies(dim: number, enabled = true) {
+  const effectiveDim = Number.isFinite(dim) && dim > 0 ? dim : 0
+  return useQuery({
+    queryKey: catalogKeys.strategies(effectiveDim),
+    queryFn: () =>
+      apiFetch<CatalogStrategiesResponse>(
+        `/api/admin/v1/catalog/strategies${effectiveDim > 0 ? `?dim=${effectiveDim}` : ''}`,
+      ),
+    enabled,
+    staleTime: 5 * 60_000,
   })
 }
 

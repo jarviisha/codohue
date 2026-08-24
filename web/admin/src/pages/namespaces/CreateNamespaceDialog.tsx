@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Alert,
@@ -16,7 +16,10 @@ import {
   Select,
   Stack,
 } from '@jarviisha/davinci-react-ui'
-import { useUpsertNamespace } from '@/services/namespaces'
+import { lookupNamespace, useUpsertNamespace } from '@/services/namespaces'
+import { useCatalogStrategies } from '@/services/catalog'
+import CatalogStrategyFields from '@/components/CatalogStrategyFields'
+import SecretValue from '@/components/SecretValue'
 
 const DENSE_SOURCES = [
   { value: 'disabled', label: 'disabled — sparse only' },
@@ -32,35 +35,92 @@ type Props = {
 }
 
 export default function CreateNamespaceDialog({ open, onOpenChange }: Props) {
+  // While the freshly minted API key is on screen the dialog stops being
+  // dismissible by Escape / backdrop click: the key is shown once and a stray
+  // click costs the operator a key rotation to recover.
+  const [keyOnScreen, setKeyOnScreen] = useState(false)
+
+  const handleOpenChange = (next: boolean) => {
+    if (!next) setKeyOnScreen(false)
+    onOpenChange(next)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} >
+    <Dialog
+      open={open}
+      onOpenChange={handleOpenChange}
+      closeOnEscape={!keyOnScreen}
+      closeOnOverlayClick={!keyOnScreen}
+    >
       {/*
        * Mount the body only while open so every field, the surfaced API key,
        * and the mutation state start fresh on each open — no effect-based reset
        * (which triggers cascading renders) needed.
        */}
-      {open && <CreateNamespaceBody onOpenChange={onOpenChange} />}
+      {open && <CreateNamespaceBody onOpenChange={handleOpenChange} onKeyShown={setKeyOnScreen} />}
     </Dialog>
   )
 }
 
-function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
+function CreateNamespaceBody({
+  onOpenChange,
+  onKeyShown,
+}: Pick<Props, 'onOpenChange'> & { onKeyShown: (shown: boolean) => void }) {
   const navigate = useNavigate()
   const upsert = useUpsertNamespace()
 
   const [namespace, setNamespace] = useState('')
   const [denseSource, setDenseSource] = useState('disabled')
   const [embeddingDim, setEmbeddingDim] = useState(64)
+  const [strategyId, setStrategyId] = useState('')
+  const [strategyVersion, setStrategyVersion] = useState('')
   const [apiKeyShown, setApiKeyShown] = useState<string | null>(null)
+  // Set when the name is already taken, or when the pre-flight lookup itself
+  // failed. Both block the submit: creating is a PUT upsert, so proceeding on
+  // an unknown answer risks overwriting a live namespace's config.
+  const [preflightError, setPreflightError] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
 
-  const onSubmit = (event: FormEvent) => {
+  const catalogMode = denseSource === 'catalog'
+  const strategies = useCatalogStrategies(embeddingDim, catalogMode)
+  const descriptors = useMemo(() => strategies.data?.strategies ?? [], [strategies.data])
+
+  const onSubmit = async (event: FormEvent) => {
     event.preventDefault()
+    setPreflightError(null)
+
+    setChecking(true)
+    try {
+      const existing = await lookupNamespace(namespace)
+      if (existing) {
+        setPreflightError(
+          `Namespace "${namespace}" already exists (dense_source=${existing.dense_source}, embedding_dim=${existing.embedding_dim}). Open it from the namespaces list to edit its config.`,
+        )
+        return
+      }
+    } catch (error) {
+      setPreflightError(
+        `Could not check whether "${namespace}" already exists: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }. Not creating, since creating would overwrite an existing namespace.`,
+      )
+      return
+    } finally {
+      setChecking(false)
+    }
+
     upsert.mutate(
       {
         namespace,
         body: {
           dense_source: denseSource,
           embedding_dim: embeddingDim,
+          // The backend rejects dense_source="catalog" unless the strategy
+          // rides along in the same request, so it can validate the strategy
+          // dim against embedding_dim before flipping the namespace over.
+          ...(catalogMode
+            ? { catalog_strategy_id: strategyId, catalog_strategy_version: strategyVersion }
+            : {}),
         },
       },
       {
@@ -69,6 +129,7 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
             // First-create: the API key is returned once. Surface it here so
             // the operator can copy it before leaving the dialog.
             setApiKeyShown(data.api_key)
+            onKeyShown(true)
           } else {
             onOpenChange(false)
             navigate(`/ns/${encodeURIComponent(namespace)}`)
@@ -78,6 +139,9 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
     )
   }
 
+  const catalogIncomplete = catalogMode && (strategyId === '' || strategyVersion === '')
+  const busy = checking || upsert.isPending
+
   return (
     <>
       {apiKeyShown ? (
@@ -85,7 +149,8 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
           <DialogHeader>
             <DialogTitle>Namespace created</DialogTitle>
             <DialogDescription>
-              Copy the API key below — this is the only time it will be shown.
+              Copy the API key below — this is the only time it will be shown. Losing it means
+              rotating the key.
             </DialogDescription>
           </DialogHeader>
           <DialogContent>
@@ -95,7 +160,7 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
                 title={namespace}
                 description="API key (per-namespace data plane)"
               />
-              <code className="font-mono text-sm break-all block">{apiKeyShown}</code>
+              <SecretValue value={apiKeyShown} label="namespace API key" />
             </Stack>
           </DialogContent>
           <DialogFooter>
@@ -119,6 +184,9 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
           </DialogHeader>
           <DialogContent>
             <Stack>
+              {preflightError && (
+                <Alert variant="danger" title="Cannot create" description={preflightError} />
+              )}
               {upsert.error && (
                 <Alert
                   variant="danger"
@@ -130,7 +198,10 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
               <FormField label="Namespace name" required>
                 <Input
                   value={namespace}
-                  onChange={(e) => setNamespace(e.target.value)}
+                  onChange={(e) => {
+                    setNamespace(e.target.value)
+                    setPreflightError(null)
+                  }}
                   pattern="[a-z0-9_-]+"
                   required
                   autoFocus
@@ -139,7 +210,14 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
               </FormField>
 
               <FormField label="Dense source" required>
-                <Select value={denseSource} onChange={(e) => setDenseSource(e.target.value)}>
+                <Select
+                  value={denseSource}
+                  onChange={(e) => {
+                    setDenseSource(e.target.value)
+                    setStrategyId('')
+                    setStrategyVersion('')
+                  }}
+                >
                   {DENSE_SOURCES.map((s) => (
                     <option key={s.value} value={s.value}>
                       {s.label}
@@ -154,11 +232,33 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
               >
                 <NumberInput
                   value={embeddingDim}
-                  onChange={(e) => setEmbeddingDim(Number(e.target.value))}
+                  onChange={(e) => {
+                    setEmbeddingDim(Number(e.target.value))
+                    // Strategies are filtered by dim, so a dim change can
+                    // invalidate the current pick.
+                    setStrategyId('')
+                    setStrategyVersion('')
+                  }}
                   min={8}
                   max={2048}
                 />
               </FormField>
+
+              {catalogMode && (
+                <CatalogStrategyFields
+                  embeddingDim={embeddingDim}
+                  descriptors={descriptors}
+                  loading={strategies.isLoading}
+                  error={strategies.error?.message}
+                  strategyId={strategyId}
+                  strategyVersion={strategyVersion}
+                  onStrategyId={(next) => {
+                    setStrategyId(next)
+                    setStrategyVersion(descriptors.find((s) => s.id === next)?.version ?? '')
+                  }}
+                  onStrategyVersion={setStrategyVersion}
+                />
+              )}
             </Stack>
           </DialogContent>
           <DialogFooter>
@@ -166,8 +266,11 @@ function CreateNamespaceBody({ onOpenChange }: Pick<Props, 'onOpenChange'>) {
               <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={upsert.isPending || namespace.length === 0}>
-                {upsert.isPending ? 'Creating…' : 'Create'}
+              <Button
+                type="submit"
+                disabled={busy || namespace.length === 0 || catalogIncomplete}
+              >
+                {busy ? 'Creating…' : 'Create'}
               </Button>
             </Inline>
           </DialogFooter>

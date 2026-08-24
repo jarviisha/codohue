@@ -66,7 +66,10 @@ func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, 
 		// App-wide reset (danger zone).
 		r.Post("/api/admin/v1/reset", h.ResetApp)
 
-		// Catalog auto-embedding (feature 004) — per-namespace config.
+		// Catalog auto-embedding (feature 004) — registry read, then per-namespace
+		// config. The registry read is namespace-free so the create-namespace form
+		// can offer a strategy picker before the namespace exists.
+		r.Get("/api/admin/v1/catalog/strategies", h.ListCatalogStrategies)
 		r.Get("/api/admin/v1/namespaces/{ns}/catalog", h.GetCatalogConfig)
 		r.Put("/api/admin/v1/namespaces/{ns}/catalog", h.UpdateCatalogConfig)
 

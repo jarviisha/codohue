@@ -60,6 +60,13 @@ type CatalogStrategyDescriptor struct {
 	Description   string `json:"description,omitempty"`
 }
 
+// CatalogStrategiesResponse is the body of GET /api/admin/v1/catalog/strategies.
+// Namespace-independent on purpose: the create-namespace form needs the picker
+// before the namespace exists, and .../namespaces/{ns}/catalog 404s until then.
+type CatalogStrategiesResponse struct {
+	Strategies []CatalogStrategyDescriptor `json:"strategies"`
+}
+
 // CatalogBacklog is a snapshot of operational counts surfaced by
 // GET .../catalog. Counts are approximate (sampled, not transactional).
 type CatalogBacklog struct {

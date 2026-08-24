@@ -62,6 +62,7 @@ type adminSvc interface {
 	RotateNamespaceAPIKey(ctx context.Context, namespace string) (*NamespaceKeyRotateResponse, error)
 	ResetApp(ctx context.Context) (*ResetAppResponse, error)
 	GetCatalogConfig(ctx context.Context, namespace string) (*NamespaceCatalogResponse, error)
+	ListCatalogStrategies(dim int) ([]CatalogStrategyDescriptor, error)
 	UpdateCatalogConfig(ctx context.Context, namespace string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error)
 	TriggerReEmbed(ctx context.Context, namespace, onlyState string) (*CatalogReEmbedResponse, error)
 	ListCatalogItems(ctx context.Context, namespace, state string, limit, offset int, objectIDFilter, authorFilter string) (*CatalogItemsListResponse, error)
@@ -258,6 +259,33 @@ func (h *Handler) GetCatalogConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+// ListCatalogStrategies handles GET /api/admin/v1/catalog/strategies.
+// Optional ?dim=N narrows the list to strategies that fit that embedding_dim;
+// an unparseable or non-positive dim returns every registered variant.
+// Returns 503 when the catalog feature is not wired in this deployment.
+func (h *Handler) ListCatalogStrategies(w http.ResponseWriter, r *http.Request) {
+	dim := 0
+	if raw := r.URL.Query().Get("dim"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			dim = n
+		}
+	}
+	strategies, err := h.svc.ListCatalogStrategies(dim)
+	if err != nil {
+		if errors.Is(err, ErrCatalogConfiguratorUnavailable) {
+			httpapi.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable",
+				"catalog auto-embedding is not wired in this deployment")
+			return
+		}
+		writeInternalError(w, r, "could not list catalog strategies", err)
+		return
+	}
+	if strategies == nil {
+		strategies = []CatalogStrategyDescriptor{}
+	}
+	httpapi.WriteJSON(w, http.StatusOK, CatalogStrategiesResponse{Strategies: strategies})
 }
 
 // UpdateCatalogConfig handles PUT /api/admin/v1/namespaces/{ns}/catalog.

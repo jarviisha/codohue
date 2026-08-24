@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.VITE_ADMIN_API_BASE_URL ?? ''
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number
   code: string
 
@@ -56,3 +56,12 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
 }
 
 export const apiBaseUrl = API_BASE
+
+/**
+ * isAuthError distinguishes "the session is gone" from "the request failed".
+ * AuthGuard needs the split: bouncing to /login on a 500 or a dropped
+ * connection logs out an operator whose session is perfectly valid.
+ */
+export function isAuthError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401
+}

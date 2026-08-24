@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,9 @@ type fakeSvc struct {
 	demoErr            error
 	catalogGetResp     *NamespaceCatalogResponse
 	catalogGetErr      error
+	strategiesResp     []CatalogStrategyDescriptor
+	strategiesErr      error
+	strategiesDim      int
 	catalogUpdateResp  *NamespaceCatalogConfig
 	catalogUpdateErr   error
 	catalogUpdateReq   *NamespaceCatalogUpdateRequest
@@ -224,6 +228,11 @@ func (f *fakeSvc) DeleteDemoData(_ context.Context) (*DemoDatasetResponse, error
 
 func (f *fakeSvc) GetCatalogConfig(_ context.Context, _ string) (*NamespaceCatalogResponse, error) {
 	return f.catalogGetResp, f.catalogGetErr
+}
+
+func (f *fakeSvc) ListCatalogStrategies(dim int) ([]CatalogStrategyDescriptor, error) {
+	f.strategiesDim = dim
+	return f.strategiesResp, f.strategiesErr
 }
 
 func (f *fakeSvc) UpdateCatalogConfig(_ context.Context, _ string, req *NamespaceCatalogUpdateRequest) (*NamespaceCatalogConfig, error) {
@@ -1088,6 +1097,64 @@ func TestGetCatalogConfig_OK(t *testing.T) {
 	}
 	if len(got.AvailableStrategies) != 1 {
 		t.Errorf("expected 1 available strategy, got %d", len(got.AvailableStrategies))
+	}
+}
+
+func TestListCatalogStrategies_FiltersByDim(t *testing.T) {
+	svc := &fakeSvc{strategiesResp: []CatalogStrategyDescriptor{
+		{ID: "internal-hashing-ngrams", Version: "v1", Dim: 128},
+	}}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/catalog/strategies?dim=128", nil, "")
+
+	h.ListCatalogStrategies(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.strategiesDim != 128 {
+		t.Errorf("expected dim 128 forwarded to service, got %d", svc.strategiesDim)
+	}
+	var got CatalogStrategiesResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Strategies) != 1 || got.Strategies[0].ID != "internal-hashing-ngrams" {
+		t.Errorf("unexpected strategies: %+v", got.Strategies)
+	}
+}
+
+func TestListCatalogStrategies_UnparseableDimMeansAll(t *testing.T) {
+	svc := &fakeSvc{strategiesResp: nil}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/catalog/strategies?dim=abc", nil, "")
+
+	h.ListCatalogStrategies(rec, r)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if svc.strategiesDim != 0 {
+		t.Errorf("expected dim 0 (all variants), got %d", svc.strategiesDim)
+	}
+	// A nil slice must still marshal as [] so the UI can map over it.
+	if body := rec.Body.String(); !strings.Contains(body, `"strategies":[]`) {
+		t.Errorf("expected empty array in body, got %s", body)
+	}
+}
+
+func TestListCatalogStrategies_Unavailable(t *testing.T) {
+	svc := &fakeSvc{strategiesErr: ErrCatalogConfiguratorUnavailable}
+	h := newTestHandler(svc)
+	rec := httptest.NewRecorder()
+	r := newChiRequest(http.MethodGet, "/api/admin/v1/catalog/strategies", nil, "")
+
+	h.ListCatalogStrategies(rec, r)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

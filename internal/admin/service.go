@@ -363,6 +363,20 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 	return resp, nil
 }
 
+// ListCatalogStrategies returns the registered embed strategies, optionally
+// narrowed to those whose Dim matches dim (dim <= 0 means "every variant").
+// Unlike GetCatalogConfig this takes no namespace, so the create-namespace
+// form can render its strategy picker before the namespace exists.
+func (s *Service) ListCatalogStrategies(dim int) ([]CatalogStrategyDescriptor, error) {
+	if s.catalogConfig == nil {
+		return nil, ErrCatalogConfiguratorUnavailable
+	}
+	if dim < 0 {
+		dim = 0
+	}
+	return s.catalogConfig.AvailableStrategies(dim), nil
+}
+
 // summarizeReembedRun derives the CatalogReEmbedSummary projection from a
 // batch_run_logs row that was created with trigger_source='admin_reembed'.
 // Reads target strategy from the dedicated columns added by migration 012;
