@@ -130,5 +130,5 @@ In pull requests:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/005-dense-source-unification/plan.md
+at specs/007-backend-audit-remediation/plan.md
 <!-- SPECKIT END -->
