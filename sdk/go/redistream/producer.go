@@ -21,8 +21,9 @@ type XAdder interface {
 // stream name matches what the Codohue ingest worker consumes; override only
 // if you are running a custom deployment.
 type Producer struct {
-	rdb    XAdder
-	stream string
+	rdb                 XAdder
+	stream              string
+	namespaceGeneration int64
 }
 
 // Option configures a Producer.
@@ -33,6 +34,16 @@ func WithStream(name string) Option {
 	return func(p *Producer) {
 		if name != "" {
 			p.stream = name
+		}
+	}
+}
+
+// WithNamespaceGeneration stamps events that do not already carry a
+// namespace generation. Explicit per-event generations take precedence.
+func WithNamespaceGeneration(generation int64) Option {
+	return func(p *Producer) {
+		if generation > 0 {
+			p.namespaceGeneration = generation
 		}
 	}
 }
@@ -52,6 +63,9 @@ func NewProducer(rdb XAdder, opts ...Option) *Producer {
 
 // Publish XADDs a single event and returns the assigned Redis stream ID.
 func (p *Producer) Publish(ctx context.Context, event codohuetypes.EventPayload) (string, error) {
+	if event.NamespaceGeneration == 0 && p.namespaceGeneration > 0 {
+		event.NamespaceGeneration = p.namespaceGeneration
+	}
 	raw, err := json.Marshal(event)
 	if err != nil {
 		return "", fmt.Errorf("codohue/redistream: marshal event: %w", err)

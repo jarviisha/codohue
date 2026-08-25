@@ -49,6 +49,16 @@ func (n *Namespace) IngestCatalogBatch(ctx context.Context, items []codohuetypes
 // changedSince (RFC3339) to fetch only objects updated after that instant, so
 // a repair pass re-sends the gap instead of the whole corpus.
 func (n *Namespace) ListCatalogObjects(ctx context.Context, changedSince string, limit, offset int) (*codohuetypes.CatalogObjectsResponse, error) {
+	return n.ListCatalogObjectsPage(ctx, changedSince, limit, offset, "")
+}
+
+// ListCatalogObjectsPage continues reconciliation from an opaque server
+// cursor. Offset remains available for legacy callers but must be zero when
+// cursor is non-empty.
+func (n *Namespace) ListCatalogObjectsPage(ctx context.Context, changedSince string, limit, offset int, cursor string) (*codohuetypes.CatalogObjectsResponse, error) {
+	if cursor != "" && offset != 0 {
+		return nil, fmt.Errorf("codohue: cursor and offset cannot be combined")
+	}
 	q := url.Values{}
 	if changedSince != "" {
 		q.Set("changed_since", changedSince)
@@ -58,6 +68,9 @@ func (n *Namespace) ListCatalogObjects(ctx context.Context, changedSince string,
 	}
 	if offset > 0 {
 		q.Set("offset", fmt.Sprint(offset))
+	}
+	if cursor != "" {
+		q.Set("cursor", cursor)
 	}
 	path := "/v1/namespaces/" + url.PathEscape(n.namespace) + "/catalog/objects"
 	var out codohuetypes.CatalogObjectsResponse

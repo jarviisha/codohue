@@ -8,6 +8,19 @@ import (
 // Option configures a Client.
 type Option func(*Client)
 
+// NamespaceOption configures one namespace-scoped SDK wrapper.
+type NamespaceOption func(*Namespace)
+
+// WithNamespaceGeneration binds a namespace wrapper to the generation
+// returned by namespace provisioning. Non-positive values retain legacy mode.
+func WithNamespaceGeneration(generation int64) NamespaceOption {
+	return func(namespace *Namespace) {
+		if generation > 0 {
+			namespace.generation = generation
+		}
+	}
+}
+
 // WithHTTPClient overrides the http.Client used for all requests. Useful for
 // injecting custom transports, mTLS config, or fake clients in tests.
 func WithHTTPClient(h *http.Client) Option {

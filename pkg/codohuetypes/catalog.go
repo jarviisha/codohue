@@ -24,11 +24,12 @@ type CatalogIngestRequest struct {
 // Unlike the HTTP body it carries Namespace, because a stream entry has no
 // URL path. Validation is identical to the HTTP path once consumed.
 type CatalogStreamItem struct {
-	Namespace       string         `json:"namespace"`
-	ObjectID        string         `json:"object_id"`
-	Content         string         `json:"content"`
-	AuthorSubjectID string         `json:"author_subject_id,omitempty"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
+	Namespace           string         `json:"namespace"`
+	NamespaceGeneration int64          `json:"namespace_generation,omitempty"`
+	ObjectID            string         `json:"object_id"`
+	Content             string         `json:"content"`
+	AuthorSubjectID     string         `json:"author_subject_id,omitempty"`
+	Metadata            map[string]any `json:"metadata,omitempty"`
 }
 
 // CatalogBatchIngestRequest is the JSON body for
@@ -75,9 +76,10 @@ type CatalogObjectSummary struct {
 // updated_at ascending so a repair pass can page forward and resume from the
 // last UpdatedAt it saw.
 type CatalogObjectsResponse struct {
-	Namespace string                 `json:"namespace"`
-	Items     []CatalogObjectSummary `json:"items"`
-	Total     int                    `json:"total"`
-	Limit     int                    `json:"limit"`
-	Offset    int                    `json:"offset"`
+	Namespace  string                 `json:"namespace"`
+	Items      []CatalogObjectSummary `json:"items"`
+	Total      int                    `json:"total"`
+	Limit      int                    `json:"limit"`
+	Offset     int                    `json:"offset"`
+	NextCursor string                 `json:"next_cursor,omitempty"`
 }

@@ -57,6 +57,9 @@ func TestProducerPublishUsesDefaultStream(t *testing.T) {
 	if call.Stream != codohuetypes.StreamName {
 		t.Errorf("stream = %q, want %q", call.Stream, codohuetypes.StreamName)
 	}
+	if call.MaxLen != 0 || call.Approx {
+		t.Errorf("event stream must not be producer-trimmed: MaxLen=%d Approx=%v", call.MaxLen, call.Approx)
+	}
 	valuesMap, ok := call.Values.(map[string]any)
 	if !ok {
 		t.Fatalf("Values is not a map: %T", call.Values)
@@ -85,6 +88,33 @@ func TestProducerWithStreamOverride(t *testing.T) {
 	}
 	if f.calls[0].Stream != "custom:events" {
 		t.Errorf("stream = %q", f.calls[0].Stream)
+	}
+}
+
+func TestProducerDefaultGenerationStampsLegacyPayload(t *testing.T) {
+	f := &fakeXAdder{id: "1-0"}
+	p := NewProducer(f, WithNamespaceGeneration(4))
+	if _, err := p.Publish(context.Background(), codohuetypes.EventPayload{Namespace: "feed"}); err != nil {
+		t.Fatal(err)
+	}
+	raw := f.calls[0].Values.(map[string]any)[codohuetypes.PayloadField].(string)
+	var decoded codohuetypes.EventPayload
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.NamespaceGeneration != 4 {
+		t.Fatalf("generation = %d", decoded.NamespaceGeneration)
+	}
+
+	if _, err := p.Publish(context.Background(), codohuetypes.EventPayload{Namespace: "feed", NamespaceGeneration: 5}); err != nil {
+		t.Fatal(err)
+	}
+	raw = f.calls[1].Values.(map[string]any)[codohuetypes.PayloadField].(string)
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.NamespaceGeneration != 5 {
+		t.Fatalf("explicit generation overwritten: %d", decoded.NamespaceGeneration)
 	}
 }
 

@@ -358,3 +358,81 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 		t.Fatalf("future changed_since must be empty: total=%d rows=%d", total3, len(rows3))
 	}
 }
+
+// ─── keyset cursor ───────────────────────────────────────────────────────────
+
+// The reconciliation read is ordered by updated_at, and a batch ingest gives
+// many rows the same timestamp. Offset paging over a set that is still being
+// written re-sends rows or skips them; a keyset over (updated_at, id) is
+// stable because id breaks the tie deterministically.
+func TestObjectCursor_RoundTripsAndBindsToItsQuery(t *testing.T) {
+	updatedAt := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	raw, err := encodeObjectCursor(objectCursor{
+		Version: 1, Namespace: "ns", ChangedSince: "2026-08-01T00:00:00Z",
+		UpdatedAt: updatedAt, ID: 42,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	got, err := decodeObjectCursor(raw, "ns", "2026-08-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != 42 || !got.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("round trip lost the key: %+v", got)
+	}
+
+	// A cursor is only meaningful for the query that produced it. Replaying a
+	// cursor from one namespace against another, or after changing
+	// changed_since, would silently page through a different result set.
+	if _, err := decodeObjectCursor(raw, "other-ns", "2026-08-01T00:00:00Z"); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("cursor accepted for a different namespace: %v", err)
+	}
+	if _, err := decodeObjectCursor(raw, "ns", "2026-01-01T00:00:00Z"); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("cursor accepted for a different changed_since: %v", err)
+	}
+}
+
+// A malformed cursor is a client error, not a silent restart from the
+// beginning: restarting would re-send the whole corpus without saying so.
+func TestObjectCursor_MalformedIsRejected(t *testing.T) {
+	valid, err := encodeObjectCursor(objectCursor{
+		Version: 1, Namespace: "ns", UpdatedAt: time.Now().UTC(), ID: 1,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	zeroID, err := encodeObjectCursor(objectCursor{Version: 1, Namespace: "ns", UpdatedAt: time.Now().UTC(), ID: 0})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	futureVersion, err := encodeObjectCursor(objectCursor{Version: 99, Namespace: "ns", UpdatedAt: time.Now().UTC(), ID: 1})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	for _, tc := range []struct{ name, raw string }{
+		{"not base64", "!!!not-base64!!!"},
+		{"base64 but not JSON", "bm90LWpzb24"},
+		{"zero id", zeroID},
+		{"unknown version", futureVersion},
+		{"truncated", valid[:len(valid)/2]},
+	} {
+		if _, err := decodeObjectCursor(tc.raw, "ns", ""); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%s: expected ErrInvalidRequest, got %v", tc.name, err)
+		}
+	}
+}
+
+// An absent cursor is the first page, not an error — the legacy offset caller
+// keeps working through the same endpoint.
+func TestObjectCursor_EmptyMeansFirstPage(t *testing.T) {
+	got, err := decodeObjectCursor("", "ns", "")
+	if err != nil {
+		t.Fatalf("empty cursor: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil cursor, got %+v", got)
+	}
+}

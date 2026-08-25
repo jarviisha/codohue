@@ -1,5 +1,6 @@
 {
   "namespace": "feed",
+  "namespace_generation": 3,
   "object_id": "obj-1",
   "content": "hello world",
   "author_subject_id": "subj-1",

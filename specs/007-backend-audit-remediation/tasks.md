@@ -194,16 +194,16 @@
 
 ### Tests for User Story 5
 
-- [ ] T091 [P] [US5] Add multi-page, empty-page, terminal `0-0`, error-retention, `NOGROUP`, ten-page-budget, and early-failure reclaim tests in `internal/ingest/worker_test.go` and `internal/ingest/catalog_worker_test.go`
-- [ ] T092 [P] [US5] Add independent per-generation embed cursors, empty pages, terminal reset, error retention, ten-page budget, and permanently failing early-entry tests in `internal/embedder/recovery_sweeper_test.go`
-- [ ] T093 [P] [US5] Add equal-timestamp keyset, malformed or mismatched cursor, terminal page, legacy offset, golden response, and SDK compatibility tests in `internal/catalog/repository_test.go`, `internal/catalog/handler_test.go`, `pkg/codohuetypes/golden_test.go`, and `sdk/go/catalog_http_test.go`
+- [X] T091 [P] [US5] Add multi-page, empty-page, terminal `0-0`, error-retention, `NOGROUP`, ten-page-budget, and early-failure reclaim tests in `internal/ingest/worker_test.go` and `internal/ingest/catalog_worker_test.go`
+- [X] T092 [P] [US5] Add independent per-generation embed cursors, empty pages, terminal reset, error retention, ten-page budget, and permanently failing early-entry tests in `internal/embedder/recovery_sweeper_test.go`
+- [X] T093 [P] [US5] Add equal-timestamp keyset, malformed or mismatched cursor, terminal page, legacy offset, golden response, and SDK compatibility tests in `internal/catalog/repository_test.go`, `internal/catalog/handler_test.go`, `pkg/codohuetypes/golden_test.go`, and `sdk/go/catalog_http_test.go`
 - [ ] T094 [US5] Add three-page reclaim and equal-timestamp catalog reconciliation scenarios in `e2e/recovery_reconciliation_test.go`
 
 ### Implementation for User Story 5
 
-- [ ] T095 [US5] Persist returned `XAUTOCLAIM` cursors across pages and ticks, retain cursors on errors, reset only at terminal or recreated groups, and enforce ten pages per tick in `internal/ingest/worker.go`, `internal/ingest/catalog_worker.go`, and `internal/embedder/recovery_sweeper.go`
-- [ ] T096 [US5] Implement versioned URL-safe `(updated_at,id)` cursors and matching keyset queries while retaining legacy offset for one window in `internal/catalog/types.go`, `internal/catalog/repository.go`, and `internal/catalog/handler.go`
-- [ ] T097 [US5] Expose additive `next_cursor` response and cursor request support in `pkg/codohuetypes/catalog.go`, `pkg/codohuetypes/testdata/catalog_objects_response.golden.json`, `sdk/go/catalog_http.go`, and `sdk/go/README.md`
+- [X] T095 [US5] Persist returned `XAUTOCLAIM` cursors across pages and ticks, retain cursors on errors, reset only at terminal or recreated groups, and enforce ten pages per tick in `internal/ingest/worker.go`, `internal/ingest/catalog_worker.go`, and `internal/embedder/recovery_sweeper.go`
+- [X] T096 [US5] Implement versioned URL-safe `(updated_at,id)` cursors and matching keyset queries while retaining legacy offset for one window in `internal/catalog/types.go`, `internal/catalog/repository.go`, and `internal/catalog/handler.go`
+- [X] T097 [US5] Expose additive `next_cursor` response and cursor request support in `pkg/codohuetypes/catalog.go`, `pkg/codohuetypes/testdata/catalog_objects_response.golden.json`, `sdk/go/catalog_http.go`, and `sdk/go/README.md`
 
 **Checkpoint**: Reclaim and reconciliation eventually visit every eligible item without starvation or timestamp gaps.
 
@@ -217,16 +217,16 @@
 
 ### Tests for User Story 6
 
-- [ ] T098 [P] [US6] Add constant-time bearer parsing, missing/malformed header, disabled-token, and admin-key separation tests in `internal/auth/observability_test.go`
-- [ ] T099 [P] [US6] Add sanitized public health, protected `details=true`, conditional authenticated metrics, 404/401, and invalid-header-on-plain-health tests in `cmd/api/healthz_test.go` and `cmd/api/main_test.go`
-- [ ] T100 [P] [US6] Add the same public/protected health and conditional metrics contract tests for the embedder listener in `cmd/embedder/main_test.go`
+- [X] T098 [P] [US6] Add constant-time bearer parsing, missing/malformed header, disabled-token, and admin-key separation tests in `internal/auth/observability_test.go`
+- [X] T099 [P] [US6] Add sanitized public health, protected `details=true`, conditional authenticated metrics, 404/401, and invalid-header-on-plain-health tests in `cmd/api/healthz_test.go` and `cmd/api/main_test.go`
+- [X] T100 [P] [US6] Add the same public/protected health and conditional metrics contract tests for the embedder listener in `cmd/embedder/main_test.go`
 - [ ] T101 [US6] Add public disclosure and trusted monitoring scrape scenarios for API and embedder in `e2e/observability_security_test.go`
 
 ### Implementation for User Story 6
 
-- [ ] T102 [US6] Implement dedicated constant-time observability bearer middleware without accepting the global admin key in `internal/auth/observability.go`
-- [ ] T103 [US6] Sanitize plain API `/healthz`, add protected `/healthz?details=true`, and conditionally register protected `/metrics` in `cmd/api/main.go`
-- [ ] T104 [US6] Sanitize plain embedder `/healthz`, add protected `/healthz?details=true`, and conditionally register protected `/metrics` in `cmd/embedder/main.go`
+- [X] T102 [US6] Implement dedicated constant-time observability bearer middleware without accepting the global admin key in `internal/auth/observability.go`
+- [X] T103 [US6] Sanitize plain API `/healthz`, add protected `/healthz?details=true`, and conditionally register protected `/metrics` in `cmd/api/main.go`
+- [X] T104 [US6] Sanitize plain embedder `/healthz`, add protected `/healthz?details=true`, and conditionally register protected `/metrics` in `cmd/embedder/main.go`
 
 **Checkpoint**: Public operational endpoints reveal no tenant labels or raw dependency errors while trusted monitoring retains detailed signals.
 

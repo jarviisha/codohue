@@ -6,6 +6,9 @@ package codohuetypes
 const (
 	StreamName   = "codohue:events"
 	PayloadField = "payload"
+	// NamespaceGenerationField is the additive lifecycle-generation envelope
+	// field used by producers that encode stream values without JSON payloads.
+	NamespaceGenerationField = "namespace_generation"
 )
 
 // CatalogStreamName is the durable transport for catalog content, symmetric

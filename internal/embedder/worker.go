@@ -297,7 +297,9 @@ func (w *Worker) consumePhysicalStream(ctx context.Context, ns, stream string) {
 // and re-processes them. This is how a crashed replica's pending work
 // gets re-driven.
 func (w *Worker) reapStream(ctx context.Context, ns, stream string) {
-	group := defaultConsumerGroup
+	// The cursor lives here, per goroutine — one per (namespace, generation)
+	// stream — so a recreated namespace scans its own PEL independently of the
+	// generation it replaced.
 	cursor := "0-0"
 	ticker := time.NewTicker(w.cfg.ReapInterval)
 	defer ticker.Stop()
@@ -308,33 +310,48 @@ func (w *Worker) reapStream(ctx context.Context, ns, stream string) {
 			return
 		case <-ticker.C:
 		}
+		cursor = w.reapOnce(ctx, ns, stream, cursor)
+	}
+}
 
-		for page := 0; page < defaultReapPageBudget; page++ {
-			msgs, next, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-				Stream: stream, Group: group, Consumer: w.cfg.ConsumerName,
-				MinIdle: w.cfg.MinIdleReap, Start: cursor, Count: int64(w.cfg.ReapBatchSize),
-			}).Result()
-			if err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-					return
-				}
-				if strings.Contains(err.Error(), "NOGROUP") {
-					cursor = "0-0"
-				} else {
-					slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
-				}
-				break
+// reapOnce runs one bounded XAUTOCLAIM scan and returns the cursor the next
+// tick must start from.
+//
+// The cursor is returned rather than reset because restarting at "0-0" every
+// tick re-examines the head of the PEL forever: an entry that keeps failing at
+// the front would starve every entry behind it. It resets only when Redis
+// reports the terminal cursor (the scan wrapped) or NOGROUP (the group was
+// recreated, so any cursor into the old PEL is meaningless); an error retains
+// it, because a failed call says nothing about how far the scan had got.
+func (w *Worker) reapOnce(ctx context.Context, ns, stream, cursor string) string {
+	group := defaultConsumerGroup
+	if cursor == "" {
+		cursor = "0-0"
+	}
+	for page := 0; page < defaultReapPageBudget; page++ {
+		msgs, next, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream: stream, Group: group, Consumer: w.cfg.ConsumerName,
+			MinIdle: w.cfg.MinIdleReap, Start: cursor, Count: int64(w.cfg.ReapBatchSize),
+		}).Result()
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return cursor
 			}
-			for _, msg := range msgs {
-				w.handleMessage(ctx, ns, stream, group, msg)
+			if strings.Contains(err.Error(), "NOGROUP") {
+				return "0-0"
 			}
-			cursor = next
-			if next == "0-0" || next == "" {
-				cursor = "0-0"
-				break
-			}
+			slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+			return cursor
+		}
+		for _, msg := range msgs {
+			w.handleMessage(ctx, ns, stream, group, msg)
+		}
+		cursor = next
+		if next == "0-0" || next == "" {
+			return "0-0"
 		}
 	}
+	return cursor
 }
 
 // handleMessage decodes a stream entry, dispatches it through the service,

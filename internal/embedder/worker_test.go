@@ -3,6 +3,7 @@ package embedder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -490,5 +491,129 @@ func TestDecodeStreamEntryNamespaceGeneration(t *testing.T) {
 	}
 	if entry.NamespaceGeneration == nil || *entry.NamespaceGeneration != 3 {
 		t.Fatalf("generation = %v", entry.NamespaceGeneration)
+	}
+}
+
+// ─── reclaim cursor fairness ─────────────────────────────────────────────────
+
+// Each (namespace, generation) stream keeps its own cursor and continues from
+// where the last tick stopped. Restarting at "0-0" every tick would re-examine
+// the head of the PEL forever, so a permanently failing item at the front
+// starves every catalog item behind it.
+func TestWorkerReapOnce_CursorFairness(t *testing.T) {
+	newWorker := func(auto func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)) *Worker {
+		return &Worker{
+			redis:   &fakeStreamClient{autoFn: auto},
+			service: &fakeProcessor{out: OutcomeEmbedded},
+			cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+		}
+	}
+
+	t.Run("continues from the returned cursor", func(t *testing.T) {
+		var starts []string
+		w := newWorker(func(_ context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			starts = append(starts, a.Start)
+			if len(starts) == 1 {
+				return nil, "400-0", nil
+			}
+			return nil, "0-0", nil
+		})
+
+		got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "0-0")
+
+		if len(starts) != 2 || starts[1] != "400-0" {
+			t.Errorf("cursor not carried across pages: %v", starts)
+		}
+		if got != "0-0" {
+			t.Errorf("terminal cursor must reset, got %q", got)
+		}
+	})
+
+	t.Run("stops at the page budget and returns the cursor", func(t *testing.T) {
+		calls := 0
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			calls++
+			return nil, fmt.Sprintf("%d-0", calls), nil
+		})
+
+		got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "0-0")
+
+		if calls != defaultReapPageBudget {
+			t.Errorf("scanned %d pages, want the %d-page budget", calls, defaultReapPageBudget)
+		}
+		if got == "0-0" || got == "" {
+			t.Errorf("cursor must be carried to the next tick, got %q", got)
+		}
+	})
+
+	t.Run("empty page still advances", func(t *testing.T) {
+		var starts []string
+		w := newWorker(func(_ context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			starts = append(starts, a.Start)
+			if len(starts) == 1 {
+				return nil, "600-0", nil
+			}
+			return nil, "0-0", nil
+		})
+
+		w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "0-0")
+
+		if len(starts) != 2 || starts[1] != "600-0" {
+			t.Errorf("an empty page must not stop the scan: %v", starts)
+		}
+	})
+
+	t.Run("error retains the cursor", func(t *testing.T) {
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("redis down")
+		})
+
+		if got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "900-0"); got != "900-0" {
+			t.Errorf("cursor after an error = %q, want it retained", got)
+		}
+	})
+
+	t.Run("NOGROUP resets the cursor", func(t *testing.T) {
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("NOGROUP No such consumer group")
+		})
+
+		if got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "900-0"); got != "0-0" {
+			t.Errorf("cursor after NOGROUP = %q, want 0-0", got)
+		}
+	})
+
+	t.Run("cancellation keeps the cursor", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", context.Canceled
+		})
+
+		if got := w.reapOnce(ctx, "ns", "catalog:embed:ns", "950-0"); got != "950-0" {
+			t.Errorf("shutdown must not rewind the cursor, got %q", got)
+		}
+	})
+}
+
+// Two generations of the same namespace are two streams with two PELs. Their
+// scans must not share a cursor, or the newer generation's reaper would skip
+// entries the older one happened to walk past.
+func TestWorkerReapOnce_CursorsAreIndependentPerGeneration(t *testing.T) {
+	seen := map[string]string{}
+	w := &Worker{
+		redis: &fakeStreamClient{autoFn: func(_ context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			seen[a.Stream] = a.Start
+			return nil, "0-0", nil
+		}},
+		service: &fakeProcessor{out: OutcomeEmbedded},
+		cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+	}
+
+	w.reapOnce(context.Background(), "ns", embedStreamName("ns", 1), "100-0")
+	w.reapOnce(context.Background(), "ns", embedStreamName("ns", 2), "200-0")
+
+	if seen[embedStreamName("ns", 1)] != "100-0" || seen[embedStreamName("ns", 2)] != "200-0" {
+		t.Errorf("generation cursors bled into each other: %v", seen)
 	}
 }

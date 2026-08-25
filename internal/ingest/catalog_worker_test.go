@@ -283,3 +283,77 @@ func TestCatalogWorkerAck_LogsAckFailure(t *testing.T) {
 	}}
 	w.ack(context.Background(), "1-0") // must not panic
 }
+
+// The catalog stream's PEL is scanned under the same fairness rules as the
+// event stream: continue from the returned cursor, keep it across ticks, and
+// reset only at a terminal cursor or after the group is recreated. Restarting
+// at "0-0" every tick lets one permanently failing entry at the head starve
+// every catalog item behind it.
+func TestCatalogWorkerReapOnce_CursorFairness(t *testing.T) {
+	t.Run("continues from the returned cursor and resets at terminal", func(t *testing.T) {
+		var starts []string
+		w := &CatalogWorker{
+			service: &fakeCatalogIngestor{},
+			autoClaimFn: func(_ context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+				starts = append(starts, args.Start)
+				if len(starts) == 1 {
+					return nil, "300-0", nil
+				}
+				return nil, "0-0", nil
+			},
+			ackFn: func(context.Context, string, string, ...string) error { return nil },
+		}
+
+		w.reapOnce(context.Background())
+
+		if len(starts) != 2 || starts[0] != "0-0" || starts[1] != "300-0" {
+			t.Errorf("cursor not carried: %v", starts)
+		}
+		if w.reapCursor != "0-0" {
+			t.Errorf("terminal cursor must reset, got %q", w.reapCursor)
+		}
+	})
+
+	t.Run("stops at the page budget and keeps the cursor", func(t *testing.T) {
+		calls := 0
+		w := &CatalogWorker{
+			service: &fakeCatalogIngestor{},
+			autoClaimFn: func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+				calls++
+				return nil, fmt.Sprintf("%d-0", calls), nil
+			},
+			ackFn: func(context.Context, string, string, ...string) error { return nil },
+		}
+
+		w.reapOnce(context.Background())
+
+		if calls != reapPageBudget {
+			t.Errorf("scanned %d pages, want %d", calls, reapPageBudget)
+		}
+		if w.reapCursor == "0-0" || w.reapCursor == "" {
+			t.Errorf("cursor must survive the tick, got %q", w.reapCursor)
+		}
+	})
+
+	t.Run("error retains, NOGROUP resets", func(t *testing.T) {
+		w := &CatalogWorker{
+			service:    &fakeCatalogIngestor{},
+			reapCursor: "800-0",
+			autoClaimFn: func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+				return nil, "", errors.New("redis down")
+			},
+		}
+		w.reapOnce(context.Background())
+		if w.reapCursor != "800-0" {
+			t.Errorf("cursor after error = %q, want it retained", w.reapCursor)
+		}
+
+		w.autoClaimFn = func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("NOGROUP No such consumer group")
+		}
+		w.reapOnce(context.Background())
+		if w.reapCursor != "0-0" {
+			t.Errorf("cursor after NOGROUP = %q, want 0-0", w.reapCursor)
+		}
+	})
+}
