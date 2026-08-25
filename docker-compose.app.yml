@@ -12,6 +12,10 @@ services:
         required: false
       - path: .env.app
         required: false
+    environment:
+      - CODOHUE_STREAM_RETENTION_ENABLED=${CODOHUE_STREAM_RETENTION_ENABLED:-false}
+      - CODOHUE_STREAM_RETENTION_INTERVAL=${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}
+      - CODOHUE_OBSERVABILITY_TOKEN=${CODOHUE_OBSERVABILITY_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:$${CODOHUE_API_PORT:-2001}/healthz"]
       interval: 5s
@@ -32,7 +36,6 @@ services:
         required: false
       - path: .env.app
         required: false
-
   embedder:
     build:
       context: .
@@ -46,6 +49,10 @@ services:
         required: false
       - path: .env.app
         required: false
+    environment:
+      - CODOHUE_STREAM_RETENTION_ENABLED=${CODOHUE_STREAM_RETENTION_ENABLED:-false}
+      - CODOHUE_STREAM_RETENTION_INTERVAL=${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}
+      - CODOHUE_OBSERVABILITY_TOKEN=${CODOHUE_OBSERVABILITY_TOKEN:-}
 
   admin:
     build:

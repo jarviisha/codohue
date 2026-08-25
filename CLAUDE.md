@@ -122,7 +122,7 @@ Each feature domain lives in `internal/<domain>/` with a consistent `handler.go`
 | `catalog`              | Data-plane HTTP ingest path for raw catalog content; persists `catalog_items` and publishes to embed streams      |
 | `objects`              | Per-object metadata independent of embedding (currently author attribution); the `objects` table, usable under every `dense_source` |
 | `embedder`             | Per-item embed pipeline (load → embed → upsert dense vector → mark embedded), worker, re-embed completion watcher |
-| `auth`                 | Bearer token validation — global admin key and per-namespace bcrypt-hashed keys                                   |
+| `auth`                 | Application and operational bearer validation — global admin, per-namespace bcrypt, and dedicated observability credentials |
 | `config`               | Loads and validates application configuration from environment variables                                          |
 | `core/embedstrategy`   | Forward-compat seam for embedding strategies — `Strategy` interface + registry; both `catalog` and `embedder` depend on it (and never on each other) |
 | `core/namespace`       | Shared namespace configuration contracts (`namespace.Config`) consumed by every domain                            |
@@ -166,18 +166,18 @@ The cron binary runs three phases per namespace on each tick:
 - **Time decay**: Events older than 90 days excluded. Freshness multiplier `e^(-λ × days_since)` applied during vector build; γ-based object freshness applied at rerank time.
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
-- **Two-tier auth**: Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and to authenticate its data-plane proxy reads (recommendations, trending, event injection). Namespace configuration mutation lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate client data-plane requests; the global admin key is **accepted for every namespace** (a DB-free constant-time compare checked before the hash lookup) because the admin server must reach all namespaces through it — and it already grants full control via the admin-plane login, so restricting its data-plane reach bought little while breaking the admin panel. A leaked namespace key is rotated via `POST /api/admin/v1/namespaces/{ns}/api-key` (plaintext returned once). All plain-string credential compares are constant-time; the public admin login endpoint is per-IP rate-limited on **failed** attempts only (a correct key is never throttled); repeated bad data-plane tokens hit a 30s negative cache (only definitive rejections, never infra blips) instead of a bcrypt compare each time. Admin sessions are HMAC JWTs signed with an independent secret (`CODOHUE_ADMIN_SESSION_SECRET`, or fresh random material each boot), carry a `jti`, and logout revokes the token server-side.
+- **Application and operational auth**: Application authorization has two authority tiers. Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and its data-plane proxy reads; server-issued admin sessions carry the same admin authority. Per-namespace bcrypt-hashed keys authenticate client data-plane requests, while the global admin key remains the documented fallback. Operational monitoring is separate: protected metrics and detailed diagnostics use `CODOHUE_OBSERVABILITY_TOKEN`, never a namespace key or the global admin key; unauthenticated health exposes sanitized aggregate state only. All plain-string credential compares are constant-time. Failed admin login attempts are rate-limited, definitive bad data-plane tokens use the negative cache, and admin sessions are HMAC JWTs with server-side revocation.
 - **Locked client wire contract**: The client-facing JSON types live once in `pkg/codohuetypes` and are re-exported into the server domains via type aliases (e.g. `type Response = codohuetypes.Response`), so the server marshals the exact struct the SDK unmarshals. Request bodies are decoded with `httpapi.DecodeStrict` (rejects unknown fields + trailing data → 400), so client typos fail loudly instead of being silently dropped — a redundant `namespace` in the rankings/catalog body is rejected (the URL path is authoritative; `events` still carries `namespace` because the Redis-stream transport needs it). The marshaled shape of every wire type is pinned by golden snapshots in `pkg/codohuetypes/testdata/` (see the wire-contract convention below).
 
 ### REST API — `cmd/api` (port 2001)
 
-**Infra / ops (no auth, unversioned)**
+**Infra / ops (unversioned; authentication as noted)**
 
-| Method  | Path       | Description                              |
-| ------- | ---------- | ---------------------------------------- |
-| `GET`   | `/ping`    | Liveness probe                           |
-| `GET`   | `/healthz` | Health check for postgres, redis, qdrant |
-| `GET`   | `/metrics` | Prometheus metrics                       |
+| Method  | Path       | Authentication | Description |
+| ------- | ---------- | -------------- | ----------- |
+| `GET`   | `/ping`    | none | Liveness probe |
+| `GET`   | `/healthz` | none | Sanitized aggregate health; no raw dependency errors |
+| `GET`   | `/metrics` | observability bearer | Prometheus metrics; route absent when the credential is not configured |
 
 **Client-facing — per-namespace Bearer token (falls back to `CODOHUE_ADMIN_API_KEY`)**
 

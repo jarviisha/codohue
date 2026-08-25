@@ -35,8 +35,9 @@
 |------|--------|-------|
 | **I. Code Quality** — domain in `internal/<domain>/`, `docs.go` present, import boundaries respected, English-only comments | ☐ | |
 | **II. Testing Standards** — `_test.go` planned for every `service.go`, `repository.go`, `job.go`, `worker.go` | ☐ | |
-| **III. API Consistency** — endpoints follow `/v1/<resource>`, two-tier auth, REST API table in CLAUDE.md updated | ☐ | N/A if no new endpoints |
+| **III. API & Operations** — data/admin paths follow their conventions; application authority stays two-tier; monitoring uses a dedicated credential; CLAUDE.md is updated | ☐ | N/A if no endpoint or auth change |
 | **IV. Performance** — Redis cache plan in place, batch phases non-blocking, cold-start fallback accounted for | ☐ | N/A if not on hot path |
+| **Architecture Constraints** — exactly four approved binaries; ID mappings, migration pairs, and full recompute rules preserved | ☐ | Governance approval required for any exception |
 
 > Any ☒ violation requires a Complexity Tracking entry below.
 

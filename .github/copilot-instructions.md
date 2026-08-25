@@ -9,6 +9,8 @@ Use the Makefile targets unless you need a one-off `go test` invocation:
 make build
 make build-api
 make build-cron
+make build-admin
+make build-embedder
 
 # Run
 make up-infra      # postgres + redis + qdrant only
@@ -33,10 +35,12 @@ Migrations are SQL files in `migrations/`; CI applies `001_initial.up.sql` throu
 
 ## High-level architecture
 
-Codohue is a behavior-based collaborative filtering system with two binaries:
+Codohue is a hybrid recommendation service with four binaries:
 
-1. `cmd/api`: serves HTTP endpoints, exposes metrics/health, and runs a Redis Streams ingest worker (`codohue:events`) in-process.
-2. `cmd/cron`: runs a periodic batch job (`CODOHUE_BATCH_INTERVAL_MINUTES`) to recompute vectors and upsert them to Qdrant.
+1. `cmd/api`: serves the data-plane HTTP API and runs event and catalog Redis Streams ingest workers.
+2. `cmd/cron`: runs scheduled sparse, dense, and trending recompute jobs.
+3. `cmd/admin`: serves the admin API and embedded `web/admin` application.
+4. `cmd/embedder`: consumes catalog embed streams and upserts catalog-owned dense vectors.
 
 Data flow:
 
@@ -62,4 +66,4 @@ Core storage model:
 3. Every package must include `docs.go` with the package doc comment and `package` declaration only.
 4. All comments in Go files must be English.
 5. Business-logic files (`service.go`, `repository.go`, `job.go`, `worker.go`) require matching `_test.go` files; handler tests belong in `handler_test.go`.
-6. Protected API routes use bearer auth header `Authorization: Bearer <CODOHUE_ADMIN_API_KEY>`.
+6. Application routes use global-admin/session or per-namespace authority as documented; protected operational monitoring uses a distinct observability bearer credential.
