@@ -130,7 +130,7 @@ func TestPayloadIDField_MatchesTheCollectionFamily(t *testing.T) {
 func TestQdrantPointMover_InspectRefusesNonPositiveIDs(t *testing.T) {
 	mover := &qdrantPointMover{client: nil}
 
-	_, _, found, err := mover.InspectPoint(t.Context(), "ns_objects_dense", -1)
+	_, found, err := mover.InspectPoint(t.Context(), "ns_objects_dense", -1)
 	if err == nil {
 		t.Error("inspecting a negative id must be refused")
 	}

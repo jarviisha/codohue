@@ -68,9 +68,13 @@ type RepairRun struct {
 	PGSnapshotRef      string
 	QdrantSnapshotRefs map[string]string
 	ManifestHash       string
-	StartedAt          time.Time
-	CompletedAt        *time.Time
-	Error              string
+	// RebuiltNamespaces records which namespaces had their sparse vectors
+	// rebuilt. Verification asserts coverage against the manifest rather than
+	// inferring it from the run having reached the verifying phase.
+	RebuiltNamespaces []string
+	StartedAt         time.Time
+	CompletedAt       *time.Time
+	Error             string
 }
 
 // RepairItem is one audited logical identity within a run.

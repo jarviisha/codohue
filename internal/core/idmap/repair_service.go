@@ -39,17 +39,28 @@ type EvidenceSource interface {
 	Evidence(ctx context.Context, namespace string) (*NamespaceEvidence, error)
 }
 
+// InspectedPoint is what verification reads back from a repaired location.
+//
+// The two hashes are the preservation checks the audit recorded: the payload
+// carries `created_at`, which drives the γ-freshness rerank, and the vector is
+// the thing that may not be recomputable at all.
+type InspectedPoint struct {
+	StringID    string
+	PayloadHash string
+	VectorHash  string
+}
+
 // PointMover copies and removes dense points. Implemented over
 // internal/infra/qdrant by the composition layer.
 type PointMover interface {
 	CopyPointVerified(ctx context.Context, collection string, from, to int64) error
 	DeletePoint(ctx context.Context, collection string, id int64) error
 	PointAbsent(ctx context.Context, collection string, id int64) (bool, error)
-	// InspectPoint returns the logical id and vector hash stored at a numeric
-	// id. Verification needs it to prove the target holds the right vector
-	// rather than trusting that apply's own check ran — a resumed run skips
-	// items already marked cleaned, so nothing else would confirm them.
-	InspectPoint(ctx context.Context, collection string, id int64) (stringID, vectorHash string, found bool, err error)
+	// InspectPoint returns what is stored at a numeric id. Verification needs
+	// it to prove the target holds the right point rather than trusting that
+	// apply's own check ran — a resumed run skips items already marked
+	// cleaned, so nothing else would confirm them.
+	InspectPoint(ctx context.Context, collection string, id int64) (point InspectedPoint, found bool, err error)
 }
 
 // SparseRebuilder is the narrow port through which the repair triggers a full
@@ -69,9 +80,26 @@ type GlobalFence interface {
 	WithGlobalExclusive(ctx context.Context, fn func(context.Context) error) error
 }
 
+// repairStore is the durable surface the orchestration needs. Declared as an
+// interface so the state machine can be driven without PostgreSQL;
+// *RepairRepository satisfies it.
+type repairStore interface {
+	ActiveRun(ctx context.Context) (*RepairRun, error)
+	CreateRun(ctx context.Context, items []RepairItem, startedAt time.Time) (*RepairRun, error)
+	GetRun(ctx context.Context, id int64) (*RepairRun, error)
+	ListItems(ctx context.Context, runID int64) ([]RepairItem, error)
+	ListItemsInState(ctx context.Context, runID int64, states ...RepairItemState) ([]RepairItem, error)
+	NextNumericID(ctx context.Context) (int64, error)
+	RecordRebuiltNamespace(ctx context.Context, id int64, namespace string) error
+	RecordSnapshots(ctx context.Context, id int64, pgRef string, qdrantRefs map[string]string) error
+	RetargetMapping(ctx context.Context, namespace, entityType, stringID string, numericID int64) error
+	SetItemState(ctx context.Context, item RepairItem, state RepairItemState, errMessage string) error
+	SetRunState(ctx context.Context, id int64, state RepairRunState, errMessage string) error
+}
+
 // RepairService orchestrates the migration-022 reconciliation.
 type RepairService struct {
-	repo     *RepairRepository
+	repo     repairStore
 	evidence EvidenceSource
 	mover    PointMover
 	rebuild  SparseRebuilder
@@ -207,7 +235,7 @@ func verifyItem(ctx context.Context, mover PointMover, item RepairItem) []string
 
 	var problems []string
 	for _, collection := range copyableCollections(item) {
-		stringID, vectorHash, found, err := mover.InspectPoint(ctx, collection, target)
+		point, found, err := mover.InspectPoint(ctx, collection, target)
 		switch {
 		case err != nil:
 			problems = append(problems, fmt.Sprintf("%s: could not read %s#%d: %v", identity, collection, target, err))
@@ -215,14 +243,17 @@ func verifyItem(ctx context.Context, mover PointMover, item RepairItem) []string
 		case !found:
 			problems = append(problems, fmt.Sprintf("%s: target point %s#%d is missing", identity, collection, target))
 			continue
-		case stringID != item.StringID:
-			problems = append(problems, fmt.Sprintf("%s: target point %s#%d carries %q", identity, collection, target, stringID))
+		case point.StringID != item.StringID:
+			problems = append(problems, fmt.Sprintf("%s: target point %s#%d carries %q", identity, collection, target, point.StringID))
 			continue
 		}
-		// A manifest written before hashes were recorded cannot be checked for
-		// content; identity and absence still are.
-		if item.VectorHash != "" && vectorHash != item.VectorHash {
+		// A manifest written before a given hash was recorded cannot be checked
+		// against it; every other check still runs.
+		if item.VectorHash != "" && point.VectorHash != item.VectorHash {
 			problems = append(problems, fmt.Sprintf("%s: vector at %s#%d changed", identity, collection, target))
+		}
+		if item.PayloadHash != "" && point.PayloadHash != item.PayloadHash {
+			problems = append(problems, fmt.Sprintf("%s: payload at %s#%d changed", identity, collection, target))
 		}
 
 		for _, old := range item.OldNumericIDs {
@@ -240,6 +271,28 @@ func verifyItem(ctx context.Context, mover PointMover, item RepairItem) []string
 		}
 	}
 	return problems
+}
+
+// unrebuiltNamespaces lists the manifest's namespaces that have no rebuild
+// record, sorted and deduplicated so the operator sees each one once.
+func unrebuiltNamespaces(items []RepairItem, rebuilt []string) []string {
+	done := make(map[string]struct{}, len(rebuilt))
+	for _, namespace := range rebuilt {
+		done[namespace] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var missing []string
+	for _, item := range items {
+		if _, already := seen[item.Namespace]; already {
+			continue
+		}
+		seen[item.Namespace] = struct{}{}
+		if _, ok := done[item.Namespace]; !ok {
+			missing = append(missing, item.Namespace)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // missingSnapshotCollections lists the collections this manifest touches that
@@ -523,6 +576,12 @@ func (s *RepairService) applyFenced(ctx context.Context, runID int64) error {
 				s.recordFailure(ctx, runID, nil, err)
 				return fmt.Errorf("rebuild sparse vectors for %q: %w", namespace, err)
 			}
+			// Recorded per namespace as it completes, so an interrupted apply
+			// leaves an accurate partial record for verification to read.
+			if err := s.repo.RecordRebuiltNamespace(ctx, runID, namespace); err != nil {
+				s.recordFailure(ctx, runID, nil, err)
+				return err
+			}
 		}
 	}
 
@@ -603,19 +662,42 @@ func (s *RepairService) Verify(ctx context.Context, runID int64) (*VerifyReport,
 	if err != nil {
 		return nil, err
 	}
+	run, err := s.repo.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
 	report := &VerifyReport{RunID: runID, Checked: len(items)}
+	// A namespace whose mappings moved is only repaired once its sparse
+	// vectors are rebuilt, because those coordinates encode subject numeric
+	// ids. Skipping the rebuild leaves the namespace serving stale vectors.
+	if s.rebuild != nil {
+		for _, namespace := range unrebuiltNamespaces(items, run.RebuiltNamespaces) {
+			report.Problems = append(report.Problems,
+				fmt.Sprintf("%s: sparse vectors were never rebuilt", namespace))
+		}
+	}
 	for _, item := range items {
-		if item.State != RepairItemCleaned {
+		// Both states mean apply is done with the item; `verified` additionally
+		// means a previous verification pass already confirmed it.
+		if item.State != RepairItemCleaned && item.State != RepairItemVerified {
 			report.Remaining = append(report.Remaining, item)
 			continue
 		}
-		if problems := verifyItem(ctx, s.mover, item); len(problems) > 0 {
+		problems := verifyItem(ctx, s.mover, item)
+		if len(problems) > 0 {
 			report.Unmoved = append(report.Unmoved, item)
 			report.Problems = append(report.Problems, problems...)
+			continue
+		}
+		// `cleaned` means apply finished with the item; `verified` means this
+		// independent gate confirmed it. Recording the distinction is what
+		// makes the item-level record match the run-level one.
+		if err := s.repo.SetItemState(ctx, item, RepairItemVerified, ""); err != nil {
+			return nil, err
 		}
 	}
 
-	if len(report.Remaining) == 0 && len(report.Unmoved) == 0 {
+	if len(report.Remaining) == 0 && len(report.Unmoved) == 0 && len(report.Problems) == 0 {
 		if err := s.repo.SetRunState(ctx, runID, RepairRunComplete, ""); err != nil {
 			return nil, err
 		}

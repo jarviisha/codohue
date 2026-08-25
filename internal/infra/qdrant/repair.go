@@ -188,15 +188,18 @@ func DeletePoint(ctx context.Context, client PointWriter, collection string, id 
 // Verification uses it to prove the repaired point holds the identity and the
 // bytes it is supposed to, rather than inferring that from the fact that the
 // old point is gone.
-func InspectPoint(ctx context.Context, client PointWriter, collection, idField string, id uint64) (stringID, vectorHash string, found bool, err error) {
+func InspectPoint(ctx context.Context, client PointWriter, collection, idField string, id uint64) (stringID, payloadHash, vectorHash string, found bool, err error) {
 	point, err := readPoint(ctx, client, collection, id)
 	if err != nil {
-		return "", "", false, err
+		return "", "", "", false, err
 	}
 	if point == nil {
-		return "", "", false, nil
+		return "", "", "", false, nil
 	}
-	return point.GetPayload()[idField].GetStringValue(), HashVectors(point.GetVectors()), true, nil
+	return point.GetPayload()[idField].GetStringValue(),
+		HashPayload(point.GetPayload()),
+		HashVectors(point.GetVectors()),
+		true, nil
 }
 
 // PointAbsent reports whether a numeric id no longer exists, which is what

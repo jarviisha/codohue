@@ -71,10 +71,10 @@ func (r *RepairRepository) CreateRun(ctx context.Context, items []RepairItem, st
 			INSERT INTO id_mapping_repair_runs (state, manifest_hash, started_at)
 			VALUES ('audited', $1, $2)
 			RETURNING id, state, COALESCE(pg_snapshot_ref, ''), qdrant_snapshot_refs,
-			          manifest_hash, started_at, completed_at, COALESCE(error, '')`,
+			          manifest_hash, rebuilt_namespaces, started_at, completed_at, COALESCE(error, '')`,
 			hash, startedAt,
 		).Scan(&run.ID, &run.State, &run.PGSnapshotRef, &run.QdrantSnapshotRefs,
-			&run.ManifestHash, &run.StartedAt, &run.CompletedAt, &run.Error)
+			&run.ManifestHash, &run.RebuiltNamespaces, &run.StartedAt, &run.CompletedAt, &run.Error)
 		if err != nil {
 			if isUniqueViolation(err) {
 				return ErrRepairRunActive
@@ -122,10 +122,10 @@ func (r *RepairRepository) GetRun(ctx context.Context, id int64) (*RepairRun, er
 	var run RepairRun
 	err := r.db.QueryRow(ctx, `
 		SELECT id, state, COALESCE(pg_snapshot_ref, ''), qdrant_snapshot_refs,
-		       manifest_hash, started_at, completed_at, COALESCE(error, '')
+		       manifest_hash, rebuilt_namespaces, started_at, completed_at, COALESCE(error, '')
 		FROM id_mapping_repair_runs WHERE id = $1`, id,
 	).Scan(&run.ID, &run.State, &run.PGSnapshotRef, &run.QdrantSnapshotRefs,
-		&run.ManifestHash, &run.StartedAt, &run.CompletedAt, &run.Error)
+		&run.ManifestHash, &run.RebuiltNamespaces, &run.StartedAt, &run.CompletedAt, &run.Error)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrRepairRunNotFound
 	}
@@ -140,11 +140,11 @@ func (r *RepairRepository) ActiveRun(ctx context.Context) (*RepairRun, error) {
 	var run RepairRun
 	err := r.db.QueryRow(ctx, `
 		SELECT id, state, COALESCE(pg_snapshot_ref, ''), qdrant_snapshot_refs,
-		       manifest_hash, started_at, completed_at, COALESCE(error, '')
+		       manifest_hash, rebuilt_namespaces, started_at, completed_at, COALESCE(error, '')
 		FROM id_mapping_repair_runs
 		WHERE state NOT IN ('complete', 'failed')`,
 	).Scan(&run.ID, &run.State, &run.PGSnapshotRef, &run.QdrantSnapshotRefs,
-		&run.ManifestHash, &run.StartedAt, &run.CompletedAt, &run.Error)
+		&run.ManifestHash, &run.RebuiltNamespaces, &run.StartedAt, &run.CompletedAt, &run.Error)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -152,6 +152,24 @@ func (r *RepairRepository) ActiveRun(ctx context.Context) (*RepairRun, error) {
 		return nil, fmt.Errorf("get active repair run: %w", err)
 	}
 	return &run, nil
+}
+
+// RecordRebuiltNamespace appends a namespace to the run's rebuild record.
+//
+// Appended one at a time, immediately after each rebuild succeeds, so an
+// interrupted apply leaves an accurate partial record instead of an all-or-
+// nothing claim.
+func (r *RepairRepository) RecordRebuiltNamespace(ctx context.Context, id int64, namespace string) error {
+	if _, err := r.db.Exec(ctx, `
+		UPDATE id_mapping_repair_runs
+		SET rebuilt_namespaces = (
+			SELECT jsonb_agg(DISTINCT value)
+			FROM jsonb_array_elements_text(rebuilt_namespaces || to_jsonb($2::text)) AS value
+		)
+		WHERE id = $1`, id, namespace); err != nil {
+		return fmt.Errorf("record rebuilt namespace %q: %w", namespace, err)
+	}
+	return nil
 }
 
 // SetRunState advances the run. errMessage is empty on success paths.

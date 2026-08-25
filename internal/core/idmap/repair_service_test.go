@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func evidenceFor(namespace string, mappings map[string]map[string]int64, points ...CollectionEvidence) *NamespaceEvidence {
@@ -311,22 +312,6 @@ func TestAuditNamespace_SelfOccupancyIsNotAConflict(t *testing.T) {
 	}
 }
 
-// fakeRepairStore lets the reassignment logic be exercised without a database.
-type fakeRepairStore struct {
-	next  int64
-	calls int
-	err   error
-}
-
-func (f *fakeRepairStore) NextNumericID(context.Context) (int64, error) {
-	f.calls++
-	if f.err != nil {
-		return 0, f.err
-	}
-	f.next++
-	return f.next, nil
-}
-
 // A contested target is resolved by moving the item to a FRESH id rather than
 // by evicting the occupant: the occupant's vector may be as unrecomputable as
 // this one's, so neither may be sacrificed for the other.
@@ -539,8 +524,9 @@ type fakePointMover struct {
 }
 
 type storedPoint struct {
-	stringID   string
-	vectorHash string
+	stringID    string
+	vectorHash  string
+	payloadHash string
 }
 
 func (f *fakePointMover) CopyPointVerified(context.Context, string, int64, int64) error { return nil }
@@ -553,13 +539,17 @@ func (f *fakePointMover) PointAbsent(_ context.Context, collection string, id in
 	return f.absent[pointKey(collection, id)], nil
 }
 
-func (f *fakePointMover) InspectPoint(_ context.Context, collection string, id int64) (stringID, vectorHash string, found bool, err error) {
+func (f *fakePointMover) InspectPoint(_ context.Context, collection string, id int64) (point InspectedPoint, found bool, err error) {
 	f.reads++
 	if f.err != nil {
-		return "", "", false, f.err
+		return InspectedPoint{}, false, f.err
 	}
-	point, ok := f.present[pointKey(collection, id)]
-	return point.stringID, point.vectorHash, ok, nil
+	stored, ok := f.present[pointKey(collection, id)]
+	return InspectedPoint{
+		StringID:    stored.stringID,
+		PayloadHash: stored.payloadHash,
+		VectorHash:  stored.vectorHash,
+	}, ok, nil
 }
 
 func pointKey(collection string, id int64) string {
@@ -764,3 +754,261 @@ func TestVerifyItem_ChecksOnlyTheCollectionsApplyCopies(t *testing.T) {
 		t.Errorf("read %d point(s), want only the dense one", mover.reads)
 	}
 }
+
+// ─── payload preservation ────────────────────────────────────────────────────
+
+// The audit records a payload hash and a vector hash for the same reason —
+// both are preservation checks. Comparing only the vector leaves the payload
+// unguarded, and Qdrant payloads carry `created_at`, which drives the
+// γ-freshness rerank.
+func TestVerifyItem_AlteredPayloadIsReported(t *testing.T) {
+	item := cleanedItem(10)
+	item.PayloadHash = "phash"
+	mover := &fakePointMover{
+		present: map[string]storedPoint{
+			"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash", payloadHash: "tampered"},
+		},
+		absent: map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, item)
+
+	if len(problems) == 0 {
+		t.Fatal("an altered payload must be reported")
+	}
+	if !strings.Contains(problems[0], "payload") {
+		t.Errorf("problem should name the payload: %q", problems[0])
+	}
+}
+
+func TestVerifyItem_MatchingPayloadPasses(t *testing.T) {
+	item := cleanedItem(10)
+	item.PayloadHash = "phash"
+	mover := &fakePointMover{
+		present: map[string]storedPoint{
+			"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash", payloadHash: "phash"},
+		},
+		absent: map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	if problems := verifyItem(context.Background(), mover, item); len(problems) != 0 {
+		t.Fatalf("a matching payload reported %v", problems)
+	}
+}
+
+// A manifest written before payload hashes were recorded still verifies its
+// identity, vector and old-point absence — degrading beats skipping the item.
+func TestVerifyItem_MissingRecordedPayloadHashSkipsOnlyThatCheck(t *testing.T) {
+	item := cleanedItem(10) // PayloadHash left empty
+	mover := &fakePointMover{
+		present: map[string]storedPoint{
+			"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash", payloadHash: "anything"},
+		},
+		absent: map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	if problems := verifyItem(context.Background(), mover, item); len(problems) != 0 {
+		t.Fatalf("a manifest without a payload hash reported %v", problems)
+	}
+}
+
+// ─── sparse rebuild coverage ─────────────────────────────────────────────────
+
+// Sparse coordinates encode subject numeric ids, so a namespace whose mappings
+// moved is only repaired once its sparse vectors are rebuilt. Verification is
+// the gate before the fleet unlocks, so it must confirm that happened rather
+// than infer it from the run having reached this phase.
+func TestUnrebuiltNamespaces_NamesEveryNamespaceStillWaiting(t *testing.T) {
+	items := []RepairItem{
+		{Namespace: "alpha"}, {Namespace: "beta"}, {Namespace: "gamma"},
+	}
+
+	missing := unrebuiltNamespaces(items, []string{"beta"})
+
+	if len(missing) != 2 || missing[0] != "alpha" || missing[1] != "gamma" {
+		t.Fatalf("got %v, want [alpha gamma] sorted", missing)
+	}
+}
+
+func TestUnrebuiltNamespaces_FullCoverageIsAccepted(t *testing.T) {
+	items := []RepairItem{{Namespace: "alpha"}, {Namespace: "beta"}}
+
+	if missing := unrebuiltNamespaces(items, []string{"beta", "alpha"}); len(missing) != 0 {
+		t.Errorf("full coverage reported %v", missing)
+	}
+}
+
+// A namespace appearing on several manifest rows is still one namespace; the
+// report must not repeat it.
+func TestUnrebuiltNamespaces_DeduplicatesTheManifest(t *testing.T) {
+	items := []RepairItem{{Namespace: "alpha"}, {Namespace: "alpha"}, {Namespace: "alpha"}}
+
+	missing := unrebuiltNamespaces(items, nil)
+
+	if len(missing) != 1 {
+		t.Fatalf("got %v, want one entry", missing)
+	}
+}
+
+func TestUnrebuiltNamespaces_EmptyManifestNeedsNothing(t *testing.T) {
+	if missing := unrebuiltNamespaces(nil, nil); len(missing) != 0 {
+		t.Errorf("empty manifest demanded a rebuild: %v", missing)
+	}
+}
+
+// ─── verification gate end to end ────────────────────────────────────────────
+
+// fakeRepairStore drives the orchestration without PostgreSQL. It serves both
+// the reassignment tests (which only mint ids) and the verification tests.
+type fakeRepairStore struct {
+	run        *RepairRun
+	items      []RepairItem
+	itemStates map[string]RepairItemState
+	runState   RepairRunState
+	runError   string
+	next       int64
+	calls      int
+	err        error
+}
+
+func newFakeRepairStore(run *RepairRun, items []RepairItem) *fakeRepairStore {
+	return &fakeRepairStore{run: run, items: items, itemStates: map[string]RepairItemState{}}
+}
+
+func (f *fakeRepairStore) ActiveRun(context.Context) (*RepairRun, error) { return nil, nil }
+func (f *fakeRepairStore) CreateRun(context.Context, []RepairItem, time.Time) (*RepairRun, error) {
+	return f.run, nil
+}
+func (f *fakeRepairStore) GetRun(context.Context, int64) (*RepairRun, error) { return f.run, nil }
+func (f *fakeRepairStore) ListItems(context.Context, int64) ([]RepairItem, error) {
+	return f.items, nil
+}
+func (f *fakeRepairStore) ListItemsInState(context.Context, int64, ...RepairItemState) ([]RepairItem, error) {
+	return nil, nil
+}
+func (f *fakeRepairStore) NextNumericID(context.Context) (int64, error) {
+	f.calls++
+	if f.err != nil {
+		return 0, f.err
+	}
+	f.next++
+	return f.next, nil
+}
+func (f *fakeRepairStore) RecordRebuiltNamespace(context.Context, int64, string) error { return nil }
+func (f *fakeRepairStore) RecordSnapshots(context.Context, int64, string, map[string]string) error {
+	return nil
+}
+func (f *fakeRepairStore) RetargetMapping(context.Context, string, string, string, int64) error {
+	return nil
+}
+func (f *fakeRepairStore) SetItemState(_ context.Context, item RepairItem, state RepairItemState, _ string) error {
+	f.itemStates[item.StringID] = state
+	return nil
+}
+func (f *fakeRepairStore) SetRunState(_ context.Context, _ int64, state RepairRunState, errMessage string) error {
+	f.runState = state
+	f.runError = errMessage
+	return nil
+}
+
+func verifyingRun(rebuilt ...string) *RepairRun {
+	return &RepairRun{ID: 7, State: RepairRunVerifying, RebuiltNamespaces: rebuilt}
+}
+
+// `cleaned` means apply finished with the item; `verified` means this gate
+// confirmed it. Recording the promotion is what makes the item-level record
+// match the run-level one.
+func TestVerify_PromotesConfirmedItemsAndCompletesTheRun(t *testing.T) {
+	store := newFakeRepairStore(verifyingRun("ns"), []RepairItem{cleanedItem(10)})
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+	svc := &RepairService{repo: store, mover: mover, rebuild: noopRebuilder{}, now: time.Now}
+
+	report, err := svc.Verify(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(report.Problems) != 0 {
+		t.Fatalf("a clean run reported %v", report.Problems)
+	}
+	if store.itemStates["o1"] != RepairItemVerified {
+		t.Errorf("item state = %q, want verified", store.itemStates["o1"])
+	}
+	if store.runState != RepairRunComplete {
+		t.Errorf("run state = %q, want complete", store.runState)
+	}
+}
+
+// A namespace whose sparse vectors were never rebuilt is still serving stale
+// coordinates, so the gate must refuse even when every point checks out.
+func TestVerify_RefusesWhenASparseRebuildIsMissing(t *testing.T) {
+	store := newFakeRepairStore(verifyingRun(), []RepairItem{cleanedItem(10)}) // nothing rebuilt
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+	svc := &RepairService{repo: store, mover: mover, rebuild: noopRebuilder{}, now: time.Now}
+
+	report, err := svc.Verify(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(report.Problems) == 0 || !strings.Contains(report.Problems[0], "never rebuilt") {
+		t.Fatalf("a missing rebuild must block the gate, got %v", report.Problems)
+	}
+	if store.runState != RepairRunFailed {
+		t.Errorf("run state = %q, want failed", store.runState)
+	}
+}
+
+// Verification is re-runnable: an item promoted by an earlier pass must not
+// come back as unfinished work.
+func TestVerify_AcceptsItemsPromotedByAnEarlierPass(t *testing.T) {
+	already := cleanedItem(10)
+	already.State = RepairItemVerified
+	store := newFakeRepairStore(verifyingRun("ns"), []RepairItem{already})
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+	svc := &RepairService{repo: store, mover: mover, rebuild: noopRebuilder{}, now: time.Now}
+
+	report, err := svc.Verify(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(report.Remaining) != 0 {
+		t.Errorf("an already-verified item was reported unfinished: %+v", report.Remaining)
+	}
+	if store.runState != RepairRunComplete {
+		t.Errorf("run state = %q, want complete", store.runState)
+	}
+}
+
+// An item apply never finished must not be promoted by the gate.
+func TestVerify_LeavesUnfinishedItemsAlone(t *testing.T) {
+	pending := cleanedItem(10)
+	pending.State = RepairItemCopied
+	store := newFakeRepairStore(verifyingRun("ns"), []RepairItem{pending})
+	svc := &RepairService{repo: store, mover: &fakePointMover{}, rebuild: noopRebuilder{}, now: time.Now}
+
+	report, err := svc.Verify(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if len(report.Remaining) != 1 {
+		t.Fatalf("expected the unfinished item to be reported, got %+v", report)
+	}
+	if _, promoted := store.itemStates["o1"]; promoted {
+		t.Error("an unfinished item must not be promoted")
+	}
+	if store.runState != RepairRunFailed {
+		t.Errorf("run state = %q, want failed", store.runState)
+	}
+}
+
+type noopRebuilder struct{}
+
+func (noopRebuilder) RebuildSparse(context.Context, string) error { return nil }

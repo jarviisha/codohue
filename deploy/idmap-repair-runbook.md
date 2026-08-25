@@ -118,8 +118,11 @@ so the full recompute that follows rebuilds them once every mapping has settled.
 ```
 
 Verification checks every manifest tuple: the target point exists, carries the
-right logical id, still hashes to the vector recorded at audit time, and no old
-point remains. Failures are reported per identity with the reason. It exits non-zero when anything is unfinished —
+right logical id, still hashes to the payload and vector recorded at audit
+time, and no old point remains. It also confirms every namespace in the
+manifest had its sparse vectors rebuilt. Failures are reported per identity
+with the reason, and each confirmed item is promoted from `cleaned` to
+`verified` so the item record matches the run record. It exits non-zero when anything is unfinished —
 **do not unlock the fleet until it passes.**
 
 ## 5. Resume after a failure

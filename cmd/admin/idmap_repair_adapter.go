@@ -70,12 +70,21 @@ func (m *qdrantPointMover) PointAbsent(ctx context.Context, collection string, i
 //
 // The payload key depends on the collection family, the same pairing the audit
 // uses when it inventories them.
-func (m *qdrantPointMover) InspectPoint(ctx context.Context, collection string, id int64) (stringID, vectorHash string, found bool, err error) {
+func (m *qdrantPointMover) InspectPoint(ctx context.Context, collection string, id int64) (idmap.InspectedPoint, bool, error) {
 	point, err := pointID(id)
 	if err != nil {
-		return "", "", false, err
+		return idmap.InspectedPoint{}, false, err
 	}
-	return infraqdrant.InspectPoint(ctx, m.client, collection, payloadIDField(collection), point)
+	stringID, payloadHash, vectorHash, found, err := infraqdrant.InspectPoint(
+		ctx, m.client, collection, payloadIDField(collection), point)
+	if err != nil || !found {
+		return idmap.InspectedPoint{}, found, err
+	}
+	return idmap.InspectedPoint{
+		StringID:    stringID,
+		PayloadHash: payloadHash,
+		VectorHash:  vectorHash,
+	}, true, nil
 }
 
 // payloadIDField returns the payload key a collection's points carry. Subject

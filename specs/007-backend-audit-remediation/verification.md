@@ -57,6 +57,22 @@ Dead-code recheck after wiring: `NextNumericID`, `RetargetMapping`,
 `verifyItem` all have live call sites. `ValidateSnapshotRefs` and
 `affectedCollections` were retired — the manifest-aware check replaced them.
 
+## Phase 12 (convergence) gates
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues |
+| `go build ./...` | **pass** |
+| `go test ./...` | **pass** |
+| `go test -race` (idmap, cmd/admin, infra/qdrant) | **pass** |
+| `go vet -tags=e2e ./e2e/` | **pass** |
+
+Migration 027 adds `id_mapping_repair_runs.rebuilt_namespaces`; include it in
+the T109 rehearsal alongside 024-026.
+
+All six `RepairItemState` values are now assigned by the code, so the state
+machine matches the data model.
+
 ## Outstanding — requires a live environment
 
 These cannot be completed from a workstation without the stack running. Each
