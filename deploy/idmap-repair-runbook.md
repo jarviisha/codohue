@@ -62,7 +62,14 @@ The audit quarantines rather than guesses. An item is quarantined when:
 | `points exist for an identity with no id_mappings row` | Points reference an identity PostgreSQL has never mapped | Re-ingest the object/subject so a mapping is minted, or delete the points |
 
 Apply refuses to run while any item is quarantined. Resolve them all, then run
-`audit` again — a new run supersedes the old manifest.
+`audit` again — a new run supersedes the old manifest, provided the previous
+run has not started applying.
+
+To re-check what is still blocking a run without discarding its manifest:
+
+```bash
+./tmp/admin idmap-repair quarantine --run 7
+```
 
 ## 2. Coordinated snapshots
 

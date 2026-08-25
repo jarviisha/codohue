@@ -30,6 +30,18 @@ dependency's call graph changes.
   committed (`git diff --name-only main...HEAD`) and uncommitted
   (`git status --short`). The no-frontend constraint holds.
 
+## Phase 10 (convergence) gates
+
+Re-run after the convergence tasks T111-T116:
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues |
+| `go build ./...` | **pass** |
+| `go test ./...` | **pass** |
+| `go test -race` (idmap, cmd/admin, cmd/api) | **pass** |
+| `go vet -tags=e2e ./e2e/` | **pass** — suites still compile |
+
 ## Outstanding — requires a live environment
 
 These cannot be completed from a workstation without the stack running. Each

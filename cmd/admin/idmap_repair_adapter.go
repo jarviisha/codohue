@@ -24,16 +24,45 @@ type qdrantPointMover struct {
 	client *qdrantpb.Client
 }
 
+// pointID narrows a manifest numeric id to Qdrant's unsigned point id.
+//
+// A plain uint64() conversion would turn a negative id into a huge positive
+// one, quietly addressing a point nobody meant to touch. Numeric ids come from
+// a BIGSERIAL so they are positive in practice; this refuses rather than
+// trusting that a manifest row was never corrupted.
+func pointID(id int64) (uint64, error) {
+	if id < 1 {
+		return 0, fmt.Errorf("invalid numeric point id %d: ids are positive", id)
+	}
+	return uint64(id), nil
+}
+
 func (m *qdrantPointMover) CopyPointVerified(ctx context.Context, collection string, from, to int64) error {
-	return infraqdrant.CopyPointVerified(ctx, m.client, collection, uint64(from), uint64(to))
+	source, err := pointID(from)
+	if err != nil {
+		return err
+	}
+	destination, err := pointID(to)
+	if err != nil {
+		return err
+	}
+	return infraqdrant.CopyPointVerified(ctx, m.client, collection, source, destination)
 }
 
 func (m *qdrantPointMover) DeletePoint(ctx context.Context, collection string, id int64) error {
-	return infraqdrant.DeletePoint(ctx, m.client, collection, uint64(id))
+	point, err := pointID(id)
+	if err != nil {
+		return err
+	}
+	return infraqdrant.DeletePoint(ctx, m.client, collection, point)
 }
 
 func (m *qdrantPointMover) PointAbsent(ctx context.Context, collection string, id int64) (bool, error) {
-	return infraqdrant.PointAbsent(ctx, m.client, collection, uint64(id))
+	point, err := pointID(id)
+	if err != nil {
+		return false, err
+	}
+	return infraqdrant.PointAbsent(ctx, m.client, collection, point)
 }
 
 // sparseRebuildAdapter satisfies idmap.SparseRebuilder over internal/compute.

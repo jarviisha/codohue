@@ -18,6 +18,8 @@ type fakeRepairRunner struct {
 	resumeErr    error
 	snapshotErr  error
 
+	quarantined   []idmap.RepairItem
+	auditCalls    int
 	snapshotCalls int
 	applyCalls    int
 	resumeCalls   int
@@ -26,6 +28,7 @@ type fakeRepairRunner struct {
 }
 
 func (f *fakeRepairRunner) Audit(context.Context) (*idmap.AuditReport, error) {
+	f.auditCalls++
 	if f.auditErr != nil {
 		return nil, f.auditErr
 	}
@@ -63,7 +66,7 @@ func (f *fakeRepairRunner) Resume(context.Context, int64) error {
 }
 
 func (f *fakeRepairRunner) QuarantineReport(context.Context, int64) ([]idmap.RepairItem, error) {
-	return nil, nil
+	return f.quarantined, nil
 }
 
 func runRepair(t *testing.T, runner repairRunner, args ...string) (string, error) {
@@ -295,5 +298,46 @@ func TestAffectedCollections(t *testing.T) {
 	}
 	if !seen["ns_objects"] || !seen["ns_objects_dense"] {
 		t.Errorf("got %v", got)
+	}
+}
+
+// Apply refuses while anything is quarantined, and an operator works through
+// that list over time. Re-auditing just to see what is left would discard the
+// manifest they are working from, so the blockers are re-listable on demand.
+func TestIdmapRepair_QuarantineListsBlockersWithoutReAuditing(t *testing.T) {
+	runner := &fakeRepairRunner{quarantined: []idmap.RepairItem{
+		{Namespace: "ns", EntityType: "object", StringID: "o1", Error: "two points claim this identity"},
+		{Namespace: "ns", EntityType: "subject", StringID: "u9", Error: "no id_mappings row"},
+	}}
+
+	out, err := runRepair(t, runner, "quarantine", "--run", "7")
+	if err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+	if runner.auditCalls != 0 {
+		t.Error("listing blockers must not start a new audit")
+	}
+	for _, want := range []string{"2 unresolved", "ns/object/o1", "two points claim this identity", "ns/subject/u9"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A run with nothing left says so plainly, so the operator knows apply is
+// ready rather than guessing from an empty list.
+func TestIdmapRepair_QuarantineReportsAClearRun(t *testing.T) {
+	out, err := runRepair(t, &fakeRepairRunner{}, "quarantine", "--run", "7")
+	if err != nil {
+		t.Fatalf("quarantine: %v", err)
+	}
+	if !strings.Contains(out, "not blocked") {
+		t.Errorf("a clear run must say apply is unblocked:\n%s", out)
+	}
+}
+
+func TestIdmapRepair_QuarantineRequiresARunID(t *testing.T) {
+	if _, err := runRepair(t, &fakeRepairRunner{}, "quarantine"); err == nil {
+		t.Fatal("quarantine without --run must be a validation error")
 	}
 }

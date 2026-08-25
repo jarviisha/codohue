@@ -30,9 +30,10 @@ type repairRunner interface {
 	QuarantineReport(ctx context.Context, runID int64) ([]idmap.RepairItem, error)
 }
 
-const idmapRepairUsage = `usage: idmap-repair <audit|apply|verify|resume>
+const idmapRepairUsage = `usage: idmap-repair <audit|quarantine|apply|verify|resume>
 
   audit                                          inventory both stores, record an immutable manifest (read-only)
+  quarantine --run <id>                          re-list what is blocking a run, without re-auditing
   apply  --run <id> --pg-snapshot <ref> \
          --qdrant-snapshot <collection>=<ref>    move identities onto their authoritative numeric ids
   verify --run <id>                              prove every manifest tuple before unlocking the fleet
@@ -46,6 +47,8 @@ func runIdmapRepairCommand(ctx context.Context, args []string, runner repairRunn
 	switch args[0] {
 	case "audit":
 		return runRepairAudit(ctx, runner, out)
+	case "quarantine":
+		return runRepairQuarantine(ctx, args[1:], runner, out)
 	case "apply":
 		return runRepairApply(ctx, args[1:], runner, out)
 	case "verify":
@@ -125,6 +128,31 @@ func runRepairVerify(ctx context.Context, args []string, runner repairRunner, ou
 	}
 	return fmt.Errorf("run %d is not verifiable: %d unfinished, %d old point(s) present",
 		runID, len(report.Remaining), len(report.Unmoved))
+}
+
+// runRepairQuarantine re-lists a run's blockers.
+//
+// Needed because apply refuses while anything is quarantined and the operator
+// works through the list over time — re-auditing just to see what is left
+// would discard the manifest they are working from.
+func runRepairQuarantine(ctx context.Context, args []string, runner repairRunner, out *strings.Builder) error {
+	runID, err := parseRunFlag("idmap-repair quarantine", args)
+	if err != nil {
+		return err
+	}
+	items, err := runner.QuarantineReport(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		fmt.Fprintf(out, "run %d has no quarantined items; apply is not blocked\n", runID)
+		return nil
+	}
+	fmt.Fprintf(out, "run %d is blocked by %d unresolved item(s):\n", runID, len(items))
+	for _, item := range items {
+		fmt.Fprintf(out, "  %s/%s/%s: %s\n", item.Namespace, item.EntityType, item.StringID, item.Error)
+	}
+	return nil
 }
 
 func runRepairResume(ctx context.Context, args []string, runner repairRunner, out *strings.Builder) error {

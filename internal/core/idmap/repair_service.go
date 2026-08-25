@@ -93,10 +93,22 @@ type AuditReport struct {
 // no point and no mapping — the operator reviews the decisions before anything
 // moves.
 func (s *RepairService) Audit(ctx context.Context) (*AuditReport, error) {
-	if active, err := s.repo.ActiveRun(ctx); err != nil {
+	active, err := s.repo.ActiveRun(ctx)
+	if err != nil {
 		return nil, err
-	} else if active != nil {
-		return nil, fmt.Errorf("%w: run %d is in state %s", ErrRepairRunActive, active.ID, active.State)
+	}
+	if active != nil {
+		if !supersedable(active.State) {
+			return nil, fmt.Errorf("%w: run %d is in state %s", ErrRepairRunActive, active.ID, active.State)
+		}
+		// Resolving a quarantined item changes the evidence, so the operator
+		// re-audits. The previous run has moved nothing, and an `audited` run
+		// never reaches a terminal state on its own — without this it would
+		// block every later audit forever.
+		if err := s.repo.SetRunState(ctx, active.ID, RepairRunFailed, "superseded by a later audit"); err != nil {
+			return nil, fmt.Errorf("supersede run %d: %w", active.ID, err)
+		}
+		slog.InfoContext(ctx, "idmap repair: superseded a pre-mutation run", "run_id", active.ID, "state", active.State)
 	}
 
 	namespaces, err := s.evidence.Namespaces(ctx)
@@ -111,6 +123,12 @@ func (s *RepairService) Audit(ctx context.Context) (*AuditReport, error) {
 			return nil, fmt.Errorf("collect evidence for %q: %w", namespace, err)
 		}
 		items = append(items, auditNamespace(evidence)...)
+	}
+
+	// Resolve contested targets before the manifest is frozen, so what the
+	// operator reviews is the id the repair will actually write to.
+	if err := reassignContestedTargets(ctx, s.repo, items); err != nil {
+		return nil, err
 	}
 
 	run, err := s.repo.CreateRun(ctx, items, s.now().UTC())
@@ -133,6 +151,50 @@ func (s *RepairService) Audit(ctx context.Context) (*AuditReport, error) {
 	return report, nil
 }
 
+// numericIDReserver mints numeric ids from the same sequence the hot path uses.
+// Declared as an interface so the reassignment rule can be tested without a
+// database.
+type numericIDReserver interface {
+	NextNumericID(ctx context.Context) (int64, error)
+}
+
+// reassignContestedTargets moves every identity whose mapped numeric id is held
+// by a different identity onto a freshly reserved id.
+//
+// The alternative — evicting the occupant — is not available: the occupant's
+// vector may be exactly as unrecomputable as this one's, so neither may be
+// sacrificed for the other. Minting a third id resolves the conflict without
+// touching either vector; apply then retargets the mapping to it, which is the
+// one case where the mapping genuinely changes.
+//
+// Reserving a sequence value is the only side effect an audit has beyond
+// writing its own manifest: it mutates no point and no mapping.
+func reassignContestedTargets(ctx context.Context, reserver numericIDReserver, items []RepairItem) error {
+	for i := range items {
+		item := &items[i]
+		if !item.Resolved() || item.TargetConflictWith() == "" {
+			continue
+		}
+		fresh, err := reserver.NextNumericID(ctx)
+		if err != nil {
+			return fmt.Errorf("reserve a fresh numeric id for %s/%s/%s: %w",
+				item.Namespace, item.EntityType, item.StringID, err)
+		}
+		item.Sources[sourceTargetReassignedFrom] = *item.TargetNumericID
+		item.TargetNumericID = &fresh
+	}
+	return nil
+}
+
+// supersedable reports whether a re-audit may replace this run.
+//
+// Only runs that have mutated nothing qualify. Once apply has started, points
+// and mappings may already have moved, so a fresh manifest would describe a
+// half-repaired fleet — the operator has to resume or verify instead.
+func supersedable(state RepairRunState) bool {
+	return state != RepairRunApplying && state != RepairRunVerifying
+}
+
 // auditNamespace decides, for each logical identity, which numeric id is
 // authoritative — or refuses to decide.
 //
@@ -151,6 +213,10 @@ func auditNamespace(evidence *NamespaceEvidence) []RepairItem {
 		unlabeled   bool
 	}
 	byIdentity := map[string]*observed{}
+	// occupancy answers "which identity currently holds numeric id N in this
+	// collection". A target id held by a DIFFERENT identity cannot be copied
+	// onto without destroying that identity's vector.
+	occupancy := map[string]map[int64]string{}
 	key := func(entityType, stringID string) string { return entityType + "\x1f" + stringID }
 
 	for _, point := range evidence.Points {
@@ -174,6 +240,10 @@ func auditNamespace(evidence *NamespaceEvidence) []RepairItem {
 		}
 		entry.numericIDs[point.NumericID] = struct{}{}
 		entry.collections[point.Collection] = append(entry.collections[point.Collection], point.NumericID)
+		if occupancy[point.Collection] == nil {
+			occupancy[point.Collection] = map[int64]string{}
+		}
+		occupancy[point.Collection][point.NumericID] = k
 		if point.PayloadHash != "" {
 			entry.payloadHash = point.PayloadHash
 		}
@@ -226,6 +296,10 @@ func auditNamespace(evidence *NamespaceEvidence) []RepairItem {
 			}
 			target := mapped
 			item.TargetNumericID = &target
+			if holder := targetHolder(occupancy, entry.collections, target, k); holder != "" {
+				_, conflictID, _ := splitKey(holder)
+				item.Sources[sourceTargetConflict] = conflictID
+			}
 		}
 		items = append(items, item)
 	}
@@ -236,6 +310,21 @@ func auditNamespace(evidence *NamespaceEvidence) []RepairItem {
 		return items[i].StringID < items[j].StringID
 	})
 	return items
+}
+
+// targetHolder reports the identity key occupying target in any collection this
+// item appears in, or "" when the target is free or already this item's own.
+//
+// Occupancy is per collection: the same numeric id in a different collection is
+// a different vector space, so it is not a conflict.
+func targetHolder(occupancy map[string]map[int64]string, collections map[string][]int64, target int64, self string) string {
+	for collection := range collections {
+		holder, ok := occupancy[collection][target]
+		if ok && holder != self {
+			return holder
+		}
+	}
+	return ""
 }
 
 func hasAmbiguousCollection(collections map[string][]int64) bool {

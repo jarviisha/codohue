@@ -91,10 +91,38 @@ type RepairItem struct {
 	Error           string
 }
 
+// sourceTargetConflict is the Sources key recording that the mapped numeric id
+// is already held by a different identity in one of this item's collections.
+const sourceTargetConflict = "target_conflict_with"
+
+// sourceTargetReassignedFrom records the numeric id the audit wanted to use
+// before reassigning this item to a fresh one.
+const sourceTargetReassignedFrom = "target_reassigned_from"
+
 // Resolved reports whether the audit selected an authoritative numeric id for
 // this identity. An unresolved item blocks apply for the whole run.
 func (i RepairItem) Resolved() bool {
 	return i.State != RepairItemQuarantined && i.TargetNumericID != nil
+}
+
+// TargetConflictWith returns the string id of the identity already occupying
+// this item's mapped numeric id, or "" when the target is free.
+//
+// The occupancy matters because a copy onto an occupied id destroys whatever
+// was there, and the copy's own verification cannot detect it — it compares
+// the destination against the source it just wrote, not against what the
+// destination held before.
+func (i RepairItem) TargetConflictWith() string {
+	if i.Sources == nil {
+		return ""
+	}
+	// A manifest written before this key existed, or one carrying a
+	// non-string value, reads as "no conflict" rather than failing the run.
+	conflict, ok := i.Sources[sourceTargetConflict].(string)
+	if !ok {
+		return ""
+	}
+	return conflict
 }
 
 // NeedsCopy reports whether the item's dense point still has to be moved. An

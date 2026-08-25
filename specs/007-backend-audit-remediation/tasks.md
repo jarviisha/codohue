@@ -401,3 +401,14 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 - Type-only, migration-only, documentation, configuration, and composition-only files may be covered by adjacent contract or integration tests; every changed business-logic file has a direct test task.
 - Commit after each task or focused logical group using the repository Conventional Commit format.
 - Stop at any checkpoint to validate the story independently.
+
+---
+
+## Phase 10: Convergence
+
+- [X] T111 Detect target-numeric-id occupancy during audit — quarantine, or mint a fresh id via `NextNumericID` and retarget the mapping — so apply cannot overwrite a point belonging to another identity in `internal/core/idmap/repair_service.go` and `internal/core/idmap/repair_repository.go` per plan Release 4 step 5 / FR-010 (partial)
+- [X] T112 Add direct run/item persistence, immutable-manifest, resume-query, and quarantine-report tests in `internal/core/idmap/repair_repository_test.go` per Constitution II / FR-021 (missing)
+- [X] T113 Add int64/uint64 conversion, collection-kind to payload-field mapping, and missing-collection skip tests in `cmd/admin/idmap_repair_adapter_test.go` per Constitution II / FR-021 (missing)
+- [X] T114 Add transaction-bound versus nil-transaction attribution tests in `cmd/api/objects_adapter_test.go` per Constitution II / FR-021 (missing)
+- [X] T115 Expose `QuarantineReport` as an `idmap-repair quarantine --run <id>` subcommand, or remove it from the `repairRunner` interface, in `cmd/admin/idmap_repair.go` per plan repair orchestration boundary (unrequested)
+- [X] T116 [P] Align ID-map test file names with the constitution companion convention by splitting `internal/core/idmap/idmap_test.go` into `service_test.go` and `repository_test.go` per Constitution II (partial)
