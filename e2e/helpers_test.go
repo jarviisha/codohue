@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -482,4 +483,112 @@ func mustAtoi(t testing.TB, value string) int {
 		t.Fatalf("atoi %q: %v", value, err)
 	}
 	return n
+}
+
+type redisGroupProgress struct {
+	Name            string
+	Pending         int64
+	OldestPendingID string
+	LastDeliveredID string
+}
+
+func redisGroupProgressFor(t testing.TB, stream, group string) redisGroupProgress {
+	t.Helper()
+	ctx := context.Background()
+	groups, err := testRedis.XInfoGroups(ctx, stream).Result()
+	if err != nil {
+		t.Fatalf("xinfo groups %q: %v", stream, err)
+	}
+	for _, info := range groups {
+		if info.Name != group {
+			continue
+		}
+		progress := redisGroupProgress{
+			Name:            info.Name,
+			Pending:         info.Pending,
+			LastDeliveredID: info.LastDeliveredID,
+		}
+		if info.Pending > 0 {
+			pending, err := testRedis.XPending(ctx, stream, group).Result()
+			if err != nil {
+				t.Fatalf("xpending %q/%q: %v", stream, group, err)
+			}
+			progress.OldestPendingID = pending.Lower
+		}
+		return progress
+	}
+	t.Fatalf("consumer group %q not found on stream %q", group, stream)
+	return redisGroupProgress{}
+}
+
+func ensureRedisGroup(t testing.TB, stream, group, start string) {
+	t.Helper()
+	err := testRedis.XGroupCreateMkStream(context.Background(), stream, group, start).Err()
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		t.Fatalf("create consumer group %q on %q: %v", group, stream, err)
+	}
+}
+
+func assertNoStreamEntryBelow(t testing.TB, stream, frontier string) {
+	t.Helper()
+	entries, err := testRedis.XRangeN(context.Background(), stream, "-", "("+frontier, 1).Result()
+	if err != nil {
+		t.Fatalf("xrange below frontier %q on %q: %v", frontier, stream, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("stream %q still contains entry %q below frontier %q", stream, entries[0].ID, frontier)
+	}
+}
+
+func namespaceLifecycleGeneration(t testing.TB, namespace string) int64 {
+	t.Helper()
+	var generation int64
+	if err := testDB.QueryRow(context.Background(), `
+		SELECT generation FROM namespace_lifecycles WHERE namespace = $1
+	`, namespace).Scan(&generation); err != nil {
+		t.Fatalf("lifecycle generation for %q: %v", namespace, err)
+	}
+	return generation
+}
+
+func assertNoNamespaceRows(t testing.TB, table, namespace string) {
+	t.Helper()
+	allowed := map[string]bool{
+		"events": true, "catalog_items": true, "objects": true,
+		"id_mappings": true, "namespace_configs": true,
+	}
+	if !allowed[table] {
+		t.Fatalf("unsupported namespace-owned table %q", table)
+	}
+	var count int
+	query := "SELECT COUNT(*) FROM " + table + " WHERE namespace = $1" //nolint:gosec // table is allowlisted above.
+	if err := testDB.QueryRow(context.Background(), query, namespace).Scan(&count); err != nil {
+		t.Fatalf("count namespace rows in %q: %v", table, err)
+	}
+	if count != 0 {
+		t.Fatalf("table %q has %d rows for namespace %q, want zero", table, count, namespace)
+	}
+}
+
+func assertQdrantNamespaceAbsent(t testing.TB, namespace string) {
+	t.Helper()
+	for _, suffix := range []string{"_subjects", "_objects", "_subjects_dense", "_objects_dense"} {
+		collection := namespace + suffix
+		if qdrantCollectionExists(t, collection) {
+			t.Errorf("Qdrant collection %q still exists", collection)
+		}
+	}
+}
+
+func unavailableTCPAddress(t testing.TB) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve unavailable TCP address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved TCP address: %v", err)
+	}
+	return address
 }

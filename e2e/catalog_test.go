@@ -648,15 +648,21 @@ func (a *nsAdapterShim) RotateAPIKey(_ context.Context, _ string) (*admin.Namesp
 // namespace doesn't exist OR dense_source is not catalog (FR-008 single 404).
 type strategyPickerShim struct{ svc *nsconfig.Service }
 
-func (s *strategyPickerShim) GetCatalogStrategy(ctx context.Context, ns string) (string, string, bool, error) {
+// The generation is returned alongside the strategy because the admin
+// re-embed path publishes onto that generation's embed stream; a shim that
+// dropped it would enqueue work no consumer is listening for.
+func (s *strategyPickerShim) GetCatalogStrategy(ctx context.Context, ns string) (strategyID, strategyVersion string, generation int64, enabled bool, err error) {
 	cfg, err := s.svc.Get(ctx, ns)
 	if err != nil {
-		return "", "", false, err
+		return "", "", 0, false, err
 	}
 	if cfg == nil || cfg.DenseSource != "catalog" {
-		return "", "", false, nil
+		return "", "", 0, false, nil
 	}
-	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil
+	if cfg.Generation < 1 {
+		return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, 1, true, nil
+	}
+	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, cfg.Generation, true, nil
 }
 
 // forceItemToDeadletter flips a catalog item to dead_letter via direct DB

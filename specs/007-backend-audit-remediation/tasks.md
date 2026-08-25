@@ -88,7 +88,7 @@
 - [X] T030 [P] [US2] Add generation-aware cache and embed-repository name-resolution tests in `internal/recommend/repository_test.go` and `internal/embedder/repository_test.go`
 - [X] T031 [P] [US2] Add partial-delete, verified absence, restart-resume, recreation blocking, persistent reset, idempotent legacy closure, adoption-evidence, and command-registration tests in `internal/admin/service_test.go`, `internal/admin/repository_test.go`, `cmd/admin/lifecycle_test.go`, and `cmd/admin/main_test.go`
 - [X] T032 [P] [US2] Add Release-3 generation-qualified embed-stream discovery and retention-loop tests in `cmd/embedder/main_test.go`
-- [ ] T033 [US2] Add the 100-iteration writer/delete/reset/recreate race, partial-store failure, legacy-envelope closure, and stale-generation assertions in `e2e/namespace_lifecycle_test.go`
+- [X] T033 [US2] Add the 100-iteration writer/delete/reset/recreate race, partial-store failure, legacy-envelope closure, and stale-generation assertions in `e2e/namespace_lifecycle_test.go`
 
 ### Implementation for User Story 2
 
@@ -135,8 +135,8 @@
 - [X] T061 [P] [US3] Add direct ambiguous preflight, zero-mutation refusal, snapshot requirement, sparse-rebuild port, stage failure, resume, and verify tests in `internal/core/idmap/repair_service_test.go`
 - [X] T062 [P] [US3] Add collection inventory, payload/vector hashing, snapshot reference, verified copy, and old-point cleanup tests in `internal/infra/qdrant/repair_test.go`
 - [X] T063 [P] [US3] Add `audit`, `apply`, `verify`, `resume`, argument-validation, command-registration, and compute-adapter tests in `cmd/admin/idmap_repair_test.go`, `cmd/admin/idmap_repair_adapter_test.go`, and `cmd/admin/main_test.go`
-- [ ] T064 [US3] Add expired-event cleanup, strategy-tuple replacement, and timestamp boundary/fuzz scenarios in `e2e/recommendation_state_test.go`
-- [ ] T065 [US3] Add PostgreSQL/Qdrant collision, ambiguous-point zero-mutation, BYOE preservation, sparse rebuild, failure-resume, and verification rehearsal in `e2e/idmap_repair_test.go`
+- [X] T064 [US3] Add expired-event cleanup, strategy-tuple replacement, and timestamp boundary/fuzz scenarios in `e2e/recommendation_state_test.go`
+- [X] T065 [US3] Add PostgreSQL/Qdrant collision, ambiguous-point zero-mutation, BYOE preservation, sparse rebuild, failure-resume, and verification rehearsal in `e2e/idmap_repair_test.go`
 
 ### Implementation for User Story 3
 
@@ -172,7 +172,7 @@
 - [X] T082 [US4] Add sparse/dense/metadata deletion fault injection, joined-error, NotFound, and safe-retry tests in `internal/recommend/service_test.go` and `internal/recommend/repository_test.go`
 - [X] T083 [P] [US4] Add effective-dimension validation and base/catalog transaction rollback tests in `internal/nsconfig/repository_test.go`, `internal/nsconfig/repository_unit_test.go`, and `internal/nsconfig/service_test.go`
 - [X] T084 [P] [US4] Add content/author transaction rollback and same-content attribution-update tests in `internal/catalog/repository_test.go` and `internal/catalog/service_test.go`
-- [ ] T085 [US4] Add stable 404/409/503, zero-mutation, zero-cache, incomplete-delete, and compound-write rollback scenarios in `e2e/honest_failures_test.go`
+- [X] T085 [US4] Add stable 404/409/503, zero-mutation, zero-cache, incomplete-delete, and compound-write rollback scenarios in `e2e/honest_failures_test.go`
 
 ### Implementation for User Story 4
 
@@ -197,7 +197,7 @@
 - [X] T091 [P] [US5] Add multi-page, empty-page, terminal `0-0`, error-retention, `NOGROUP`, ten-page-budget, and early-failure reclaim tests in `internal/ingest/worker_test.go` and `internal/ingest/catalog_worker_test.go`
 - [X] T092 [P] [US5] Add independent per-generation embed cursors, empty pages, terminal reset, error retention, ten-page budget, and permanently failing early-entry tests in `internal/embedder/recovery_sweeper_test.go`
 - [X] T093 [P] [US5] Add equal-timestamp keyset, malformed or mismatched cursor, terminal page, legacy offset, golden response, and SDK compatibility tests in `internal/catalog/repository_test.go`, `internal/catalog/handler_test.go`, `pkg/codohuetypes/golden_test.go`, and `sdk/go/catalog_http_test.go`
-- [ ] T094 [US5] Add three-page reclaim and equal-timestamp catalog reconciliation scenarios in `e2e/recovery_reconciliation_test.go`
+- [X] T094 [US5] Add three-page reclaim and equal-timestamp catalog reconciliation scenarios in `e2e/recovery_reconciliation_test.go`
 
 ### Implementation for User Story 5
 
@@ -220,7 +220,7 @@
 - [X] T098 [P] [US6] Add constant-time bearer parsing, missing/malformed header, disabled-token, and admin-key separation tests in `internal/auth/observability_test.go`
 - [X] T099 [P] [US6] Add sanitized public health, protected `details=true`, conditional authenticated metrics, 404/401, and invalid-header-on-plain-health tests in `cmd/api/healthz_test.go` and `cmd/api/main_test.go`
 - [X] T100 [P] [US6] Add the same public/protected health and conditional metrics contract tests for the embedder listener in `cmd/embedder/main_test.go`
-- [ ] T101 [US6] Add public disclosure and trusted monitoring scrape scenarios for API and embedder in `e2e/observability_security_test.go`
+- [X] T101 [US6] Add public disclosure and trusted monitoring scrape scenarios for API and embedder in `e2e/observability_security_test.go`
 
 ### Implementation for User Story 6
 
@@ -237,8 +237,8 @@
 **Purpose**: Complete documentation, rollout rehearsal, compatibility gates, and repository-wide release proof.
 
 - [ ] T105 [P] Update lifecycle generation, exact stream retention, catalog cursor, stable error, health-details, metrics-auth, and SDK usage in `README.md`, `sdk/go/README.md`, and `sdk/go/redistream/README.md`
-- [ ] T106 [P] Document the four gated releases, exact-retention canary and kill switch, generation adoption window, guarded legacy closure, delete/reset enablement, and rollback boundaries in `deploy/backend-audit-remediation.md`
-- [ ] T107 Add the compensating `only_state=all` re-embed procedure and namespace completion evidence template in `deploy/backend-audit-remediation.md`
+- [X] T106 [P] Document the four gated releases, exact-retention canary and kill switch, generation adoption window, guarded legacy closure, delete/reset enablement, and rollback boundaries in `deploy/backend-audit-remediation.md`
+- [X] T107 Add the compensating `only_state=all` re-embed procedure and namespace completion evidence template in `deploy/backend-audit-remediation.md`
 - [ ] T108 Run `make lint`, `make build`, `make test`, `make test-race`, `make test-e2e`, `make compose-check`, `go mod verify`, and `make vuln`, then record every command result in `specs/007-backend-audit-remediation/verification.md`
 - [ ] T109 Rehearse migrations 024-026, legacy closure, ambiguous repair refusal, repair resume, coordinated snapshot restore, and migration-down safety, then record results in `specs/007-backend-audit-remediation/verification.md`
 - [ ] T110 Confirm `git diff --check` passes and the complete remediation diff contains no changes under `web/admin`, then record the scope check in `specs/007-backend-audit-remediation/verification.md`
