@@ -34,19 +34,23 @@ import (
 )
 
 func main() {
-	if err := dispatchAdminCommand(os.Args[1:], run, runLifecycleCLI); err != nil {
+	if err := dispatchAdminCommand(os.Args[1:], run, runLifecycleCLI, runIdmapRepairCLI); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func dispatchAdminCommand(args []string, runServer func() error, runLifecycle func([]string) error) error {
+func dispatchAdminCommand(args []string, runServer func() error, runLifecycle, runIdmapRepair func([]string) error) error {
 	if len(args) == 0 {
 		return runServer()
 	}
-	if args[0] == "lifecycle" {
+	switch args[0] {
+	case "lifecycle":
 		return runLifecycle(args[1:])
+	case "idmap-repair":
+		return runIdmapRepair(args[1:])
+	default:
+		return fmt.Errorf("unknown admin command %q", args[0])
 	}
-	return fmt.Errorf("unknown admin command %q", args[0])
 }
 
 func run() error {

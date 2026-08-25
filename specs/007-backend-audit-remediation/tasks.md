@@ -131,10 +131,10 @@
 - [X] T057 [P] [US3] Add exact five-minute boundary and beyond-boundary event timestamp tests in `internal/ingest/service_test.go`
 - [X] T058 [P] [US3] Add direct non-negative age, `[0,1]` clamp, malformed timestamp, and non-finite candidate tests in `internal/recommend/scoring_test.go`
 - [X] T059 [P] [US3] Add BYOE timestamp validation, finite response serialization, and rejected-candidate behavior tests in `internal/recommend/service_test.go` and `internal/recommend/handler_test.go`
-- [ ] T060 [P] [US3] Add direct immutable-manifest, quarantine, item-state, hash, and resume-query persistence tests in `internal/core/idmap/repair_repository_test.go`
-- [ ] T061 [P] [US3] Add direct ambiguous preflight, zero-mutation refusal, snapshot requirement, sparse-rebuild port, stage failure, resume, and verify tests in `internal/core/idmap/repair_service_test.go`
-- [ ] T062 [P] [US3] Add collection inventory, payload/vector hashing, snapshot reference, verified copy, and old-point cleanup tests in `internal/infra/qdrant/repair_test.go`
-- [ ] T063 [P] [US3] Add `audit`, `apply`, `verify`, `resume`, argument-validation, command-registration, and compute-adapter tests in `cmd/admin/idmap_repair_test.go`, `cmd/admin/idmap_repair_adapter_test.go`, and `cmd/admin/main_test.go`
+- [X] T060 [P] [US3] Add direct immutable-manifest, quarantine, item-state, hash, and resume-query persistence tests in `internal/core/idmap/repair_repository_test.go`
+- [X] T061 [P] [US3] Add direct ambiguous preflight, zero-mutation refusal, snapshot requirement, sparse-rebuild port, stage failure, resume, and verify tests in `internal/core/idmap/repair_service_test.go`
+- [X] T062 [P] [US3] Add collection inventory, payload/vector hashing, snapshot reference, verified copy, and old-point cleanup tests in `internal/infra/qdrant/repair_test.go`
+- [X] T063 [P] [US3] Add `audit`, `apply`, `verify`, `resume`, argument-validation, command-registration, and compute-adapter tests in `cmd/admin/idmap_repair_test.go`, `cmd/admin/idmap_repair_adapter_test.go`, and `cmd/admin/main_test.go`
 - [ ] T064 [US3] Add expired-event cleanup, strategy-tuple replacement, and timestamp boundary/fuzz scenarios in `e2e/recommendation_state_test.go`
 - [ ] T065 [US3] Add PostgreSQL/Qdrant collision, ambiguous-point zero-mutation, BYOE preservation, sparse rebuild, failure-resume, and verification rehearsal in `e2e/idmap_repair_test.go`
 
@@ -147,13 +147,13 @@
 - [X] T070 [US3] Compare immutable strategy tuples in embed selection, progress, and completion in `internal/embedder/repository.go` and `internal/embedder/reembed_watcher.go`
 - [X] T071 [US3] Enforce the shared five-minute future-skew rule for event and BYOE `object_created_at` inputs in `internal/ingest/types.go`, `internal/ingest/service.go`, `internal/recommend/types.go`, and `internal/recommend/handler.go`
 - [X] T072 [US3] Centralize non-negative freshness, clamp multipliers to `[0,1]`, and exclude observable non-finite candidates before JSON serialization in `internal/recommend/scoring.go`, `internal/recommend/service.go`, and `internal/recommend/handler.go`
-- [ ] T073 [US3] Add composite mapping uniqueness, durable repair run/item manifests, resumable states, and safe down-preflight support in `migrations/026_id_mapping_repair.up.sql` and `migrations/026_id_mapping_repair.down.sql`
-- [ ] T074 [US3] Implement repair-run/item persistence, immutable manifest hashing, quarantine reports, and resume queries in `internal/core/idmap/repair_repository.go`
-- [ ] T075 [US3] Implement Qdrant inventory, payload/vector hashing, snapshot reference validation, verified point copying, and old-point cleanup primitives in `internal/infra/qdrant/repair.go`
-- [ ] T076 [US3] Implement read-only audit plus globally fenced apply, verify, and resume orchestration that halts before mutation on unresolved evidence and invokes sparse rebuild through a narrow port in `internal/core/idmap/repair_service.go`
-- [ ] T077 [US3] Compose the sparse-rebuild adapter over `internal/compute` and register `idmap-repair audit|apply|verify|resume` under the existing admin binary in `cmd/admin/idmap_repair_adapter.go`, `cmd/admin/idmap_repair.go`, and `cmd/admin/main.go`
-- [ ] T078 [US3] Add a duplicate preflight that refuses migration-022 rollback before any constraint mutation in `migrations/022_id_mappings_composite.down.sql` and `migrations/026_id_mapping_repair.down.sql`
-- [ ] T079 [US3] Document coordinated PostgreSQL/Qdrant snapshots, audit, apply, resume, verification, and all-store restore in `deploy/idmap-repair-runbook.md`
+- [X] T073 [US3] Add composite mapping uniqueness, durable repair run/item manifests, resumable states, and safe down-preflight support in `migrations/026_id_mapping_repair.up.sql` and `migrations/026_id_mapping_repair.down.sql`
+- [X] T074 [US3] Implement repair-run/item persistence, immutable manifest hashing, quarantine reports, and resume queries in `internal/core/idmap/repair_repository.go`
+- [X] T075 [US3] Implement Qdrant inventory, payload/vector hashing, snapshot reference validation, verified point copying, and old-point cleanup primitives in `internal/infra/qdrant/repair.go`
+- [X] T076 [US3] Implement read-only audit plus globally fenced apply, verify, and resume orchestration that halts before mutation on unresolved evidence and invokes sparse rebuild through a narrow port in `internal/core/idmap/repair_service.go`
+- [X] T077 [US3] Compose the sparse-rebuild adapter over `internal/compute` and register `idmap-repair audit|apply|verify|resume` under the existing admin binary in `cmd/admin/idmap_repair_adapter.go`, `cmd/admin/idmap_repair.go`, and `cmd/admin/main.go`
+- [X] T078 [US3] Add a duplicate preflight that refuses migration-022 rollback before any constraint mutation in `migrations/022_id_mappings_composite.down.sql` and `migrations/026_id_mapping_repair.down.sql`
+- [X] T079 [US3] Document coordinated PostgreSQL/Qdrant snapshots, audit, apply, resume, verification, and all-store restore in `deploy/idmap-repair-runbook.md`
 
 **Checkpoint**: Recommendation state is current and finite; identity repair is lossless, resumable, and stops before mutation when identity is ambiguous.
 

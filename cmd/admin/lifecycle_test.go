@@ -67,7 +67,7 @@ func TestDispatchAdminCommandRegistersLifecycle(t *testing.T) {
 			t.Fatalf("forwarded args=%v", args)
 		}
 		return nil
-	})
+	}, func([]string) error { return nil })
 	if err != nil || serverCalls != 0 || lifecycleCalls != 1 {
 		t.Fatalf("err=%v server=%d lifecycle=%d", err, serverCalls, lifecycleCalls)
 	}
