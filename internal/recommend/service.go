@@ -57,6 +57,9 @@ var ErrCatalogActive = errors.New("recommend: namespace uses catalog auto-embedd
 // ErrInvalidEmbedding identifies invalid BYOE timestamps or non-finite vector values.
 var ErrInvalidEmbedding = errors.New("recommend: invalid embedding")
 
+// Namespace resolution failures are split so the handler can answer honestly:
+// a namespace that does not exist is 404, one whose config could not be read is
+// 503 and safe to retry.
 var (
 	ErrNamespaceNotFound          = errors.New("recommend: namespace not found")
 	ErrNamespaceConfigUnavailable = errors.New("recommend: namespace config unavailable")
@@ -351,7 +354,7 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 		maxResults = cfg.MaxResults
 	}
 
-	cacheKey := recCacheKey(redisPhysicalNamespace(req.Namespace, cfg), req.SubjectID, maxResults, req.Offset)
+	cacheKey := recCacheKey(req.Namespace, namespaceGeneration(cfg), req.SubjectID, maxResults, req.Offset)
 	if cached, err := s.getCacheFn(ctx, cacheKey); err == nil {
 		var resp Response
 		if json.Unmarshal([]byte(cached), &resp) == nil &&
@@ -1542,9 +1545,12 @@ func (s *Service) deleteFromCollection(ctx context.Context, collection string, i
 	return nil
 }
 
-func recCacheKey(ns, subjectID string, limit, offset int) string {
-	return fmt.Sprintf("rec:v2:%s:%s:limit=%d:offset=%d",
-		base64.RawURLEncoding.EncodeToString([]byte(ns)),
+// recCacheKey builds the per-subject cache key under the namespace-generation
+// prefix owned by nslifecycle. Namespace deletion scans that same prefix, so
+// the two must not each spell the key out.
+func recCacheKey(ns string, generation int64, subjectID string, limit, offset int) string {
+	return fmt.Sprintf("%s:%s:limit=%d:offset=%d",
+		nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, ns, generation),
 		base64.RawURLEncoding.EncodeToString([]byte(subjectID)),
 		limit,
 		offset,

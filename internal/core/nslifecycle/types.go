@@ -9,6 +9,8 @@ import (
 // NamespaceState is the durable mutation gate for one namespace name.
 type NamespaceState string
 
+// Namespace lifecycle states. Deleting is durable on purpose: a delete that
+// dies halfway must not leave the namespace writable on restart.
 const (
 	StateActive   NamespaceState = "active"
 	StateDeleting NamespaceState = "deleting"
@@ -18,11 +20,14 @@ const (
 // SystemState is the durable application-wide mutation gate.
 type SystemState string
 
+// Application-wide lifecycle states; resetting blocks every namespace writer.
 const (
 	SystemActive    SystemState = "active"
 	SystemResetting SystemState = "resetting"
 )
 
+// Lifecycle coordination errors. Callers distinguish them because they map to
+// different HTTP statuses: not-found is 404, not-active and resetting are 409.
 var (
 	ErrNamespaceNotFound   = errors.New("namespace lifecycle not found")
 	ErrNamespaceNotActive  = errors.New("namespace lifecycle is not active")
@@ -55,6 +60,8 @@ type SystemLifecycle struct {
 // EnvelopeDisposition describes whether queued work may be processed.
 type EnvelopeDisposition uint8
 
+// Envelope dispositions. Stale work is ACKed and dropped, never retried — the
+// generation it targets is gone, so no retry can make it valid.
 const (
 	EnvelopeProcess EnvelopeDisposition = iota + 1
 	EnvelopeStale

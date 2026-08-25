@@ -128,7 +128,6 @@ type fakeLifecycleWriter struct {
 	generation int64
 	err        error
 	calls      int
-	leased     bool
 }
 
 func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 // LockMode selects shared writer or exclusive lifecycle coordination.
 type LockMode string
 
+// Writers take LockShared so they run concurrently with each other; delete,
+// recreate and reset take LockExclusive to serialize against all of them.
 const (
 	LockShared    LockMode = "shared"
 	LockExclusive LockMode = "exclusive"
@@ -35,6 +38,8 @@ type postgresLock struct {
 	err  error
 }
 
+// Release drops the advisory lock and returns the pooled connection. It is
+// idempotent: releasing twice must not return the connection twice.
 func (l *postgresLock) Release(ctx context.Context) error {
 	l.once.Do(func() {
 		query := `SELECT pg_advisory_unlock($1)`
@@ -50,6 +55,8 @@ func (l *postgresLock) Release(ctx context.Context) error {
 // PostgresLocker holds session locks on dedicated pool connections.
 type PostgresLocker struct{ db *pgxpool.Pool }
 
+// NewPostgresLocker builds a locker over the pool. Each held lock pins one
+// connection, because a session advisory lock lives on the session.
 func NewPostgresLocker(db *pgxpool.Pool) *PostgresLocker { return &PostgresLocker{db: db} }
 
 func lockKey(name string) int64 {
@@ -58,6 +65,7 @@ func lockKey(name string) int64 {
 	return int64(hash.Sum64())
 }
 
+// Acquire blocks until the named lock is held in the requested mode.
 func (l *PostgresLocker) Acquire(ctx context.Context, name string, mode LockMode) (Lock, error) {
 	conn, err := l.db.Acquire(ctx)
 	if err != nil {
@@ -126,18 +134,23 @@ type Service struct {
 	now    func() time.Time
 }
 
+// NewService wires durable lifecycle state to the lock provider.
 func NewService(store Store, locker Locker) *Service {
 	return &Service{store: store, locker: locker, now: time.Now}
 }
 
-func (s *Service) acquirePair(ctx context.Context, namespace string, namespaceMode LockMode) (Lock, Lock, error) {
-	global, err := s.locker.Acquire(ctx, "global", LockShared)
+// acquirePair takes the global lock before the namespace lock, always in that
+// order. Any caller that reversed it could deadlock against one that did not.
+func (s *Service) acquirePair(ctx context.Context, namespace string, namespaceMode LockMode) (global, namespaceLock Lock, err error) {
+	global, err = s.locker.Acquire(ctx, "global", LockShared)
 	if err != nil {
 		return nil, nil, err
 	}
-	namespaceLock, err := s.locker.Acquire(ctx, "namespace:"+namespace, namespaceMode)
+	namespaceLock, err = s.locker.Acquire(ctx, "namespace:"+namespace, namespaceMode)
 	if err != nil {
-		_ = global.Release(context.WithoutCancel(ctx))
+		if releaseErr := global.Release(context.WithoutCancel(ctx)); releaseErr != nil {
+			slog.Warn("release global lifecycle lock failed", "namespace", namespace, "error", releaseErr)
+		}
 		return nil, nil, err
 	}
 	return global, namespaceLock, nil
@@ -158,7 +171,11 @@ func (s *Service) WithWriter(ctx context.Context, namespace string, fn func(cont
 	if err != nil {
 		return err
 	}
-	defer func() { _ = releasePair(ctx, namespaceLock, global) }()
+	defer func() {
+		if releaseErr := releasePair(ctx, namespaceLock, global); releaseErr != nil {
+			slog.Warn("release lifecycle locks failed", "namespace", namespace, "error", releaseErr)
+		}
+	}()
 	system, err := s.store.GetSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("read system lifecycle after lock: %w", err)

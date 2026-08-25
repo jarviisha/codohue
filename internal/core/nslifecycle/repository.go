@@ -25,7 +25,7 @@ func scanNamespace(row pgx.Row) (*NamespaceLifecycle, error) {
 		return nil, ErrNamespaceNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("scan namespace lifecycle: %w", err)
 	}
 	if lastError != nil {
 		lifecycle.LastError = *lastError
@@ -135,6 +135,8 @@ func (r *Repository) GetSystem(ctx context.Context) (*SystemLifecycle, error) {
 	return &system, nil
 }
 
+// StartReset marks the application-wide reset as in progress. It is durable so
+// a crash mid-reset does not reopen the system to writers on restart.
 func (r *Repository) StartReset(ctx context.Context) error {
 	_, err := r.db.Exec(ctx, `UPDATE system_lifecycle
 		SET state = 'resetting', last_error = NULL, updated_at = NOW()
@@ -145,6 +147,8 @@ func (r *Repository) StartReset(ctx context.Context) error {
 	return nil
 }
 
+// CompleteReset reopens the system, and only from the resetting state — a
+// stray call must not clear a failure nobody has looked at.
 func (r *Repository) CompleteReset(ctx context.Context) error {
 	_, err := r.db.Exec(ctx, `UPDATE system_lifecycle
 		SET state = 'active', last_error = NULL, updated_at = NOW()
@@ -155,6 +159,8 @@ func (r *Repository) CompleteReset(ctx context.Context) error {
 	return nil
 }
 
+// RecordResetError leaves the system durably closed with a diagnostic, so the
+// operator sees why a reset stopped rather than a silently reopened system.
 func (r *Repository) RecordResetError(ctx context.Context, message string) error {
 	_, err := r.db.Exec(ctx, `UPDATE system_lifecycle SET last_error = $1,
 		updated_at = NOW() WHERE singleton = TRUE AND state = 'resetting'`, message)
@@ -175,16 +181,18 @@ func (r *Repository) DisableLegacy(ctx context.Context, adoptionEvidence string,
 			SET legacy_envelopes_disabled_at = $1, legacy_adoption_evidence = $2, updated_at = NOW()
 			WHERE singleton = TRUE AND legacy_envelopes_disabled_at IS NULL`, at, adoptionEvidence)
 		if err != nil {
-			return err
+			return fmt.Errorf("close global legacy gate: %w", err)
 		}
 		changed = tag.RowsAffected() == 1
 		if !changed {
 			return nil
 		}
-		_, err = tx.Exec(ctx, `UPDATE namespace_lifecycles
+		if _, err = tx.Exec(ctx, `UPDATE namespace_lifecycles
 			SET legacy_messages_allowed = FALSE, updated_at = NOW()
-			WHERE legacy_messages_allowed = TRUE`)
-		return err
+			WHERE legacy_messages_allowed = TRUE`); err != nil {
+			return fmt.Errorf("close per-namespace legacy gates: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
 		return false, fmt.Errorf("disable legacy envelopes: %w", err)
@@ -216,12 +224,12 @@ func (r *Repository) ListCleanupCandidates(ctx context.Context, limit int) ([]Cl
 	for rows.Next() {
 		var candidate CleanupCandidate
 		if err := rows.Scan(&candidate.Namespace, &candidate.Generation); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan cleanup candidate: %w", err)
 		}
 		out = append(out, candidate)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("iterate cleanup candidates: %w", err)
 	}
 	return out, nil
 }
@@ -245,7 +253,7 @@ func (r *Repository) ListNonDeleted(ctx context.Context) ([]*NamespaceLifecycle,
 		out = append(out, lifecycle)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("iterate non-deleted lifecycles: %w", err)
 	}
 	return out, nil
 }

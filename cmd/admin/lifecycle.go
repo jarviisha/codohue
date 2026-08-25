@@ -70,7 +70,7 @@ func runLifecycleCommand(ctx context.Context, args []string, disabler legacyEnve
 	all := flags.Bool("all", false, "close legacy envelopes for all namespaces")
 	evidence := flags.String("adoption-evidence", "", "producer adoption evidence reference")
 	if err := flags.Parse(args[1:]); err != nil {
-		return false, err
+		return false, fmt.Errorf("parse lifecycle flags: %w", err)
 	}
 	if flags.NArg() != 0 || !*all || *evidence == "" {
 		return false, fmt.Errorf("usage: lifecycle disable-legacy-envelopes --all --adoption-evidence <evidence>")

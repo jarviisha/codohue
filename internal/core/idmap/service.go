@@ -15,16 +15,6 @@ type idmapRepo interface {
 	GetOrCreateBatch(ctx context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error)
 }
 
-// LookupSubjectID returns an existing numeric subject id without creating one.
-func (s *Service) LookupSubjectID(ctx context.Context, subjectID, namespace string) (uint64, bool, error) {
-	id, found, err := s.repo.Lookup(ctx, subjectID, namespace, "subject")
-	if err != nil {
-		metrics.IDMappingErrors.WithLabelValues("subject").Inc()
-		return 0, false, fmt.Errorf("lookup subject id: %w", err)
-	}
-	return id, found, nil
-}
-
 // Service provides methods to get or create numeric IDs for subjects and objects.
 type Service struct {
 	repo idmapRepo
@@ -33,6 +23,16 @@ type Service struct {
 // NewService creates a new Service with the given repository.
 func NewService(repo idmapRepo) *Service {
 	return &Service{repo: repo}
+}
+
+// LookupSubjectID returns an existing numeric subject id without creating one.
+func (s *Service) LookupSubjectID(ctx context.Context, subjectID, namespace string) (numericID uint64, found bool, err error) {
+	id, found, err := s.repo.Lookup(ctx, subjectID, namespace, "subject")
+	if err != nil {
+		metrics.IDMappingErrors.WithLabelValues("subject").Inc()
+		return 0, false, fmt.Errorf("lookup subject id: %w", err)
+	}
+	return id, found, nil
 }
 
 // GetOrCreateSubjectID returns the numeric ID for the given subjectID, creating it if absent.

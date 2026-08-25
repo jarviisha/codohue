@@ -1,10 +1,14 @@
 package nslifecycle
 
-import "fmt"
+import (
+	"encoding/base64"
+	"fmt"
+)
 
 // PhysicalKind is a namespace-owned Redis or Qdrant resource kind.
 type PhysicalKind string
 
+// Namespace-owned physical resources whose names carry the generation.
 const (
 	KindRecommendationCache PhysicalKind = "recommendation_cache"
 	KindTrending            PhysicalKind = "trending"
@@ -51,7 +55,12 @@ func PhysicalName(kind PhysicalKind, namespace string, generation int64) (string
 	qualified := RedisNamespace(namespace, generation)
 	switch kind {
 	case KindRecommendationCache:
-		return "rec:" + qualified, nil
+		// The namespace is base64'd because the rest of the key encodes a
+		// caller-supplied subject id the same way, and a raw ':' in either
+		// would make the key ambiguous. `v2` is the key-shape version: the
+		// serving path writes these keys and namespace deletion scans for
+		// them, so the shape has to be defined exactly once.
+		return "rec:v2:" + base64.RawURLEncoding.EncodeToString([]byte(qualified)), nil
 	case KindTrending:
 		return "trending:" + qualified, nil
 	case KindEmbedStream:

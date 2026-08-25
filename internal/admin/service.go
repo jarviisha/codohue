@@ -3,7 +3,6 @@ package admin
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -935,11 +934,11 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 			}
 			deleted, cleanupErr := s.deleteNamespaceGeneration(leased, namespace, deleting.Generation)
 			if cleanupErr != nil {
-				_ = s.lifecycle.RecordNamespaceError(context.WithoutCancel(leased), namespace, deleting.Generation, cleanupErr.Error())
+				recordLifecycleError(s.lifecycle.RecordNamespaceError(context.WithoutCancel(leased), namespace, deleting.Generation, cleanupErr.Error()), namespace)
 				return cleanupErr
 			}
 			if completeErr := s.lifecycle.CompleteDelete(leased, namespace, deleting.Generation); completeErr != nil {
-				_ = s.lifecycle.RecordNamespaceError(context.WithoutCancel(leased), namespace, deleting.Generation, completeErr.Error())
+				recordLifecycleError(s.lifecycle.RecordNamespaceError(context.WithoutCancel(leased), namespace, deleting.Generation, completeErr.Error()), namespace)
 				return fmt.Errorf("complete namespace deletion: %w", completeErr)
 			}
 			response = &NamespaceDeleteResponse{Namespace: namespace, EventsDeleted: deleted}
@@ -972,6 +971,16 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 		return nil, nil
 	}
 	return &NamespaceDeleteResponse{Namespace: namespace, EventsDeleted: deleted}, nil
+}
+
+// recordLifecycleError logs a failure to persist a lifecycle failure. The
+// original error is what the caller returns; losing the durable note only
+// costs the operator a diagnostic, so this must never mask it.
+func recordLifecycleError(err error, namespace string) {
+	if err == nil {
+		return
+	}
+	slog.Warn("persist lifecycle failure state failed", "namespace", namespace, "error", err)
 }
 
 func (s *Service) deleteNamespaceGeneration(ctx context.Context, namespace string, generation int64) (int, error) {
@@ -1008,7 +1017,7 @@ func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
 				return fmt.Errorf("persist system reset: %w", err)
 			}
 			fail := func(err error) error {
-				_ = s.lifecycle.RecordResetError(context.WithoutCancel(locked), err.Error())
+				recordLifecycleError(s.lifecycle.RecordResetError(context.WithoutCancel(locked), err.Error()), "")
 				return err
 			}
 			lifecycles, err := s.lifecycle.ListNonDeleted(locked)
@@ -1197,21 +1206,13 @@ func (s *Service) clearNamespaceEverywhereGeneration(ctx context.Context, namesp
 	return deleted, nil
 }
 
-func (s *Service) clearNamespaceRedis(ctx context.Context, namespace string) error {
-	return s.clearNamespaceRedisGeneration(ctx, namespace, 1)
-}
-
 func (s *Service) clearNamespaceRedisGeneration(ctx context.Context, namespace string, generation int64) error {
 	keys := []string{
 		nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation),
 		nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation),
 	}
-	cacheNamespace := namespace
-	if generation > 1 {
-		cacheNamespace = fmt.Sprintf("%s:g%d", namespace, generation)
-	}
-	encodedNamespace := base64.RawURLEncoding.EncodeToString([]byte(cacheNamespace))
-	iter := s.redisClient.Scan(ctx, 0, "rec:v2:"+encodedNamespace+":*", 100).Iterator()
+	cachePrefix := nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, namespace, generation)
+	iter := s.redisClient.Scan(ctx, 0, cachePrefix+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
 	}
@@ -1225,10 +1226,6 @@ func (s *Service) clearNamespaceRedisGeneration(ctx context.Context, namespace s
 		return fmt.Errorf("delete redis keys: %w", err)
 	}
 	return nil
-}
-
-func (s *Service) clearNamespaceQdrant(ctx context.Context, namespace string) error {
-	return s.clearNamespaceQdrantGeneration(ctx, namespace, 1)
 }
 
 func (s *Service) clearNamespaceQdrantGeneration(ctx context.Context, namespace string, generation int64) error {
@@ -1268,11 +1265,8 @@ func (s *Service) verifyNamespaceAbsent(ctx context.Context, namespace string, g
 		if err != nil {
 			return fmt.Errorf("verify redis cleanup for %q: %w", namespace, err)
 		}
-		cacheNamespace := namespace
-		if generation > 1 {
-			cacheNamespace = fmt.Sprintf("%s:g%d", namespace, generation)
-		}
-		iter := s.redisClient.Scan(ctx, 0, "rec:v2:"+base64.RawURLEncoding.EncodeToString([]byte(cacheNamespace))+":*", 1).Iterator()
+		cachePrefix := nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, namespace, generation)
+		iter := s.redisClient.Scan(ctx, 0, cachePrefix+":*", 1).Iterator()
 		cacheFound := iter.Next(ctx)
 		if err := iter.Err(); err != nil {
 			return fmt.Errorf("verify recommendation cache cleanup for %q: %w", namespace, err)

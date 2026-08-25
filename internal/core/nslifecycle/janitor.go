@@ -5,11 +5,16 @@ import (
 	"fmt"
 )
 
+// JanitorSource is the read side of the ledger the janitor works from: it
+// never derives cleanup candidates from what happens to exist in Redis or
+// Qdrant, only from what the durable ledger says is superseded.
 type JanitorSource interface {
 	GetSystem(context.Context) (*SystemLifecycle, error)
 	ListCleanupCandidates(context.Context, int) ([]CleanupCandidate, error)
 }
 
+// GenerationCleaner removes one superseded generation's physical resources.
+// Implemented at the wiring layer so this package keeps no store dependencies.
 type GenerationCleaner interface {
 	DeleteRedisGeneration(context.Context, CleanupCandidate) error
 	DeleteQdrantGeneration(context.Context, CleanupCandidate) error
@@ -21,6 +26,7 @@ type Janitor struct {
 	cleaner GenerationCleaner
 }
 
+// NewJanitor wires the ledger read side to the physical cleaner.
 func NewJanitor(source JanitorSource, cleaner GenerationCleaner) *Janitor {
 	return &Janitor{source: source, cleaner: cleaner}
 }

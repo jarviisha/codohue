@@ -86,9 +86,12 @@ type recordingEventPublisher struct {
 func (p *recordingEventPublisher) PublishItemStateChanged(_ context.Context, ev CatalogItemStateChangedEvent) {
 	p.itemStates = append(p.itemStates, ev)
 }
-func (p *recordingEventPublisher) PublishBacklogSnapshot(context.Context, CatalogBacklogSnapshotEvent) {}
-func (p *recordingEventPublisher) PublishDeadLetterGrew(context.Context, CatalogDeadLetterGrewEvent)   {}
-func (p *recordingEventPublisher) PublishReembedProgress(context.Context, CatalogReembedProgressEvent) {}
+func (p *recordingEventPublisher) PublishBacklogSnapshot(context.Context, CatalogBacklogSnapshotEvent) {
+}
+func (p *recordingEventPublisher) PublishDeadLetterGrew(context.Context, CatalogDeadLetterGrewEvent) {
+}
+func (p *recordingEventPublisher) PublishReembedProgress(context.Context, CatalogReembedProgressEvent) {
+}
 
 // State-change events are stamped from the lifecycle lease held by the
 // mutation, never from an argument a caller could get wrong.

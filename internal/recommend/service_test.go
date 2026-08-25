@@ -80,7 +80,7 @@ func (f *fakeIDMapper) GetOrCreateSubjectID(_ context.Context, _, _ string) (uin
 	return f.subjectID, f.subjectErr
 }
 
-func (f *fakeIDMapper) LookupSubjectID(_ context.Context, _, _ string) (uint64, bool, error) {
+func (f *fakeIDMapper) LookupSubjectID(_ context.Context, _, _ string) (numericID uint64, found bool, err error) {
 	if f.subjectErr != nil {
 		return 0, false, f.subjectErr
 	}
@@ -1695,13 +1695,13 @@ func TestDeleteFromCollection_Error(t *testing.T) {
 }
 
 func TestRecCacheKey(t *testing.T) {
-	key := recCacheKey("ns_feed", "user123", 20, 0)
+	key := recCacheKey("ns_feed", 1, "user123", 20, 0)
 	want := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=0"
 	if key != want {
 		t.Errorf("got %q, want %q", key, want)
 	}
 
-	keyWithOffset := recCacheKey("ns_feed", "user123", 20, 10)
+	keyWithOffset := recCacheKey("ns_feed", 1, "user123", 20, 10)
 	wantWithOffset := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=10"
 	if keyWithOffset != wantWithOffset {
 		t.Errorf("got %q, want %q", keyWithOffset, wantWithOffset)
@@ -1709,8 +1709,8 @@ func TestRecCacheKey(t *testing.T) {
 }
 
 func TestRecCacheKey_DelimiterCannotCollide(t *testing.T) {
-	first := recCacheKey("a", "b:c", 20, 0)
-	second := recCacheKey("a:b", "c", 20, 0)
+	first := recCacheKey("a", 1, "b:c", 20, 0)
+	second := recCacheKey("a:b", 1, "c", 20, 0)
 	if first == second {
 		t.Fatalf("cache keys collided: %q", first)
 	}

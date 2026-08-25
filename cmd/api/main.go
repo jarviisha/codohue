@@ -363,7 +363,9 @@ func healthzDetailsHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(checks)
+		if err := json.NewEncoder(w).Encode(checks); err != nil {
+			slog.Warn("write health response failed", "error", err)
+		}
 	}
 }
 

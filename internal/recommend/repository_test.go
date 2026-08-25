@@ -296,16 +296,17 @@ func TestPhysicalNamespaces_MatchLifecycleResolver(t *testing.T) {
 // Cache keys of two generations must not collide, and generation 1 must keep
 // the key shape that is already live in Redis.
 func TestRecCacheKey_SeparatesGenerations(t *testing.T) {
-	legacy := recCacheKey(redisPhysicalNamespace("tenant", &namespace.Config{Generation: 1}), "u1", 10, 0)
-	recreated := recCacheKey(redisPhysicalNamespace("tenant", &namespace.Config{Generation: 2}), "u1", 10, 0)
+	legacy := recCacheKey("tenant", 1, "u1", 10, 0)
+	recreated := recCacheKey("tenant", 2, "u1", 10, 0)
 	if legacy == recreated {
 		t.Errorf("generations share cache key %q", legacy)
 	}
-	if want := recCacheKey("tenant", "u1", 10, 0); legacy != want {
+	// Generation 1 must keep the key shape that is already live in Redis.
+	if want := "rec:v2:dGVuYW50:dTE:limit=10:offset=0"; legacy != want {
 		t.Errorf("generation 1 key changed: got %q, want %q", legacy, want)
 	}
 	// Paging and subject stay part of the key regardless of generation.
-	if recCacheKey("tenant:g2", "u1", 10, 0) == recCacheKey("tenant:g2", "u1", 10, 10) {
+	if recCacheKey("tenant", 2, "u1", 10, 0) == recCacheKey("tenant", 2, "u1", 10, 10) {
 		t.Error("offset must remain part of the cache key")
 	}
 }

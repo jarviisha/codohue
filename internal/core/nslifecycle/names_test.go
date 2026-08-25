@@ -7,7 +7,7 @@ func TestPhysicalNamePreservesGenerationOneAndQualifiesLaterGenerations(t *testi
 		kind              PhysicalKind
 		legacy, qualified string
 	}{
-		{KindRecommendationCache, "rec:tenant", "rec:tenant:g2"},
+		{KindRecommendationCache, "rec:v2:dGVuYW50", "rec:v2:dGVuYW50Omcy"},
 		{KindTrending, "trending:tenant", "trending:tenant:g2"},
 		{KindEmbedStream, "catalog:embed:tenant", "catalog:embed:tenant:g2"},
 		{KindSubjects, "tenant_subjects", "tenant_g2_subjects"},

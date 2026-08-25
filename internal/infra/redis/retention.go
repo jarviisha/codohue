@@ -67,10 +67,13 @@ type retentionBackend interface {
 
 type redisRetentionBackend struct{ client *redis.Client }
 
+// Groups reports every consumer group on the stream. An unknown group is a
+// protected group: the frontier must respect it even though nothing here
+// created it.
 func (b redisRetentionBackend) Groups(ctx context.Context, stream string) ([]retentionGroup, error) {
 	groups, err := b.client.XInfoGroups(ctx, stream).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("xinfo groups %s: %w", stream, err)
 	}
 	result := make([]retentionGroup, len(groups))
 	for i, group := range groups {
@@ -82,20 +85,32 @@ func (b redisRetentionBackend) Groups(ctx context.Context, stream string) ([]ret
 	return result, nil
 }
 
+// Pending summarises one group's PEL. The oldest pending id is the group's
+// frontier whenever the PEL is non-empty.
 func (b redisRetentionBackend) Pending(ctx context.Context, stream, group string) (retentionPending, error) {
 	pending, err := b.client.XPending(ctx, stream, group).Result()
 	if err != nil {
-		return retentionPending{}, err
+		return retentionPending{}, fmt.Errorf("xpending %s/%s: %w", stream, group, err)
 	}
 	return retentionPending{Count: pending.Count, OldestID: pending.Lower}, nil
 }
 
+// Length is the raw XLEN, reported as a gauge alongside the trim result.
 func (b redisRetentionBackend) Length(ctx context.Context, stream string) (int64, error) {
-	return b.client.XLen(ctx, stream).Result()
+	n, err := b.client.XLen(ctx, stream).Result()
+	if err != nil {
+		return 0, fmt.Errorf("xlen %s: %w", stream, err)
+	}
+	return n, nil
 }
 
+// TrimMinID executes the exact (non-approximate) trim below the frontier.
 func (b redisRetentionBackend) TrimMinID(ctx context.Context, stream, frontier string) (int64, error) {
-	return b.client.XTrimMinID(ctx, stream, frontier).Result()
+	trimmed, err := b.client.XTrimMinID(ctx, stream, frontier).Result()
+	if err != nil {
+		return 0, fmt.Errorf("xtrim minid %s %s: %w", stream, frontier, err)
+	}
+	return trimmed, nil
 }
 
 // Retention computes a consumer-progress frontier and optionally executes an
@@ -191,7 +206,12 @@ func (r *Retention) RunOnce(ctx context.Context, spec StreamSpec) (RetentionResu
 	metrics.StreamPending.WithLabelValues(spec.Kind, spec.Namespace).Set(float64(result.Pending))
 	metrics.StreamUndelivered.WithLabelValues(spec.Kind, spec.Namespace).Set(float64(result.Undelivered))
 	metrics.StreamUnexpectedGroups.WithLabelValues(spec.Kind, spec.Namespace).Set(float64(result.UnexpectedGroups))
-	milliseconds, _, _ := parseStreamID(frontier)
+	// The frontier was already parsed to get here, so a parse failure is
+	// impossible; report 0 rather than pretend a bogus timestamp.
+	milliseconds, _, parseErr := parseStreamID(frontier)
+	if parseErr != nil {
+		milliseconds = 0
+	}
 	metrics.StreamRetentionFrontierMilliseconds.WithLabelValues(spec.Kind, spec.Namespace).Set(float64(milliseconds))
 
 	if r.dryRun {
@@ -246,7 +266,8 @@ func RunRetentionLoop(ctx context.Context, interval time.Duration, runner Retent
 	}
 }
 
-func compareStreamIDs(a, b string) (int, error) {
+// compareStreamIDs orders two stream ids, returning -1/0/1.
+func compareStreamIDs(a, b string) (order int, err error) {
 	aMS, aSeq, err := parseStreamID(a)
 	if err != nil {
 		return 0, err
@@ -255,6 +276,7 @@ func compareStreamIDs(a, b string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	if aMS < bMS || (aMS == bMS && aSeq < bSeq) {
 		return -1, nil
 	}
@@ -264,16 +286,18 @@ func compareStreamIDs(a, b string) (int, error) {
 	return 1, nil
 }
 
-func parseStreamID(id string) (uint64, uint64, error) {
+// parseStreamID splits a Redis stream id into its millisecond and sequence
+// halves. Both are required: a bare "12345" is not a valid entry id here.
+func parseStreamID(id string) (ms, seq uint64, err error) {
 	milliseconds, sequence, ok := strings.Cut(id, "-")
 	if !ok || milliseconds == "" || sequence == "" {
 		return 0, 0, fmt.Errorf("malformed stream ID %q", id)
 	}
-	ms, err := strconv.ParseUint(milliseconds, 10, 64)
+	ms, err = strconv.ParseUint(milliseconds, 10, 64)
 	if err != nil {
 		return 0, 0, fmt.Errorf("malformed stream ID %q: %w", id, err)
 	}
-	seq, err := strconv.ParseUint(sequence, 10, 64)
+	seq, err = strconv.ParseUint(sequence, 10, 64)
 	if err != nil {
 		return 0, 0, fmt.Errorf("malformed stream ID %q: %w", id, err)
 	}

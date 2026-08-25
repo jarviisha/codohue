@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,7 +20,7 @@ func TestRequireObservabilityContract(t *testing.T) {
 		{"valid", "obs", "Bearer obs", http.StatusNoContent},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/metrics", http.NoBody)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", http.NoBody)
 			if tc.header != "" {
 				req.Header.Set("Authorization", tc.header)
 			}

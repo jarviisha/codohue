@@ -13,6 +13,8 @@ import (
 // CollectionKind identifies a namespace-owned Qdrant collection.
 type CollectionKind string
 
+// The four namespace-owned collections: sparse CF vectors plus their dense
+// counterparts.
 const (
 	CollectionSubjects      CollectionKind = "subjects"
 	CollectionObjects       CollectionKind = "objects"

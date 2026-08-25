@@ -49,8 +49,8 @@ func (f *fakeStore) GetSystem(context.Context) (*SystemLifecycle, error) {
 	if f.system == nil {
 		f.system = &SystemLifecycle{State: SystemActive}
 	}
-	copy := *f.system
-	return &copy, nil
+	snapshot := *f.system
+	return &snapshot, nil
 }
 func (f *fakeStore) StartReset(context.Context) error    { f.system.State = SystemResetting; return nil }
 func (f *fakeStore) CompleteReset(context.Context) error { f.system.State = SystemActive; return nil }

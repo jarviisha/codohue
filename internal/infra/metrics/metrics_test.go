@@ -58,7 +58,7 @@ func TestRemediationMetricsUseBoundedLabels(t *testing.T) {
 		"codohue_stream_reclaim_cycles_total",
 		"codohue_stream_retention_errors_total",
 	}
-	var got []string
+	got := make([]string, 0, len(families))
 	for _, family := range families {
 		got = append(got, family.GetName())
 	}

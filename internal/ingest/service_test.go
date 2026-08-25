@@ -69,15 +69,15 @@ type fakeLifecycleWriter struct {
 	leasedCtx  context.Context
 }
 
-func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
 	f.calls++
 	if f.err != nil {
 		return f.err
 	}
-	leased := nslifecycle.ContextWithLease(ctx, namespace, f.generation, nslifecycle.LockShared)
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
 	f.leasedCtx = leased
 	return fn(leased, &nslifecycle.NamespaceLifecycle{
-		Namespace:  namespace,
+		Namespace:  ns,
 		Generation: f.generation,
 		State:      nslifecycle.StateActive,
 	})
