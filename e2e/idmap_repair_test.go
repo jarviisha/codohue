@@ -4,7 +4,9 @@ package e2e
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -188,18 +190,49 @@ func TestIdmapRepair_ManifestHashDetectsDrift(t *testing.T) {
 }
 
 // Snapshot references are required arguments, not hygiene: apply deletes
-// points that may not be recomputable, so a run without a recorded recovery
-// point must not start.
+// points that may not be recomputable, so a run whose manifest touches a
+// collection with no recorded snapshot must not start. Coverage is per
+// collection — one snapshot for a run spanning four of them would leave three
+// with no way back.
 func TestIdmapRepair_SnapshotsAreRequiredForEveryAffectedCollection(t *testing.T) {
-	collections := []string{"ns_objects", "ns_objects_dense"}
+	namespace, _ := createIsolatedNamespace(t, "repair_snapshots", map[string]any{
+		"action_weights": map[string]float64{"VIEW": 1.0},
+		"embedding_dim":  128,
+		"dense_source":   "byoe",
+	})
 
-	if err := infraqdrant.ValidateSnapshotRefs(collections, map[string]string{"ns_objects": "snap-a"}); err == nil {
-		t.Fatal("a missing collection snapshot must block apply")
+	repairRepo := idmap.NewRepairRepository(testDB)
+	service := idmap.NewRepairService(repairRepo, nil, nil, nil, nil)
+
+	// The manifest names two collections; only one snapshot is recorded.
+	items := []idmap.RepairItem{{
+		Namespace: namespace, EntityType: "object", StringID: "o1",
+		Sources: map[string]any{"collections": map[string]any{
+			namespace + "_objects": nil, namespace + "_objects_dense": nil,
+		}},
+	}}
+	run, err := repairRepo.CreateRun(context.Background(), items, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create run: %v", err)
 	}
-	if err := infraqdrant.ValidateSnapshotRefs(collections, map[string]string{
-		"ns_objects": "snap-a", "ns_objects_dense": "snap-b",
-	}); err != nil {
-		t.Fatalf("complete snapshots rejected: %v", err)
+	t.Cleanup(func() {
+		testDB.Exec(context.Background(), `DELETE FROM id_mapping_repair_runs WHERE id = $1`, run.ID) //nolint:errcheck
+	})
+
+	if err := service.PrepareSnapshots(context.Background(), run.ID, "base-1",
+		map[string]string{namespace + "_objects": "snap-a"}); err != nil {
+		t.Fatalf("record partial snapshots: %v", err)
+	}
+
+	err = service.Apply(context.Background(), run.ID)
+	if err == nil {
+		t.Fatal("apply started without a snapshot for every affected collection")
+	}
+	if !errors.Is(err, idmap.ErrSnapshotsRequired) {
+		t.Errorf("error = %v, want ErrSnapshotsRequired", err)
+	}
+	if !strings.Contains(err.Error(), namespace+"_objects_dense") {
+		t.Errorf("error must name the uncovered collection: %v", err)
 	}
 }
 

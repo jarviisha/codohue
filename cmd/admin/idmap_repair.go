@@ -123,8 +123,10 @@ func runRepairVerify(ctx context.Context, args []string, runner repairRunner, ou
 	for _, item := range report.Remaining {
 		fmt.Fprintf(out, "  unfinished %s/%s/%s (state %s)\n", item.Namespace, item.EntityType, item.StringID, item.State)
 	}
-	for _, item := range report.Unmoved {
-		fmt.Fprintf(out, "  old point still present for %s/%s/%s\n", item.Namespace, item.EntityType, item.StringID)
+	// Problems carry the reason each item failed; without them the operator is
+	// left comparing point ids by hand to work out why the gate refused.
+	for _, problem := range report.Problems {
+		fmt.Fprintf(out, "  %s\n", problem)
 	}
 	return fmt.Errorf("run %d is not verifiable: %d unfinished, %d old point(s) present",
 		runID, len(report.Remaining), len(report.Unmoved))

@@ -102,11 +102,14 @@ Apply refuses to start when:
 - Any item is quarantined.
 - Either snapshot reference is missing.
 
-Per identity it copies the dense point to the authoritative id, verifies the
+Apply requires a snapshot for **every** collection the manifest touches, not
+just one — it names the uncovered collections if any are missing.
+
+Per identity it copies the **dense** point to the authoritative id, verifies the
 payload and vector hashes, retargets the mapping, then deletes the original —
 in that order, so a failure at any step never loses an unrecomputable vector.
-Sparse collections are rebuilt through a full recompute after every mapping has
-settled, because sparse coordinates encode subject numeric ids.
+Sparse collections are not copied: their coordinates encode subject numeric ids,
+so the full recompute that follows rebuilds them once every mapping has settled.
 
 ## 4. Verify before unlocking
 
@@ -114,8 +117,9 @@ settled, because sparse coordinates encode subject numeric ids.
 ./tmp/admin idmap-repair verify --run 7
 ```
 
-Verification checks every manifest tuple: each identity is on its authoritative
-id, and no old point remains. It exits non-zero when anything is unfinished —
+Verification checks every manifest tuple: the target point exists, carries the
+right logical id, still hashes to the vector recorded at audit time, and no old
+point remains. Failures are reported per identity with the reason. It exits non-zero when anything is unfinished —
 **do not unlock the fleet until it passes.**
 
 ## 5. Resume after a failure

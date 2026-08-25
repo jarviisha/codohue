@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -44,6 +45,11 @@ type PointMover interface {
 	CopyPointVerified(ctx context.Context, collection string, from, to int64) error
 	DeletePoint(ctx context.Context, collection string, id int64) error
 	PointAbsent(ctx context.Context, collection string, id int64) (bool, error)
+	// InspectPoint returns the logical id and vector hash stored at a numeric
+	// id. Verification needs it to prove the target holds the right vector
+	// rather than trusting that apply's own check ran — a resumed run skips
+	// items already marked cleaned, so nothing else would confirm them.
+	InspectPoint(ctx context.Context, collection string, id int64) (stringID, vectorHash string, found bool, err error)
 }
 
 // SparseRebuilder is the narrow port through which the repair triggers a full
@@ -186,6 +192,78 @@ func reassignContestedTargets(ctx context.Context, reserver numericIDReserver, i
 	return nil
 }
 
+// verifyItem re-checks one repaired identity and returns every problem found.
+//
+// Plan Release 4 step 7 asks verification to confirm the manifest tuple, the
+// payload id, the vector hash and old-point absence. Checking absence alone
+// would pass a run whose replacement point never landed.
+func verifyItem(ctx context.Context, mover PointMover, item RepairItem) []string {
+	if !item.NeedsCopy() {
+		// Nothing moved, so there is no new location to confirm.
+		return nil
+	}
+	target := *item.TargetNumericID
+	identity := fmt.Sprintf("%s/%s/%s", item.Namespace, item.EntityType, item.StringID)
+
+	var problems []string
+	for _, collection := range copyableCollections(item) {
+		stringID, vectorHash, found, err := mover.InspectPoint(ctx, collection, target)
+		switch {
+		case err != nil:
+			problems = append(problems, fmt.Sprintf("%s: could not read %s#%d: %v", identity, collection, target, err))
+			continue
+		case !found:
+			problems = append(problems, fmt.Sprintf("%s: target point %s#%d is missing", identity, collection, target))
+			continue
+		case stringID != item.StringID:
+			problems = append(problems, fmt.Sprintf("%s: target point %s#%d carries %q", identity, collection, target, stringID))
+			continue
+		}
+		// A manifest written before hashes were recorded cannot be checked for
+		// content; identity and absence still are.
+		if item.VectorHash != "" && vectorHash != item.VectorHash {
+			problems = append(problems, fmt.Sprintf("%s: vector at %s#%d changed", identity, collection, target))
+		}
+
+		for _, old := range item.OldNumericIDs {
+			if old == target {
+				continue
+			}
+			absent, err := mover.PointAbsent(ctx, collection, old)
+			if err != nil {
+				problems = append(problems, fmt.Sprintf("%s: could not check %s#%d: %v", identity, collection, old, err))
+				continue
+			}
+			if !absent {
+				problems = append(problems, fmt.Sprintf("%s: old point %s#%d still present", identity, collection, old))
+			}
+		}
+	}
+	return problems
+}
+
+// missingSnapshotCollections lists the collections this manifest touches that
+// have no recorded snapshot, sorted so the operator sees a stable list.
+//
+// Every manifest row counts, including quarantined ones: coverage is about
+// what apply could reach, not about which rows happen to be actionable today.
+func missingSnapshotCollections(items []RepairItem, refs map[string]string) []string {
+	needed := map[string]struct{}{}
+	for _, item := range items {
+		for _, collection := range itemCollections(item) {
+			needed[collection] = struct{}{}
+		}
+	}
+	var missing []string
+	for collection := range needed {
+		if strings.TrimSpace(refs[collection]) == "" {
+			missing = append(missing, collection)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
 // supersedable reports whether a re-audit may replace this run.
 //
 // Only runs that have mutated nothing qualify. Once apply has started, points
@@ -266,6 +344,15 @@ func auditNamespace(evidence *NamespaceEvidence) []RepairItem {
 	items := make([]RepairItem, 0, len(byIdentity))
 	for k, entry := range byIdentity {
 		entityType, stringID, _ := splitKey(k)
+		// dense_collections narrows what apply copies: sparse coordinates
+		// encode subject numeric ids, so they are rebuilt by the recompute
+		// rather than moved point by point.
+		dense := map[string]any{}
+		for collection := range entry.collections {
+			if evidence.DenseCollections[collection] {
+				dense[collection] = true
+			}
+		}
 		item := RepairItem{
 			Namespace:   evidence.Namespace,
 			EntityType:  entityType,
@@ -273,7 +360,10 @@ func auditNamespace(evidence *NamespaceEvidence) []RepairItem {
 			PayloadHash: entry.payloadHash,
 			VectorHash:  entry.vectorHash,
 			State:       RepairItemPending,
-			Sources:     map[string]any{"collections": entry.collections},
+			Sources: map[string]any{
+				"collections":       entry.collections,
+				"dense_collections": dense,
+			},
 		}
 		for id := range entry.numericIDs {
 			item.OldNumericIDs = append(item.OldNumericIDs, id)
@@ -397,8 +487,14 @@ func (s *RepairService) applyFenced(ctx context.Context, runID int64) error {
 			ErrQuarantinedItems, len(quarantined),
 			quarantined[0].Namespace, quarantined[0].EntityType, quarantined[0].StringID, quarantined[0].Error)
 	}
-	if run.PGSnapshotRef == "" || len(run.QdrantSnapshotRefs) == 0 {
-		return ErrSnapshotsRequired
+	if run.PGSnapshotRef == "" {
+		return fmt.Errorf("%w: no PostgreSQL backup reference recorded", ErrSnapshotsRequired)
+	}
+	// Coverage is per collection, not "at least one". A run spanning four
+	// collections that recorded a single snapshot would mutate three of them
+	// with no way back, and would report success doing it.
+	if missing := missingSnapshotCollections(items, run.QdrantSnapshotRefs); len(missing) > 0 {
+		return fmt.Errorf("%w: no snapshot recorded for %s", ErrSnapshotsRequired, strings.Join(missing, ", "))
 	}
 
 	if err := s.repo.SetRunState(ctx, runID, RepairRunApplying, ""); err != nil {
@@ -458,7 +554,7 @@ func (s *RepairService) applyItem(ctx context.Context, item RepairItem) error {
 		return s.repo.SetItemState(ctx, item, RepairItemCleaned, "")
 	}
 	target := *item.TargetNumericID
-	collections := itemCollections(item)
+	collections := copyableCollections(item)
 
 	for _, collection := range collections {
 		for _, old := range item.OldNumericIDs {
@@ -495,6 +591,9 @@ type VerifyReport struct {
 	Checked   int
 	Unmoved   []RepairItem
 	Remaining []RepairItem
+	// Problems explains what failed, so the operator is not left comparing
+	// point ids by hand to work out why the gate refused.
+	Problems []string
 }
 
 // Verify proves the run before the fleet is unlocked: every manifest tuple is
@@ -510,22 +609,9 @@ func (s *RepairService) Verify(ctx context.Context, runID int64) (*VerifyReport,
 			report.Remaining = append(report.Remaining, item)
 			continue
 		}
-		if !item.NeedsCopy() {
-			continue
-		}
-		for _, collection := range itemCollections(item) {
-			for _, old := range item.OldNumericIDs {
-				if old == *item.TargetNumericID {
-					continue
-				}
-				absent, err := s.mover.PointAbsent(ctx, collection, old)
-				if err != nil {
-					return nil, err
-				}
-				if !absent {
-					report.Unmoved = append(report.Unmoved, item)
-				}
-			}
+		if problems := verifyItem(ctx, s.mover, item); len(problems) > 0 {
+			report.Unmoved = append(report.Unmoved, item)
+			report.Problems = append(report.Problems, problems...)
 		}
 	}
 
@@ -572,6 +658,28 @@ func filterState(items []RepairItem, state RepairItemState) []RepairItem {
 			out = append(out, item)
 		}
 	}
+	return out
+}
+
+// copyableCollections returns the collections apply moves points in.
+//
+// Only dense vectors are copied: sparse coordinates encode subject numeric
+// ids, so once mappings move the whole sparse vector is stale and the full
+// recompute rebuilds it. Copying them first would do work the rebuild
+// immediately discards, on the largest collections in the namespace.
+//
+// A manifest written before the dense set was recorded falls back to every
+// observed collection, so an older run still repairs something.
+func copyableCollections(item RepairItem) []string {
+	dense, ok := item.Sources["dense_collections"].(map[string]any)
+	if !ok || len(dense) == 0 {
+		return itemCollections(item)
+	}
+	out := make([]string, 0, len(dense))
+	for collection := range dense {
+		out = append(out, collection)
+	}
+	sort.Strings(out)
 	return out
 }
 

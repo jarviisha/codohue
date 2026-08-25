@@ -183,6 +183,22 @@ func DeletePoint(ctx context.Context, client PointWriter, collection string, id 
 	return nil
 }
 
+// InspectPoint returns the logical id and vector hash stored at a numeric id.
+//
+// Verification uses it to prove the repaired point holds the identity and the
+// bytes it is supposed to, rather than inferring that from the fact that the
+// old point is gone.
+func InspectPoint(ctx context.Context, client PointWriter, collection, idField string, id uint64) (stringID, vectorHash string, found bool, err error) {
+	point, err := readPoint(ctx, client, collection, id)
+	if err != nil {
+		return "", "", false, err
+	}
+	if point == nil {
+		return "", "", false, nil
+	}
+	return point.GetPayload()[idField].GetStringValue(), HashVectors(point.GetVectors()), true, nil
+}
+
 // PointAbsent reports whether a numeric id no longer exists, which is what
 // verification checks after cleanup.
 func PointAbsent(ctx context.Context, client PointWriter, collection string, id uint64) (bool, error) {
@@ -248,26 +264,6 @@ func vectorFromOutput(out *qdrant.VectorOutput) *qdrant.Vector {
 	default:
 		return nil
 	}
-}
-
-// ValidateSnapshotRefs checks that every affected collection has a recorded
-// snapshot before any mutation runs.
-//
-// A partially-snapshotted repair has no recovery path: restoring PostgreSQL
-// without the matching Qdrant collection reintroduces exactly the cross-store
-// divergence the repair is fixing.
-func ValidateSnapshotRefs(collections []string, refs map[string]string) error {
-	var missing []string
-	for _, collection := range collections {
-		if strings.TrimSpace(refs[collection]) == "" {
-			missing = append(missing, collection)
-		}
-	}
-	if len(missing) > 0 {
-		sort.Strings(missing)
-		return fmt.Errorf("missing qdrant snapshot references for: %s", strings.Join(missing, ", "))
-	}
-	return nil
 }
 
 // IsMissingCollection reports whether an error is Qdrant saying the collection

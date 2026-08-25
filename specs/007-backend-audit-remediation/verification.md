@@ -42,6 +42,21 @@ Re-run after the convergence tasks T111-T116:
 | `go test -race` (idmap, cmd/admin, cmd/api) | **pass** |
 | `go vet -tags=e2e ./e2e/` | **pass** — suites still compile |
 
+## Phase 11 (convergence) gates
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues |
+| `go build ./...` | **pass** |
+| `go test ./...` | **pass** |
+| `go test -race` (idmap, cmd/admin, infra/qdrant) | **pass** |
+| `go vet -tags=e2e ./e2e/` | **pass** |
+
+Dead-code recheck after wiring: `NextNumericID`, `RetargetMapping`,
+`InspectPoint`, `copyableCollections`, `missingSnapshotCollections` and
+`verifyItem` all have live call sites. `ValidateSnapshotRefs` and
+`affectedCollections` were retired — the manifest-aware check replaced them.
+
 ## Outstanding — requires a live environment
 
 These cannot be completed from a workstation without the stack running. Each

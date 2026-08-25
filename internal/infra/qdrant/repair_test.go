@@ -281,33 +281,6 @@ func TestDeletePointAndPointAbsent(t *testing.T) {
 	}
 }
 
-// A repair that restores PostgreSQL without the matching Qdrant collection
-// reintroduces exactly the divergence being fixed, so apply refuses to start
-// until every affected collection has a recorded snapshot.
-func TestValidateSnapshotRefs(t *testing.T) {
-	collections := []string{"ns_objects", "ns_objects_dense"}
-
-	if err := ValidateSnapshotRefs(collections, map[string]string{
-		"ns_objects": "snap-a", "ns_objects_dense": "snap-b",
-	}); err != nil {
-		t.Fatalf("complete snapshots: %v", err)
-	}
-
-	err := ValidateSnapshotRefs(collections, map[string]string{"ns_objects": "snap-a"})
-	if err == nil {
-		t.Fatal("a missing snapshot must block apply")
-	}
-	if !errorContains(err, "ns_objects_dense") {
-		t.Errorf("error must name the missing collection: %v", err)
-	}
-
-	if err := ValidateSnapshotRefs(collections, map[string]string{
-		"ns_objects": "snap-a", "ns_objects_dense": "   ",
-	}); err == nil {
-		t.Error("a blank reference is not a snapshot")
-	}
-}
-
 func TestIsMissingCollection(t *testing.T) {
 	if IsMissingCollection(nil) {
 		t.Error("nil is not a missing collection")

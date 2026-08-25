@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	qdrantpb "github.com/qdrant/go-client/qdrant"
 
@@ -63,6 +64,27 @@ func (m *qdrantPointMover) PointAbsent(ctx context.Context, collection string, i
 		return false, err
 	}
 	return infraqdrant.PointAbsent(ctx, m.client, collection, point)
+}
+
+// InspectPoint reads back a repaired point so verification can confirm it.
+//
+// The payload key depends on the collection family, the same pairing the audit
+// uses when it inventories them.
+func (m *qdrantPointMover) InspectPoint(ctx context.Context, collection string, id int64) (stringID, vectorHash string, found bool, err error) {
+	point, err := pointID(id)
+	if err != nil {
+		return "", "", false, err
+	}
+	return infraqdrant.InspectPoint(ctx, m.client, collection, payloadIDField(collection), point)
+}
+
+// payloadIDField returns the payload key a collection's points carry. Subject
+// collections are named "<ns>_subjects[...]"; everything else is an object.
+func payloadIDField(collection string) string {
+	if strings.Contains(collection, "_subjects") {
+		return "subject_id"
+	}
+	return "object_id"
 }
 
 // sparseRebuildAdapter satisfies idmap.SparseRebuilder over internal/compute.
@@ -166,25 +188,4 @@ func (s *repairEvidenceSource) Evidence(ctx context.Context, namespace string) (
 		}
 	}
 	return evidence, nil
-}
-
-// affectedCollections lists every collection a run touches, which is the set
-// that must have a recorded snapshot before apply.
-func affectedCollections(items []idmap.RepairItem) []string {
-	seen := map[string]struct{}{}
-	var out []string
-	for _, item := range items {
-		raw, ok := item.Sources["collections"].(map[string]any)
-		if !ok {
-			continue
-		}
-		for collection := range raw {
-			if _, dup := seen[collection]; dup {
-				continue
-			}
-			seen[collection] = struct{}{}
-			out = append(out, collection)
-		}
-	}
-	return out
 }

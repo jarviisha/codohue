@@ -412,3 +412,11 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 - [X] T114 Add transaction-bound versus nil-transaction attribution tests in `cmd/api/objects_adapter_test.go` per Constitution II / FR-021 (missing)
 - [X] T115 Expose `QuarantineReport` as an `idmap-repair quarantine --run <id>` subcommand, or remove it from the `repairRunner` interface, in `cmd/admin/idmap_repair.go` per plan repair orchestration boundary (unrequested)
 - [X] T116 [P] Align ID-map test file names with the constitution companion convention by splitting `internal/core/idmap/idmap_test.go` into `service_test.go` and `repository_test.go` per Constitution II (partial)
+
+---
+
+## Phase 11: Convergence
+
+- [X] T117 Enforce a recorded Qdrant snapshot for every collection the manifest touches before apply mutates anything, and retire whichever of `ValidateSnapshotRefs` / `affectedCollections` the wiring leaves unused, in `internal/core/idmap/repair_service.go`, `internal/infra/qdrant/repair.go`, and `cmd/admin/idmap_repair_adapter.go` per plan Release 4 step 4 (partial)
+- [X] T118 Extend verification to re-read each target point and assert its payload id and recorded vector hash, and confirm the sparse rebuild ran, in `internal/core/idmap/repair_service.go` per FR-010 / plan Release 4 step 7 (partial)
+- [X] T119 Restrict the apply-time point copy to dense collections — reading `NamespaceEvidence.DenseCollections` instead of every observed collection — so sparse points are rebuilt rather than copied and discarded, in `internal/core/idmap/repair_service.go` per plan Release 4 steps 5-6 (partial)

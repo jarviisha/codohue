@@ -3,6 +3,8 @@ package idmap
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -453,5 +455,312 @@ func TestSupersedable_TerminalStatesAreNotActive(t *testing.T) {
 		if !supersedable(state) {
 			t.Errorf("terminal state %q must never block a new audit", state)
 		}
+	}
+}
+
+// ─── snapshot coverage ───────────────────────────────────────────────────────
+
+// Apply deletes points that may not be recomputable, so every collection it
+// touches needs a recovery point. Accepting one snapshot for a run spanning
+// four collections leaves three with no way back — and the operator would have
+// no signal, because apply reported success.
+func TestMissingSnapshotCollections_NamesEveryUncoveredCollection(t *testing.T) {
+	items := []RepairItem{
+		{Sources: map[string]any{"collections": map[string]any{"ns_objects": nil, "ns_objects_dense": nil}}},
+		{Sources: map[string]any{"collections": map[string]any{"ns_subjects": nil}}},
+	}
+
+	missing := missingSnapshotCollections(items, map[string]string{"ns_objects": "snap-a"})
+
+	if len(missing) != 2 {
+		t.Fatalf("got %v, want the two uncovered collections", missing)
+	}
+	// Sorted so the operator sees a stable list across runs.
+	if missing[0] != "ns_objects_dense" || missing[1] != "ns_subjects" {
+		t.Errorf("got %v, want [ns_objects_dense ns_subjects]", missing)
+	}
+}
+
+func TestMissingSnapshotCollections_FullCoverageIsAccepted(t *testing.T) {
+	items := []RepairItem{
+		{Sources: map[string]any{"collections": map[string]any{"ns_objects": nil, "ns_objects_dense": nil}}},
+	}
+
+	missing := missingSnapshotCollections(items, map[string]string{
+		"ns_objects": "snap-a", "ns_objects_dense": "snap-b",
+	})
+
+	if len(missing) != 0 {
+		t.Errorf("full coverage reported missing: %v", missing)
+	}
+}
+
+// A blank reference is not a snapshot — an operator passing an empty value
+// must not satisfy the gate.
+func TestMissingSnapshotCollections_BlankReferenceIsNotCoverage(t *testing.T) {
+	items := []RepairItem{{Sources: map[string]any{"collections": map[string]any{"ns_objects": nil}}}}
+
+	missing := missingSnapshotCollections(items, map[string]string{"ns_objects": "   "})
+
+	if len(missing) != 1 {
+		t.Errorf("a blank reference counted as coverage: %v", missing)
+	}
+}
+
+// A quarantined item blocks apply anyway, but its collections still belong to
+// the manifest — the coverage check must not depend on item state.
+func TestMissingSnapshotCollections_CoversEveryManifestRow(t *testing.T) {
+	items := []RepairItem{
+		{State: RepairItemQuarantined, Sources: map[string]any{"collections": map[string]any{"ns_objects": nil}}},
+	}
+
+	if missing := missingSnapshotCollections(items, nil); len(missing) != 1 {
+		t.Errorf("quarantined rows were excluded from coverage: %v", missing)
+	}
+}
+
+// A manifest with no recorded collections needs no Qdrant snapshot: there is
+// nothing in the vector store to lose.
+func TestMissingSnapshotCollections_EmptyManifestNeedsNothing(t *testing.T) {
+	if missing := missingSnapshotCollections(nil, nil); len(missing) != 0 {
+		t.Errorf("empty manifest demanded snapshots: %v", missing)
+	}
+}
+
+// ─── verification completeness ───────────────────────────────────────────────
+
+// fakePointMover answers the verification reads without a vector store.
+type fakePointMover struct {
+	// present maps "collection#id" to the identity and vector hash stored there.
+	present map[string]storedPoint
+	absent  map[string]bool
+	err     error
+	reads   int
+}
+
+type storedPoint struct {
+	stringID   string
+	vectorHash string
+}
+
+func (f *fakePointMover) CopyPointVerified(context.Context, string, int64, int64) error { return nil }
+func (f *fakePointMover) DeletePoint(context.Context, string, int64) error              { return nil }
+
+func (f *fakePointMover) PointAbsent(_ context.Context, collection string, id int64) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	return f.absent[pointKey(collection, id)], nil
+}
+
+func (f *fakePointMover) InspectPoint(_ context.Context, collection string, id int64) (stringID, vectorHash string, found bool, err error) {
+	f.reads++
+	if f.err != nil {
+		return "", "", false, f.err
+	}
+	point, ok := f.present[pointKey(collection, id)]
+	return point.stringID, point.vectorHash, ok, nil
+}
+
+func pointKey(collection string, id int64) string {
+	return collection + "#" + strconv.FormatInt(id, 10)
+}
+
+func cleanedItem(target int64) RepairItem {
+	return RepairItem{
+		Namespace: "ns", EntityType: "object", StringID: "o1",
+		OldNumericIDs: []int64{20}, TargetNumericID: &target,
+		VectorHash: "vhash", State: RepairItemCleaned,
+		Sources: map[string]any{"collections": map[string]any{"ns_objects_dense": nil}},
+	}
+}
+
+// Verify is the gate before the fleet is unlocked, so it re-reads the target
+// rather than trusting that apply's own check ran. A run resumed from a
+// manifest whose items were already marked cleaned would otherwise unlock
+// without anything ever confirming the vectors are intact.
+func TestVerifyItem_ConfirmsTheTargetHoldsTheRightVector(t *testing.T) {
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, cleanedItem(10))
+
+	if len(problems) != 0 {
+		t.Fatalf("a correctly repaired item reported %v", problems)
+	}
+	if mover.reads == 0 {
+		t.Error("verification must actually re-read the target point")
+	}
+}
+
+// A target that is simply not there is the failure this check exists for: the
+// old point was deleted and the replacement never landed.
+func TestVerifyItem_MissingTargetIsReported(t *testing.T) {
+	mover := &fakePointMover{
+		present: map[string]storedPoint{},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, cleanedItem(10))
+
+	if len(problems) == 0 {
+		t.Fatal("a missing target point must be reported")
+	}
+	if !strings.Contains(problems[0], "missing") {
+		t.Errorf("problem should name the cause: %q", problems[0])
+	}
+}
+
+// A target holding a different identity's payload means the copy went to the
+// wrong place, or something overwrote it afterwards.
+func TestVerifyItem_ForeignPayloadIsReported(t *testing.T) {
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "someone-else", vectorHash: "vhash"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, cleanedItem(10))
+
+	if len(problems) == 0 || !strings.Contains(problems[0], "someone-else") {
+		t.Fatalf("a foreign payload must be reported, got %v", problems)
+	}
+}
+
+// The vector hash is what proves an unrecomputable vector survived intact.
+func TestVerifyItem_AlteredVectorIsReported(t *testing.T) {
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "different"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, cleanedItem(10))
+
+	if len(problems) == 0 || !strings.Contains(problems[0], "vector") {
+		t.Fatalf("an altered vector must be reported, got %v", problems)
+	}
+}
+
+// An old point still present means cleanup did not finish — the fleet would
+// unlock with two points claiming one identity.
+func TestVerifyItem_SurvivingOldPointIsReported(t *testing.T) {
+	mover := &fakePointMover{
+		present: map[string]storedPoint{
+			"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash"},
+			"ns_objects_dense#20": {stringID: "o1", vectorHash: "vhash"},
+		},
+		absent: map[string]bool{},
+	}
+
+	problems := verifyItem(context.Background(), mover, cleanedItem(10))
+
+	if len(problems) == 0 {
+		t.Fatal("a surviving old point must be reported")
+	}
+}
+
+// An item that never needed a copy has nothing at a new id to check; verifying
+// it must not invent a failure.
+func TestVerifyItem_ItemThatNeverMovedNeedsNoTargetRead(t *testing.T) {
+	mover := &fakePointMover{present: map[string]storedPoint{}}
+	settled := cleanedItem(20) // target == its only old id
+
+	problems := verifyItem(context.Background(), mover, settled)
+
+	if len(problems) != 0 {
+		t.Fatalf("an unmoved item reported %v", problems)
+	}
+	if mover.reads != 0 {
+		t.Error("an unmoved item needs no target read")
+	}
+}
+
+// A manifest written before vector hashes were recorded cannot be checked for
+// content, but identity and old-point absence still are — degrading is better
+// than skipping the whole item.
+func TestVerifyItem_MissingRecordedHashSkipsOnlyTheContentCheck(t *testing.T) {
+	item := cleanedItem(10)
+	item.VectorHash = ""
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "anything"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, item)
+
+	if len(problems) != 0 {
+		t.Fatalf("a manifest without a recorded hash reported %v", problems)
+	}
+}
+
+// ─── dense-only point copying ────────────────────────────────────────────────
+
+// Sparse coordinates encode subject numeric ids, so they cannot be repaired by
+// moving a point — the whole vector is stale once mappings change, which is
+// why a full recompute follows. Copying them anyway does work the rebuild
+// immediately discards, on the largest collections in the namespace.
+func TestCopyableCollections_ExcludesSparse(t *testing.T) {
+	item := RepairItem{Sources: map[string]any{
+		"collections": map[string]any{
+			"ns_objects":        nil,
+			"ns_objects_dense":  nil,
+			"ns_subjects":       nil,
+			"ns_subjects_dense": nil,
+		},
+		"dense_collections": map[string]any{
+			"ns_objects_dense":  true,
+			"ns_subjects_dense": true,
+		},
+	}}
+
+	got := copyableCollections(item)
+
+	if len(got) != 2 || got[0] != "ns_objects_dense" || got[1] != "ns_subjects_dense" {
+		t.Fatalf("got %v, want only the dense collections", got)
+	}
+}
+
+// A manifest written before the dense set was recorded must still repair
+// something rather than silently copying nothing — falling back to every
+// observed collection preserves the old behaviour.
+func TestCopyableCollections_FallsBackWhenTheDenseSetIsAbsent(t *testing.T) {
+	item := RepairItem{Sources: map[string]any{
+		"collections": map[string]any{"ns_objects": nil, "ns_objects_dense": nil},
+	}}
+
+	got := copyableCollections(item)
+
+	if len(got) != 2 {
+		t.Fatalf("got %v, want the full observed set as a fallback", got)
+	}
+}
+
+// Verification checks what apply actually moved, so it must use the same
+// scope — otherwise it would demand a target point in a sparse collection
+// nothing ever copied into.
+func TestVerifyItem_ChecksOnlyTheCollectionsApplyCopies(t *testing.T) {
+	target := int64(10)
+	item := RepairItem{
+		Namespace: "ns", EntityType: "object", StringID: "o1",
+		OldNumericIDs: []int64{20}, TargetNumericID: &target,
+		VectorHash: "vhash", State: RepairItemCleaned,
+		Sources: map[string]any{
+			"collections":       map[string]any{"ns_objects": nil, "ns_objects_dense": nil},
+			"dense_collections": map[string]any{"ns_objects_dense": true},
+		},
+	}
+	mover := &fakePointMover{
+		present: map[string]storedPoint{"ns_objects_dense#10": {stringID: "o1", vectorHash: "vhash"}},
+		absent:  map[string]bool{"ns_objects_dense#20": true},
+	}
+
+	problems := verifyItem(context.Background(), mover, item)
+
+	if len(problems) != 0 {
+		t.Fatalf("verification looked outside the copied collections: %v", problems)
+	}
+	if mover.reads != 1 {
+		t.Errorf("read %d point(s), want only the dense one", mover.reads)
 	}
 }

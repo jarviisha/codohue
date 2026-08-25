@@ -206,13 +206,14 @@ func TestIdmapRepair_VerifyFailsWhenWorkRemains(t *testing.T) {
 		RunID: 7, Checked: 5,
 		Remaining: []idmap.RepairItem{{Namespace: "ns", EntityType: "object", StringID: "o1", State: idmap.RepairItemPending}},
 		Unmoved:   []idmap.RepairItem{{Namespace: "ns", EntityType: "subject", StringID: "u1"}},
+		Problems:  []string{"ns/subject/u1: old point ns_subjects#20 still present"},
 	}}
 
 	out, err := runRepair(t, runner, "verify", "--run", "7")
 	if err == nil {
 		t.Fatal("an unfinished run must not verify")
 	}
-	for _, want := range []string{"unfinished ns/object/o1", "old point still present for ns/subject/u1"} {
+	for _, want := range []string{"unfinished ns/object/o1", "ns/subject/u1: old point ns_subjects#20 still present"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("verify output missing %q:\n%s", want, out)
 		}
@@ -274,30 +275,6 @@ func TestDispatchAdminCommand_RegistersIdmapRepair(t *testing.T) {
 		})
 	if err != nil || serverCalls != 0 || lifecycleCalls != 0 || repairCalls != 1 {
 		t.Fatalf("err=%v server=%d lifecycle=%d repair=%d", err, serverCalls, lifecycleCalls, repairCalls)
-	}
-}
-
-// affectedCollections drives which snapshots apply demands, so it must reflect
-// every collection the manifest touches and list each one once.
-func TestAffectedCollections(t *testing.T) {
-	items := []idmap.RepairItem{
-		{Sources: map[string]any{"collections": map[string]any{"ns_objects": nil, "ns_objects_dense": nil}}},
-		{Sources: map[string]any{"collections": map[string]any{"ns_objects": nil}}},
-		{Sources: map[string]any{}},
-		{},
-	}
-
-	got := affectedCollections(items)
-
-	if len(got) != 2 {
-		t.Fatalf("got %v, want two distinct collections", got)
-	}
-	seen := map[string]bool{}
-	for _, collection := range got {
-		seen[collection] = true
-	}
-	if !seen["ns_objects"] || !seen["ns_objects_dense"] {
-		t.Errorf("got %v", got)
 	}
 }
 

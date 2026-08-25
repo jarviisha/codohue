@@ -106,10 +106,35 @@ func TestQdrantPointMover_RefusesBeforeTouchingTheClient(t *testing.T) {
 	}
 }
 
-// A manifest row with no recorded collections contributes nothing rather than
-// crashing the snapshot check.
-func TestAffectedCollections_ToleratesRowsWithoutCollections(t *testing.T) {
-	if got := affectedCollections(nil); got != nil {
-		t.Errorf("empty manifest yielded %v", got)
+// Verification reads a repaired point back through the same payload-key pairing
+// the audit used to inventory it. Getting this wrong would make every verified
+// point look like it carried no identity, failing a correct repair.
+func TestPayloadIDField_MatchesTheCollectionFamily(t *testing.T) {
+	for _, tc := range []struct{ collection, want string }{
+		{"prod_subjects", "subject_id"},
+		{"prod_subjects_dense", "subject_id"},
+		{"prod_objects", "object_id"},
+		{"prod_objects_dense", "object_id"},
+		{"prod_g3_subjects_dense", "subject_id"},
+		{"prod_g3_objects", "object_id"},
+		// A namespace whose own name contains "objects" must not confuse the
+		// subject collections it owns.
+		{"my_objects_app_subjects", "subject_id"},
+	} {
+		if got := payloadIDField(tc.collection); got != tc.want {
+			t.Errorf("%s -> %s, want %s", tc.collection, got, tc.want)
+		}
+	}
+}
+
+func TestQdrantPointMover_InspectRefusesNonPositiveIDs(t *testing.T) {
+	mover := &qdrantPointMover{client: nil}
+
+	_, _, found, err := mover.InspectPoint(t.Context(), "ns_objects_dense", -1)
+	if err == nil {
+		t.Error("inspecting a negative id must be refused")
+	}
+	if found {
+		t.Error("a refused inspection must not report the point as found")
 	}
 }
