@@ -61,6 +61,14 @@ func TestObservability_DetailsAndMetricsNeedTheirOwnCredential(t *testing.T) {
 	} {
 		for _, path := range []string{"/healthz?details=true", "/metrics"} {
 			t.Run(target.name+path, func(t *testing.T) {
+				// The embedder only runs for the tests that need it; a dead
+				// listener says nothing about the credential split.
+				if probe, err := http.Get(target.base + "/healthz"); err != nil { //nolint:noctx // e2e liveness probe
+					t.Skipf("%s listener not running: %v", target.name, err)
+				} else {
+					probe.Body.Close() //nolint:errcheck
+				}
+
 				noCredential := doRequest(t, http.MethodGet, target.base+path, "", nil)
 				status := noCredential.StatusCode
 				noCredential.Body.Close() //nolint:errcheck

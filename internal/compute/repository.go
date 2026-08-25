@@ -182,6 +182,27 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 	return ns, nil
 }
 
+// HasAnyEvents reports whether the namespace has ever received an event,
+// regardless of age.
+//
+// The compute job enumerates every configured namespace, not only those with
+// recent activity — that is how a namespace whose events all aged out gets its
+// stale vectors swept. But "enumerate it" must not mean "materialize four
+// Qdrant collections for it": a namespace that has never received an event has
+// nothing to sweep, and creating the collections anyway leaves empty
+// collections behind for every namespace that was merely configured.
+//
+// Deliberately unwindowed. Expired-but-present rows are exactly the case that
+// still needs a sweep, so restricting this to the decay window would skip it.
+func (r *Repository) HasAnyEvents(ctx context.Context, namespace string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM events WHERE namespace = $1)`, namespace).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check namespace events: %w", err)
+	}
+	return exists, nil
+}
+
 // InsertBatchRunLog inserts a new in-progress batch run log row and returns its ID.
 func (r *Repository) InsertBatchRunLog(ctx context.Context, namespace string, startedAt time.Time, triggerSource batchrun.TriggerSource) (int64, error) {
 	var id int64

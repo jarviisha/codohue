@@ -26,6 +26,11 @@ func TestRecommendationState_ExpiredEventsClearOwnedVectors(t *testing.T) {
 		seedEvent(t, namespace, "u1", fmt.Sprintf("o%d", i), "VIEW", 1, recent, nil)
 	}
 	runCronOnceUntil(t, 60*time.Second, func() (bool, error) {
+		// The collection only exists once cron has created it; counting it
+		// before that is a hard failure, not a zero.
+		if !qdrantCollectionExists(t, namespace+"_subjects") {
+			return false, nil
+		}
 		return qdrantPointCount(t, namespace+"_subjects") > 0, nil
 	})
 
@@ -36,11 +41,16 @@ func TestRecommendationState_ExpiredEventsClearOwnedVectors(t *testing.T) {
 		t.Fatalf("age events: %v", err)
 	}
 	runCronOnceUntil(t, 60*time.Second, func() (bool, error) {
+		if !qdrantCollectionExists(t, namespace+"_subjects") {
+			return true, nil // nothing left to sweep
+		}
 		return qdrantPointCount(t, namespace+"_subjects") == 0, nil
 	})
 
-	if count := qdrantPointCount(t, namespace+"_objects"); count != 0 {
-		t.Errorf("object collection still holds %d point(s) after every event expired", count)
+	if qdrantCollectionExists(t, namespace+"_objects") {
+		if count := qdrantPointCount(t, namespace+"_objects"); count != 0 {
+			t.Errorf("object collection still holds %d point(s) after every event expired", count)
+		}
 	}
 
 	// The API stays healthy on an empty namespace rather than erroring.
@@ -143,6 +153,9 @@ func TestRecommendationState_ScoresAreAlwaysFinite(t *testing.T) {
 		seedEvent(t, namespace, "u1", fmt.Sprintf("o%d", i), "VIEW", 1, now.Add(-time.Hour), &objectCreatedAt)
 	}
 	runCronOnceUntil(t, 60*time.Second, func() (bool, error) {
+		if !qdrantCollectionExists(t, namespace+"_subjects") {
+			return false, nil
+		}
 		return qdrantPointCount(t, namespace+"_subjects") > 0, nil
 	})
 

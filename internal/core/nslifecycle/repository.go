@@ -39,7 +39,16 @@ func (r *Repository) Activate(ctx context.Context, namespace string) (*Namespace
 	lifecycle, err := scanNamespace(r.db.QueryRow(ctx, `
 		INSERT INTO namespace_lifecycles
 			(namespace, generation, state, activated_at, legacy_messages_allowed, updated_at)
-		VALUES ($1, 1, 'active', NOW(), FALSE, NOW())
+		VALUES ($1, 1, 'active', NOW(),
+			-- Generation 1 has exactly one incarnation, so an envelope that names
+			-- no generation is unambiguous — and the documented Redis Streams
+			-- transport publishes exactly that. Seeding FALSE would make every
+			-- stream event for a newly created namespace be acked and dropped
+			-- with nothing returned to the producer. The gate closes globally,
+			-- once, against adoption evidence (see DisableLegacyEnvelopes); a
+			-- namespace created after that must not reopen it.
+			(SELECT legacy_envelopes_disabled_at IS NULL FROM system_lifecycle WHERE singleton = TRUE),
+			NOW())
 		ON CONFLICT (namespace) DO UPDATE SET
 			generation = CASE WHEN namespace_lifecycles.state = 'deleted'
 				THEN namespace_lifecycles.generation + 1 ELSE namespace_lifecycles.generation END,

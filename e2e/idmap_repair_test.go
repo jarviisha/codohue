@@ -47,7 +47,7 @@ func TestIdmapRepair_AmbiguousEvidenceMutatesNothing(t *testing.T) {
 				Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("ambiguous-1")},
 				Vectors: &qdrant.Vectors{VectorsOptions: &qdrant.Vectors_Vectors{
 					Vectors: &qdrant.NamedVectors{Vectors: map[string]*qdrant.Vector{
-						"dense": {Vector: &qdrant.Vector_Dense{Dense: &qdrant.DenseVector{Data: make([]float32, 128)}}},
+						"dense_interactions": {Vector: &qdrant.Vector_Dense{Dense: &qdrant.DenseVector{Data: make([]float32, 128)}}},
 					}},
 				}},
 			}},
@@ -114,7 +114,7 @@ func TestIdmapRepair_PreservesUnrecomputableVectorsExactly(t *testing.T) {
 			Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("byoe-1")},
 			Vectors: &qdrant.Vectors{VectorsOptions: &qdrant.Vectors_Vectors{
 				Vectors: &qdrant.NamedVectors{Vectors: map[string]*qdrant.Vector{
-					"dense": {Vector: &qdrant.Vector_Dense{Dense: &qdrant.DenseVector{Data: vector}}},
+					"dense_interactions": {Vector: &qdrant.Vector_Dense{Dense: &qdrant.DenseVector{Data: vector}}},
 				}},
 			}},
 		}},
@@ -266,7 +266,11 @@ func TestIdmapRepair_RollbackPreflightRefusesOnDuplicates(t *testing.T) {
 	nsB := fmt.Sprintf("repair_dup_b_%d", time.Now().UnixNano())
 	shared := "shared-string-id"
 
+	// id_mappings.namespace references namespace_configs, which in turn
+	// references namespace_lifecycles — a mapping for an invented namespace is
+	// an FK error, not a row.
 	for _, namespace := range []string{nsA, nsB} {
+		seedNamespaceRows(t, namespace)
 		if _, err := testDB.Exec(ctx, `
 			INSERT INTO id_mappings (string_id, namespace, entity_type)
 			VALUES ($1, $2, 'object')`, shared, namespace); err != nil {
@@ -291,4 +295,27 @@ func TestIdmapRepair_RollbackPreflightRefusesOnDuplicates(t *testing.T) {
 	// The preflight in 022's down-migration is exactly this query; a rollback
 	// attempt in this state must raise rather than drop the primary key.
 	t.Logf("%d duplicate string id(s) present — rollback is correctly blocked", duplicates)
+}
+
+// seedNamespaceRows creates the lifecycle + config rows an id_mappings row
+// depends on, and removes them afterwards. Tests that need a namespace to exist
+// only as an FK parent use this rather than the full HTTP provisioning path.
+func seedNamespaceRows(t *testing.T, namespace string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := testDB.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW()) ON CONFLICT (namespace) DO NOTHING`, namespace); err != nil {
+		t.Fatalf("seed lifecycle for %q: %v", namespace, err)
+	}
+	if _, err := testDB.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, namespace); err != nil {
+		t.Fatalf("seed config for %q: %v", namespace, err)
+	}
+	t.Cleanup(func() {
+		clean := context.Background()
+		testDB.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, namespace)    //nolint:errcheck
+		testDB.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, namespace) //nolint:errcheck
+	})
 }

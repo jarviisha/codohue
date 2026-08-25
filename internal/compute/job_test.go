@@ -66,6 +66,9 @@ func newTestJob(svc recomputer, nsCfg jobNsConfigReader, repo jobComputeRepo) *J
 		repo:        repo,
 		redis:       nil, // phase 3 skipped by default
 
+		// Default to a namespace that has seen traffic; the tests covering the
+		// never-used case override this.
+		hasAnyEventsFn:           func(_ context.Context, _ string) (bool, error) { return true, nil },
 		ensureCollectionsFn:      func(_ context.Context, _ string) error { return nil },
 		ensureDenseCollectionsFn: func(_ context.Context, _ string, _ uint64, _ string) error { return nil },
 		upsertItemDenseFn:        func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error { return nil },
@@ -1029,5 +1032,127 @@ func TestRunOnce_NamespaceEnumerationFailureSkipsTheTick(t *testing.T) {
 
 	if svc.called {
 		t.Error("an unreadable namespace list must not be treated as an empty one")
+	}
+}
+
+// ─── quiet namespaces ────────────────────────────────────────────────────────
+
+// The job enumerates every configured namespace, not just those with recent
+// events — that is how a namespace whose events aged out gets swept. The cost
+// of that breadth is that a namespace which has never received an event also
+// reaches phase 1, and creating its collections there would leave four empty
+// Qdrant collections behind for every namespace anyone ever configured.
+func TestRunPhase1_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return false, nil }
+
+	ensured := false
+	job.ensureCollectionsFn = func(_ context.Context, _ string) error {
+		ensured = true
+		return nil
+	}
+	svc := &fakeRecomputer{}
+	job.service = svc
+
+	subjects, objects, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{})
+	if err != nil {
+		t.Fatalf("runPhase1: %v", err)
+	}
+	if ensured {
+		t.Error("collections were created for a namespace that has never received an event")
+	}
+	if svc.called {
+		t.Error("recompute ran for a namespace with no events at all")
+	}
+	if subjects != 0 || objects != 0 {
+		t.Errorf("counts = (%d, %d), want (0, 0)", subjects, objects)
+	}
+}
+
+// The distinction is "never received an event", not "has no recent events".
+// A namespace whose every event aged out still holds vectors that must be
+// swept, so it has to reach the recompute path.
+func TestRunPhase1_ExpiredEventsStillReachTheSweep(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return true, nil }
+
+	ensured := false
+	job.ensureCollectionsFn = func(_ context.Context, _ string) error {
+		ensured = true
+		return nil
+	}
+	svc := &fakeRecomputer{}
+	job.service = svc
+
+	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase1: %v", err)
+	}
+	if !ensured || !svc.called {
+		t.Errorf("ensured=%v recomputed=%v, want both true: aged-out events still need a sweep", ensured, svc.called)
+	}
+}
+
+// A failed lookup must not be read as "never used" — that would silently skip
+// the sweep for a namespace that does hold vectors.
+func TestRunPhase1_EventLookupFailureIsNotTreatedAsQuiet(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) {
+		return false, errors.New("connection refused")
+	}
+
+	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{}); err == nil {
+		t.Fatal("runPhase1 returned nil error when the event lookup failed")
+	}
+}
+
+// Phase 2 carries the same rule as phase 1, and needs its own check: it has a
+// separate ensure call, so gating only phase 1 still leaves an empty
+// {ns}_subjects_dense behind for every namespace that was merely configured.
+func TestRunPhase2Dense_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return false, nil }
+
+	ensured := false
+	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+		ensured = true
+		return nil
+	}
+	cleared := false
+	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+		cleared = true
+		return 0, nil
+	}
+
+	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase2Dense: %v", err)
+	}
+	if ensured {
+		t.Error("dense collections were created for a namespace that has never received an event")
+	}
+	if cleared {
+		t.Error("cleared dense state for a namespace that never had any")
+	}
+}
+
+// An aged-out namespace has dense state that must be cleared, so it has to get
+// past the gate and reach the cleanup.
+func TestRunPhase2Dense_ExpiredEventsStillClearDenseState(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return true, nil }
+
+	cleared := false
+	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+		cleared = true
+		return 0, nil
+	}
+	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
+
+	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase2Dense: %v", err)
+	}
+	if !cleared {
+		t.Error("aged-out namespace did not reach the dense cleanup")
 	}
 }

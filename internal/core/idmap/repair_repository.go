@@ -103,13 +103,21 @@ func insertItem(ctx context.Context, tx pgx.Tx, item RepairItem) error {
 	if item.Sources == nil {
 		sources = []byte(`{}`)
 	}
+	// A nil slice binds as SQL NULL, and the column's DEFAULT only applies when
+	// the column is omitted from the INSERT — so an identity the audit observed
+	// no points for (a mapping with no vectors yet, which is ordinary) would
+	// violate the NOT NULL constraint and fail the whole run.
+	oldNumericIDs := item.OldNumericIDs
+	if oldNumericIDs == nil {
+		oldNumericIDs = []int64{}
+	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO id_mapping_repair_items (
 			run_id, namespace, entity_type, string_id, old_numeric_ids,
 			target_numeric_id, sources, payload_hash, vector_hash, state, error, updated_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10, NULLIF($11, ''), NOW())`,
-		item.RunID, item.Namespace, item.EntityType, item.StringID, item.OldNumericIDs,
+		item.RunID, item.Namespace, item.EntityType, item.StringID, oldNumericIDs,
 		item.TargetNumericID, sources, item.PayloadHash, item.VectorHash, string(item.State), item.Error,
 	); err != nil {
 		return fmt.Errorf("insert repair item %s/%s/%s: %w", item.Namespace, item.EntityType, item.StringID, err)

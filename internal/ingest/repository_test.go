@@ -43,6 +43,7 @@ func TestRepositoryInsert(t *testing.T) {
 	}
 	defer db.Close()
 	defer db.Exec(ctx, `DELETE FROM events WHERE namespace = $1`, "ingest_test") //nolint:errcheck // test cleanup, failure is not critical
+	ensureNamespace(t, db, "ingest_test")
 
 	repo := NewRepository(db)
 
@@ -86,6 +87,7 @@ func TestRepositoryInsert_WithObjectCreatedAt(t *testing.T) {
 	}
 	defer db.Close()
 	defer db.Exec(ctx, `DELETE FROM events WHERE namespace = $1`, "ingest_test") //nolint:errcheck // test cleanup, failure is not critical
+	ensureNamespace(t, db, "ingest_test")
 
 	repo := NewRepository(db)
 
@@ -116,4 +118,30 @@ func TestRepositoryInsert_WithObjectCreatedAt(t *testing.T) {
 	if gotCreatedAt == nil || !gotCreatedAt.Truncate(time.Second).Equal(createdAt.Truncate(time.Second)) {
 		t.Errorf("ObjectCreatedAt: got %v, want %v", gotCreatedAt, createdAt)
 	}
+}
+
+// ensureNamespace creates the rows an events row depends on.
+//
+// Migration 025 gave events a foreign key onto namespace_configs, which in turn
+// references namespace_lifecycles (024). Inserting an event for an invented
+// namespace is therefore an FK error rather than a row — and these tests skip
+// unless DATABASE_URL is set, so the break went unseen.
+func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW()) ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace lifecycle %q: %v", ns, err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace config %q: %v", ns, err)
+	}
+	t.Cleanup(func() {
+		clean := context.Background()
+		db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, ns)    //nolint:errcheck // test cleanup
+		db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, ns) //nolint:errcheck // test cleanup
+	})
 }

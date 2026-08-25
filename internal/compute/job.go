@@ -93,6 +93,7 @@ type Job struct {
 	lockFn                   func(ctx context.Context, ns string) (release func(), err error)
 	lockAllFn                func(ctx context.Context) (release func(), err error)
 	finalizeOrphansFn        func(ctx context.Context, cutoff time.Time) (int64, error)
+	hasAnyEventsFn           func(ctx context.Context, ns string) (bool, error)
 	ensureCollectionsFn      func(ctx context.Context, ns string) error
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
 	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error
@@ -131,6 +132,7 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		lockFn:            repo.LockNamespace,
 		lockAllFn:         repo.LockAllNamespaces,
 		finalizeOrphansFn: repo.FinalizeOrphanRuns,
+		hasAnyEventsFn:    repo.HasAnyEvents,
 		ensureCollectionsFn: func(ctx context.Context, ns string) error {
 			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
 			if generation < 1 {
@@ -563,6 +565,21 @@ func (j *Job) checkCancelBetweenPhases(ctx context.Context, runID int64, afterPh
 func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (subjects, objects int, err error) {
 	start := time.Now()
 
+	// Every configured namespace is enumerated, including quiet ones, so that a
+	// namespace whose events all aged out still gets its stale vectors swept.
+	// A namespace that has never received an event is a different case: there
+	// is nothing to write and nothing to sweep, and creating its collections
+	// anyway would leave four empty Qdrant collections behind for every
+	// namespace that was merely configured.
+	seen, err := j.hasAnyEventsFn(ctx, ns)
+	if err != nil {
+		return 0, 0, fmt.Errorf("check namespace events: %w", err)
+	}
+	if !seen {
+		capture.Info("namespace has never received an event — no collections to create or sweep")
+		return 0, 0, nil
+	}
+
 	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
 		return 0, 0, fmt.Errorf("ensure collections: %w", err)
 	}
@@ -627,6 +644,19 @@ func phase2Runs(denseSource string) bool {
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
 func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items, subjectCount int, err error) {
 	start := time.Now()
+
+	// Same rule as phase 1: a namespace that has never received an event has no
+	// dense state to write and none to clear, so creating its collections would
+	// only leave empty ones behind. A namespace whose events merely aged out
+	// still passes this gate and reaches the cleanup below.
+	seen, err := j.hasAnyEventsFn(ctx, ns)
+	if err != nil {
+		return 0, 0, fmt.Errorf("check namespace events: %w", err)
+	}
+	if !seen {
+		capture.Info("namespace has never received an event — no dense collections to create or clear")
+		return 0, 0, nil
+	}
 
 	embeddingDim := 64
 	if cfg.EmbeddingDim > 0 {

@@ -321,6 +321,7 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 	db := openCatalogTestDB(t)
 	repo := NewRepository(db)
 	ns := "catalog_listobjects_test"
+	ensureNamespace(t, db, ns)
 	t.Cleanup(func() {
 		db.Exec(context.Background(), //nolint:errcheck // test cleanup
 			`DELETE FROM catalog_items WHERE namespace = $1`, ns)
@@ -435,4 +436,30 @@ func TestObjectCursor_EmptyMeansFirstPage(t *testing.T) {
 	if got != nil {
 		t.Errorf("expected nil cursor, got %+v", got)
 	}
+}
+
+// ensureNamespace creates the rows a namespace-scoped row depends on.
+//
+// Migration 025 gave the data tables a foreign key onto namespace_configs,
+// which in turn references namespace_lifecycles (024). Seeding a row for an
+// invented namespace is therefore an FK error rather than a row — and these
+// tests skip unless DATABASE_URL is set, so the break went unseen.
+func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW()) ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace lifecycle %q: %v", ns, err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace config %q: %v", ns, err)
+	}
+	t.Cleanup(func() {
+		clean := context.Background()
+		db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, ns)    //nolint:errcheck // test cleanup
+		db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, ns) //nolint:errcheck // test cleanup
+	})
 }

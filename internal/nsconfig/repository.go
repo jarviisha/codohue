@@ -163,11 +163,16 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 
 	if err := r.execFn(ctx, `
 		WITH system_gate AS (
-			SELECT 1 FROM system_lifecycle WHERE singleton = TRUE AND state = 'active'
+			-- Also carries the global legacy gate: a generation-1 namespace
+			-- accepts envelopes that name no generation (the shape the Redis
+			-- Streams transport publishes), unless an operator has closed the
+			-- gate fleet-wide against adoption evidence.
+			SELECT legacy_envelopes_disabled_at IS NULL AS legacy_allowed
+			FROM system_lifecycle WHERE singleton = TRUE AND state = 'active'
 		), activated AS (
 			INSERT INTO namespace_lifecycles
 				(namespace, generation, state, activated_at, legacy_messages_allowed, updated_at)
-			SELECT $1, 1, 'active', NOW(), FALSE, NOW() FROM system_gate
+			SELECT $1, 1, 'active', NOW(), system_gate.legacy_allowed, NOW() FROM system_gate
 			ON CONFLICT (namespace) DO UPDATE SET
 				generation = CASE WHEN namespace_lifecycles.state = 'deleted'
 					THEN namespace_lifecycles.generation + 1 ELSE namespace_lifecycles.generation END,

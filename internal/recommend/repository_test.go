@@ -28,6 +28,7 @@ func openTestDB(t *testing.T) *pgxpool.Pool {
 
 func seedRecommendEvent(t *testing.T, db *pgxpool.Pool, ns, subjectID, objectID string, weight float64, occurredAt time.Time) {
 	t.Helper()
+	ensureNamespace(t, db, ns)
 	_, err := db.Exec(context.Background(), `
 		INSERT INTO events (namespace, subject_id, object_id, action, weight, occurred_at)
 		VALUES ($1, $2, $3, 'VIEW', $4, $5)`,
@@ -40,6 +41,7 @@ func seedRecommendEvent(t *testing.T, db *pgxpool.Pool, ns, subjectID, objectID 
 
 func cleanupRecommendNS(t *testing.T, db *pgxpool.Pool, ns string) {
 	t.Helper()
+	ensureNamespace(t, db, ns)
 	t.Cleanup(func() {
 		db.Exec(context.Background(), //nolint:errcheck // test cleanup, failure is not critical
 			`DELETE FROM events WHERE namespace = $1`, ns)
@@ -167,6 +169,7 @@ func TestRepositoryGetPopularItems_Empty(t *testing.T) {
 // there and never creates a catalog row.
 func seedAuthoredItem(t *testing.T, db *pgxpool.Pool, ns, objectID, author string, createdAt time.Time) {
 	t.Helper()
+	ensureNamespace(t, db, ns)
 	_, err := db.Exec(context.Background(), `
 		INSERT INTO objects (namespace, object_id, author_subject_id, created_at, updated_at)
 		VALUES ($1, $2, NULLIF($3, ''), $4, $4)`,
@@ -322,4 +325,30 @@ func TestTrendingKey_MatchesWriterForEveryGeneration(t *testing.T) {
 			t.Errorf("generation=%d: serving reads %q, cron writes %q", generation, read, written)
 		}
 	}
+}
+
+// ensureNamespace creates the rows a namespace-scoped row depends on.
+//
+// Migration 025 gave the data tables a foreign key onto namespace_configs,
+// which in turn references namespace_lifecycles (024). Seeding a row for an
+// invented namespace is therefore an FK error rather than a row — and these
+// tests skip unless DATABASE_URL is set, so the break went unseen.
+func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW()) ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace lifecycle %q: %v", ns, err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace config %q: %v", ns, err)
+	}
+	t.Cleanup(func() {
+		clean := context.Background()
+		db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, ns)    //nolint:errcheck // test cleanup
+		db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, ns) //nolint:errcheck // test cleanup
+	})
 }
