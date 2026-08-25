@@ -9,7 +9,7 @@ reversible; do not cross a gate until its evidence is recorded in
 | 1 | Dependency upgrades, honest failures, finite scores, catalog keyset cursor, observability auth | none | redeploy previous image |
 | 2 | Exact stream retention + reclaim cursor fairness | none | kill switch (below) |
 | 3 | Namespace lifecycle generations, leases, delete/reset, legacy-gate closure | 024, 025 | migrate down (before the gate closes) |
-| 4 | Migration-022 identity reconciliation | 026 | coordinated snapshot restore only |
+| 4 | Migration-022 identity reconciliation | 026, 027 | coordinated snapshot restore only |
 
 ## Release 1 — migration-free correctness
 
@@ -113,7 +113,9 @@ forward-only.
 See [idmap-repair-runbook.md](idmap-repair-runbook.md) for the full workflow.
 Summary of the gate:
 
-1. Apply migration 026.
+1. Apply migrations 026 and 027. **Both** — 027 adds
+   `id_mapping_repair_runs.rebuilt_namespaces`, which verification reads; without
+   it every apply and verify fails on a missing column mid-window.
 2. Run `./tmp/admin idmap-repair audit` — read-only. If it reports zero
    quarantined items and zero needing repair, you are done.
 3. Otherwise resolve every quarantined item, re-audit, take coordinated
@@ -160,6 +162,7 @@ release 3 generation: adopted <date>; legacy gate closed <date or "open">
 release 4 repair:     not required | run <id>, manifest <hash>
                       pg snapshot: <ref>
                       qdrant snapshots: <collection>=<ref>, ...
+                      migrations applied: 026 __ 027 __
                       verify passed: <date>
 post-gate recompute:  <batch_run_logs id, success y/n>
 ```

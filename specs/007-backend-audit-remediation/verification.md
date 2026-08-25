@@ -73,6 +73,22 @@ the T109 rehearsal alongside 024-026.
 All six `RepairItemState` values are now assigned by the code, so the state
 machine matches the data model.
 
+## Phase 13 (convergence) gates
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues |
+| `go build ./...` | **pass** |
+| `go test ./...` | **pass** |
+| `go test -race` (idmap, cmd/admin) | **pass** |
+| `go vet -tags=e2e ./e2e/` | **pass** |
+
+T124 added nine PostgreSQL-backed tests for the repair repository in
+`internal/core/idmap/repair_repository_test.go` (not `e2e/`, see below). They
+**skip** without `DATABASE_URL` — confirmed skipping rather than passing
+vacuously — so they run under `make test` wherever a database is configured.
+Until then the repair repository's SQL still has no execution anywhere.
+
 ## Outstanding — requires a live environment
 
 These cannot be completed from a workstation without the stack running. Each
@@ -98,11 +114,21 @@ New suites added by this work, none yet executed:
 `observability_security_test.go` skips unless `CODOHUE_OBSERVABILITY_TOKEN` is
 set for the run — set it before treating a pass as meaningful.
 
+### T124 — repair repository SQL
+
+```bash
+DATABASE_URL=postgres://... make test-pkg PKG=./internal/core/idmap/...
+```
+
+Covers the two-table transactional insert, the partial unique index on
+in-flight runs, the jsonb append-and-dedup behind `RecordRebuiltNamespace`,
+item/run state transitions, and mapping retarget. Requires migrations 024-027.
+
 ### T109 — migration and operational rehearsal
 
 Against a disposable copy of production-shaped data:
 
-1. **Migrations 024–026 up.** Confirm every namespace backfills to generation 1
+1. **Migrations 024–027 up.** Confirm every namespace backfills to generation 1
    and keeps its existing physical names (nothing should move).
 2. **Legacy-gate closure.** Run
    `./tmp/admin lifecycle disable-legacy-envelopes --all --adoption-evidence <ref>`;

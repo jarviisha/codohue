@@ -428,3 +428,11 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 - [X] T120 Compare the recorded `payload_hash` alongside the vector hash when verifying a repaired point, so both preservation checks the audit collects are actually enforced, in `internal/core/idmap/repair_service.go` per data-model IDMappingRepairItem preservation checks (partial)
 - [X] T121 Record the namespaces whose sparse vectors were rebuilt on the run and assert that coverage during verification in `internal/core/idmap/repair_service.go` and `internal/core/idmap/repair_repository.go` per plan Release 4 step 7 (partial)
 - [X] T122 Assign the `verified` item state once a copy passes its hash checks, or remove it from `RepairItemState` and migration 026's CHECK constraint, in `internal/core/idmap/repair_types.go` and `internal/core/idmap/repair_service.go` per data-model IDMappingRepairItem state list (partial)
+
+---
+
+## Phase 13: Convergence
+
+- [X] T123 Add migration 027 to the Release 4 gate and the per-namespace completion evidence template in `deploy/backend-audit-remediation.md`, so an operator following the rollout does not stop at 026 and leave `rebuilt_namespaces` absent per plan Release 4 step 1 (partial)
+- [X] T124 Add DB-backed coverage for the repair run/item lifecycle — create, snapshot recording, item and run state transitions, mapping retarget, id reservation and the rebuilt-namespace record — in `e2e/idmap_repair_test.go` per FR-021 (partial)
+- [X] T125 Bring `CLAUDE.md` up to date with the migration list through 027, the `CODOHUE_STREAM_RETENTION_*` settings, and the changed API contract (`namespace_not_active`, `namespace_config_unavailable`, `invalid_object_created_at`, `next_cursor`, `/healthz?details=true`) per Constitution III documentation conventions (partial)
