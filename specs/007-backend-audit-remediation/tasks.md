@@ -443,3 +443,10 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 
 - [X] T126 Seed and clean up the `namespace_configs` row that `TestRepairRepository_RetargetMappingMovesAnExistingRow` depends on, so the insert does not violate `id_mappings_namespace_fk` and the test can actually run, in `internal/core/idmap/repair_repository_test.go` per FR-021 (contradicts)
 - [X] T127 Name the `cmd/admin` CLI subcommands — `lifecycle disable-legacy-envelopes` and `idmap-repair audit|quarantine|apply|verify|resume` — where the binary's responsibilities are enumerated in `CLAUDE.md` per CLAUDE.md four-binary conventions (partial)
+
+---
+
+## Phase 15: Convergence
+
+- [X] T128 Give the snapshot-coverage e2e test a lifecycle fence so `Apply` reaches the per-collection snapshot check instead of short-circuiting on a nil fence, in `e2e/idmap_repair_test.go` per FR-021 / plan Release 4 step 4 (contradicts)
+- [X] T129 Stop calling `t.Fatalf` from the writer goroutines in the delete/recreate race — report transport failures back to the test goroutine — so a failure fails the test instead of silently exiting a worker, in `e2e/namespace_lifecycle_test.go` per FR-021 / SC-003 (contradicts)

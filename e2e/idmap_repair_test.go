@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	"github.com/qdrant/go-client/qdrant"
 )
@@ -189,6 +190,19 @@ func TestIdmapRepair_ManifestHashDetectsDrift(t *testing.T) {
 	}
 }
 
+// e2eGlobalFence adapts the lifecycle service to idmap.GlobalFence, the same
+// composition cmd/admin performs. The core package cannot depend on the
+// concrete service, so every caller supplies its own two-line adapter.
+type e2eGlobalFence struct {
+	svc *nslifecycle.Service
+}
+
+func (f *e2eGlobalFence) WithGlobalExclusive(ctx context.Context, fn func(context.Context) error) error {
+	return f.svc.WithGlobalExclusive(ctx, func(locked context.Context, _ *nslifecycle.SystemLifecycle) error {
+		return fn(locked)
+	})
+}
+
 // Snapshot references are required arguments, not hygiene: apply deletes
 // points that may not be recomputable, so a run whose manifest touches a
 // collection with no recorded snapshot must not start. Coverage is per
@@ -202,11 +216,18 @@ func TestIdmapRepair_SnapshotsAreRequiredForEveryAffectedCollection(t *testing.T
 	})
 
 	repairRepo := idmap.NewRepairRepository(testDB)
-	service := idmap.NewRepairService(repairRepo, nil, nil, nil, nil)
+	// The fence is required, not decoration: Apply refuses outright without
+	// one, so a nil fence would short-circuit before the snapshot check and
+	// this test would prove nothing about the guard it names.
+	lifecycleSvc := nslifecycle.NewService(
+		nslifecycle.NewRepository(testDB), nslifecycle.NewPostgresLocker(testDB))
+	service := idmap.NewRepairService(repairRepo, nil, nil, nil, &e2eGlobalFence{svc: lifecycleSvc})
 
 	// The manifest names two collections; only one snapshot is recorded.
+	// State is explicit: the schema CHECK rejects an empty one.
 	items := []idmap.RepairItem{{
 		Namespace: namespace, EntityType: "object", StringID: "o1",
+		State: idmap.RepairItemPending,
 		Sources: map[string]any{"collections": map[string]any{
 			namespace + "_objects": nil, namespace + "_objects_dense": nil,
 		}},

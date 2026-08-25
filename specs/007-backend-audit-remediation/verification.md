@@ -107,6 +107,28 @@ satisfying it also requires a `namespace_lifecycles` row because
 reading the schema, not by running anything** — the first real run of these
 tests is still their first real validation.
 
+## Phase 15 (convergence) gates
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues |
+| `go build ./...` | **pass** |
+| `go test ./...` | **pass** |
+| `go vet -tags=e2e ./e2e/` | **pass** |
+
+T128 fixed two defects in one e2e test, neither of which compilation or
+`go vet` can catch: the item was built without a `state`, which the migration
+026 CHECK rejects, and the service was constructed with a nil fence, so `Apply`
+returned "requires the global lifecycle fence" long before the snapshot check
+the test asserts on. T129 stopped the race test calling `t.Fatalf` from writer
+goroutines, where `FailNow` exits the worker without failing the test.
+
+A follow-up sweep for the same two shapes across the other e2e files found
+nothing further — but that sweep is reasoning, not execution. **Three
+convergence rounds in a row have found defects in tests written the round
+before, all of them invisible to compilation.** Running the suites once is
+worth more than another reasoning pass.
+
 ## Outstanding — requires a live environment
 
 These cannot be completed from a workstation without the stack running. Each

@@ -3,7 +3,9 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -33,6 +35,10 @@ func TestNamespaceLifecycle_ConcurrentWritersNeverOutliveADelete(t *testing.T) {
 
 		var writers sync.WaitGroup
 		stop := make(chan struct{})
+		// Transport failures travel back to the test goroutine. t.Fatalf from a
+		// worker only exits that worker — the test would keep running and could
+		// still report success.
+		writerErrs := make(chan error, 4)
 		for writer := 0; writer < 4; writer++ {
 			writers.Add(1)
 			go func(id int) {
@@ -45,14 +51,14 @@ func TestNamespaceLifecycle_ConcurrentWritersNeverOutliveADelete(t *testing.T) {
 					}
 					// Every one of these is expected to be accepted OR
 					// rejected — never accepted-then-orphaned.
-					resp := doRequest(t, http.MethodPost,
-						baseURL+"/v1/namespaces/"+namespace+"/events", apiKey,
-						map[string]any{
-							"subject_id": fmt.Sprintf("u%d", id),
-							"object_id":  fmt.Sprintf("o%d_%d", id, seq),
-							"action":     "VIEW",
-						})
-					resp.Body.Close() //nolint:errcheck
+					if err := postEventIgnoringStatus(namespace, apiKey,
+						fmt.Sprintf("u%d", id), fmt.Sprintf("o%d_%d", id, seq)); err != nil {
+						select {
+						case writerErrs <- err:
+						default: // one report per writer is enough
+						}
+						return
+					}
 				}
 			}(writer)
 		}
@@ -66,6 +72,10 @@ func TestNamespaceLifecycle_ConcurrentWritersNeverOutliveADelete(t *testing.T) {
 
 		close(stop)
 		writers.Wait()
+		close(writerErrs)
+		for err := range writerErrs {
+			t.Fatalf("iteration %d: writer transport failure: %v", iteration, err)
+		}
 
 		if deleteStatus != http.StatusOK {
 			t.Fatalf("iteration %d: delete returned %d", iteration, deleteStatus)
@@ -77,6 +87,34 @@ func TestNamespaceLifecycle_ConcurrentWritersNeverOutliveADelete(t *testing.T) {
 		}
 		assertQdrantNamespaceAbsent(t, namespace)
 	}
+}
+
+// postEventIgnoringStatus publishes one event and reports only transport
+// failures. Any HTTP status is acceptable here — the point of the race is that
+// a write is either accepted or rejected, never accepted-then-orphaned — but a
+// connection error means the test setup broke and must reach the test
+// goroutine rather than being swallowed in a worker.
+func postEventIgnoringStatus(namespace, apiKey, subjectID, objectID string) error {
+	body, err := json.Marshal(map[string]any{
+		"subject_id": subjectID,
+		"object_id":  objectID,
+		"action":     "VIEW",
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		baseURL+"/v1/namespaces/"+namespace+"/events", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	return resp.Body.Close()
 }
 
 // Recreating a name mints a new generation, and the new incarnation's physical
