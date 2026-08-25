@@ -1,8 +1,10 @@
 # Feature Specification: Dense Source Unification
 
-**Feature Branch**: `feat/compute-dense-source-unification`  
-**Created**: 2026-06-19  
-**Status**: Draft  
+**Feature Branch**: `feat/compute-dense-source-unification`
+**Created**: 2026-06-19
+**Status**: Implemented
+**Superseded By**: [Spec 006](../006-darkvoid-alignment/spec.md) — catalog subject-vector ownership only
+**Known Remediation**: [Spec 007](../007-backend-audit-remediation/spec.md)
 **Input**: User description: "Unify the namespace dense-vector configuration by collapsing the two coupled fields `dense_strategy` and `catalog_enabled` into a single mutually-exclusive enum `dense_source` with values {disabled, item2vec, svd, byoe, catalog}."
 
 ## User Scenarios & Testing *(mandatory)*

@@ -81,7 +81,20 @@ for a live repair walk.
 ## Health and metrics
 
 Public `/healthz` keeps 200/503 and its current component/status keys, but values are only
-`ok` or `error`; raw dependency errors appear only in protected logs.
+`ok` or `error`; it never returns dependency addresses or raw errors.
+
+Protected diagnostics use the same listener and an explicit request:
+
+```http
+GET /healthz?details=true
+Authorization: Bearer <observability-token>
+```
+
+With a valid token, the response retains the public status fields and adds a `details` object
+containing per-dependency diagnostic messages. Missing/incorrect credentials return 401. When no
+observability token is configured, `details=true` returns 404. Plain `/healthz` remains public
+and sanitized even when an invalid Authorization header is present unless `details=true` is
+requested.
 
 `/metrics` is registered only when `CODOHUE_OBSERVABILITY_TOKEN` is configured. It requires:
 
@@ -91,4 +104,5 @@ Authorization: Bearer <observability-token>
 
 Missing/incorrect credentials return 401. When no token is configured the route is absent
 (404). The token is distinct from the global admin API key and is compared in constant time.
-The same rule applies to API and embedder metrics.
+The same public/protected health behavior and metrics rule apply to the API and embedder
+listeners.

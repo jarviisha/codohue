@@ -54,8 +54,19 @@ const (
 // Subject embeddings are unaffected.
 var ErrCatalogActive = errors.New("recommend: namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted")
 
-// ErrInvalidEmbedding identifies invalid BYOE timestamps or non-finite vector values.
+// ErrInvalidEmbedding identifies non-finite vector values.
 var ErrInvalidEmbedding = errors.New("recommend: invalid embedding")
+
+// ErrInvalidObjectCreatedAt identifies a BYOE object_created_at beyond the
+// permitted future skew. Separate from ErrInvalidEmbedding so the handler can
+// answer with the documented error code.
+var ErrInvalidObjectCreatedAt = errors.New("recommend: invalid object_created_at")
+
+// maxObjectCreatedAtSkew mirrors ingest's maxOccurredAtSkew: one documented
+// clock-skew rule for every client-supplied creation timestamp. The domains
+// cannot share the constant (peer imports are forbidden), so keep them in step
+// by hand. Exactly at the boundary is accepted.
+const maxObjectCreatedAtSkew = 5 * time.Minute
 
 // Namespace resolution failures are split so the handler can answer honestly:
 // a namespace that does not exist is 404, one whose config could not be read is
@@ -222,8 +233,11 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 			return fmt.Errorf("%w: vector contains non-finite values", ErrInvalidEmbedding)
 		}
 	}
-	if createdAt != nil && createdAt.After(time.Now().UTC().Add(5*time.Minute)) {
-		return fmt.Errorf("%w: object_created_at is more than five minutes in the future", ErrInvalidEmbedding)
+	// A future creation time makes the γ-freshness age negative, which boosts
+	// the item instead of decaying it. Scoring clamps as a backstop, but the
+	// value is rejected here so the stored payload is not quietly wrong.
+	if createdAt != nil && createdAt.After(time.Now().UTC().Add(maxObjectCreatedAtSkew)) {
+		return fmt.Errorf("%w: object_created_at is more than five minutes in the future", ErrInvalidObjectCreatedAt)
 	}
 	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
 		return s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {

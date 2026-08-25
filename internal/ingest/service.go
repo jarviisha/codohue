@@ -11,14 +11,21 @@ import (
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
-// maxOccurredAtSkew is how far into the future occurred_at may point —
-// generous enough for ordinary clock skew, tight enough to reject unit
-// mistakes (epoch millis land ~year 56000).
+// maxOccurredAtSkew is how far into the future a client-supplied timestamp may
+// point — generous enough for ordinary clock skew, tight enough to reject unit
+// mistakes (epoch millis land ~year 56000). Exactly at the boundary is
+// accepted. The BYOE embedding endpoint applies the same rule to
+// object_created_at; the two cannot share a constant because the domains may
+// not import each other, so keep them in step by hand.
 const maxOccurredAtSkew = 5 * time.Minute
 
 var (
 	// ErrInvalidPayload indicates that the inbound event payload is missing required fields or is otherwise malformed.
 	ErrInvalidPayload = errors.New("invalid payload")
+	// ErrInvalidObjectCreatedAt indicates object_created_at points further into
+	// the future than the permitted clock skew. Separate from ErrInvalidPayload
+	// so the handler can answer with the documented error code.
+	ErrInvalidObjectCreatedAt = errors.New("invalid object_created_at")
 	// ErrUnknownAction indicates that the event action cannot be resolved to a configured or default weight.
 	ErrUnknownAction = errors.New("unknown action")
 	// ErrNamespaceNotFound indicates that an event targets a namespace that no longer exists.
@@ -80,6 +87,15 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 	} else if payload.OccurredAt.After(now.Add(maxOccurredAtSkew)) {
 		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "future_occurred_at").Inc()
 		return 0, fmt.Errorf("%w: occurred_at %s is in the future", ErrInvalidPayload, payload.OccurredAt.Format(time.RFC3339))
+	}
+
+	// object_created_at drives the γ-freshness rerank (e^(-γ·ageDays)). A
+	// future value makes ageDays negative, which would boost the item instead
+	// of decaying it. Scoring clamps the age as a backstop, but the value is
+	// rejected here so the stored row is not quietly wrong.
+	if payload.ObjectCreatedAt != nil && payload.ObjectCreatedAt.After(now.Add(maxOccurredAtSkew)) {
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "future_object_created_at").Inc()
+		return 0, fmt.Errorf("%w: object_created_at %s is in the future", ErrInvalidObjectCreatedAt, payload.ObjectCreatedAt.Format(time.RFC3339))
 	}
 
 	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, payload.Namespace) != nil {

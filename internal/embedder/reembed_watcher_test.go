@@ -266,3 +266,56 @@ func TestReembedWatcher_CompletionRunsUnderLifecycleLease(t *testing.T) {
 		t.Errorf("inactive namespace must not have its run completed, got %d calls", len(blocked.completedCalls))
 	}
 }
+
+// Two strategies can publish the same version string ("v1" is not scarce), so
+// a run's target is the whole (strategy_id, strategy_version) tuple. Counting
+// stale rows on the version alone would let a switch between same-versioned
+// strategies look like an instantly-complete re-embed.
+func TestReembedWatcher_CountsAgainstTheWholeStrategyTuple(t *testing.T) {
+	startedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	repo := &fakeReembedRepo{
+		openRuns: []ReembedRun{
+			{ID: 11, Namespace: "ns", TargetStrategyID: "model-b", TargetStrategyVersion: "v1", StartedAt: startedAt},
+		},
+		staleCount:    map[string]int{"ns": 0},
+		embeddedCount: map[string]int{"ns": 4},
+	}
+	w := NewReembedWatcher(repo, 0)
+	w.clock = func() time.Time { return startedAt.Add(time.Second) }
+
+	w.RunOnce(context.Background())
+
+	if len(repo.staleTargets) != 1 || repo.staleTargets[0] != "model-b/v1" {
+		t.Errorf("stale count target = %v, want [model-b/v1]", repo.staleTargets)
+	}
+	if len(repo.embeddedTargets) != 1 || repo.embeddedTargets[0] != "model-b/v1" {
+		t.Errorf("embedded count target = %v, want [model-b/v1]", repo.embeddedTargets)
+	}
+}
+
+// The run's target is frozen at trigger time. If the watcher re-read the
+// namespace's current strategy instead, a config change mid-run would silently
+// move the goalposts and close the run against a target nobody asked for.
+func TestReembedWatcher_TargetIsFrozenPerRun(t *testing.T) {
+	startedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	repo := &fakeReembedRepo{
+		openRuns: []ReembedRun{
+			{ID: 11, Namespace: "ns", TargetStrategyID: "model-a", TargetStrategyVersion: "v1", StartedAt: startedAt},
+			{ID: 12, Namespace: "other", TargetStrategyID: "model-a", TargetStrategyVersion: "v2", StartedAt: startedAt},
+		},
+		staleCount:    map[string]int{"ns": 0, "other": 3},
+		embeddedCount: map[string]int{"ns": 1, "other": 1},
+	}
+	w := NewReembedWatcher(repo, 0)
+	w.clock = func() time.Time { return startedAt.Add(time.Second) }
+
+	w.RunOnce(context.Background())
+
+	if len(repo.staleTargets) != 2 || repo.staleTargets[0] != "model-a/v1" || repo.staleTargets[1] != "model-a/v2" {
+		t.Errorf("each run must use its own frozen target, got %v", repo.staleTargets)
+	}
+	// Only the drained run closes.
+	if len(repo.completedCalls) != 1 || repo.completedCalls[0].id != 11 {
+		t.Errorf("expected only run 11 to complete, got %+v", repo.completedCalls)
+	}
+}

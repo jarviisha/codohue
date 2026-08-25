@@ -17,8 +17,9 @@ upgrades are lower risk than maintaining suppressions.
 
 **Decision**: Remove every producer-side `MAXLEN`. Once per minute, inspect all consumer
 groups and trim only IDs strictly below the minimum safe frontier: oldest pending ID when a
-PEL is non-empty, otherwise last-delivered ID. Use `XTRIM MINID ~`, fail closed on inspection
-errors, and retain unexpected groups in the frontier calculation.
+PEL is non-empty, otherwise last-delivered ID. Use exact `XTRIM MINID`, fail closed on
+inspection or trim errors, and retain unexpected groups in the frontier calculation. A
+successful pass leaves zero entries strictly below the computed safe frontier.
 
 **Rationale**: Length caps and TTL know nothing about processing progress and can delete the
 only durable copy during an outage. Redis documents `XAUTOCLAIM` as cursor-based PEL scanning
@@ -28,8 +29,10 @@ their payload ([Redis XAUTOCLAIM](https://redis.io/docs/latest/commands/xautocla
 ([Redis XACKDEL](https://redis.io/docs/latest/commands/xackdel/)).
 
 **Alternatives considered**: `XADD MAXLEN`, TTL, and per-message `XACK`+`XDEL` were rejected
-because they are not safe for multiple groups. A Lua group check on every ACK was rejected as
-hot-path overhead and still embeds retention policy in consumers.
+because they are not safe for multiple groups. Approximate `XTRIM MINID ~` was rejected because
+its retained overhang cannot satisfy the measurable completed-history bound without an
+additional Redis node-layout assumption. A Lua group check on every ACK was rejected as hot-path
+overhead and still embeds retention policy in consumers.
 
 ## Decision 3: Persist namespace generation and fence writers with lifecycle leases
 
@@ -50,8 +53,9 @@ known resurrection path.
 ## Decision 4: Retain backward compatibility only for first-generation stream envelopes
 
 **Decision**: Backfilled generation-1 namespaces temporarily accept envelopes without a
-generation. New or recreated namespaces require an exact generation, and an adoption gate
-later disables the legacy allowance everywhere.
+generation. New or recreated namespaces require an exact generation. After producer adoption,
+`cmd/admin lifecycle disable-legacy-envelopes --all` acquires the global exclusive lease,
+verifies adoption evidence, and atomically disables the allowance everywhere.
 
 **Rationale**: Existing Redis SDK clients cannot be switched atomically with servers. The
 grandfathered rule preserves their current namespaces without permitting a legacy backlog to
@@ -113,7 +117,9 @@ two autocommit writes all retain partial-state or semantic-drift windows.
 **Decision**: Add an audit/apply/verify/resume workflow under `cmd/admin`. Freeze all writers,
 take coordinated PostgreSQL and Qdrant snapshots, inventory payload IDs and vector hashes,
 copy unrecomputable dense points to authoritative IDs, rebuild sparse coordinates, and verify
-before unlock. Treat post-duplicate migration 022 as forward-only.
+before unlock. `internal/core/idmap` owns the repair state machine and a sparse-rebuild port;
+`cmd/admin` adapts `internal/compute` to that port. Treat post-duplicate migration 022 as
+forward-only.
 
 **Rationale**: Sparse object vectors encode subject numeric IDs, while catalog and BYOE dense
 vectors may not be server-recomputable. A database-only key fix or normal cron run cannot
@@ -126,8 +132,10 @@ the key scheme.
 ## Decision 10: Use keyset reconciliation and authenticated metrics
 
 **Decision**: Catalog reconciliation returns an opaque cursor representing `(updated_at,id)`.
-Public health retains its status shape but contains no raw dependency errors. Metrics require
-a dedicated observability bearer token and are absent when it is not configured.
+Plain `/healthz` retains its status shape but contains no raw dependency errors.
+`/healthz?details=true` and `/metrics` require a dedicated observability bearer token; metrics
+is absent when the token is not configured, and detailed health returns 404 when protected
+diagnostics are disabled.
 
 **Rationale**: A total-order cursor prevents equal-timestamp gaps. A separate monitoring token
 preserves existing deployment topology without exposing tenant labels or giving Prometheus the
@@ -136,3 +144,17 @@ global admin credential.
 **Alternatives considered**: Offset plus timestamp remains unstable; binding only to loopback
 does not protect bare-metal or misconfigured deployments; reusing the global admin key violates
 least privilege.
+
+## Decision 11: Stage embed retention before lifecycle-qualified discovery
+
+**Decision**: Release 2 applies retention only to the existing generation-1 embed stream names.
+Release 3 extends discovery to generation-qualified names after the lifecycle name resolver and
+generation ledger are available.
+
+**Rationale**: This keeps the retention release independently deployable and avoids making its
+startup path depend on schema and naming behavior that does not exist until Release 3.
+
+**Alternatives considered**: Implementing generation-qualified discovery in Release 2 was
+rejected because it creates a hidden dependency on the later lifecycle migration. Deferring all
+embed retention was rejected because current embed streams need the same loss-safe cleanup as
+the global streams.

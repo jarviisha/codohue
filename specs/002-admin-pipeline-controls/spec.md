@@ -1,8 +1,8 @@
 # Feature Specification: Admin Pipeline Controls
 
-**Feature Branch**: `feat/web-admin-dashboard`  
-**Created**: 2026-05-03  
-**Status**: Draft  
+**Feature Branch**: `feat/web-admin-dashboard`
+**Created**: 2026-05-03
+**Status**: Implemented
 **Input**: Thêm 3 tính năng vào web/admin để admin có thể kiểm soát pipeline khuyến nghị: trigger batch thủ công, xem events gần đây, và inject test events.
 
 ## User Scenarios & Testing *(mandatory)*

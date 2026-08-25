@@ -2341,3 +2341,64 @@ func TestStoreEmbedding_RunsUnderLifecycleLease(t *testing.T) {
 		t.Error("inactive namespace must not accept a BYOE vector")
 	}
 }
+
+// ─── BYOE creation-timestamp validation ──────────────────────────────────────
+
+// One documented clock-skew rule covers events and BYOE alike: at most five
+// minutes ahead, boundary inclusive.
+func TestStoreObjectEmbedding_FutureCreatedAtRejectedAtTheSameBoundaryAsEvents(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name       string
+		createdAt  time.Time
+		wantReject bool
+	}{
+		{"past", now.Add(-time.Hour), false},
+		{"exactly at the boundary", now.Add(maxObjectCreatedAtSkew), false},
+		{"beyond the boundary", now.Add(maxObjectCreatedAtSkew + time.Minute), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
+			var upserted bool
+			s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+			s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+				upserted = true
+				return nil
+			}
+
+			createdAt := tc.createdAt
+			err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, &createdAt)
+
+			if tc.wantReject {
+				if !errors.Is(err, ErrInvalidObjectCreatedAt) {
+					t.Fatalf("expected ErrInvalidObjectCreatedAt, got %v", err)
+				}
+				if upserted {
+					t.Error("a rejected timestamp must not reach qdrant")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected rejection: %v", err)
+			}
+			if !upserted {
+				t.Error("expected the vector to be stored")
+			}
+		})
+	}
+}
+
+// A non-finite vector value is a separate failure from a bad timestamp: both
+// are 400s, but they must not be reported as the same thing.
+func TestStoreObjectEmbedding_NonFiniteVectorIsNotATimestampError(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2}}, newFakeIDMapper())
+
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{float32(math.NaN()), 0.2}, nil)
+
+	if !errors.Is(err, ErrInvalidEmbedding) {
+		t.Fatalf("expected ErrInvalidEmbedding, got %v", err)
+	}
+	if errors.Is(err, ErrInvalidObjectCreatedAt) {
+		t.Error("a non-finite vector must not be reported as a timestamp problem")
+	}
+}

@@ -937,3 +937,97 @@ func TestStartNamespaceRun_InactiveNamespaceLogsNoRun(t *testing.T) {
 		t.Errorf("expected no batch_run_logs insert, got %d", logger.inserted.Load())
 	}
 }
+
+// ─── dense ownership matrix on an empty window ───────────────────────────────
+
+// When a namespace's events have all aged out, whatever this run owns must be
+// cleared — otherwise the last vectors linger forever with frozen scores and
+// keep matching searches. What "owns" means depends on dense_source, and
+// getting it wrong either strands stale data or deletes another process's work.
+func TestRunPhase2Dense_EmptyWindowClearsOnlyWhatThisRunOwns(t *testing.T) {
+	for _, tc := range []struct {
+		denseSource      string
+		wantItemCleared  bool
+		wantSubjCleared  bool
+		ownershipComment string
+	}{
+		{"item2vec", true, true, "cron trains and owns both collections"},
+		{"svd", true, true, "cron trains and owns both collections"},
+		{"catalog", false, true, "cmd/embedder owns {ns}_objects_dense"},
+	} {
+		t.Run(tc.denseSource, func(t *testing.T) {
+			job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{}) // no events
+			itemCleared, subjCleared := false, false
+			job.cleanupItemDenseFn = func(_ context.Context, _ string, keep []string) (int, error) {
+				itemCleared = true
+				if len(keep) != 0 {
+					t.Errorf("empty window must clear with an empty keep set, got %v", keep)
+				}
+				return 0, nil
+			}
+			job.cleanupSubjectDenseFn = func(_ context.Context, _ string, keep []string) (int, error) {
+				subjCleared = true
+				if len(keep) != 0 {
+					t.Errorf("empty window must clear with an empty keep set, got %v", keep)
+				}
+				return 0, nil
+			}
+
+			if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
+				&namespace.Config{DenseSource: tc.denseSource, EmbeddingDim: 2}, &LogCapture{}); err != nil {
+				t.Fatalf("runPhase2Dense: %v", err)
+			}
+			if itemCleared != tc.wantItemCleared {
+				t.Errorf("%s: item dense cleared=%v, want %v (%s)", tc.denseSource, itemCleared, tc.wantItemCleared, tc.ownershipComment)
+			}
+			if subjCleared != tc.wantSubjCleared {
+				t.Errorf("%s: subject dense cleared=%v, want %v", tc.denseSource, subjCleared, tc.wantSubjCleared)
+			}
+		})
+	}
+}
+
+// Under catalog mode the embedder's vectors must survive an empty event
+// window: they are the namespace's corpus, not this run's output.
+func TestRunPhase2Dense_CatalogEmptyWindowPreservesEmbedderVectors(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+		t.Fatal("catalog mode must never clear {ns}_objects_dense — cmd/embedder owns it")
+		return 0, nil
+	}
+	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
+
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
+		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase2Dense: %v", err)
+	}
+}
+
+// A namespace with no events at all still needs a compute pass, so the
+// enumeration is over configured namespaces rather than over namespaces that
+// happen to have recent events. Otherwise a namespace that goes quiet keeps
+// its last vectors forever.
+func TestRunOnce_SchedulesConfiguredNamespacesWithNoEvents(t *testing.T) {
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc,
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "disabled"}},
+		&fakeJobRepo{namespaces: []string{"quiet-ns"}}, // configured, zero events
+	)
+
+	job.runOnce(context.Background())
+
+	if !svc.called {
+		t.Error("a configured namespace with no events must still be recomputed")
+	}
+}
+
+func TestRunOnce_NamespaceEnumerationFailureSkipsTheTick(t *testing.T) {
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{err: errors.New("db down")})
+
+	job.runOnce(context.Background())
+
+	if svc.called {
+		t.Error("an unreadable namespace list must not be treated as an empty one")
+	}
+}

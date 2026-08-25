@@ -2,8 +2,10 @@
 
 **Feature Branch**: `feat/recommend-darkvoid-alignment`
 **Created**: 2026-08-03
-**Status**: Accepted — derived from the accepted [design.md](design.md) (rev 4, all design
-decisions resolved); this spec restates it in requirement form for task generation
+**Status**: Implemented with deferred follow-ups
+**Deferred Follow-up**: T034 readiness endpoint in [tasks.md](tasks.md), pending consumer commitment
+**Pending Release Action**: T037 SDK release and tagging in [tasks.md](tasks.md)
+**Known Remediation**: [Spec 007](../007-backend-audit-remediation/spec.md)
 **Input**: User description: "Generate spec.md for the existing feature
 specs/006-darkvoid-alignment. Source material: the accepted design.md in that directory."
 

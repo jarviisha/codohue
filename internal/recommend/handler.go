@@ -234,6 +234,10 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 		if writeNamespaceResolutionError(w, storeErr) {
 			return
 		}
+		if errors.Is(storeErr, ErrInvalidObjectCreatedAt) {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_object_created_at", storeErr.Error())
+			return
+		}
 		if errors.Is(storeErr, ErrInvalidEmbedding) {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_embedding", storeErr.Error())
 			return

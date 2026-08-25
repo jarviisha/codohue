@@ -10,7 +10,7 @@ Persistent tombstone for every namespace name ever activated.
 | `generation` | bigint | Starts at 1; increments only on recreation after `deleted` |
 | `state` | text | `active`, `deleting`, or `deleted` |
 | `activated_at` | timestamp | Start of the current generation |
-| `legacy_messages_allowed` | boolean | True only for explicitly grandfathered generation 1 |
+| `legacy_messages_allowed` | boolean | True only for explicitly grandfathered generation 1; false for every new/recreated lifecycle |
 | `last_error` | text nullable | Most recent resumable delete failure |
 | `updated_at` | timestamp | State transition time |
 
@@ -36,11 +36,17 @@ Singleton durable gate for application-wide maintenance.
 |-------|------|-------|
 | `singleton` | boolean | Primary key constrained to true |
 | `state` | text | `active` or `resetting` |
+| `legacy_envelopes_disabled_at` | timestamp nullable | Set once by the global legacy-envelope closure operation; never cleared |
 | `last_error` | text nullable | Most recent reset failure |
 | `updated_at` | timestamp | State transition time |
 
 `resetting` blocks namespace creation and every namespace mutation even if the process that
 started reset has exited. Only verified completion returns it to `active`.
+
+The legacy-envelope closure operation takes the global-exclusive lease, verifies producer
+adoption evidence, changes every remaining `legacy_messages_allowed` value to false in one
+transaction, and records `legacy_envelopes_disabled_at`. It is idempotent and cannot be reversed
+by namespace recreation or ordinary configuration writes.
 
 ## NamespaceConfig generation
 
@@ -91,6 +97,21 @@ uses a generation marker so late artifacts cannot be visible to current readers.
 
 Kinds include recommendation cache, trending, embed stream, subjects, objects,
 subjects-dense, and objects-dense. Deleted-generation artifacts are janitor candidates.
+
+## StreamRetentionPass
+
+Ephemeral result recorded in metrics/logs for one stream inspection and trim attempt.
+
+| Attribute | Rules |
+|-----------|-------|
+| `stream` | Recognized event, catalog, or embed stream physical name |
+| `safe_frontier` | Minimum oldest-pending/last-delivered ID across every discovered group |
+| `trimmed_count` | Count returned by exact `XTRIM MINID` |
+| `status` | `dry_run`, `trimmed`, or `failed` |
+| `failure_stage` | Empty on success; otherwise group, PEL, frontier, or trim stage |
+
+After a successful non-dry-run pass, the stream contains zero entries strictly below
+`safe_frontier`. No successful bound is recorded when inspection or trimming fails.
 
 ## EmbeddingStrategyIdentity
 
@@ -151,3 +172,9 @@ payloads at a target ID, or ambiguous vectors enter `quarantined` and halt apply
 Numeric IDs become unique within `(namespace,entity_type)` rather than globally, permitting
 historically shared numeric IDs across independent Qdrant collections while preventing two
 logical IDs in the same collection from colliding.
+
+## Repair orchestration boundary
+
+`internal/core/idmap` defines a narrow sparse-rebuild port consumed by the repair service.
+`cmd/admin` provides an adapter backed by `internal/compute`. The core package never imports
+`internal/compute`, preserving the existing `compute -> core/idmap` dependency direction.

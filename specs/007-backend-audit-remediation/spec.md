@@ -2,8 +2,18 @@
 
 **Feature Branch**: `fix/redis-backend-audit-remediation`
 **Created**: 2026-08-24
-**Status**: Draft
+**Status**: Tasks generated — ready for implementation
 **Input**: User description: "Plan remediation for all audited project findings, excluding web/admin."
+
+## Clarifications
+
+### Session 2026-08-25
+
+- Q: When consumers are unavailable long enough for Redis to reach its capacity, which guarantee takes priority? → A: Preserve every unprocessed entry and reject new publishes explicitly until capacity is restored; do not trim unprocessed backlog.
+- Q: What lifecycle state applies when namespace deletion succeeds in some stores but fails in another? → A: Keep the namespace durably in `deleting`, return a retryable failure, and block writes and same-name recreation until cleanup completes successfully.
+- Q: How is the trusted monitoring path protected? → A: Require a dedicated observability bearer token for metrics and detailed health diagnostics on the existing listener; keep the unauthenticated public health response sanitized.
+- Q: How are legacy stream entries without a namespace generation handled during rollout? → A: Treat a missing generation as generation 1 only; once a namespace name has entered generation 2 or later, reject every entry without an explicitly matching generation.
+- Q: What happens when identity-migration preflight cannot uniquely associate an existing vector point with a namespace and entity? → A: Stop the entire migration before any mutation, emit an actionable conflict report, and require operator repair before retrying.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -38,6 +48,8 @@ Operators can delete or reset namespaces knowing that concurrent ingest, embeddi
 2. **Given** queued event or catalog work for a deleted namespace, **When** workers receive it, **Then** it cannot recreate namespace-owned state.
 3. **Given** an application-wide reset, **When** it reports success, **Then** no writer or background job can recreate pre-reset state.
 4. **Given** a deleted namespace name is later reused, **When** the new namespace starts receiving work, **Then** work from the previous lifecycle is not replayed into it.
+5. **Given** namespace cleanup succeeds in some stores but fails in another, **When** the delete request returns, **Then** the namespace remains in `deleting`, all writes and same-name recreation are blocked, and retrying deletion resumes cleanup safely.
+6. **Given** a legacy queued entry without a lifecycle generation, **When** it is consumed for a namespace that has never been recreated, **Then** it is treated as generation 1; for generation 2 or later, the same entry is rejected and cannot mutate state.
 
 ---
 
@@ -56,6 +68,7 @@ Clients receive recommendations produced only from current, valid namespace conf
 3. **Given** a creation timestamp beyond the permitted clock skew, **When** an event or embedding is submitted, **Then** it is rejected and cannot produce a non-finite recommendation score.
 4. **Given** existing vector identities created before namespace-scoped mappings, **When** the mapping transition completes, **Then** catalog, client-provided, sparse, and computed dense vectors remain reachable by their string identifiers.
 5. **Given** an identity transition has completed, **When** rollback is requested, **Then** the system either performs a verified lossless rollback or refuses before modifying state with an actionable recovery instruction.
+6. **Given** migration preflight finds a point whose namespace or entity identity is ambiguous, **When** migration is requested, **Then** no point or mapping is modified and an actionable conflict report identifies every unresolved point.
 
 ---
 
@@ -69,7 +82,7 @@ Clients and operators receive a failure when required configuration or cleanup w
 
 **Acceptance Scenarios**:
 
-1. **Given** namespace configuration cannot be loaded, **When** recommendation or ranking is requested, **Then** the request fails or returns an explicitly degraded non-cacheable response; it never silently uses defaults.
+1. **Given** namespace configuration does not exist or its store is unavailable, **When** recommendation or ranking is requested, **Then** the request returns the stable 404 or 503 failure respectively, is not cached, and never uses defaults.
 2. **Given** a nonexistent namespace and a globally privileged credential, **When** a data-plane mutation is attempted, **Then** no vector collection, mapping, object, or event is created.
 3. **Given** sparse deletion succeeds but dense deletion fails, **When** object deletion completes, **Then** the caller receives a retryable failure and retrying converges safely.
 4. **Given** a combined namespace and catalog configuration request is invalid, **When** it is rejected, **Then** no subset of the requested configuration change remains committed.
@@ -105,18 +118,23 @@ Operators retain health and metrics visibility without exposing namespace activi
 
 1. **Given** an untrusted client on the public API listener, **When** it requests metrics, **Then** namespace-labelled operational data is unavailable.
 2. **Given** an untrusted client requests health status, **When** a dependency is unhealthy, **Then** no internal address, credential fragment, or raw dependency error is disclosed.
-3. **Given** the trusted monitoring path, **When** health and metrics are collected, **Then** existing operational signals remain available.
+3. **Given** a valid dedicated observability bearer token, **When** health diagnostics and metrics are collected on the existing listener, **Then** all existing operational signals remain available.
+4. **Given** a missing or invalid observability token, **When** a client requests metrics or detailed health diagnostics, **Then** the request is rejected without exposing protected content.
 
 ### Edge Cases
 
 - A consumer crashes after committing durable work but before acknowledging its stream entry.
 - Multiple consumer groups have different acknowledgement progress on a shared stream.
+- Redis reaches its storage limit during a prolonged consumer outage; existing unprocessed entries remain recoverable while new publishes fail explicitly until capacity is restored.
 - A namespace is deleted and recreated with the same name while old stream entries remain.
+- A legacy stream entry has no generation field while the namespace is in generation 2 or later.
+- Namespace cleanup partially succeeds before a dependency becomes unavailable; the durable `deleting` fence remains authoritative across process restarts.
 - A scheduled cleanup runs concurrently with a manual recompute or re-embed operation.
 - Every event expires at the same maintenance boundary.
 - A new strategy reuses a version label already used by another strategy.
 - Creation time is exactly at the allowed future-skew boundary or contains a malformed timezone.
 - Identity mappings contain cross-namespace and cross-entity collisions before migration.
+- An existing vector point lacks sufficient authoritative metadata to resolve its namespace and entity type during migration preflight.
 - Dense storage is unavailable after sparse deletion has already succeeded.
 - Reclaim and reconciliation cursors reach their terminal values with an empty final page.
 
@@ -125,15 +143,15 @@ Operators retain health and metrics visibility without exposing namespace activi
 ### Functional Requirements
 
 - **FR-001**: The system MUST ship with no known reachable dependency vulnerability for which an applicable fixed release is available.
-- **FR-002**: The system MUST bound completed stream history without deleting unprocessed or recoverable entries.
-- **FR-003**: Stream retention MUST cover behavioral event, catalog transport, and per-namespace embedding queues under a documented ownership and consumer-progress policy.
-- **FR-004**: Namespace deletion and application reset MUST establish a lifecycle boundary observed by every data-plane and background writer.
-- **FR-005**: Work from an earlier namespace lifecycle MUST NOT mutate a later namespace created with the same name.
+- **FR-002**: The system MUST bound completed stream history without deleting unprocessed or recoverable entries; when Redis capacity is exhausted, it MUST reject new publishes explicitly rather than trim unprocessed backlog.
+- **FR-003**: Stream retention MUST cover behavioral event, catalog transport, and per-namespace embedding queues under a documented ownership and consumer-progress policy, including operational backpressure and recovery behavior at the storage limit.
+- **FR-004**: Namespace deletion and application reset MUST establish a durable lifecycle boundary observed by every data-plane and background writer. A partially completed deletion MUST leave the namespace in `deleting`, reject writes and same-name recreation, return a retryable failure, and allow idempotent cleanup retries until success.
+- **FR-005**: Work from an earlier namespace lifecycle MUST NOT mutate a later namespace created with the same name. A missing work-item generation MUST be interpreted as generation 1 only; generation 2 and later MUST require an explicit generation that matches the current namespace lifecycle.
 - **FR-006**: Scheduled maintenance MUST evaluate every configured namespace, including namespaces with zero events in the active window.
 - **FR-007**: Scheduled maintenance MUST remove stale sparse and system-owned dense state when the authoritative keep set is empty.
 - **FR-008**: Re-embed selection, progress, and completion MUST compare the full strategy identifier and version pair.
 - **FR-009**: All client-controlled creation timestamps MUST use one documented clock-skew rule, and all scoring paths MUST remain finite for any stored payload.
-- **FR-010**: The identity-mapping transition MUST include verified recovery for all existing vector producers, including producers that the server cannot recompute independently.
+- **FR-010**: The identity-mapping transition MUST include verified recovery for all existing vector producers, including producers that the server cannot recompute independently. Preflight MUST resolve each existing point to exactly one namespace and entity identity; otherwise it MUST stop before mutation and emit an actionable conflict report covering every unresolved point.
 - **FR-011**: Identity-mapping rollback MUST be preflighted and MUST NOT leave a partially modified key scheme.
 - **FR-012**: Required namespace configuration lookup failures MUST NOT silently fall back to defaults or populate recommendation caches.
 - **FR-013**: Globally privileged credentials MUST NOT permit mutation of a namespace that does not exist.
@@ -142,19 +160,19 @@ Operators retain health and metrics visibility without exposing namespace activi
 - **FR-016**: Catalog content and requested attribution MUST have atomic success semantics or a durable, observable repair mechanism.
 - **FR-017**: Pending-entry recovery MUST advance through the complete reclaim cursor space without starvation.
 - **FR-018**: Catalog reconciliation MUST use a stable resume position that totally orders rows sharing the same update time.
-- **FR-019**: Operational metrics containing namespace labels MUST be restricted to a trusted monitoring path.
-- **FR-020**: Public health responses MUST be sanitized while trusted operators retain actionable diagnostics through protected channels.
+- **FR-019**: Operational metrics containing namespace labels MUST require a dedicated observability bearer token on the existing listener and MUST reject missing or invalid tokens without returning protected content.
+- **FR-020**: Unauthenticated public health responses MUST expose only sanitized aggregate status, while detailed dependency diagnostics on the existing listener MUST require the dedicated observability bearer token.
 - **FR-021**: Every changed business-logic component MUST have deterministic regression tests covering its failure and concurrency boundaries.
 - **FR-022**: Remediation MUST NOT modify or require changes to `web/admin`.
 
 ### Key Entities
 
-- **Namespace Lifecycle**: One generation of a namespace name, with states that determine whether writes and background work are allowed.
+- **Namespace Lifecycle**: One generation of a namespace name, with states that determine whether writes and background work are allowed. Generation numbers start at 1 and increase on same-name recreation. The `deleting` state is durable, rejects writes and same-name recreation, and persists until cross-store cleanup completes.
 - **Stream Entry**: Durable unit of event, catalog, or embedding work with processing and acknowledgement progress.
 - **Embedding Strategy Identity**: The immutable pair of strategy identifier and strategy version used to select and verify re-embedding work.
-- **Vector Identity Mapping**: Association between namespace, entity type, string identifier, and numeric vector-store identifier.
+- **Vector Identity Mapping**: Association between namespace, entity type, string identifier, and numeric vector-store identifier; migration preflight must establish this association unambiguously before modifying any point or mapping.
 - **Reconciliation Cursor**: Stable resume position that uniquely orders catalog changes.
-- **Operational Endpoint**: Health or metric surface with a defined trust boundary and disclosure policy.
+- **Operational Endpoint**: Health or metric surface whose protected metrics and detailed diagnostics require a dedicated observability bearer token; its unauthenticated health response exposes only sanitized aggregate status.
 
 ## Success Criteria *(mandatory)*
 
@@ -166,7 +184,7 @@ Operators retain health and metrics visibility without exposing namespace activi
 - **SC-004**: After all events age out, the next scheduled maintenance cycle removes 100% of stale system-owned recommendation vectors for the namespace.
 - **SC-005**: Replacing a strategy with another strategy at the same version label reprocesses 100% of mismatched items and reports accurate completion.
 - **SC-006**: Every accepted recommendation response contains only finite scores under boundary and fuzzed timestamp inputs.
-- **SC-007**: A migration rehearsal with cross-namespace and cross-entity identifier collisions preserves reachability of 100% of catalog, client-provided, sparse, and computed dense points.
+- **SC-007**: A conflict-free migration rehearsal with cross-namespace and cross-entity identifier collisions preserves reachability of 100% of catalog, client-provided, sparse, and computed dense points; a rehearsal containing an unresolvable point modifies zero points or mappings and reports 100% of unresolved points.
 - **SC-008**: Fault-injection tests produce zero cached responses based on missing configuration and zero successful object deletions with a known remaining dense point.
 - **SC-009**: Recovery and reconciliation tests visit 100% of entries across at least three pages, including equal-timestamp boundaries and permanently failing early entries.
 - **SC-010**: Unauthenticated public requests reveal zero namespace labels or raw dependency errors while trusted monitoring continues to collect all existing signals.
@@ -177,6 +195,7 @@ Operators retain health and metrics visibility without exposing namespace activi
 - The remediation covers Go services, SDKs, migrations, deployment configuration, and backend documentation; `web/admin` is explicitly excluded.
 - Existing public data-plane response shapes remain backward compatible unless a security-safe failure response is required.
 - At-least-once delivery remains the queue contract; consumers and writes continue to be idempotent.
+- Preserving existing unprocessed work takes priority over accepting new publishes when Redis capacity is exhausted; producers receive an explicit retryable failure until capacity is restored.
 - Operators can perform a staged rollout and maintenance window for identity migration when required.
-- Trusted monitoring can use a private listener, private network, or authenticated route without requiring changes to the excluded web application.
+- Trusted monitoring supplies a dedicated observability bearer token to the existing API listener; this mechanism does not require changes to the excluded web application.
 - Dependency upgrades stay within compatible release lines unless testing demonstrates that a larger upgrade is required.

@@ -2,7 +2,8 @@
 
 **Feature Branch**: `feat/recommend-catalog-embedder`
 **Created**: 2026-05-09
-**Status**: Draft
+**Status**: Implemented
+**Known Remediation**: [Spec 007](../007-backend-audit-remediation/spec.md)
 **Input**: User description: "Catalog feature for auto-embedding raw client content via separate cmd/embedder binary — remove the requirement that clients (e.g. social-network backends) precompute their own dense embeddings. Approach A from prior discussion: a new dedicated binary, decoupled from the data plane, that consumes raw items and produces dense vectors that flow into the existing dense Qdrant collections."
 
 ## Clarifications

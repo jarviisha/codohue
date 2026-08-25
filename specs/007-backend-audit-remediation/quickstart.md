@@ -45,8 +45,9 @@ Verify these fixtures:
   leaves no accepted catalog item.
 - Equal `updated_at` rows across three catalog pages are returned exactly once with the keyset
   cursor.
-- Public health contains no injected raw dependency error; metrics is 404 without an observability
-  token, 401 with a wrong token, and scrapeable with the correct token.
+- Public health contains no injected raw dependency error; `?details=true` is 404 without an
+  observability token, 401 with a wrong token, and diagnostic with the correct token; metrics
+  follows the same 404/401/protected behavior.
 
 ## 3. Redis retention canary
 
@@ -67,9 +68,9 @@ Observe one interval of computed frontier metrics without trimming. Then enable 
 3. `codohue:events`.
 
 For each stream, stop the consumer, publish more than ten normal retention windows of work, run
-retention repeatedly, restart the consumer, and verify 100% processing. With consumers healthy,
-completed history must stop growing linearly. If a frontier or group alert fires, disable the
-flag; do not restore producer `MAXLEN`.
+retention repeatedly, restart the consumer, and verify 100% processing. After each successful
+pass, assert that no entry remains below the recorded safe frontier. If inspection, trim,
+frontier, or group alerts fire, disable the flag; do not restore producer `MAXLEN`.
 
 ## 4. Lifecycle migration and dual-protocol rollout
 
@@ -97,7 +98,14 @@ assert no PostgreSQL child row, current-generation Redis key, mapping, or Qdrant
 exists. Publish an old-generation envelope after recreation and verify it is ACKed as stale with
 zero writes.
 
-Only after the SDK adoption window should `legacy_messages_allowed` be disabled.
+Only after the SDK adoption window, run:
+
+```bash
+./tmp/admin lifecycle disable-legacy-envelopes --all --adoption-evidence <ref>
+```
+
+Verify every lifecycle has `legacy_messages_allowed=false`, the global closure timestamp is set,
+and rerunning the command is a no-op success before enabling deleted-generation janitors.
 
 ## 5. ID mapping repair rehearsal
 

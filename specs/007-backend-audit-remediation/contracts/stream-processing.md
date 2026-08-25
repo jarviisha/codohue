@@ -6,7 +6,7 @@
 |--------|----------------|---------------------------|
 | `codohue:events` | `codohue-ingest` | Event committed to PostgreSQL |
 | `codohue:catalog` | `codohue-catalog-ingest` | Catalog row committed and embed work durably represented |
-| generation-qualified `catalog:embed` | `embedder` | Vector/state terminally committed or work permanently rejected |
+| generation-1 legacy or generation-qualified `catalog:embed` | `embedder` | Vector/state terminally committed or work permanently rejected |
 
 Additional groups are protected by retention but generate an operational alert. Creating a
 backfill group from `0` requires retention to be disabled until that group catches up; live-only
@@ -46,15 +46,20 @@ Producers do not set `MAXLEN` and streams have no TTL. A retention pass:
 2. Reads PEL summary for each group.
 3. Uses the oldest pending ID when pending exists; otherwise uses last-delivered ID.
 4. Selects the minimum frontier across all groups.
-5. Executes approximate `XTRIM MINID` strictly below that frontier.
+5. Executes exact `XTRIM MINID` strictly below that frontier.
 
-No group, malformed/contradictory progress, or Redis error means no trim. Approximation may
-retain extra entries but must never advance beyond the safe frontier.
+No group, malformed/contradictory progress, or Redis error means no trim. A successful pass has
+one measurable post-condition: no stream entry remains with an ID strictly below the safe
+frontier. Entries at or above the frontier remain protected even when an individual consumer has
+already processed them.
 
 Configuration:
 
 - `CODOHUE_STREAM_RETENTION_ENABLED`, default false for the first rollout.
 - `CODOHUE_STREAM_RETENTION_INTERVAL`, default `1m`.
+
+Release 2 discovers only existing generation-1 embed stream names. Release 3 extends discovery
+to generation-qualified physical names after the lifecycle resolver is deployed.
 
 ## Reclaim cursor
 

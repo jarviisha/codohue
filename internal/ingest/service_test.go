@@ -411,3 +411,69 @@ func TestProcess_SlightClockSkewTolerated(t *testing.T) {
 		t.Fatalf("ordinary clock skew must pass: %v", err)
 	}
 }
+
+// ─── object_created_at clock skew ────────────────────────────────────────────
+
+// object_created_at feeds the γ-freshness rerank as e^(-γ·ageDays). A future
+// value makes the age negative, so the term boosts instead of decays. The
+// boundary itself is accepted — only strictly beyond it is rejected.
+func TestServiceProcess_ObjectCreatedAtFutureSkew(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name       string
+		createdAt  time.Time
+		wantReject bool
+	}{
+		{"past", now.Add(-24 * time.Hour), false},
+		{"now", now, false},
+		{"just inside the boundary", now.Add(maxOccurredAtSkew - time.Second), false},
+		{"exactly at the boundary", now.Add(maxOccurredAtSkew), false},
+		{"beyond the boundary", now.Add(maxOccurredAtSkew + time.Minute), true},
+		{"epoch millis mistaken for seconds", time.Unix(now.UnixMilli(), 0).UTC(), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRepo{}
+			svc := newTestService(repo, &fakeNsConfig{})
+
+			createdAt := tc.createdAt
+			_, err := svc.Process(context.Background(), &EventPayload{
+				Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+				Action: ActionView, OccurredAt: now,
+				ObjectCreatedAt: &createdAt,
+			})
+
+			if tc.wantReject {
+				if !errors.Is(err, ErrInvalidObjectCreatedAt) {
+					t.Fatalf("expected ErrInvalidObjectCreatedAt, got %v", err)
+				}
+				if repo.insertCalled {
+					t.Error("a rejected timestamp must not be persisted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected rejection: %v", err)
+			}
+			if !repo.insertCalled {
+				t.Error("expected the event to be persisted")
+			}
+		})
+	}
+}
+
+// occurred_at and object_created_at are independent inputs: a valid one must
+// not be rejected because the other is absent.
+func TestServiceProcess_OmittedObjectCreatedAtIsAccepted(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newTestService(repo, &fakeNsConfig{})
+
+	if _, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionView, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.lastEvent.ObjectCreatedAt != nil {
+		t.Errorf("object_created_at should stay nil, got %v", repo.lastEvent.ObjectCreatedAt)
+	}
+}

@@ -123,14 +123,14 @@
 
 ### Tests for User Story 3
 
-- [ ] T052 [P] [US3] Add configured-namespace enumeration, zero-event scheduling, and repository failure tests in `internal/compute/job_test.go` and `internal/compute/repository_test.go`
-- [ ] T053 [P] [US3] Add direct empty-keep-set sparse cleanup and ownership-boundary tests in `internal/compute/cleanup_test.go`
-- [ ] T054 [P] [US3] Add direct item2vec/SVD/catalog/BYOE dense ownership-matrix tests in `internal/compute/dense_test.go` and `internal/compute/user_dense_test.go`
-- [ ] T055 [P] [US3] Add same-version/different-strategy reset, stale-count, and immutable-run tuple tests in `internal/admin/catalog_ops_repository_test.go` and `internal/admin/catalog_ops_service_test.go`
-- [ ] T056 [P] [US3] Add tuple-based selection, progress, and completion tests in `internal/embedder/repository_test.go` and `internal/embedder/reembed_watcher_test.go`
-- [ ] T057 [P] [US3] Add exact five-minute boundary and beyond-boundary event timestamp tests in `internal/ingest/service_test.go`
-- [ ] T058 [P] [US3] Add direct non-negative age, `[0,1]` clamp, malformed timestamp, and non-finite candidate tests in `internal/recommend/scoring_test.go`
-- [ ] T059 [P] [US3] Add BYOE timestamp validation, finite response serialization, and rejected-candidate behavior tests in `internal/recommend/service_test.go` and `internal/recommend/handler_test.go`
+- [X] T052 [P] [US3] Add configured-namespace enumeration, zero-event scheduling, and repository failure tests in `internal/compute/job_test.go` and `internal/compute/repository_test.go`
+- [X] T053 [P] [US3] Add direct empty-keep-set sparse cleanup and ownership-boundary tests in `internal/compute/cleanup_test.go`
+- [X] T054 [P] [US3] Add direct item2vec/SVD/catalog/BYOE dense ownership-matrix tests in `internal/compute/dense_test.go` and `internal/compute/user_dense_test.go`
+- [X] T055 [P] [US3] Add same-version/different-strategy reset, stale-count, and immutable-run tuple tests in `internal/admin/catalog_ops_repository_test.go` and `internal/admin/catalog_ops_service_test.go`
+- [X] T056 [P] [US3] Add tuple-based selection, progress, and completion tests in `internal/embedder/repository_test.go` and `internal/embedder/reembed_watcher_test.go`
+- [X] T057 [P] [US3] Add exact five-minute boundary and beyond-boundary event timestamp tests in `internal/ingest/service_test.go`
+- [X] T058 [P] [US3] Add direct non-negative age, `[0,1]` clamp, malformed timestamp, and non-finite candidate tests in `internal/recommend/scoring_test.go`
+- [X] T059 [P] [US3] Add BYOE timestamp validation, finite response serialization, and rejected-candidate behavior tests in `internal/recommend/service_test.go` and `internal/recommend/handler_test.go`
 - [ ] T060 [P] [US3] Add direct immutable-manifest, quarantine, item-state, hash, and resume-query persistence tests in `internal/core/idmap/repair_repository_test.go`
 - [ ] T061 [P] [US3] Add direct ambiguous preflight, zero-mutation refusal, snapshot requirement, sparse-rebuild port, stage failure, resume, and verify tests in `internal/core/idmap/repair_service_test.go`
 - [ ] T062 [P] [US3] Add collection inventory, payload/vector hashing, snapshot reference, verified copy, and old-point cleanup tests in `internal/infra/qdrant/repair_test.go`
@@ -140,13 +140,13 @@
 
 ### Implementation for User Story 3
 
-- [ ] T066 [US3] Enumerate every active configured namespace, including empty event windows, in `internal/compute/repository.go` and `internal/compute/job.go`
-- [ ] T067 [US3] Clear stale sparse vectors for empty authoritative keep sets in `internal/compute/cleanup.go`
-- [ ] T068 [US3] Apply the item2vec/SVD/catalog/BYOE dense ownership matrix for empty keep sets in `internal/compute/dense.go` and `internal/compute/user_dense.go`
-- [ ] T069 [US3] Compare immutable `(strategy_id,strategy_version)` tuples in re-embed reset, stale counts, and batch-run state in `internal/admin/catalog_ops_repository.go` and `internal/admin/catalog_ops_service.go`
-- [ ] T070 [US3] Compare immutable strategy tuples in embed selection, progress, and completion in `internal/embedder/repository.go` and `internal/embedder/reembed_watcher.go`
-- [ ] T071 [US3] Enforce the shared five-minute future-skew rule for event and BYOE `object_created_at` inputs in `internal/ingest/types.go`, `internal/ingest/service.go`, `internal/recommend/types.go`, and `internal/recommend/handler.go`
-- [ ] T072 [US3] Centralize non-negative freshness, clamp multipliers to `[0,1]`, and exclude observable non-finite candidates before JSON serialization in `internal/recommend/scoring.go`, `internal/recommend/service.go`, and `internal/recommend/handler.go`
+- [X] T066 [US3] Enumerate every active configured namespace, including empty event windows, in `internal/compute/repository.go` and `internal/compute/job.go`
+- [X] T067 [US3] Clear stale sparse vectors for empty authoritative keep sets in `internal/compute/cleanup.go`
+- [X] T068 [US3] Apply the item2vec/SVD/catalog/BYOE dense ownership matrix for empty keep sets in `internal/compute/dense.go` and `internal/compute/user_dense.go`
+- [X] T069 [US3] Compare immutable `(strategy_id,strategy_version)` tuples in re-embed reset, stale counts, and batch-run state in `internal/admin/catalog_ops_repository.go` and `internal/admin/catalog_ops_service.go`
+- [X] T070 [US3] Compare immutable strategy tuples in embed selection, progress, and completion in `internal/embedder/repository.go` and `internal/embedder/reembed_watcher.go`
+- [X] T071 [US3] Enforce the shared five-minute future-skew rule for event and BYOE `object_created_at` inputs in `internal/ingest/types.go`, `internal/ingest/service.go`, `internal/recommend/types.go`, and `internal/recommend/handler.go`
+- [X] T072 [US3] Centralize non-negative freshness, clamp multipliers to `[0,1]`, and exclude observable non-finite candidates before JSON serialization in `internal/recommend/scoring.go`, `internal/recommend/service.go`, and `internal/recommend/handler.go`
 - [ ] T073 [US3] Add composite mapping uniqueness, durable repair run/item manifests, resumable states, and safe down-preflight support in `migrations/026_id_mapping_repair.up.sql` and `migrations/026_id_mapping_repair.down.sql`
 - [ ] T074 [US3] Implement repair-run/item persistence, immutable manifest hashing, quarantine reports, and resume queries in `internal/core/idmap/repair_repository.go`
 - [ ] T075 [US3] Implement Qdrant inventory, payload/vector hashing, snapshot reference validation, verified point copying, and old-point cleanup primitives in `internal/infra/qdrant/repair.go`
