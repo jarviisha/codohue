@@ -436,3 +436,10 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 - [X] T123 Add migration 027 to the Release 4 gate and the per-namespace completion evidence template in `deploy/backend-audit-remediation.md`, so an operator following the rollout does not stop at 026 and leave `rebuilt_namespaces` absent per plan Release 4 step 1 (partial)
 - [X] T124 Add DB-backed coverage for the repair run/item lifecycle — create, snapshot recording, item and run state transitions, mapping retarget, id reservation and the rebuilt-namespace record — in `e2e/idmap_repair_test.go` per FR-021 (partial)
 - [X] T125 Bring `CLAUDE.md` up to date with the migration list through 027, the `CODOHUE_STREAM_RETENTION_*` settings, and the changed API contract (`namespace_not_active`, `namespace_config_unavailable`, `invalid_object_created_at`, `next_cursor`, `/healthz?details=true`) per Constitution III documentation conventions (partial)
+
+---
+
+## Phase 14: Convergence
+
+- [X] T126 Seed and clean up the `namespace_configs` row that `TestRepairRepository_RetargetMappingMovesAnExistingRow` depends on, so the insert does not violate `id_mappings_namespace_fk` and the test can actually run, in `internal/core/idmap/repair_repository_test.go` per FR-021 (contradicts)
+- [X] T127 Name the `cmd/admin` CLI subcommands — `lifecycle disable-legacy-envelopes` and `idmap-repair audit|quarantine|apply|verify|resume` — where the binary's responsibilities are enumerated in `CLAUDE.md` per CLAUDE.md four-binary conventions (partial)

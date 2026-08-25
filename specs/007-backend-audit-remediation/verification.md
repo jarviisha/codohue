@@ -89,6 +89,24 @@ T124 added nine PostgreSQL-backed tests for the repair repository in
 vacuously — so they run under `make test` wherever a database is configured.
 Until then the repair repository's SQL still has no execution anywhere.
 
+## Phase 14 (convergence) gates
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues |
+| `go build ./...` | **pass** |
+| `go test ./...` | **pass** |
+| `go test -race` (idmap) | **pass** |
+| `go vet -tags=e2e ./e2e/` | **pass** |
+
+T126 fixed a defect in the T124 tests that no local run could surface: the
+mapping insert violated `id_mappings_namespace_fk` (migration 025), and
+satisfying it also requires a `namespace_lifecycles` row because
+`namespace_configs (namespace, generation)` references it (migration 024). A
+`seedNamespace` helper now makes that chain explicit. **This was found by
+reading the schema, not by running anything** — the first real run of these
+tests is still their first real validation.
+
 ## Outstanding — requires a live environment
 
 These cannot be completed from a workstation without the stack running. Each

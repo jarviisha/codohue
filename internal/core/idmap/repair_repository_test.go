@@ -444,6 +444,42 @@ func TestRepairRepository_ItemStateTransitionsArePersisted(t *testing.T) {
 	}
 }
 
+// seedNamespace creates the rows a namespace-scoped mapping depends on.
+//
+// The chain is not obvious and biting it is a runtime FK error, not a compile
+// one: `id_mappings.namespace` references `namespace_configs` (migration 025),
+// and `namespace_configs (namespace, generation)` references
+// `namespace_lifecycles` (migration 024). A test that inserts a mapping for an
+// invented namespace fails on the first of those.
+//
+// `id_mapping_repair_items.namespace` deliberately has no such key — the
+// manifest is an audit record and must outlive the namespace it describes — so
+// the repair-run tests above do not need this.
+func seedNamespace(t *testing.T, db *pgxpool.Pool, namespace string) {
+	t.Helper()
+	ctx := context.Background()
+
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW())
+		ON CONFLICT (namespace) DO NOTHING`, namespace); err != nil {
+		t.Fatalf("seed namespace lifecycle: %v", err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, namespace); err != nil {
+		t.Fatalf("seed namespace config: %v", err)
+	}
+
+	t.Cleanup(func() {
+		clean := context.Background()
+		// namespace_configs first: the mapping FK cascades from it, and the
+		// lifecycle row is what it points at.
+		_, _ = db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, namespace)
+		_, _ = db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, namespace)
+	})
+}
+
 // Retarget moves an EXISTING mapping; minting a parallel one would leave the
 // identity resolvable two ways.
 func TestRepairRepository_RetargetMappingMovesAnExistingRow(t *testing.T) {
@@ -452,9 +488,7 @@ func TestRepairRepository_RetargetMappingMovesAnExistingRow(t *testing.T) {
 	ctx := context.Background()
 	namespace := "idmap_repair_retarget"
 
-	t.Cleanup(func() {
-		_, _ = db.Exec(context.Background(), `DELETE FROM id_mappings WHERE namespace = $1`, namespace)
-	})
+	seedNamespace(t, db, namespace)
 	if _, err := db.Exec(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
 		VALUES ('o1', $1, 'object')`, namespace); err != nil {
