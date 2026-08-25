@@ -2402,3 +2402,78 @@ func TestStoreObjectEmbedding_NonFiniteVectorIsNotATimestampError(t *testing.T) 
 		t.Error("a non-finite vector must not be reported as a timestamp problem")
 	}
 }
+
+// ─── fail-closed namespace configuration ─────────────────────────────────────
+
+// Configuration decides max_results, alpha, gamma and which generation's keys
+// to read. Serving a request before resolving it means serving defaults — and
+// caching the result would persist that wrong answer for the whole TTL, long
+// after the config store recovered.
+func TestReadPaths_ResolveConfigBeforeTouchingTheCache(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		nsCfg   *fakeNsConfig
+		wantErr error
+	}{
+		{"namespace does not exist", &fakeNsConfig{missing: true}, ErrNamespaceNotFound},
+		{"config store unavailable", &fakeNsConfig{err: errors.New("db down")}, ErrNamespaceConfigUnavailable},
+	} {
+		for _, path := range []struct {
+			name string
+			call func(*Service) error
+		}{
+			{"Recommend", func(s *Service) error {
+				_, err := s.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1", Limit: 10})
+				return err
+			}},
+			{"Rank", func(s *Service) error {
+				_, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"o1"}}, "ns")
+				return err
+			}},
+			{"GetTrending", func(s *Service) error {
+				_, err := s.GetTrending(context.Background(), "ns", 10, 0)
+				return err
+			}},
+		} {
+			t.Run(path.name+"/"+tc.name, func(t *testing.T) {
+				s := newTestService(&fakeRepo{}, tc.nsCfg, newFakeIDMapper())
+				cacheRead, cacheWritten := false, false
+				s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+					cacheRead = true
+					return "", errors.New("cache miss")
+				}
+				s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cacheWritten = true }
+
+				err := path.call(s)
+
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("got %v, want %v", err, tc.wantErr)
+				}
+				if cacheRead {
+					t.Error("the cache was consulted before the namespace was known to exist")
+				}
+				if cacheWritten {
+					t.Error("a result computed without configuration must never be cached")
+				}
+			})
+		}
+	}
+}
+
+// The two failures are answered differently by the handler (404 vs 503), so
+// they must stay distinguishable all the way up: a missing namespace is
+// permanent, an unreadable config store is worth retrying.
+func TestNamespaceResolutionErrors_StayDistinguishable(t *testing.T) {
+	missing := newTestService(&fakeRepo{}, &fakeNsConfig{missing: true}, newFakeIDMapper())
+	_, missingErr := missing.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1"})
+
+	unavailable := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("db down")}, newFakeIDMapper())
+	_, unavailableErr := unavailable.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1"})
+
+	if errors.Is(missingErr, ErrNamespaceConfigUnavailable) {
+		t.Error("a missing namespace must not read as a transient store failure")
+	}
+	if errors.Is(unavailableErr, ErrNamespaceNotFound) {
+		t.Error("an unreadable config store must not read as a missing namespace")
+	}
+}

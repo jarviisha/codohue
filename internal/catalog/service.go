@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -18,6 +19,7 @@ import (
 // catalogRepository abstracts Repository for tests.
 type catalogRepository interface {
 	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any) (*UpsertResult, error)
+	UpsertWithAttribution(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any, writeAuthor AttributionWriter) (*UpsertResult, error)
 	ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int, cursor *objectCursor) ([]ObjectRow, int, error)
 }
 
@@ -34,7 +36,9 @@ type lifecycleWriter interface {
 // objects.Service in cmd/api — declared here as an interface because the
 // import rule forbids catalog from importing a peer domain directly.
 type objectAuthorWriter interface {
-	SetAuthor(ctx context.Context, namespace, objectID, authorSubjectID string) error
+	// SetAuthorTx runs inside the catalog row's transaction so content and
+	// attribution commit together.
+	SetAuthorTx(ctx context.Context, tx pgx.Tx, namespace, objectID, authorSubjectID string) error
 }
 
 // xAdder abstracts the Redis client's XAdd method so the service can be
@@ -144,24 +148,25 @@ func (s *Service) ingestActive(ctx context.Context, ns string, req *IngestReques
 
 	hash := ContentHash(req.Content)
 
-	res, err := s.repo.Upsert(ctx, ns, req.ObjectID, req.Content, hash, req.Metadata)
-	if err != nil {
-		return nil, fmt.Errorf("persist catalog item: %w", err)
+	// Attribution lives in the objects table, not here, so that it works for
+	// every dense_source. It is written through an injected interface because
+	// the import rule forbids reaching into a peer domain, and inside the same
+	// transaction as the content so a request cannot report success having
+	// stored only half of what it was given.
+	//
+	// A re-ingest of identical content still updates attribution: the content
+	// write is a no-op upsert (NeedsPublish stays false, so no duplicate embed
+	// work) while the author row is rewritten.
+	var writeAuthor AttributionWriter
+	if s.authorWriter != nil && req.AuthorSubjectID != "" {
+		writeAuthor = func(ctx context.Context, tx pgx.Tx) error {
+			return s.authorWriter.SetAuthorTx(ctx, tx, ns, req.ObjectID, req.AuthorSubjectID)
+		}
 	}
 
-	// Attribution lives in the objects table, not here, so that it works for
-	// every dense_source. Written through an injected interface because the
-	// import rule forbids reaching into a peer domain; cmd/api supplies the
-	// real implementation. A failure is logged, not fatal: the catalog row is
-	// already durable and attribution is not embedding input.
-	if s.authorWriter != nil && req.AuthorSubjectID != "" {
-		if err := s.authorWriter.SetAuthor(ctx, ns, req.ObjectID, req.AuthorSubjectID); err != nil {
-			slog.WarnContext(ctx, "catalog ingest: could not record object author",
-				slog.String("namespace", ns),
-				slog.String("object_id", req.ObjectID),
-				slog.String("error", err.Error()),
-			)
-		}
+	res, err := s.repo.UpsertWithAttribution(ctx, ns, req.ObjectID, req.Content, hash, req.Metadata, writeAuthor)
+	if err != nil {
+		return nil, fmt.Errorf("persist catalog item: %w", err)
 	}
 
 	if res.NeedsPublish {

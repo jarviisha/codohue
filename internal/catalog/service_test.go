@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -29,6 +30,9 @@ type fakeRepo struct {
 	lastSince  *time.Time
 	lastLimit  int
 	lastOffset int
+
+	authorHookCalls int
+	rolledBack      bool
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ map[string]any) (*UpsertResult, error) {
@@ -37,6 +41,24 @@ func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ m
 	f.lastObj = obj
 	f.lastHash = hash
 	return f.res, f.err
+}
+
+// UpsertWithAttribution mirrors the real repository: the content write and the
+// attribution hook succeed or fail together, so a failing hook must leave the
+// caller with an error and no result.
+func (f *fakeRepo) UpsertWithAttribution(ctx context.Context, ns, obj, content string, hash []byte, meta map[string]any, writeAuthor AttributionWriter) (*UpsertResult, error) {
+	res, err := f.Upsert(ctx, ns, obj, content, hash, meta)
+	if err != nil {
+		return nil, err
+	}
+	if writeAuthor != nil {
+		f.authorHookCalls++
+		if hookErr := writeAuthor(ctx, nil); hookErr != nil {
+			f.rolledBack = true
+			return nil, hookErr
+		}
+	}
+	return res, nil
 }
 
 func (f *fakeRepo) ListObjects(_ context.Context, _ string, since *time.Time, limit, offset int, _ *objectCursor) ([]ObjectRow, int, error) {
@@ -52,7 +74,7 @@ type fakeAuthorWriter struct {
 	err   error
 }
 
-func (f *fakeAuthorWriter) SetAuthor(_ context.Context, ns, obj, author string) error {
+func (f *fakeAuthorWriter) SetAuthorTx(_ context.Context, _ pgx.Tx, ns, obj, author string) error {
 	f.calls = append(f.calls, ns+"/"+obj+"/"+author)
 	return f.err
 }
@@ -216,17 +238,52 @@ func TestServiceIngest_NoAuthorSkipsWriteThrough(t *testing.T) {
 	}
 }
 
-// The catalog row is already durable when attribution is attempted, so a
-// failure there must not fail the ingest.
-func TestServiceIngest_AuthorWriteFailureIsNotFatal(t *testing.T) {
+// Content and attribution are one request, so they are one write. Reporting
+// 202 with the author silently dropped left the caller no way to learn its
+// attribution never happened — the request now fails and nothing is committed.
+func TestServiceIngest_AttributionFailureRollsBackTheContentWrite(t *testing.T) {
 	writer := &fakeAuthorWriter{err: errors.New("objects table down")}
-	svc := newSvc(&fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}, NeedsPublish: true}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
+	svc.SetAuthorWriter(writer)
+
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u1",
+	})
+
+	if err == nil {
+		t.Fatal("a dropped attribution must not be reported as success")
+	}
+	if !repo.rolledBack {
+		t.Error("the content write must roll back with the attribution")
+	}
+	// Nothing was committed, so nothing may be queued for embedding.
+	if len(pub.calls) != 0 {
+		t.Errorf("rolled-back ingest must not publish embed work, got %v", pub.calls)
+	}
+}
+
+// A re-ingest of identical content is a no-op for embedding (NeedsPublish
+// false) but must still apply a new attribution — otherwise correcting an
+// author would require editing the content to force a write.
+func TestServiceIngest_SameContentStillUpdatesAttribution(t *testing.T) {
+	writer := &fakeAuthorWriter{}
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}, NeedsPublish: false}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
 	svc.SetAuthorWriter(writer)
 
 	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
-		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u1",
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u2",
 	}); err != nil {
-		t.Fatalf("ingest must survive an attribution failure, got: %v", err)
+		t.Fatalf("Ingest: %v", err)
+	}
+	if len(writer.calls) != 1 || writer.calls[0] != "ns/o1/u2" {
+		t.Errorf("attribution not applied: %v", writer.calls)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("unchanged content must not redo embed work, got %v", pub.calls)
 	}
 }
 

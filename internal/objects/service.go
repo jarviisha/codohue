@@ -84,6 +84,29 @@ func (s *Service) SetAuthor(ctx context.Context, namespace, objectID, authorSubj
 	return s.setAuthorActive(ctx, namespace, objectID, author)
 }
 
+// SetAuthorWithRepo is SetAuthor against a caller-supplied repository — used
+// by the catalog ingest path, which binds a transaction-scoped repository so
+// the attribution commits with the content. The lifecycle fence still applies:
+// the caller's transaction does not exempt it from the namespace gate.
+func (s *Service) SetAuthorWithRepo(ctx context.Context, repo objectsRepository, namespace, objectID, authorSubjectID string) error {
+	author := strings.TrimSpace(authorSubjectID)
+	if author == "" {
+		return nil
+	}
+	write := func(ctx context.Context) error {
+		if _, err := repo.Upsert(ctx, namespace, objectID, author); err != nil {
+			return fmt.Errorf("set object author: %w", err)
+		}
+		return nil
+	}
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			return write(leased)
+		})
+	}
+	return write(ctx)
+}
+
 func (s *Service) setAuthorActive(ctx context.Context, namespace, objectID, author string) error {
 	if _, err := s.repo.Upsert(ctx, namespace, objectID, author); err != nil {
 		return fmt.Errorf("set object author: %w", err)

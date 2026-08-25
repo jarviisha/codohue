@@ -28,10 +28,22 @@ type fakeRepo struct {
 	upsertCatalogCalledWith *UpdateCatalogRequest
 	listCfgs                []*namespace.Config
 	listErr                 error
+	upsertWithCatalogCalls  int
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*namespace.Config, error) {
 	return f.upsertCfg, f.upsertErr
+}
+
+// UpsertWithCatalog mirrors the real repository: both halves land together, so
+// a failure in either leaves nothing behind.
+func (f *fakeRepo) UpsertWithCatalog(ctx context.Context, ns string, req *UpsertRequest, catalogReq *UpdateCatalogRequest) (*namespace.Config, error) {
+	f.upsertWithCatalogCalls++
+	cfg, err := f.Upsert(ctx, ns, req)
+	if err != nil || catalogReq == nil {
+		return cfg, err
+	}
+	return f.UpsertCatalogConfig(ctx, ns, catalogReq)
 }
 
 func (f *fakeRepo) SetAPIKeyHash(_ context.Context, _, _ string) (bool, error) {
@@ -629,5 +641,126 @@ func TestServiceUpsert_CatalogProvisioningReusesHeldLease(t *testing.T) {
 	}
 	if lifecycle.writerCalls != 1 {
 		t.Errorf("expected the catalog write to reuse the upsert lease, got %d leases", lifecycle.writerCalls)
+	}
+}
+
+// ─── atomic base + catalog write ─────────────────────────────────────────────
+
+// The strategy is validated against the dimension THIS request will leave
+// behind. A body that raises embedding_dim and picks a matching strategy in
+// one call must be accepted — validating against the stored dimension would
+// reject the only request that could ever set both.
+func TestServiceUpsert_ValidatesStrategyAgainstTheRequestedDimension(t *testing.T) {
+	stored := &namespace.Config{Namespace: "ns", EmbeddingDim: 64, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: stored, getCfg: stored, upsertCatalogCfg: stored}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	dim := 128
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		EmbeddingDim:           &dim,
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	}); err != nil {
+		t.Fatalf("raising embedding_dim alongside a matching strategy must be accepted: %v", err)
+	}
+}
+
+// A brand-new namespace has no stored dimension, so validation falls back to
+// the schema default rather than treating "absent" as "matches".
+func TestServiceUpsert_NewNamespaceValidatesAgainstTheSchemaDefault(t *testing.T) {
+	repo := &fakeRepo{upsertCfg: &namespace.Config{Namespace: "ns"}} // getCfg nil = does not exist
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	})
+
+	var dimErr *DimensionMismatchError
+	if !errors.As(err, &dimErr) {
+		t.Fatalf("expected DimensionMismatchError, got %v", err)
+	}
+	if dimErr.NamespaceEmbeddingDim != schemaEmbeddingDim {
+		t.Errorf("compared against dim %d, want the schema default %d", dimErr.NamespaceEmbeddingDim, schemaEmbeddingDim)
+	}
+}
+
+// Validation happens before the write, so a rejected request leaves no trace:
+// no namespace row, no API key, no half-applied config.
+func TestServiceUpsert_RejectedStrategyWritesNothing(t *testing.T) {
+	stored := &namespace.Config{Namespace: "ns", EmbeddingDim: 64}
+	repo := &fakeRepo{upsertCfg: stored, getCfg: stored}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	})
+
+	if err == nil {
+		t.Fatal("expected a dimension mismatch")
+	}
+	if repo.upsertWithCatalogCalls != 0 {
+		t.Error("a rejected request must not reach the write path at all")
+	}
+	if repo.setAPIKeyHashCalled {
+		t.Error("a rejected request must not mint an API key")
+	}
+}
+
+// The base config and the catalog config are one write, so provisioning
+// catalog mode cannot leave a namespace that exists without its strategy.
+func TestServiceUpsert_BaseAndCatalogGoThroughOneWrite(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg, upsertCatalogCfg: cfg}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if repo.upsertWithCatalogCalls != 1 {
+		t.Errorf("expected exactly 1 combined write, got %d", repo.upsertWithCatalogCalls)
+	}
+	if repo.upsertCatalogCalledWith == nil || !repo.upsertCatalogCalledWith.Enabled {
+		t.Errorf("catalog half not applied: %+v", repo.upsertCatalogCalledWith)
+	}
+}
+
+// A request that does not ask for catalog mode must not drag the catalog half
+// into the write — it would null the strategy of a namespace already in
+// catalog mode.
+func TestServiceUpsert_NonCatalogRequestLeavesCatalogConfigAlone(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg}
+	svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if repo.upsertCatalogCalledWith != nil {
+		t.Errorf("catalog config touched by a base-only request: %+v", repo.upsertCatalogCalledWith)
 	}
 }

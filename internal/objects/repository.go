@@ -36,6 +36,25 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	}
 }
 
+// NewRepositoryTx returns a Repository bound to an open transaction, so a
+// caller that is already writing (catalog ingest, which persists content and
+// attribution together) can include the objects row in the same commit. This
+// package stays the only writer of the objects table; what changes is which
+// connection the statement runs on.
+func NewRepositoryTx(tx pgx.Tx) *Repository {
+	return &Repository{
+		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+			return tx.QueryRow(ctx, sql, args...)
+		},
+		execFn: func(ctx context.Context, sql string, args ...any) error {
+			if _, err := tx.Exec(ctx, sql, args...); err != nil {
+				return fmt.Errorf("exec objects statement: %w", err)
+			}
+			return nil
+		},
+	}
+}
+
 // Upsert creates or updates the metadata row for (namespace, object_id).
 // An empty authorSubjectID is stored as NULL, which is how attribution is
 // cleared.

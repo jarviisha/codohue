@@ -47,6 +47,82 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	}
 }
 
+// schemaEmbeddingDim is the DEFAULT on namespace_configs.embedding_dim
+// (migration 005). The service needs it to know a brand-new namespace's
+// effective dimension before the row exists, so a strategy can be validated
+// against it without writing first.
+const schemaEmbeddingDim = 64
+
+// UpsertWithCatalog applies the base config and the catalog config in ONE
+// transaction.
+//
+// Two statements would leave a window where the namespace exists with its new
+// embedding_dim but not its strategy — and if the second failed, the operator
+// would be left with a half-applied config that reads as success. Provisioning
+// catalog mode is one request, so it has to be one write.
+//
+// catalogReq nil means "base config only".
+func (r *Repository) UpsertWithCatalog(ctx context.Context, ns string, req *UpsertRequest, catalogReq *UpdateCatalogRequest) (*namespace.Config, error) {
+	var cfg *namespace.Config
+	err := r.withinTx(ctx, func(tx *Repository) error {
+		var upsertErr error
+		cfg, upsertErr = tx.Upsert(ctx, ns, req)
+		if upsertErr != nil {
+			return upsertErr
+		}
+		if catalogReq == nil {
+			return nil
+		}
+		cfg, upsertErr = tx.UpsertCatalogConfig(ctx, ns, catalogReq)
+		if upsertErr != nil {
+			return upsertErr
+		}
+		if cfg == nil {
+			// The base upsert just created or updated the row, so the catalog
+			// UPDATE matching nothing means the row vanished underneath us.
+			return ErrNamespaceNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// withinTx runs fn against a Repository whose statement seams are bound to a
+// single transaction. A Repository built without a pool (unit tests drive the
+// seams directly) runs fn unchanged — there is no connection to open a
+// transaction on.
+func (r *Repository) withinTx(ctx context.Context, fn func(*Repository) error) error {
+	if r.db == nil {
+		return fn(r)
+	}
+	if err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		return fn(&Repository{
+			execFn: func(ctx context.Context, sql string, args ...any) error {
+				if _, err := tx.Exec(ctx, sql, args...); err != nil {
+					return fmt.Errorf("exec namespace config statement: %w", err)
+				}
+				return nil
+			},
+			execTagFn: func(ctx context.Context, sql string, args ...any) (int64, error) {
+				tag, err := tx.Exec(ctx, sql, args...)
+				if err != nil {
+					return 0, fmt.Errorf("exec namespace config statement: %w", err)
+				}
+				return tag.RowsAffected(), nil
+			},
+			queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+				return tx.QueryRow(ctx, sql, args...)
+			},
+		})
+	}); err != nil {
+		return fmt.Errorf("namespace config transaction: %w", err)
+	}
+	return nil
+}
+
 // Upsert creates or updates the configuration for a namespace.
 //
 // PATCH semantics: a nil field on the request leaves that column untouched.

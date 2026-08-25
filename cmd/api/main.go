@@ -143,7 +143,7 @@ func run() error {
 	objectsSvc := objects.NewService(objects.NewRepository(db))
 	objectsSvc.SetLifecycleWriter(lifecycleSvc)
 	objectsHandler := objects.NewHandler(objectsSvc)
-	catalogSvc.SetAuthorWriter(objectsSvc)
+	catalogSvc.SetAuthorWriter(&objectAttributionAdapter{svc: objectsSvc})
 
 	// Durable catalog transport: the ingest worker consumes codohue:catalog
 	// and hands entries to catalog.Service through the adapter (the import

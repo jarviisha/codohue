@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -88,6 +89,60 @@ func (r *Repository) ListObjects(ctx context.Context, namespace string, changedS
 type UpsertResult struct {
 	Item         *Item
 	NeedsPublish bool
+}
+
+// AttributionWriter records the object's author inside the same transaction as
+// the content write. It takes the open transaction rather than a context so
+// the objects domain — which owns that table — remains the only code that
+// spells the statement; cmd/api supplies the implementation, because the
+// import rule forbids reaching into a peer domain from here.
+type AttributionWriter func(ctx context.Context, tx pgx.Tx) error
+
+// UpsertWithAttribution persists the catalog row and the requested attribution
+// in ONE transaction.
+//
+// Attribution used to be a best-effort write after the row landed, so a
+// failing objects write returned 202 with the author silently dropped — the
+// caller had no way to learn its attribution never happened. Committing both
+// together means the request either records both facts or neither.
+//
+// writeAuthor nil means the request carried no attribution, which leaves any
+// existing author alone (absence means "unspecified", not "clear it").
+func (r *Repository) UpsertWithAttribution(
+	ctx context.Context,
+	namespace, objectID, content string,
+	contentHash []byte,
+	metadata map[string]any,
+	writeAuthor AttributionWriter,
+) (*UpsertResult, error) {
+	if r.db == nil || writeAuthor == nil {
+		res, err := r.Upsert(ctx, namespace, objectID, content, contentHash, metadata)
+		if err != nil || writeAuthor == nil {
+			return res, err
+		}
+		// No pool (unit tests drive the seams directly): still run the hook so
+		// the ordering is exercised, just without a real transaction.
+		if err := writeAuthor(ctx, nil); err != nil {
+			return nil, err
+		}
+		return res, nil
+	}
+
+	var result *UpsertResult
+	if err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		txRepo := &Repository{queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+			return tx.QueryRow(ctx, sql, args...)
+		}}
+		var err error
+		result, err = txRepo.Upsert(ctx, namespace, objectID, content, contentHash, metadata)
+		if err != nil {
+			return err
+		}
+		return writeAuthor(ctx, tx)
+	}); err != nil {
+		return nil, fmt.Errorf("catalog ingest transaction: %w", err)
+	}
+	return result, nil
 }
 
 // Upsert creates or updates a catalog_items row keyed by (namespace, object_id).

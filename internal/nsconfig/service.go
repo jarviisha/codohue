@@ -22,6 +22,7 @@ var ErrNamespaceNotFound = errors.New("nsconfig: namespace not found")
 
 type nsConfigRepository interface {
 	Upsert(ctx context.Context, namespace string, req *UpsertRequest) (*namespace.Config, error)
+	UpsertWithCatalog(ctx context.Context, namespace string, req *UpsertRequest, catalogReq *UpdateCatalogRequest) (*namespace.Config, error)
 	SetAPIKeyHash(ctx context.Context, namespace, hash string) (won bool, err error)
 	ReplaceAPIKeyHash(ctx context.Context, namespace, hash string) (found bool, err error)
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
@@ -106,36 +107,33 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 
 func (s *Service) upsertActive(ctx context.Context, ns string, req *UpsertRequest) (*UpsertResponse, error) {
 	// dense_source=catalog rides the upsert only together with its strategy
-	// (validateUpsert enforces that); the column itself is written by
-	// UpdateCatalogConfig below so the registry + dim validation runs the
-	// same code path as the dedicated catalog endpoint. The base upsert goes
-	// first so a brand-new namespace exists (with its embedding_dim from
-	// this same body) before the strategy dim is checked against it.
+	// (validateUpsert enforces that); the column itself is written by the
+	// catalog half of the write so the registry validation runs the same rules
+	// as the dedicated catalog endpoint.
 	catalogRequested := req.DenseSource != nil && *req.DenseSource == codohuetypes.DenseSourceCatalog
+	var catalogReq *UpdateCatalogRequest
 	if catalogRequested {
 		stripped := *req
 		stripped.DenseSource = nil
 		req = &stripped
-	}
-
-	cfg, err := s.repo.Upsert(ctx, ns, req)
-	if err != nil {
-		return nil, fmt.Errorf("upsert namespace config: %w", err)
-	}
-
-	if catalogRequested {
-		// Not transactional with the base upsert: a dim mismatch leaves the
-		// namespace created/updated with its previous dense_source, and a
-		// corrected retry converges. Same end state as the old two-request
-		// provisioning dance, minus a request.
-		if _, err := s.UpdateCatalogConfig(ctx, ns, &UpdateCatalogRequest{
+		catalogReq = &UpdateCatalogRequest{
 			Enabled:         true,
 			StrategyID:      *req.CatalogStrategyID,
 			StrategyVersion: *req.CatalogStrategyVersion,
 			Params:          req.CatalogStrategyParams,
-		}); err != nil {
+		}
+		// Validated against the dimension this request WILL leave behind, not
+		// the one on disk: the body can change embedding_dim and select a
+		// strategy in the same call. Validating first is what makes the write
+		// atomic — a rejected request must not have created the namespace.
+		if err := s.validateCatalogStrategy(ctx, ns, catalogReq, req.EmbeddingDim); err != nil {
 			return nil, err
 		}
+	}
+
+	cfg, err := s.repo.UpsertWithCatalog(ctx, ns, req, catalogReq)
+	if err != nil {
+		return nil, fmt.Errorf("upsert namespace config: %w", err)
 	}
 
 	resp := &UpsertResponse{
@@ -197,6 +195,49 @@ func (s *Service) rotateAPIKeyActive(ctx context.Context, ns string) (*RotateAPI
 		return nil, ErrNamespaceNotFound
 	}
 	return &RotateAPIKeyResponse{Namespace: ns, APIKey: plaintext}, nil
+}
+
+// validateCatalogStrategy builds the requested strategy and checks it against
+// the namespace's *effective* embedding dimension — the one this request will
+// leave behind, which is not necessarily the one currently stored.
+//
+// requestedDim is the embedding_dim from the same request body (nil when the
+// caller is not changing it). Resolution order: the request, then the stored
+// row, then the schema default for a namespace that does not exist yet.
+// Disabling catalog skips validation entirely: the strategy fields are nulled.
+func (s *Service) validateCatalogStrategy(ctx context.Context, ns string, req *UpdateCatalogRequest, requestedDim *int) error {
+	if !req.Enabled {
+		return nil
+	}
+	if req.StrategyID == "" || req.StrategyVersion == "" {
+		return fmt.Errorf("strategy_id and strategy_version are required when enabling catalog")
+	}
+	strategy, err := s.registry.Build(req.StrategyID, req.StrategyVersion, embedstrategy.Params(req.Params))
+	if err != nil {
+		return err
+	}
+
+	effectiveDim := schemaEmbeddingDim
+	switch {
+	case requestedDim != nil && *requestedDim > 0:
+		effectiveDim = *requestedDim
+	default:
+		current, err := s.repo.Get(ctx, ns)
+		if err != nil {
+			return fmt.Errorf("load namespace config: %w", err)
+		}
+		if current != nil && current.EmbeddingDim > 0 {
+			effectiveDim = current.EmbeddingDim
+		}
+	}
+
+	if strategy.Dim() != effectiveDim {
+		return &DimensionMismatchError{
+			StrategyDim:           strategy.Dim(),
+			NamespaceEmbeddingDim: effectiveDim,
+		}
+	}
+	return nil
 }
 
 // guardEmbeddingDimChange rejects an embedding_dim change while the
@@ -277,20 +318,8 @@ func (s *Service) updateCatalogConfigActive(ctx context.Context, ns string, req 
 		return nil, ErrNamespaceNotFound
 	}
 
-	if req.Enabled {
-		if req.StrategyID == "" || req.StrategyVersion == "" {
-			return nil, fmt.Errorf("strategy_id and strategy_version are required when enabling catalog")
-		}
-		strategy, err := s.registry.Build(req.StrategyID, req.StrategyVersion, embedstrategy.Params(req.Params))
-		if err != nil {
-			return nil, err
-		}
-		if strategy.Dim() != cfg.EmbeddingDim {
-			return nil, &DimensionMismatchError{
-				StrategyDim:           strategy.Dim(),
-				NamespaceEmbeddingDim: cfg.EmbeddingDim,
-			}
-		}
+	if err := s.validateCatalogStrategy(ctx, ns, req, nil); err != nil {
+		return nil, err
 	}
 
 	updated, err := s.repo.UpsertCatalogConfig(ctx, ns, req)
