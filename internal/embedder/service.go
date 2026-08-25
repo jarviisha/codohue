@@ -497,10 +497,7 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	if generation < 1 {
 		generation = 1
 	}
-	physicalNamespace := ns
-	if generation > 1 {
-		physicalNamespace = fmt.Sprintf("%s_g%d", ns, generation)
-	}
+	physicalNamespace := nslifecycle.QdrantNamespace(ns, generation)
 	key := fmt.Sprintf("%s|%d|%s", physicalNamespace, dim, distance)
 
 	s.ensuredMu.Lock()

@@ -3,10 +3,13 @@ package compute
 import (
 	"context"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/qdrant/go-client/qdrant"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
@@ -520,6 +523,74 @@ func TestSVDEmbeddings_PadsToEmbeddingDim(t *testing.T) {
 	for id, v := range vecs {
 		if len(v) != 8 {
 			t.Fatalf("vector %s: got dim %d, want padded 8", id, len(v))
+		}
+	}
+}
+
+// ─── generation-qualified collections ────────────────────────────────────────
+
+// Every sparse write and cleanup sweep resolves its collection from the
+// lifecycle lease the run holds. Hard-coding {ns}_subjects would make a run
+// that started before a recreate write into the new incarnation's collections.
+func TestRecomputeNamespace_WritesIntoLeaseGenerationCollections(t *testing.T) {
+	now := time.Now().Unix()
+	repo := &fakeComputeRepo{
+		subjects: []string{"u1"},
+		events:   []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now}},
+	}
+	svc := newTestService(repo, newFakeIDMap())
+	var upserted []string
+	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+		upserted = append(upserted, points.CollectionName)
+		return nil
+	}
+	var swept []string
+	svc.cleanupFn = func(_ context.Context, collection string, _ map[uint64]struct{}) (int, error) {
+		swept = append(swept, collection)
+		return 0, nil
+	}
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 3, nslifecycle.LockShared)
+	if _, _, err := svc.RecomputeNamespace(ctx, "ns", 0.05); err != nil {
+		t.Fatalf("RecomputeNamespace: %v", err)
+	}
+	for _, collection := range upserted {
+		if !strings.HasPrefix(collection, "ns_g3_") {
+			t.Errorf("upsert into %q, want a ns_g3_* collection", collection)
+		}
+	}
+	for _, collection := range swept {
+		if !strings.HasPrefix(collection, "ns_g3_") {
+			t.Errorf("cleanup swept %q, want a ns_g3_* collection", collection)
+		}
+	}
+	if len(upserted) == 0 || len(swept) == 0 {
+		t.Fatalf("expected both upserts and cleanup sweeps, got upserts=%v sweeps=%v", upserted, swept)
+	}
+}
+
+// Generation 1 keeps the legacy unqualified names so an upgrade does not
+// orphan every existing collection.
+func TestRecomputeNamespace_Generation1KeepsLegacyCollectionNames(t *testing.T) {
+	now := time.Now().Unix()
+	repo := &fakeComputeRepo{
+		subjects: []string{"u1"},
+		events:   []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now}},
+	}
+	svc := newTestService(repo, newFakeIDMap())
+	var upserted []string
+	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+		upserted = append(upserted, points.CollectionName)
+		return nil
+	}
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 1, nslifecycle.LockShared)
+	if _, _, err := svc.RecomputeNamespace(ctx, "ns", 0.05); err != nil {
+		t.Fatalf("RecomputeNamespace: %v", err)
+	}
+	for _, collection := range upserted {
+		if collection != "ns_subjects" && collection != "ns_objects" {
+			t.Errorf("generation 1 wrote into %q, want the legacy names", collection)
 		}
 	}
 }

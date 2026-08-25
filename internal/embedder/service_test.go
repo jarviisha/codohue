@@ -10,6 +10,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // --- fakes ----------------------------------------------------------------
@@ -588,5 +589,82 @@ func TestServiceProcessItem_PayloadCarriesCreatedAt(t *testing.T) {
 	got, ok := (*upserts)[0].points[0].Payload["created_at"]
 	if !ok || got.GetStringValue() != "2026-03-04T05:06:07Z" {
 		t.Fatalf("created_at payload: got %v", got)
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+// recordingLifecycleWriter is the shared embedder-package lifecycle fake.
+type recordingLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+}
+
+func (f *recordingLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+// Embedding writes a Qdrant point and flips the item's state, so it runs under
+// a lease and targets the lease's generation. Resolving the collection from
+// anything else would let an in-flight embed write into the previous
+// incarnation's collection after a recreate.
+func TestServiceProcessItem_RunsUnderLeaseAndTargetsLeaseGeneration(t *testing.T) {
+	svc, repo, _, _, _, upserts := newSvc(t)
+	repo.markInFlightAttempt = 1
+	lifecycle := &recordingLifecycleWriter{generation: 4}
+	svc.SetLifecycleWriter(lifecycle)
+
+	out, err := svc.ProcessItem(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ProcessItem: %v", err)
+	}
+	if out != OutcomeEmbedded {
+		t.Fatalf("outcome: got %v, want OutcomeEmbedded", out)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	if len(*upserts) != 1 || (*upserts)[0].collection != "ns_g4_objects_dense" {
+		t.Errorf("collection: got %v, want ns_g4_objects_dense", *upserts)
+	}
+}
+
+// A namespace that is mid-delete must not have its catalog rows mutated: the
+// item state machine and the vector would both outlive the wipe.
+func TestServiceProcessItem_InactiveNamespaceWritesNothing(t *testing.T) {
+	svc, repo, _, _, _, upserts := newSvc(t)
+	svc.SetLifecycleWriter(&recordingLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	if _, err := svc.ProcessItem(context.Background(), 7); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if len(repo.calls.markInFlight) != 0 || len(repo.calls.markEmbedded) != 0 {
+		t.Errorf("inactive namespace reached the item state machine: %+v", repo.calls)
+	}
+	if len(*upserts) != 0 {
+		t.Errorf("inactive namespace reached qdrant: %v", *upserts)
+	}
+}
+
+// The worker evaluates the stream envelope under its own lease before calling
+// the service; that lease must be reused, not re-acquired.
+func TestServiceProcessItem_ReusesHeldLease(t *testing.T) {
+	svc, repo, _, _, _, _ := newSvc(t)
+	repo.markInFlightAttempt = 1
+	lifecycle := &recordingLifecycleWriter{generation: 4}
+	svc.SetLifecycleWriter(lifecycle)
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 4, nslifecycle.LockShared)
+	if _, err := svc.ProcessItem(ctx, 7); err != nil {
+		t.Fatalf("ProcessItem: %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Errorf("held lease must be reused, got %d acquisitions", lifecycle.calls)
 	}
 }

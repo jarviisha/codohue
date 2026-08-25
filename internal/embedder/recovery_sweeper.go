@@ -247,7 +247,7 @@ func (s *RecoverySweeper) publish(ctx context.Context, ns string, generation int
 		},
 	}).Err()
 	if err != nil {
-		return fmt.Errorf("xadd %s: %w", streamName(ns), err)
+		return fmt.Errorf("xadd %s: %w", embedStreamName(ns, generation), err)
 	}
 	return nil
 }

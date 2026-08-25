@@ -3,6 +3,8 @@ package compute
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
@@ -629,6 +632,7 @@ type fakeBatchLogger struct {
 	insertID  int64
 	insertErr error
 	updated   chan int64
+	inserted  atomic.Int64
 }
 
 func newFakeBatchLogger(id int64) *fakeBatchLogger {
@@ -636,6 +640,7 @@ func newFakeBatchLogger(id int64) *fakeBatchLogger {
 }
 
 func (f *fakeBatchLogger) InsertBatchRunLog(_ context.Context, _ string, _ time.Time, _ batchrun.TriggerSource) (int64, error) {
+	f.inserted.Add(1)
 	return f.insertID, f.insertErr
 }
 
@@ -814,4 +819,121 @@ func (l *successCapturingLogger) UpdateBatchRunLog(ctx context.Context, id int64
 	default:
 	}
 	return l.fakeBatchLogger.UpdateBatchRunLog(ctx, id, at, dur, entities, success, errMsg, lines)
+}
+
+// ─── lifecycle fencing ───────────────────────────────────────────────────────
+
+// fakeLifecycleWriter records the order in which the lifecycle lease is taken
+// relative to the compute lock.
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+	order      *[]string
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.order != nil {
+		*f.order = append(*f.order, "lifecycle_lease")
+	}
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+// Lock order is fixed: the lifecycle lease first, then the per-namespace
+// compute lock. Taking them the other way round lets a delete holding the
+// lifecycle lock wait on a run that is itself waiting for the lifecycle lease.
+func TestRunNamespace_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
+	var order []string
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	lifecycle := &fakeLifecycleWriter{generation: 4, order: &order}
+	job.SetLifecycleWriter(lifecycle)
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		order = append(order, "compute_lock")
+		return func() {}, true, nil
+	}
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("RunNamespace: %v", err)
+	}
+	if len(order) != 2 || order[0] != "lifecycle_lease" || order[1] != "compute_lock" {
+		t.Errorf("lock order: got %v, want [lifecycle_lease compute_lock]", order)
+	}
+}
+
+// A namespace mid-delete must not be recomputed: the vectors would be written
+// back into collections the delete is in the middle of dropping.
+func TestRunNamespace_InactiveNamespaceNeverTakesComputeLock(t *testing.T) {
+	locked := false
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		locked = true
+		return func() {}, true, nil
+	}
+
+	err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron)
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if locked {
+		t.Error("compute lock must not be taken for an inactive namespace")
+	}
+	if svc.called {
+		t.Error("recompute must not run for an inactive namespace")
+	}
+}
+
+func TestStartNamespaceRun_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
+	var mu sync.Mutex
+	var order []string
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.batchLog = newFakeBatchLogger(7)
+	lifecycle := &fakeLifecycleWriter{generation: 4}
+	job.SetLifecycleWriter(lifecycle)
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		mu.Lock()
+		order = append(order, "compute_lock")
+		mu.Unlock()
+		return func() {}, true, nil
+	}
+
+	runID, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute)
+	if err != nil {
+		t.Fatalf("StartNamespaceRun: %v", err)
+	}
+	if runID != 7 {
+		t.Errorf("run id: got %d, want 7", runID)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 1 {
+		t.Errorf("compute lock taken %d times, want 1", len(order))
+	}
+}
+
+// An admin-triggered run against a deleted namespace fails before a
+// batch_run_logs row is written — an orphan row would show a run for a
+// namespace the operator was told is gone.
+func TestStartNamespaceRun_InactiveNamespaceLogsNoRun(t *testing.T) {
+	logger := newFakeBatchLogger(7)
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.batchLog = logger
+	job.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	_, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute)
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if logger.inserted.Load() != 0 {
+		t.Errorf("expected no batch_run_logs insert, got %d", logger.inserted.Load())
+	}
 }

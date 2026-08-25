@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // fakeReembedRepo is a thread-safe in-memory ReembedWatcherRepo for tests.
@@ -222,5 +224,45 @@ func TestReembedWatcher_RunStopsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after context cancel")
+	}
+}
+
+// The watcher closes a run by writing to batch_run_logs, which is namespace
+// state: a run must not be marked complete for a namespace that is being
+// deleted, or the operator sees a successful re-embed for data that is gone.
+func TestReembedWatcher_CompletionRunsUnderLifecycleLease(t *testing.T) {
+	startedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	newRepo := func() *fakeReembedRepo {
+		return &fakeReembedRepo{
+			openRuns:      []ReembedRun{{ID: 11, Namespace: "ns", TargetStrategyID: "model-a", TargetStrategyVersion: "v2", StartedAt: startedAt}},
+			staleCount:    map[string]int{"ns": 0},
+			embeddedCount: map[string]int{"ns": 25},
+		}
+	}
+
+	repo := newRepo()
+	w := NewReembedWatcher(repo, 0)
+	w.clock = func() time.Time { return startedAt.Add(3 * time.Second) }
+	lifecycle := &recordingLifecycleWriter{generation: 2}
+	w.SetLifecycleWriter(lifecycle)
+
+	w.RunOnce(context.Background())
+
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	if len(repo.completedCalls) != 1 {
+		t.Fatalf("expected the run to be completed under the lease, got %d calls", len(repo.completedCalls))
+	}
+
+	blocked := newRepo()
+	w = NewReembedWatcher(blocked, 0)
+	w.clock = func() time.Time { return startedAt.Add(3 * time.Second) }
+	w.SetLifecycleWriter(&recordingLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	w.RunOnce(context.Background())
+
+	if len(blocked.completedCalls) != 0 {
+		t.Errorf("inactive namespace must not have its run completed, got %d calls", len(blocked.completedCalls))
 	}
 }

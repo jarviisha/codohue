@@ -1558,20 +1558,15 @@ func namespaceGeneration(cfg *namespace.Config) int64 {
 	return cfg.Generation
 }
 
+// The physical-name rules live in nslifecycle so the serving path and the
+// writers that created those keys cannot disagree about which generation a
+// name belongs to.
 func qdrantPhysicalNamespace(ns string, cfg *namespace.Config) string {
-	generation := namespaceGeneration(cfg)
-	if generation == 1 {
-		return ns
-	}
-	return fmt.Sprintf("%s_g%d", ns, generation)
+	return nslifecycle.QdrantNamespace(ns, namespaceGeneration(cfg))
 }
 
 func redisPhysicalNamespace(ns string, cfg *namespace.Config) string {
-	generation := namespaceGeneration(cfg)
-	if generation == 1 {
-		return ns
-	}
-	return fmt.Sprintf("%s:g%d", ns, generation)
+	return nslifecycle.RedisNamespace(ns, namespaceGeneration(cfg))
 }
 
 // mergeExclusions unions two exclusion sets, returning nil when both are

@@ -15,6 +15,30 @@ const (
 	KindObjectsDense        PhysicalKind = "objects_dense"
 )
 
+// RedisNamespace is the namespace token inside colon-separated Redis keys.
+// Generation 1 keeps the bare name so existing keys stay addressable.
+//
+// Exported because callers that build a key from parts (the recommendation
+// cache, whose key also encodes subject and paging) must qualify it exactly
+// the way PhysicalName does — a second copy of the rule is a second thing to
+// drift.
+func RedisNamespace(namespace string, generation int64) string {
+	if generation < 2 {
+		return namespace
+	}
+	return fmt.Sprintf("%s:g%d", namespace, generation)
+}
+
+// QdrantNamespace is the namespace token inside underscore-separated Qdrant
+// collection names. Same contract as RedisNamespace, different separator
+// because Qdrant collection names cannot contain a colon.
+func QdrantNamespace(namespace string, generation int64) string {
+	if generation < 2 {
+		return namespace
+	}
+	return fmt.Sprintf("%s_g%d", namespace, generation)
+}
+
 // PhysicalName preserves all generation-1 names and qualifies generation 2+
 // so delayed writers cannot make old artifacts visible to current readers.
 func PhysicalName(kind PhysicalKind, namespace string, generation int64) (string, error) {
@@ -24,10 +48,7 @@ func PhysicalName(kind PhysicalKind, namespace string, generation int64) (string
 	if generation < 1 {
 		return "", fmt.Errorf("physical name: generation must be positive")
 	}
-	qualified := namespace
-	if generation > 1 {
-		qualified = fmt.Sprintf("%s:g%d", namespace, generation)
-	}
+	qualified := RedisNamespace(namespace, generation)
 	switch kind {
 	case KindRecommendationCache:
 		return "rec:" + qualified, nil
@@ -36,10 +57,7 @@ func PhysicalName(kind PhysicalKind, namespace string, generation int64) (string
 	case KindEmbedStream:
 		return "catalog:embed:" + qualified, nil
 	case KindSubjects, KindObjects, KindSubjectsDense, KindObjectsDense:
-		if generation == 1 {
-			return namespace + "_" + string(kind), nil
-		}
-		return fmt.Sprintf("%s_g%d_%s", namespace, generation, kind), nil
+		return QdrantNamespace(namespace, generation) + "_" + string(kind), nil
 	default:
 		return "", fmt.Errorf("physical name: unknown kind %q", kind)
 	}

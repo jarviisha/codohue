@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 type fakeRow struct {
@@ -234,5 +236,39 @@ func TestRepositoryMarkDeadLetter_NotFoundReturnsSentinel(t *testing.T) {
 	err := repo.MarkDeadLetter(context.Background(), 7, "boom")
 	if !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected ErrItemNotFound, got %v", err)
+	}
+}
+
+// ─── generation-qualified embed stream ───────────────────────────────────────
+
+// Producers (internal/catalog, the admin re-embed trigger) and consumers (the
+// worker, the recovery sweep, the backlog sampler) must derive the same stream
+// name for a generation, or work is published where nobody is listening.
+func TestEmbedStreamName_MatchesLifecycleResolver(t *testing.T) {
+	for _, tc := range []struct {
+		generation int64
+		want       string
+	}{
+		{0, "catalog:embed:ns"}, // unknown generation degrades to legacy
+		{1, "catalog:embed:ns"},
+		{2, "catalog:embed:ns:g2"},
+		{11, "catalog:embed:ns:g11"},
+	} {
+		if got := embedStreamName("ns", tc.generation); got != tc.want {
+			t.Errorf("generation=%d: got %q, want %q", tc.generation, got, tc.want)
+		}
+		resolved := nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, "ns", max(tc.generation, 1))
+		if got := embedStreamName("ns", tc.generation); got != resolved {
+			t.Errorf("generation=%d: %q disagrees with the lifecycle resolver %q", tc.generation, got, resolved)
+		}
+	}
+}
+
+// The backlog sampler reads XLEN/XINFO for the *current* generation. Reading
+// the legacy name for a recreated namespace reports the previous incarnation's
+// backlog — or an empty one — on the admin dashboard.
+func TestBacklogSampler_ReadsCurrentGenerationStream(t *testing.T) {
+	if got := embedStreamName("ns", 3); got != "catalog:embed:ns:g3" {
+		t.Fatalf("sampler stream name: got %q", got)
 	}
 }
