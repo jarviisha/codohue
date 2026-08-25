@@ -10,6 +10,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -38,7 +39,7 @@ func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ m
 	return f.res, f.err
 }
 
-func (f *fakeRepo) ListObjects(_ context.Context, _ string, since *time.Time, limit, offset int) ([]ObjectRow, int, error) {
+func (f *fakeRepo) ListObjects(_ context.Context, _ string, since *time.Time, limit, offset int, _ *objectCursor) ([]ObjectRow, int, error) {
 	f.lastSince = since
 	f.lastLimit = limit
 	f.lastOffset = offset
@@ -88,6 +89,7 @@ func (f *fakeXAdder) XAdd(_ context.Context, args *redis.XAddArgs) *redis.String
 func enabledCfg() *namespace.Config {
 	return &namespace.Config{
 		Namespace:              "ns",
+		Generation:             7,
 		DenseSource:            "catalog",
 		CatalogStrategyID:      "internal-hashing-ngrams",
 		CatalogStrategyVersion: "v1",
@@ -259,8 +261,11 @@ func TestServiceIngest_HappyPath_PublishesToStream(t *testing.T) {
 		t.Fatalf("expected 1 XAdd call, got %d", len(pub.calls))
 	}
 	xa := pub.calls[0]
-	if xa.Stream != "catalog:embed:ns" {
+	if xa.Stream != "catalog:embed:ns:g7" {
 		t.Errorf("stream: got %q", xa.Stream)
+	}
+	if xa.MaxLen != 0 || xa.Approx {
+		t.Errorf("embed stream must not be producer-trimmed: MaxLen=%d Approx=%v", xa.MaxLen, xa.Approx)
 	}
 	v, ok := xa.Values.(map[string]any)
 	if !ok {
@@ -271,6 +276,9 @@ func TestServiceIngest_HappyPath_PublishesToStream(t *testing.T) {
 	}
 	if v["namespace"] != "ns" {
 		t.Errorf("namespace: got %v", v["namespace"])
+	}
+	if v["namespace_generation"] != int64(7) {
+		t.Errorf("namespace_generation: got %v", v["namespace_generation"])
 	}
 	if v["object_id"] != "o1" {
 		t.Errorf("object_id: got %v", v["object_id"])
@@ -472,5 +480,90 @@ func TestNewServiceAndSetters(t *testing.T) {
 	}
 	if NewHandler(svc) == nil {
 		t.Fatal("NewHandler returned nil")
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+// Catalog ingest writes a row AND publishes embed work, so it must hold the
+// lease across both: a delete landing between the two would leave a stream
+// entry pointing at a row that no longer exists.
+func TestServiceIngest_RunsUnderLifecycleLease(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: true}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
+	lifecycle := &fakeLifecycleWriter{generation: 7}
+	svc.SetLifecycleWriter(lifecycle)
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	if len(pub.calls) != 1 {
+		t.Fatalf("expected 1 XADD, got %d", len(pub.calls))
+	}
+	// The embed work lands on the generation's own stream, so an embedder
+	// consuming the previous incarnation never sees it.
+	if pub.calls[0].Stream != "catalog:embed:ns:g7" {
+		t.Errorf("stream: got %q, want catalog:embed:ns:g7", pub.calls[0].Stream)
+	}
+	values, ok := pub.calls[0].Values.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected XADD values type %T", pub.calls[0].Values)
+	}
+	if values["namespace_generation"] != int64(7) {
+		t.Errorf("payload generation: got %v, want 7", values["namespace_generation"])
+	}
+}
+
+func TestServiceIngest_InactiveNamespaceWritesNothing(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: true}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
+	svc.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"})
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if repo.called != 0 || len(pub.calls) != 0 {
+		t.Errorf("inactive namespace reached storage: repo=%d xadds=%d", repo.called, len(pub.calls))
+	}
+}
+
+// The stream worker evaluates the envelope under its own lease and then calls
+// Ingest; that lease must be reused rather than re-acquired.
+func TestServiceIngest_ReusesHeldLease(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: true}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	lifecycle := &fakeLifecycleWriter{generation: 7}
+	svc.SetLifecycleWriter(lifecycle)
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 7, nslifecycle.LockShared)
+	if _, err := svc.Ingest(ctx, "ns", &IngestRequest{ObjectID: "o1", Content: "hello"}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Errorf("held lease must be reused, got %d acquisitions", lifecycle.calls)
+	}
+	if repo.called != 1 {
+		t.Errorf("expected the write to reach the repo once, got %d", repo.called)
 	}
 }

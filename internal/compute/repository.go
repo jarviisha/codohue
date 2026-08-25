@@ -157,11 +157,11 @@ func (r *Repository) GetNamespaceEventsInWindow(ctx context.Context, namespace s
 	return events, nil
 }
 
-// GetActiveNamespaces returns namespaces that have events within the last 90 days.
+// GetActiveNamespaces returns every configured namespace. Empty active windows
+// still need a compute pass so owned Qdrant and Redis state is removed.
 func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) {
 	rows, err := r.queryFn(ctx, `
-		SELECT DISTINCT namespace FROM events
-		WHERE occurred_at > NOW() - INTERVAL '90 days'`,
+		SELECT namespace FROM namespace_configs ORDER BY namespace`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get active namespaces: %w", err)

@@ -143,6 +143,69 @@ var (
 		Help: "Redis consumer-group PEL depth on catalog:embed:{ns} per namespace.",
 	}, []string{"namespace"})
 
+	// Stream retention and recovery metrics use only controlled stream-kind,
+	// configured-namespace, stage, and outcome values. They never label from
+	// arbitrary stream payloads or consumer names.
+	StreamLength = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_stream_length",
+		Help: "Current Redis stream length by recognized stream kind.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamPending = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_stream_pending",
+		Help: "Current pending-entry count across recognized Redis stream groups.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamUndelivered = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_stream_undelivered",
+		Help: "Current estimated undelivered entry count for recognized Redis streams.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamRetentionFrontierMilliseconds = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_stream_retention_frontier_milliseconds",
+		Help: "Timestamp component of the last safely computed Redis stream retention frontier.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamTrimmedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_stream_trimmed_total",
+		Help: "Total entries removed by exact consumer-progress retention.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamRetentionErrorsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_stream_retention_errors_total",
+		Help: "Total retention failures by controlled inspection or trim stage.",
+	}, []string{"stream_kind", "namespace", "stage"})
+
+	StreamUnexpectedGroups = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_stream_unexpected_groups",
+		Help: "Current count of consumer groups outside the configured expected set.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamReclaimedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_stream_reclaimed_total",
+		Help: "Total pending entries reclaimed by recognized worker kind.",
+	}, []string{"stream_kind", "namespace"})
+
+	StreamReclaimCyclesTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_stream_reclaim_cycles_total",
+		Help: "Total reclaim scan cycles by terminal outcome.",
+	}, []string{"stream_kind", "namespace", "outcome"})
+
+	StaleGenerationTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_stale_generation_total",
+		Help: "Total work items rejected at a namespace lifecycle boundary.",
+	}, []string{"work_kind", "reason"})
+
+	NamespaceLifecycleOperationsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_namespace_lifecycle_operations_total",
+		Help: "Total namespace lifecycle operations by controlled operation and outcome.",
+	}, []string{"operation", "outcome"})
+
+	IDMappingRepairItems = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "codohue_idmap_repair_items",
+		Help: "Current ID mapping repair manifest items by state and entity type.",
+	}, []string{"state", "entity_type"})
+
 	// Admin-plane self-observability metrics. Live in their own
 	// `codohue_admin_*` namespace so dashboards can split operator-facing
 	// data-plane metrics from admin-process health (BUILD_PLAN §12.3).
@@ -202,6 +265,18 @@ func Register() {
 		CatalogStrategyWorkVolumeTotal,
 		CatalogPendingItems,
 		CatalogConsumerLag,
+		StreamLength,
+		StreamPending,
+		StreamUndelivered,
+		StreamRetentionFrontierMilliseconds,
+		StreamTrimmedTotal,
+		StreamRetentionErrorsTotal,
+		StreamUnexpectedGroups,
+		StreamReclaimedTotal,
+		StreamReclaimCyclesTotal,
+		StaleGenerationTotal,
+		NamespaceLifecycleOperationsTotal,
+		IDMappingRepairItems,
 		AdminSSEConnectionsActive,
 		AdminSSEDroppedTotal,
 		AdminEventbusPublishTotal,

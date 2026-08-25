@@ -41,6 +41,15 @@ type AppConfig struct {
 	// ingest, applied when a namespace has no override. Read by cmd/api.
 	CatalogMaxContentBytes int
 
+	// StreamRetentionEnabled controls consumer-progress-based Redis stream
+	// trimming. It is disabled by default for a canary-first rollout.
+	StreamRetentionEnabled  bool
+	StreamRetentionInterval time.Duration
+
+	// ObservabilityToken protects metrics and detailed health diagnostics.
+	// An empty token leaves protected operational routes unregistered.
+	ObservabilityToken string
+
 	// Retention windows for observability tables that grow unbounded under
 	// steady-state operation. Zero or negative disables the prune for the
 	// matching table. Read by cmd/cron only.
@@ -73,6 +82,14 @@ func LoadAPI() (*AppConfig, error) {
 		return nil, fmt.Errorf("CODOHUE_CATALOG_MAX_CONTENT_BYTES must be positive, got %d", maxBytes)
 	}
 	cfg.CatalogMaxContentBytes = maxBytes
+
+	retentionEnabled, retentionInterval, err := loadStreamRetentionConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.StreamRetentionEnabled = retentionEnabled
+	cfg.StreamRetentionInterval = retentionInterval
+	cfg.ObservabilityToken = getEnv("CODOHUE_OBSERVABILITY_TOKEN", "")
 	return cfg, nil
 }
 
@@ -225,6 +242,14 @@ type EmbedderConfig struct {
 	// NamespacePollInterval is how often the embedder polls
 	// namespace_configs for newly-enabled namespaces.
 	NamespacePollInterval time.Duration
+
+	// StreamRetentionEnabled controls consumer-progress-based trimming for
+	// catalog embed streams. It is disabled by default for staged rollout.
+	StreamRetentionEnabled  bool
+	StreamRetentionInterval time.Duration
+
+	// ObservabilityToken protects metrics and detailed health diagnostics.
+	ObservabilityToken string
 }
 
 // LoadEmbedder reads and validates configuration for the embedder binary.
@@ -279,5 +304,30 @@ func LoadEmbedder() (*EmbedderConfig, error) {
 	}
 	cfg.NamespacePollInterval = pollInterval
 
+	retentionEnabled, retentionInterval, err := loadStreamRetentionConfig()
+	if err != nil {
+		return nil, err
+	}
+	cfg.StreamRetentionEnabled = retentionEnabled
+	cfg.StreamRetentionInterval = retentionInterval
+	cfg.ObservabilityToken = getEnv("CODOHUE_OBSERVABILITY_TOKEN", "")
+
 	return cfg, nil
+}
+
+func loadStreamRetentionConfig() (bool, time.Duration, error) {
+	enabled, err := strconv.ParseBool(getEnv("CODOHUE_STREAM_RETENTION_ENABLED", "false"))
+	if err != nil {
+		return false, 0, fmt.Errorf("invalid CODOHUE_STREAM_RETENTION_ENABLED: %w", err)
+	}
+
+	interval, err := time.ParseDuration(getEnv("CODOHUE_STREAM_RETENTION_INTERVAL", "1m"))
+	if err != nil {
+		return false, 0, fmt.Errorf("invalid CODOHUE_STREAM_RETENTION_INTERVAL: %w", err)
+	}
+	if interval <= 0 {
+		return false, 0, fmt.Errorf("CODOHUE_STREAM_RETENTION_INTERVAL must be positive, got %s", interval)
+	}
+
+	return enabled, interval, nil
 }

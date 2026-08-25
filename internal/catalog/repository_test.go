@@ -333,14 +333,14 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 		}
 	}
 
-	rows, total, err := repo.ListObjects(ctx, ns, nil, 2, 0)
+	rows, total, err := repo.ListObjects(ctx, ns, nil, 2, 0, nil)
 	if err != nil {
 		t.Fatalf("ListObjects: %v", err)
 	}
 	if total != 3 || len(rows) != 2 {
 		t.Fatalf("paging wrong: total=%d rows=%d", total, len(rows))
 	}
-	rows2, _, err := repo.ListObjects(ctx, ns, nil, 2, 2)
+	rows2, _, err := repo.ListObjects(ctx, ns, nil, 2, 2, nil)
 	if err != nil {
 		t.Fatalf("ListObjects offset: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 
 	// changed_since after every row's updated_at → empty.
 	future := time.Now().Add(time.Hour)
-	rows3, total3, err := repo.ListObjects(ctx, ns, &future, 10, 0)
+	rows3, total3, err := repo.ListObjects(ctx, ns, &future, 10, 0, nil)
 	if err != nil {
 		t.Fatalf("ListObjects changed_since: %v", err)
 	}

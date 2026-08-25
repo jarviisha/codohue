@@ -47,20 +47,19 @@ func TestTrendingKey(t *testing.T) {
 	}
 }
 
-func TestStoreTrending_EmptyScoresIsNoOp(t *testing.T) {
-	called := false
+func TestStoreTrending_EmptyScoresClearsStaleKey(t *testing.T) {
+	pipe := &fakePipeline{}
 	orig := newPipelineFn
 	t.Cleanup(func() { newPipelineFn = orig })
 	newPipelineFn = func(_ *goredis.Client) trendingPipeline {
-		called = true
-		return &fakePipeline{}
+		return pipe
 	}
 
 	if err := StoreTrending(context.Background(), nil, "ns", nil, time.Minute); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if called {
-		t.Fatal("expected pipeline not to be created for empty scores")
+	if pipe.delKey != "trending:ns" || pipe.zaddKey != "" || pipe.expireKey != "" {
+		t.Fatalf("empty scores must only delete stale key: %+v", pipe)
 	}
 }
 

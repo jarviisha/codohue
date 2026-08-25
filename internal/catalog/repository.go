@@ -31,6 +31,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 // ObjectRow is one row of the reconciliation read.
 type ObjectRow struct {
+	ID        int64
 	ObjectID  string
 	UpdatedAt time.Time
 }
@@ -39,7 +40,7 @@ type ObjectRow struct {
 // updated_at ascending (stable id tie-break) so a repair pass can page
 // forward and resume from the last updated_at it saw. changedSince nil means
 // "everything".
-func (r *Repository) ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int) ([]ObjectRow, int, error) {
+func (r *Repository) ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int, cursor *objectCursor) ([]ObjectRow, int, error) {
 	var total int
 	err := r.queryRowFn(ctx, `
 		SELECT COUNT(*) FROM catalog_items
@@ -50,12 +51,18 @@ func (r *Repository) ListObjects(ctx context.Context, namespace string, changedS
 		return nil, 0, fmt.Errorf("count catalog objects: %w", err)
 	}
 
+	var cursorTime *time.Time
+	var cursorID int64
+	if cursor != nil {
+		cursorTime, cursorID = &cursor.UpdatedAt, cursor.ID
+	}
 	rows, err := r.db.Query(ctx, `
-		SELECT object_id, updated_at FROM catalog_items
+		SELECT id, object_id, updated_at FROM catalog_items
 		WHERE namespace = $1 AND ($2::timestamptz IS NULL OR updated_at > $2)
+		  AND ($5::timestamptz IS NULL OR (updated_at, id) > ($5, $6))
 		ORDER BY updated_at ASC, id ASC
 		LIMIT $3 OFFSET $4`,
-		namespace, changedSince, limit, offset,
+		namespace, changedSince, limit, offset, cursorTime, cursorID,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list catalog objects: %w", err)
@@ -65,7 +72,7 @@ func (r *Repository) ListObjects(ctx context.Context, namespace string, changedS
 	var out []ObjectRow
 	for rows.Next() {
 		var row ObjectRow
-		if err := rows.Scan(&row.ObjectID, &row.UpdatedAt); err != nil {
+		if err := rows.Scan(&row.ID, &row.ObjectID, &row.UpdatedAt); err != nil {
 			return nil, 0, fmt.Errorf("scan catalog object row: %w", err)
 		}
 		out = append(out, row)

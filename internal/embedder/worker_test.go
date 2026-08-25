@@ -11,6 +11,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // --- fakes ----------------------------------------------------------------
@@ -111,6 +112,15 @@ func (f *fakeProcessor) ProcessItem(ctx context.Context, id int64) (ProcessOutco
 type fakeNSLister struct {
 	cfgs []*namespace.Config
 	err  error
+}
+
+type fakeEmbedLifecycleEvaluator struct {
+	disposition nslifecycle.EnvelopeDisposition
+	err         error
+}
+
+func (f *fakeEmbedLifecycleEvaluator) EvaluateEnvelope(context.Context, string, *int64) (nslifecycle.EnvelopeDisposition, error) {
+	return f.disposition, f.err
 }
 
 func (f *fakeNSLister) ListCatalogNamespaces(_ context.Context) ([]*namespace.Config, error) {
@@ -219,6 +229,29 @@ func TestWorker_HandleMessage_FailedOutcome_DoesNotACK(t *testing.T) {
 	// processor still called
 	if proc.calls != 1 {
 		t.Errorf("processor calls=%d", proc.calls)
+	}
+}
+
+func TestWorker_HandleMessageLifecycleStaleACKsAndStoreFailureRetries(t *testing.T) {
+	for name, tc := range map[string]struct {
+		evaluator *fakeEmbedLifecycleEvaluator
+		wantACK   bool
+	}{
+		"stale":         {&fakeEmbedLifecycleEvaluator{disposition: nslifecycle.EnvelopeStale}, true},
+		"store failure": {&fakeEmbedLifecycleEvaluator{err: errors.New("postgres down")}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &fakeStreamClient{}
+			processor := &fakeProcessor{out: OutcomeEmbedded}
+			worker := newTestWorker(client, processor, &fakeNSLister{})
+			worker.lifecycle = tc.evaluator
+			entry := validEntry("1-0", 7, "ns")
+			entry.Values["namespace_generation"] = "2"
+			worker.handleMessage(context.Background(), "ns", "catalog:embed:ns:g2", "embedder", entry)
+			if (len(client.acked()) == 1) != tc.wantACK || processor.calls != 0 {
+				t.Fatalf("acked=%v processCalls=%d", client.acked(), processor.calls)
+			}
+		})
 	}
 }
 
@@ -445,5 +478,17 @@ func TestWorker_ConsumeStream_DispatchesAndACKs(t *testing.T) {
 func TestStreamName(t *testing.T) {
 	if got := streamName("foo"); got != "catalog:embed:foo" {
 		t.Errorf("streamName(foo) = %q", got)
+	}
+}
+
+func TestDecodeStreamEntryNamespaceGeneration(t *testing.T) {
+	entry, err := DecodeStreamEntry(redis.XMessage{ID: "1-0", Values: map[string]any{
+		"catalog_item_id": "7", "namespace": "ns", "namespace_generation": "3",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.NamespaceGeneration == nil || *entry.NamespaceGeneration != 3 {
+		t.Fatalf("generation = %v", entry.NamespaceGeneration)
 	}
 }

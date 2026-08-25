@@ -46,8 +46,9 @@ type UpsertRequest struct {
 
 // UpsertResponse is returned after a successful upsert.
 type UpsertResponse struct {
-	Namespace string    `json:"namespace"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Namespace  string    `json:"namespace"`
+	Generation int64     `json:"generation"`
+	UpdatedAt  time.Time `json:"updated_at"`
 	// APIKey is the plaintext API key returned only on initial namespace creation.
 	// It will not appear on subsequent updates.
 	APIKey string `json:"api_key,omitempty"`

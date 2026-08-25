@@ -9,6 +9,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -43,6 +44,10 @@ type Service struct {
 	// wired by cmd/admin (the only place config writes happen); nil skips
 	// the guard.
 	denseCollections DenseCollectionChecker
+	lifecycle        interface {
+		Activate(context.Context, string) (*nslifecycle.NamespaceLifecycle, error)
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
 }
 
 // DenseCollectionChecker reports whether a namespace's dense Qdrant
@@ -55,6 +60,14 @@ type DenseCollectionChecker interface {
 // SetDenseCollectionChecker wires the embedding_dim change guard. Safe to
 // call once at startup before serving.
 func (s *Service) SetDenseCollectionChecker(c DenseCollectionChecker) { s.denseCollections = c }
+
+// SetLifecycleCoordinator fences config creation/update and controls recreation.
+func (s *Service) SetLifecycleCoordinator(coordinator interface {
+	Activate(context.Context, string) (*nslifecycle.NamespaceLifecycle, error)
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	s.lifecycle = coordinator
+}
 
 // NewService creates a new Service with the given repository. The catalog
 // strategy registry defaults to embedstrategy.DefaultRegistry().
@@ -76,7 +89,22 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 	if err := s.guardEmbeddingDimChange(ctx, ns, req); err != nil {
 		return nil, err
 	}
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		if _, err := s.lifecycle.Activate(ctx, ns); err != nil {
+			return nil, err
+		}
+		var response *UpsertResponse
+		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			var upsertErr error
+			response, upsertErr = s.upsertActive(leased, ns, req)
+			return upsertErr
+		})
+		return response, err
+	}
+	return s.upsertActive(ctx, ns, req)
+}
 
+func (s *Service) upsertActive(ctx context.Context, ns string, req *UpsertRequest) (*UpsertResponse, error) {
 	// dense_source=catalog rides the upsert only together with its strategy
 	// (validateUpsert enforces that); the column itself is written by
 	// UpdateCatalogConfig below so the registry + dim validation runs the
@@ -111,8 +139,9 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 	}
 
 	resp := &UpsertResponse{
-		Namespace: cfg.Namespace,
-		UpdatedAt: cfg.UpdatedAt,
+		Namespace:  cfg.Namespace,
+		Generation: cfg.Generation,
+		UpdatedAt:  cfg.UpdatedAt,
 	}
 
 	// If no API key exists for this namespace yet, generate one now.
@@ -143,6 +172,19 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 // previously required manual SQL or a full namespace wipe.
 // Returns ErrNamespaceNotFound when the namespace does not exist.
 func (s *Service) RotateAPIKey(ctx context.Context, ns string) (*RotateAPIKeyResponse, error) {
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		var response *RotateAPIKeyResponse
+		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			var rotateErr error
+			response, rotateErr = s.rotateAPIKeyActive(leased, ns)
+			return rotateErr
+		})
+		return response, err
+	}
+	return s.rotateAPIKeyActive(ctx, ns)
+}
+
+func (s *Service) rotateAPIKeyActive(ctx context.Context, ns string) (*RotateAPIKeyResponse, error) {
 	plaintext, hash, err := generateAPIKey()
 	if err != nil {
 		return nil, fmt.Errorf("generate api key: %w", err)
@@ -211,6 +253,22 @@ func (s *Service) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Confi
 //
 // Returns ErrNamespaceNotFound if the namespace row does not exist.
 func (s *Service) UpdateCatalogConfig(ctx context.Context, ns string, req *UpdateCatalogRequest) (*namespace.Config, error) {
+	// Upsert already holds the lease when it calls this for a one-request
+	// catalog provisioning, so the guard below reuses it instead of
+	// re-acquiring; the standalone admin catalog endpoint takes its own.
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		var updated *namespace.Config
+		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			var updateErr error
+			updated, updateErr = s.updateCatalogConfigActive(leased, ns, req)
+			return updateErr
+		})
+		return updated, err
+	}
+	return s.updateCatalogConfigActive(ctx, ns, req)
+}
+
+func (s *Service) updateCatalogConfigActive(ctx context.Context, ns string, req *UpdateCatalogRequest) (*namespace.Config, error) {
 	cfg, err := s.repo.Get(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("load namespace config: %w", err)

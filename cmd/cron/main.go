@@ -14,6 +14,7 @@ import (
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -68,6 +69,8 @@ func run() error {
 
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
+	lifecycleRepo := nslifecycle.NewRepository(db)
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, nslifecycle.NewPostgresLocker(db))
 
 	nsConfigRepo := nsconfig.NewRepository(db)
 	nsConfigSvc := nsconfig.NewService(nsConfigRepo)
@@ -75,6 +78,7 @@ func run() error {
 	computeRepo := compute.NewRepository(db)
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := newComputeJobFn(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, cfg.BatchIntervalMinutes)
+	job.SetLifecycleWriter(lifecycleSvc)
 	// Publish run lifecycle events so cmd/admin can stream cron runs live —
 	// its in-process observer never sees them (different process).
 	if obs := compute.NewRedisBatchRunObserver(redisClient); obs != nil {

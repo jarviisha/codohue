@@ -11,18 +11,23 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // catalogRepository abstracts Repository for tests.
 type catalogRepository interface {
 	Upsert(ctx context.Context, namespace, objectID, content string, contentHash []byte, metadata map[string]any) (*UpsertResult, error)
-	ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int) ([]ObjectRow, int, error)
+	ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int, cursor *objectCursor) ([]ObjectRow, int, error)
 }
 
 // nsConfigGetter abstracts nsconfig.Service.Get for tests.
 type nsConfigGetter interface {
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
+}
+
+type lifecycleWriter interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
 }
 
 // objectAuthorWriter records an object's author. Satisfied by
@@ -47,6 +52,7 @@ type Service struct {
 	publisher    xAdder
 	authorWriter objectAuthorWriter // optional; attribution is skipped when nil
 	clock        func() time.Time
+	lifecycle    lifecycleWriter
 
 	// defaultMaxContentBytes is the global content cap applied when the
 	// namespace carries no override (NULL column). Wired from
@@ -61,6 +67,9 @@ func (s *Service) SetDefaultMaxContentBytes(n int) { s.defaultMaxContentBytes = 
 // SetAuthorWriter wires the objects domain in. The wiring layer calls this
 // once at startup; when unset, catalog ingest simply drops author_subject_id.
 func (s *Service) SetAuthorWriter(w objectAuthorWriter) { s.authorWriter = w }
+
+// SetLifecycleWriter fences catalog persistence and its embed-stream publish.
+func (s *Service) SetLifecycleWriter(writer lifecycleWriter) { s.lifecycle = writer }
 
 // NewService creates a Service with the given dependencies. The publisher
 // is typically the process-wide *redis.Client; pass any implementation of
@@ -98,6 +107,19 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 		return nil, ErrEmptyContent
 	}
 
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		var item *Item
+		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			var ingestErr error
+			item, ingestErr = s.ingestActive(leased, ns, req)
+			return ingestErr
+		})
+		return item, err
+	}
+	return s.ingestActive(ctx, ns, req)
+}
+
+func (s *Service) ingestActive(ctx context.Context, ns string, req *IngestRequest) (*Item, error) {
 	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
 		return nil, fmt.Errorf("load namespace config: %w", err)
@@ -227,6 +249,12 @@ func itemErrorCode(err error) string {
 // this namespace already hold (optionally: changed since a timestamp). A
 // repair pass diffs this against its own corpus and re-sends only the gap.
 func (s *Service) ListObjects(ctx context.Context, ns string, changedSince *time.Time, limit, offset int) (*codohuetypes.CatalogObjectsResponse, error) {
+	return s.ListObjectsPage(ctx, ns, changedSince, limit, offset, "")
+}
+
+// ListObjectsPage supports the versioned keyset cursor while retaining the
+// legacy offset argument for one compatibility window.
+func (s *Service) ListObjectsPage(ctx context.Context, ns string, changedSince *time.Time, limit, offset int, rawCursor string) (*codohuetypes.CatalogObjectsResponse, error) {
 	if ns == "" {
 		return nil, fmt.Errorf("%w: namespace is required", ErrInvalidRequest)
 	}
@@ -238,7 +266,18 @@ func (s *Service) ListObjects(ctx context.Context, ns string, changedSince *time
 		return nil, ErrNamespaceNotFound
 	}
 
-	rows, total, err := s.repo.ListObjects(ctx, ns, changedSince, limit, offset)
+	sinceKey := ""
+	if changedSince != nil {
+		sinceKey = changedSince.UTC().Format(time.RFC3339Nano)
+	}
+	cursor, err := decodeObjectCursor(rawCursor, ns, sinceKey)
+	if err != nil {
+		return nil, err
+	}
+	if cursor != nil && offset != 0 {
+		return nil, fmt.Errorf("%w: cursor and offset cannot be combined", ErrInvalidRequest)
+	}
+	rows, total, err := s.repo.ListObjects(ctx, ns, changedSince, limit, offset, cursor)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog objects: %w", err)
 	}
@@ -255,6 +294,13 @@ func (s *Service) ListObjects(ctx context.Context, ns string, changedSince *time
 			UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339),
 		}
 	}
+	if len(rows) == limit && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		resp.NextCursor, err = encodeObjectCursor(objectCursor{Version: 1, Namespace: ns, ChangedSince: sinceKey, UpdatedAt: last.UpdatedAt.UTC(), ID: last.ID})
+		if err != nil {
+			return nil, err
+		}
+	}
 	return resp, nil
 }
 
@@ -262,24 +308,24 @@ func (s *Service) ListObjects(ctx context.Context, ns string, changedSince *time
 // §5: catalog:embed:{namespace}.
 func streamName(ns string) string { return "catalog:embed:" + ns }
 
-// catalogStreamMaxLen caps the embed stream via approximate XADD MAXLEN.
-// XACK never deletes entries, so without a cap the stream grows one entry
-// per ingest forever. Keep in sync with the same constant in internal/admin
-// and internal/embedder (peer-domain imports are forbidden).
-const catalogStreamMaxLen = 100_000
+func generationStreamName(ns string, generation int64) string {
+	if generation < 1 {
+		generation = 1
+	}
+	return nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, ns, generation)
+}
 
 func (s *Service) publish(ctx context.Context, ns string, item *Item, cfg *namespace.Config) error {
 	args := &redis.XAddArgs{
-		Stream: streamName(ns),
-		MaxLen: catalogStreamMaxLen,
-		Approx: true,
+		Stream: generationStreamName(ns, cfg.Generation),
 		Values: map[string]any{
-			"catalog_item_id":  item.ID,
-			"namespace":        ns,
-			"object_id":        item.ObjectID,
-			"strategy_id":      cfg.CatalogStrategyID,
-			"strategy_version": cfg.CatalogStrategyVersion,
-			"enqueued_at":      s.clock().UTC().Format(time.RFC3339Nano),
+			"catalog_item_id":      item.ID,
+			"namespace":            ns,
+			"namespace_generation": cfg.Generation,
+			"object_id":            item.ObjectID,
+			"strategy_id":          cfg.CatalogStrategyID,
+			"strategy_version":     cfg.CatalogStrategyVersion,
+			"enqueued_at":          s.clock().UTC().Format(time.RFC3339Nano),
 		},
 	}
 	if err := s.publisher.XAdd(ctx, args).Err(); err != nil {

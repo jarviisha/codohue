@@ -6,6 +6,7 @@ import "time"
 type Config struct {
 	// Core fields.
 	Namespace     string             `json:"namespace"`
+	Generation    int64              `json:"generation"`
 	ActionWeights map[string]float64 `json:"action_weights"`
 	Lambda        float64            `json:"lambda"`
 	Gamma         float64            `json:"gamma"`

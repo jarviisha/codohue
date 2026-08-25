@@ -10,6 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -106,6 +107,28 @@ func TestCatalogWorkerHandleMessage_TransientErrorLeavesEntryPending(t *testing.
 
 	if len(acked) != 0 {
 		t.Fatalf("transient failure must leave the entry pending for the reaper, got %v", acked)
+	}
+}
+
+func TestCatalogWorkerLifecycleStaleACKsAndStoreFailureRetries(t *testing.T) {
+	for name, tc := range map[string]struct {
+		evaluator *fakeLifecycleEvaluator
+		wantACK   bool
+		wantCall  bool
+	}{
+		"stale":         {&fakeLifecycleEvaluator{disposition: nslifecycle.EnvelopeStale}, true, false},
+		"store failure": {&fakeLifecycleEvaluator{err: errors.New("postgres down")}, false, false},
+		"accepted":      {&fakeLifecycleEvaluator{disposition: nslifecycle.EnvelopeProcess}, true, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			acked := []string{}
+			svc := &fakeCatalogIngestor{}
+			worker := &CatalogWorker{service: svc, lifecycle: tc.evaluator, ackFn: ackRecorder(&acked)}
+			worker.handleMessage(context.Background(), catalogMessage(t, "1-0", codohuetypes.CatalogStreamItem{Namespace: "ns", NamespaceGeneration: 2}))
+			if (len(acked) == 1) != tc.wantACK || (svc.called == 1) != tc.wantCall {
+				t.Fatalf("acked=%v calls=%d", acked, svc.called)
+			}
+		})
 	}
 }
 

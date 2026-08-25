@@ -43,6 +43,25 @@ func TestCatalogStreamAdapter_ClassifiesValidationAsRejected(t *testing.T) {
 	}
 }
 
+// Generation enforcement belongs to the stream worker, which evaluates the
+// envelope against the lifecycle ledger before dispatching. The adapter must
+// therefore treat a stamped and an unstamped item identically — if it started
+// judging generations itself, a legacy producer's items would be rejected here
+// with a permanent error and acked off the stream instead of being ingested.
+func TestCatalogStreamAdapter_GenerationEnvelopeIsWorkerBusiness(t *testing.T) {
+	a := &catalogStreamAdapter{svc: catalog.NewService(nil, &adapterFakeNsCfg{}, nil)}
+
+	legacy := a.IngestStreamItem(context.Background(), &codohuetypes.CatalogStreamItem{
+		Namespace: "ns", ObjectID: "o1", Content: "hello",
+	})
+	stamped := a.IngestStreamItem(context.Background(), &codohuetypes.CatalogStreamItem{
+		Namespace: "ns", NamespaceGeneration: 7, ObjectID: "o1", Content: "hello",
+	})
+	if !errors.Is(legacy, ingest.ErrCatalogItemRejected) || !errors.Is(stamped, ingest.ErrCatalogItemRejected) {
+		t.Fatalf("classification must not depend on the generation envelope: legacy=%v stamped=%v", legacy, stamped)
+	}
+}
+
 func TestCatalogStreamAdapter_InfraFailureStaysTransient(t *testing.T) {
 	a := &catalogStreamAdapter{svc: catalog.NewService(nil, &adapterFakeNsCfg{err: errors.New("db down")}, nil)}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
+	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	"github.com/qdrant/go-client/qdrant"
 )
 
@@ -123,8 +124,8 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// points of entities that aged past it, or they keep frozen scores (and
 	// keep matching searches) forever. Best-effort: a failed sweep is stale
 	// data, not a failed run; the next tick retries it.
-	s.cleanupCollection(ctx, namespace+"_subjects", keepSubjects)
-	s.cleanupCollection(ctx, namespace+"_objects", keepObjects)
+	s.cleanupCollection(ctx, collectionForContext(ctx, namespace, infraqdrant.CollectionSubjects), keepSubjects)
+	s.cleanupCollection(ctx, collectionForContext(ctx, namespace, infraqdrant.CollectionObjects), keepObjects)
 
 	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(upserted))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", len(objectAccum))
@@ -246,7 +247,7 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 
 func (s *Service) upsertSubjectVector(ctx context.Context, namespace string, vec *SubjectVector) error {
 	err := s.upsertFn(ctx, &qdrant.UpsertPoints{
-		CollectionName: namespace + "_subjects",
+		CollectionName: collectionForContext(ctx, namespace, infraqdrant.CollectionSubjects),
 		Points: []*qdrant.PointStruct{
 			{
 				Id: qdrant.NewIDNum(vec.NumericID),
@@ -273,7 +274,7 @@ func (s *Service) upsertSubjectVector(ctx context.Context, namespace string, vec
 }
 
 func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[string]map[uint64]float32, maxTimes, createdTimes map[string]int64) (map[uint64]struct{}, error) {
-	collectionName := namespace + "_objects"
+	collectionName := collectionForContext(ctx, namespace, infraqdrant.CollectionObjects)
 	upsertedIDs := make(map[uint64]struct{}, len(accum))
 	var batch []*qdrant.PointStruct
 

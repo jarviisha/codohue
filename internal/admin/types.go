@@ -16,6 +16,7 @@ import (
 // the "managed by catalog" hint on embedding_dim, etc.).
 type NamespaceConfig struct {
 	Namespace              string             `json:"namespace"`
+	Generation             int64              `json:"generation"`
 	ActionWeights          map[string]float64 `json:"action_weights"`
 	Lambda                 float64            `json:"lambda"`
 	Gamma                  float64            `json:"gamma"`
@@ -385,9 +386,10 @@ type NamespaceUpsertRequest struct {
 
 // NamespaceUpsertResponse is the response for PUT /api/admin/v1/namespaces/{ns}.
 type NamespaceUpsertResponse struct {
-	Namespace string    `json:"namespace"`
-	UpdatedAt time.Time `json:"updated_at"`
-	APIKey    *string   `json:"api_key,omitempty"` // non-nil only on first create
+	Namespace  string    `json:"namespace"`
+	Generation int64     `json:"generation"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	APIKey     *string   `json:"api_key,omitempty"` // non-nil only on first create
 }
 
 // RecommendDebug contains additional operator-only recommendation diagnostics.

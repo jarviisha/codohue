@@ -55,8 +55,9 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 	}
 
 	out := &admin.NamespaceUpsertResponse{
-		Namespace: resp.Namespace,
-		UpdatedAt: resp.UpdatedAt,
+		Namespace:  resp.Namespace,
+		Generation: resp.Generation,
+		UpdatedAt:  resp.UpdatedAt,
 	}
 	if resp.APIKey != "" {
 		key := resp.APIKey

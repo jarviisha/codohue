@@ -19,6 +19,7 @@ import (
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 
 	// Side-effect import: internal/embedder.init() registers the V1 hashing
@@ -33,9 +34,19 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := dispatchAdminCommand(os.Args[1:], run, runLifecycleCLI); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func dispatchAdminCommand(args []string, runServer func() error, runLifecycle func([]string) error) error {
+	if len(args) == 0 {
+		return runServer()
+	}
+	if args[0] == "lifecycle" {
+		return runLifecycle(args[1:])
+	}
+	return fmt.Errorf("unknown admin command %q", args[0])
 }
 
 func run() error {
@@ -72,9 +83,12 @@ func run() error {
 
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
+	lifecycleRepo := nslifecycle.NewRepository(db)
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, nslifecycle.NewPostgresLocker(db))
 
 	nsConfigRepo := nsconfig.NewRepository(db)
 	nsConfigSvc := nsconfig.NewService(nsConfigRepo)
+	nsConfigSvc.SetLifecycleCoordinator(lifecycleSvc)
 	if qdrantClient != nil {
 		nsConfigSvc.SetDenseCollectionChecker(&denseCollectionChecker{client: qdrantClient})
 	}
@@ -82,6 +96,7 @@ func run() error {
 	computeRepo := compute.NewRepository(db)
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := compute.NewJob(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, 5)
+	job.SetLifecycleWriter(lifecycleSvc)
 
 	// Wire the admin-plane event bus. Batch-run and catalog events arrive
 	// over Redis pub/sub (cron and the embedder are separate processes);
@@ -140,6 +155,7 @@ func run() error {
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
 	svc := admin.NewService(repo, cfg.APIURL, cfg.AdminAPIKey, redisClient, qdrantClient, job, nsAdapter)
+	svc.SetLifecycleCoordinator(&lifecycleCoordinatorAdapter{service: lifecycleSvc, repo: lifecycleRepo})
 
 	// Catalog auto-embedding admin endpoints (US2). The adapter bridges
 	// admin.Service → nsconfig.Service + embedstrategy.DefaultRegistry

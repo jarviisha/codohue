@@ -3,9 +3,12 @@ package idmap
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 type fakeRow struct {
@@ -37,6 +40,19 @@ func (f *fakeRepo) Lookup(_ context.Context, stringID, namespace, entityType str
 	f.lastNS = namespace
 	f.lastType = entityType
 	return f.id, f.found, f.err
+}
+
+func (f *fakeRepo) LookupBatch(_ context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
+	f.lastNS = namespace
+	f.lastType = entityType
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]uint64, len(stringIDs))
+	for i, id := range stringIDs {
+		out[id] = f.id + uint64(i)
+	}
+	return out, nil
 }
 
 func (f *fakeRepo) GetOrCreateBatch(_ context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
@@ -92,6 +108,22 @@ func TestRepositoryGetOrCreate_QueryError(t *testing.T) {
 	_, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestRepositoryGetOrCreateRequiresLifecycleLeaseButLookupDoesNot(t *testing.T) {
+	repo := &Repository{requireLease: true, queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		return fakeRow{scanFn: func(dest ...any) error { *dest[0].(*int64) = 42; return nil }}
+	}}
+	if _, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Fatalf("mutation error = %v", err)
+	}
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 2, nslifecycle.LockShared)
+	if id, err := repo.GetOrCreate(ctx, "obj-1", "ns", "object"); err != nil || id != 42 {
+		t.Fatalf("leased mutation id=%d err=%v", id, err)
+	}
+	if _, _, err := repo.Lookup(context.Background(), "obj-1", "ns", "object"); err != nil {
+		t.Fatalf("read-only lookup required lease: %v", err)
 	}
 }
 
@@ -207,6 +239,23 @@ func TestRepositoryLookup_QueryError(t *testing.T) {
 	}
 	if _, _, err := repo.Lookup(context.Background(), "obj-1", "ns", "object"); err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+func TestRepositoryLookupBatchIsReadOnlyAndOmitsMissing(t *testing.T) {
+	rows := &fakeRows{rows: [][]any{{"known", int64(7)}}}
+	repo := &Repository{requireLease: true, queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+		if !strings.Contains(sql, "SELECT string_id, numeric_id") || strings.Contains(sql, "INSERT") {
+			t.Fatalf("lookup query is not read-only: %s", sql)
+		}
+		return rows, nil
+	}}
+	got, err := repo.LookupBatch(context.Background(), []string{"known", "missing"}, "ns", "object")
+	if err != nil || got["known"] != 7 {
+		t.Fatalf("LookupBatch=%v err=%v", got, err)
+	}
+	if _, ok := got["missing"]; ok {
+		t.Fatal("missing mapping must be omitted")
 	}
 }
 

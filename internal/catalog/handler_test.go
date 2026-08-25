@@ -43,7 +43,7 @@ func (f *fakeIngester) IngestBatch(_ context.Context, ns string, req *BatchInges
 	return f.batchResp, f.batchErr
 }
 
-func (f *fakeIngester) ListObjects(_ context.Context, ns string, changedSince *time.Time, limit, _ int) (*codohuetypes.CatalogObjectsResponse, error) {
+func (f *fakeIngester) ListObjectsPage(_ context.Context, ns string, changedSince *time.Time, limit, _ int, _ string) (*codohuetypes.CatalogObjectsResponse, error) {
 	f.lastNS = ns
 	f.lastSince = changedSince
 	f.lastLimit = limit

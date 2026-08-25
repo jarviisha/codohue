@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
@@ -32,11 +33,16 @@ type nsConfigGetter interface {
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
+type lifecycleWriter interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}
+
 // Service processes and persists behavioral events received from Redis Streams.
 type Service struct {
 	repo          eventInserter
 	nsConfigSvc   nsConfigGetter
 	tailPublisher EventTailPublisher
+	lifecycle     lifecycleWriter
 }
 
 // NewService creates a new Service with the given repository and namespace config service.
@@ -49,6 +55,9 @@ func NewService(repo *Repository, nsConfigSvc nsConfigGetter) *Service {
 func (s *Service) SetTailPublisher(p EventTailPublisher) {
 	s.tailPublisher = p
 }
+
+// SetLifecycleWriter fences every event mutation with the active generation.
+func (s *Service) SetLifecycleWriter(writer lifecycleWriter) { s.lifecycle = writer }
 
 // Process validates the payload, resolves the action weight, and stores the
 // event. On success it returns the generated event id, increments the ingest
@@ -73,6 +82,20 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 		return 0, fmt.Errorf("%w: occurred_at %s is in the future", ErrInvalidPayload, payload.OccurredAt.Format(time.RFC3339))
 	}
 
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, payload.Namespace) != nil {
+		var id int64
+		err := s.lifecycle.WithWriter(ctx, payload.Namespace, func(leased context.Context, lifecycle *nslifecycle.NamespaceLifecycle) error {
+			payload.NamespaceGeneration = lifecycle.Generation
+			var processErr error
+			id, processErr = s.processActive(leased, payload)
+			return processErr
+		})
+		return id, err
+	}
+	return s.processActive(ctx, payload)
+}
+
+func (s *Service) processActive(ctx context.Context, payload *EventPayload) (int64, error) {
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)
 	if err != nil {
 		reason := "config"
@@ -103,13 +126,14 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 	metrics.EventsIngestedTotal.WithLabelValues(event.Namespace, string(event.Action)).Inc()
 	if s.tailPublisher != nil {
 		s.tailPublisher.Publish(EventTailMessage{
-			ID:         event.ID,
-			Namespace:  event.Namespace,
-			SubjectID:  event.SubjectID,
-			ObjectID:   event.ObjectID,
-			Action:     string(event.Action),
-			Weight:     event.Weight,
-			OccurredAt: event.OccurredAt,
+			ID:                  event.ID,
+			Namespace:           event.Namespace,
+			NamespaceGeneration: payload.NamespaceGeneration,
+			SubjectID:           event.SubjectID,
+			ObjectID:            event.ObjectID,
+			Action:              string(event.Action),
+			Weight:              event.Weight,
+			OccurredAt:          event.OccurredAt,
 		})
 	}
 	return event.ID, nil

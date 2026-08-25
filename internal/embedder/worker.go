@@ -12,17 +12,20 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // Default worker tunables. Operators can override via cmd/embedder env vars.
 const (
-	defaultConsumerGroup = "embedder"
-	defaultPollInterval  = 30 * time.Second
-	defaultReapInterval  = 60 * time.Second
-	defaultMinIdleReap   = 60 * time.Second
-	defaultReadBlockTime = 5 * time.Second
-	defaultReadBatchSize = 32
-	defaultReapBatchSize = 100
+	defaultConsumerGroup  = "embedder"
+	defaultPollInterval   = 30 * time.Second
+	defaultReapInterval   = 60 * time.Second
+	defaultMinIdleReap    = 60 * time.Second
+	defaultReadBlockTime  = 5 * time.Second
+	defaultReadBatchSize  = 32
+	defaultReapBatchSize  = 100
+	defaultReapPageBudget = 10
 )
 
 // streamClient is the subset of *redis.Client methods the worker needs.
@@ -38,6 +41,10 @@ type streamClient interface {
 // itemProcessor abstracts Service.ProcessItem for tests.
 type itemProcessor interface {
 	ProcessItem(ctx context.Context, catalogItemID int64) (ProcessOutcome, error)
+}
+
+type lifecycleEvaluator interface {
+	EvaluateEnvelope(context.Context, string, *int64) (nslifecycle.EnvelopeDisposition, error)
 }
 
 // nsLister abstracts nsconfig.Service.ListCatalogNamespaces for tests.
@@ -82,16 +89,20 @@ type WorkerConfig struct {
 // registry poller plus per-namespace consumer + reaper goroutines and
 // blocks until ctx is cancelled or an unrecoverable error occurs.
 type Worker struct {
-	redis    streamClient
-	service  itemProcessor
-	nsLister nsLister
-	cfg      WorkerConfig
+	redis     streamClient
+	service   itemProcessor
+	nsLister  nsLister
+	lifecycle lifecycleEvaluator
+	cfg       WorkerConfig
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
 
 	wg sync.WaitGroup
 }
+
+// SetLifecycleEvaluator enables durable generation enforcement.
+func (w *Worker) SetLifecycleEvaluator(evaluator lifecycleEvaluator) { w.lifecycle = evaluator }
 
 // NewWorker constructs a Worker. Empty fields in cfg are filled with the
 // package defaults.
@@ -164,30 +175,32 @@ func (w *Worker) refreshNamespaces(ctx context.Context) error {
 		return fmt.Errorf("list catalog-enabled namespaces: %w", err)
 	}
 
-	enabled := make(map[string]struct{}, len(cfgs))
+	type enabledStream struct{ namespace, stream string }
+	enabled := make(map[string]enabledStream, len(cfgs))
 	for _, c := range cfgs {
-		enabled[c.Namespace] = struct{}{}
+		stream := embedStreamName(c.Namespace, c.Generation)
+		enabled[stream] = enabledStream{namespace: c.Namespace, stream: stream}
 	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
 	// Start consumers for newly-enabled namespaces.
-	for ns := range enabled {
-		if _, running := w.cancels[ns]; running {
+	for key, target := range enabled {
+		if _, running := w.cancels[key]; running {
 			continue
 		}
 		nsCtx, cancel := context.WithCancel(ctx)
-		w.cancels[ns] = cancel
+		w.cancels[key] = cancel
 		w.wg.Add(2)
-		go func(ns string) {
+		go func(ns, stream string) {
 			defer w.wg.Done()
-			w.consumeStream(nsCtx, ns)
-		}(ns)
-		go func(ns string) {
+			w.consumePhysicalStream(nsCtx, ns, stream)
+		}(target.namespace, target.stream)
+		go func(ns, stream string) {
 			defer w.wg.Done()
-			w.reapStream(nsCtx, ns)
-		}(ns)
+			w.reapStream(nsCtx, ns, stream)
+		}(target.namespace, target.stream)
 	}
 
 	// Stop consumers for namespaces that left the enabled set.
@@ -204,7 +217,10 @@ func (w *Worker) refreshNamespaces(ctx context.Context) error {
 // consumeStream is the per-namespace primary consumer goroutine. It reads
 // new messages with XREADGROUP > and dispatches each through the service.
 func (w *Worker) consumeStream(ctx context.Context, ns string) {
-	stream := streamName(ns)
+	w.consumePhysicalStream(ctx, ns, streamName(ns))
+}
+
+func (w *Worker) consumePhysicalStream(ctx context.Context, ns, stream string) {
 	group := defaultConsumerGroup
 
 	// The group must exist before the first XREADGROUP. Retry with backoff —
@@ -280,9 +296,9 @@ func (w *Worker) consumeStream(ctx context.Context, ns string) {
 // reapStream periodically reclaims entries idle in another consumer's PEL
 // and re-processes them. This is how a crashed replica's pending work
 // gets re-driven.
-func (w *Worker) reapStream(ctx context.Context, ns string) {
-	stream := streamName(ns)
+func (w *Worker) reapStream(ctx context.Context, ns, stream string) {
 	group := defaultConsumerGroup
+	cursor := "0-0"
 	ticker := time.NewTicker(w.cfg.ReapInterval)
 	defer ticker.Stop()
 
@@ -293,27 +309,30 @@ func (w *Worker) reapStream(ctx context.Context, ns string) {
 		case <-ticker.C:
 		}
 
-		msgs, _, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-			Stream:   stream,
-			Group:    group,
-			Consumer: w.cfg.ConsumerName,
-			MinIdle:  w.cfg.MinIdleReap,
-			Start:    "0",
-			Count:    int64(w.cfg.ReapBatchSize),
-		}).Result()
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return
+		for page := 0; page < defaultReapPageBudget; page++ {
+			msgs, next, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+				Stream: stream, Group: group, Consumer: w.cfg.ConsumerName,
+				MinIdle: w.cfg.MinIdleReap, Start: cursor, Count: int64(w.cfg.ReapBatchSize),
+			}).Result()
+			if err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return
+				}
+				if strings.Contains(err.Error(), "NOGROUP") {
+					cursor = "0-0"
+				} else {
+					slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+				}
+				break
 			}
-			// NOGROUP just means the group hasn't been (re)created yet — the
-			// consumer loop owns that; warning every tick is pure noise.
-			if !strings.Contains(err.Error(), "NOGROUP") {
-				slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+			for _, msg := range msgs {
+				w.handleMessage(ctx, ns, stream, group, msg)
 			}
-			continue
-		}
-		for _, msg := range msgs {
-			w.handleMessage(ctx, ns, stream, group, msg)
+			cursor = next
+			if next == "0-0" || next == "" {
+				cursor = "0-0"
+				break
+			}
 		}
 	}
 }
@@ -338,6 +357,21 @@ func (w *Worker) handleMessage(ctx context.Context, ns, stream, group string, ms
 			)
 		}
 		return
+	}
+	if w.lifecycle != nil {
+		disposition, lifecycleErr := w.lifecycle.EvaluateEnvelope(ctx, ns, entry.NamespaceGeneration)
+		if lifecycleErr != nil {
+			slog.WarnContext(ctx, "embed lifecycle check failed; leaving entry pending",
+				slog.String("namespace", ns), slog.String("entry_id", msg.ID), slog.String("error", lifecycleErr.Error()))
+			return
+		}
+		if disposition == nslifecycle.EnvelopeStale {
+			metrics.StaleGenerationTotal.WithLabelValues("embed", "stale").Inc()
+			if ackErr := w.redis.XAck(ctx, stream, group, msg.ID).Err(); ackErr != nil {
+				slog.WarnContext(ctx, "xack stale entry failed", slog.String("namespace", ns), slog.String("entry_id", msg.ID), slog.String("error", ackErr.Error()))
+			}
+			return
+		}
 	}
 
 	out, err := w.service.ProcessItem(ctx, entry.CatalogItemID)

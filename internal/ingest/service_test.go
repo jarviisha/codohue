@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // fakeRepo implements eventInserter for testing.
@@ -56,6 +57,103 @@ func (f *fakeNsConfig) Get(_ context.Context, _ string) (*namespace.Config, erro
 
 func newTestService(repo eventInserter, ns nsConfigGetter) *Service {
 	return &Service{repo: repo, nsConfigSvc: ns}
+}
+
+// fakeLifecycleWriter stands in for nslifecycle.Service. It records how often a
+// writer lease was taken and hands the callback a context carrying that lease,
+// exactly as the real service does.
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+	leasedCtx  context.Context
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, namespace, f.generation, nslifecycle.LockShared)
+	f.leasedCtx = leased
+	return fn(leased, &nslifecycle.NamespaceLifecycle{
+		Namespace:  namespace,
+		Generation: f.generation,
+		State:      nslifecycle.StateActive,
+	})
+}
+
+// Every event write runs under a namespace lifecycle lease so a concurrent
+// delete/recreate cannot interleave, and the row is stamped with the
+// generation that lease resolved — not one the caller supplied.
+func TestServiceProcess_AcquiresLeaseAndStampsActiveGeneration(t *testing.T) {
+	repo := &fakeRepo{insertID: 11}
+	pub := &fakeTailPublisher{}
+	svc := newTestService(repo, &fakeNsConfig{})
+	svc.SetTailPublisher(pub)
+	lifecycle := &fakeLifecycleWriter{generation: 5}
+	svc.SetLifecycleWriter(lifecycle)
+
+	payload := &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionLike, OccurredAt: time.Now().UTC(),
+		NamespaceGeneration: 2, // a stale client claim must not survive
+	}
+	if _, err := svc.Process(context.Background(), payload); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	if payload.NamespaceGeneration != 5 {
+		t.Errorf("payload generation: got %d, want the lease's 5", payload.NamespaceGeneration)
+	}
+	if pub.last.NamespaceGeneration != 5 {
+		t.Errorf("tail generation: got %d, want 5", pub.last.NamespaceGeneration)
+	}
+}
+
+// A caller that already holds the lease (the stream worker, which evaluated the
+// envelope under one) must not take a second one.
+func TestServiceProcess_ReusesCallerLease(t *testing.T) {
+	svc := newTestService(&fakeRepo{insertID: 12}, &fakeNsConfig{})
+	lifecycle := &fakeLifecycleWriter{generation: 5}
+	svc.SetLifecycleWriter(lifecycle)
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 5, nslifecycle.LockShared)
+	if _, err := svc.Process(ctx, &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionLike, OccurredAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Errorf("expected the held lease to be reused, got %d acquisitions", lifecycle.calls)
+	}
+}
+
+// A namespace that is being deleted, or already gone, must not accept writes:
+// the lifecycle error is returned and nothing reaches PostgreSQL.
+func TestServiceProcess_InactiveNamespaceWritesNothing(t *testing.T) {
+	repo := &fakeRepo{}
+	pub := &fakeTailPublisher{}
+	svc := newTestService(repo, &fakeNsConfig{})
+	svc.SetTailPublisher(pub)
+	svc.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	_, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionLike, OccurredAt: time.Now().UTC(),
+	})
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if repo.insertCalled {
+		t.Error("no event may be inserted for an inactive namespace")
+	}
+	if pub.called {
+		t.Error("no tail message may be published for an inactive namespace")
+	}
 }
 
 func TestNewService(t *testing.T) {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 type objectsRepository interface {
@@ -14,12 +16,22 @@ type objectsRepository interface {
 
 // Service owns the per-object metadata rules.
 type Service struct {
-	repo objectsRepository
+	repo      objectsRepository
+	lifecycle interface {
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
 }
 
 // NewService creates a new Service.
 func NewService(repo objectsRepository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetLifecycleWriter fences object metadata mutations.
+func (s *Service) SetLifecycleWriter(writer interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	s.lifecycle = writer
 }
 
 // Upsert stores metadata for an object. Unlike catalog ingest this path is
@@ -33,6 +45,19 @@ func (s *Service) Upsert(ctx context.Context, namespace, objectID string, req *U
 		return nil, fmt.Errorf("%w: request body is required", ErrInvalidRequest)
 	}
 
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+		var object *Object
+		err := s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			var writeErr error
+			object, writeErr = s.upsertActive(leased, namespace, objectID, req)
+			return writeErr
+		})
+		return object, err
+	}
+	return s.upsertActive(ctx, namespace, objectID, req)
+}
+
+func (s *Service) upsertActive(ctx context.Context, namespace, objectID string, req *UpsertRequest) (*Object, error) {
 	obj, err := s.repo.Upsert(ctx, namespace, objectID, strings.TrimSpace(req.AuthorSubjectID))
 	if err != nil {
 		return nil, fmt.Errorf("persist object metadata: %w", err)
@@ -51,6 +76,15 @@ func (s *Service) SetAuthor(ctx context.Context, namespace, objectID, authorSubj
 		// not "clear it".
 		return nil
 	}
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			return s.setAuthorActive(leased, namespace, objectID, author)
+		})
+	}
+	return s.setAuthorActive(ctx, namespace, objectID, author)
+}
+
+func (s *Service) setAuthorActive(ctx context.Context, namespace, objectID, author string) error {
 	if _, err := s.repo.Upsert(ctx, namespace, objectID, author); err != nil {
 		return fmt.Errorf("set object author: %w", err)
 	}
@@ -64,5 +98,10 @@ func (s *Service) Get(ctx context.Context, namespace, objectID string) (*Object,
 
 // Delete removes an object's metadata.
 func (s *Service) Delete(ctx context.Context, namespace, objectID string) error {
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			return s.repo.Delete(leased, namespace, objectID)
+		})
+	}
 	return s.repo.Delete(ctx, namespace, objectID)
 }

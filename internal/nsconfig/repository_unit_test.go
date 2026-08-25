@@ -58,6 +58,15 @@ func setInt(dest any, value int) error {
 	return nil
 }
 
+func setInt64(dest any, value int64) error {
+	ptr, ok := dest.(*int64)
+	if !ok {
+		return errors.New("expected *int64")
+	}
+	*ptr = value
+	return nil
+}
+
 func setBool(dest any, value bool) error {
 	ptr, ok := dest.(*bool)
 	if !ok {
@@ -83,7 +92,7 @@ func setTime(dest any, value time.Time) error {
 // repository.go; tests that need to inject a malformed value at a specific position
 // can call this helper and then overwrite the field they care about.
 func fillScanRow(dest []any, weightsRaw, paramsRaw []byte, now time.Time) error {
-	if len(dest) < 22 {
+	if len(dest) < 23 {
 		return errors.New("scan dest too short")
 	}
 	if err := setString(dest[0], "ns"); err != nil {
@@ -146,10 +155,13 @@ func fillScanRow(dest []any, weightsRaw, paramsRaw []byte, now time.Time) error 
 	if err := setInt(dest[19], 32768); err != nil {
 		return err
 	}
-	if err := setTime(dest[20], now); err != nil {
+	if err := setInt64(dest[20], 1); err != nil {
 		return err
 	}
-	return setTime(dest[21], now)
+	if err := setTime(dest[21], now); err != nil {
+		return err
+	}
+	return setTime(dest[22], now)
 }
 
 func TestNewRepository(t *testing.T) {

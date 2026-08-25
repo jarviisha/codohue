@@ -86,8 +86,29 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	}
 
 	if err := r.execFn(ctx, `
-		INSERT INTO namespace_configs (namespace, dense_source)
-		VALUES ($1, 'disabled')
+		WITH system_gate AS (
+			SELECT 1 FROM system_lifecycle WHERE singleton = TRUE AND state = 'active'
+		), activated AS (
+			INSERT INTO namespace_lifecycles
+				(namespace, generation, state, activated_at, legacy_messages_allowed, updated_at)
+			SELECT $1, 1, 'active', NOW(), FALSE, NOW() FROM system_gate
+			ON CONFLICT (namespace) DO UPDATE SET
+				generation = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN namespace_lifecycles.generation + 1 ELSE namespace_lifecycles.generation END,
+				state = 'active',
+				activated_at = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN NOW() ELSE namespace_lifecycles.activated_at END,
+				legacy_messages_allowed = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN FALSE ELSE namespace_lifecycles.legacy_messages_allowed END,
+				last_error = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN NULL ELSE namespace_lifecycles.last_error END,
+				updated_at = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN NOW() ELSE namespace_lifecycles.updated_at END
+			WHERE namespace_lifecycles.state IN ('active', 'deleted')
+			RETURNING generation
+		)
+		INSERT INTO namespace_configs (namespace, generation, dense_source)
+		SELECT $1, generation, 'disabled' FROM activated
 		ON CONFLICT (namespace) DO NOTHING`,
 		ns,
 	); err != nil {
@@ -124,7 +145,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at`,
+			generation, created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
 		req.ExcludeAuthored,
 		req.Alpha, denseSource, req.EmbeddingDim, req.DenseDistance,
@@ -137,7 +158,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-		&cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert namespace config: %w", err)
@@ -205,7 +226,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at
+			generation, created_at, updated_at
 		FROM namespace_configs
 		WHERE namespace = $1`,
 		ns,
@@ -217,7 +238,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-		&cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -258,7 +279,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at
+			generation, created_at, updated_at
 		FROM namespace_configs
 		WHERE dense_source = 'catalog'
 		ORDER BY namespace ASC`,
@@ -281,7 +302,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 			&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 			&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 			&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-			&cfg.CreatedAt, &cfg.UpdatedAt,
+			&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan namespace config row: %w", err)
@@ -361,7 +382,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at`,
+			generation, created_at, updated_at`,
 		ns, req.Enabled, strategyID, strategyVer, paramsJSON, maxAttempts, maxBytes,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
@@ -371,7 +392,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-		&cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil

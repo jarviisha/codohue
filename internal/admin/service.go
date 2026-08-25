@@ -20,6 +20,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // adminRepo is the repository interface used by Service.
@@ -49,7 +50,7 @@ type adminRepo interface {
 	FindLatestReembedRun(ctx context.Context, namespace string) (*BatchRunLog, error)
 	InsertReembedRun(ctx context.Context, namespace, strategyID, strategyVersion string, startedAt time.Time) (int64, error)
 	StartReembedRun(ctx context.Context, namespace, strategyID, strategyVersion, onlyState string, startedAt time.Time) (batchRunID int64, targets []CatalogReembedTarget, err error)
-	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion, onlyState string) ([]CatalogReembedTarget, error)
+	SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion, onlyState string) ([]CatalogReembedTarget, error)
 
 	// Catalog liveness signal for the admin Status tab.
 	GetLastCatalogEmbeddedAt(ctx context.Context, namespace string) (*time.Time, error)
@@ -121,6 +122,21 @@ type batchRunner interface {
 	LockAllNamespaces(ctx context.Context) (release func(), err error)
 }
 
+// lifecycleCoordinator keeps destructive admin operations durable across
+// dependency failures and process restarts.
+type lifecycleCoordinator interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	WithNamespaceExclusive(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	WithGlobalExclusive(context.Context, func(context.Context, *nslifecycle.SystemLifecycle) error) error
+	StartDelete(context.Context, string) (*nslifecycle.NamespaceLifecycle, error)
+	CompleteDelete(context.Context, string, int64) error
+	RecordNamespaceError(context.Context, string, int64, string) error
+	StartReset(context.Context) error
+	CompleteReset(context.Context) error
+	RecordResetError(context.Context, string) error
+	ListNonDeleted(context.Context) ([]*nslifecycle.NamespaceLifecycle, error)
+}
+
 // streamPublisher abstracts the Redis Streams write used by the catalog
 // re-embed and redrive paths. The concrete *goredis.Client implements this
 // interface; tests inject a fake. Defined here (not in catalog_ops_service.go)
@@ -133,7 +149,7 @@ type streamPublisher interface {
 // a namespace's catalog config. The cmd/admin wiring layer satisfies this with
 // an adapter over nsconfig.Service so we avoid a forbidden cross-domain import.
 type catalogStrategyPicker interface {
-	GetCatalogStrategy(ctx context.Context, namespace string) (strategyID, strategyVersion string, enabled bool, err error)
+	GetCatalogStrategy(ctx context.Context, namespace string) (strategyID, strategyVersion string, generation int64, enabled bool, err error)
 }
 
 // qdrantPointDeleter abstracts Qdrant point deletion so the delete catalog
@@ -159,6 +175,7 @@ type Service struct {
 	streamPublisher streamPublisher
 	qdrantDeleter   qdrantPointDeleter
 	eventRate       eventRateReader
+	lifecycle       lifecycleCoordinator
 	nowFn           func() time.Time
 	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
 
@@ -166,6 +183,12 @@ type Service struct {
 	// qdrantCollection in NewService, replaceable in tests (the concrete
 	// qdrant.Client cannot be faked).
 	collectionStatsFn func(ctx context.Context, name string) QdrantCollection
+}
+
+// SetLifecycleCoordinator enables durable generation fencing for destructive
+// operations and admin-originated mutations.
+func (s *Service) SetLifecycleCoordinator(coordinator lifecycleCoordinator) {
+	s.lifecycle = coordinator
 }
 
 // NewService creates a new Service.
@@ -869,7 +892,7 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 				return nil, fmt.Errorf("list seeded demo catalog items: %w", err)
 			}
 			for _, it := range items {
-				if err := s.publishCatalogEnqueue(ctx, demoNamespace, CatalogReembedTarget{
+				if err := s.publishCatalogEnqueue(ctx, demoNamespace, 1, CatalogReembedTarget{
 					ID:       it.ID,
 					ObjectID: it.ObjectID,
 				}, strategyID, strategyVersion); err != nil {
@@ -900,6 +923,36 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 	if err != nil {
 		return nil, fmt.Errorf("get namespace: %w", err)
 	}
+	if s.lifecycle != nil {
+		var response *NamespaceDeleteResponse
+		err := s.lifecycle.WithNamespaceExclusive(ctx, namespace, func(leased context.Context, current *nslifecycle.NamespaceLifecycle) error {
+			if current.State == nslifecycle.StateDeleted {
+				return nil
+			}
+			deleting, startErr := s.lifecycle.StartDelete(leased, namespace)
+			if startErr != nil {
+				return fmt.Errorf("persist namespace deletion: %w", startErr)
+			}
+			deleted, cleanupErr := s.deleteNamespaceGeneration(leased, namespace, deleting.Generation)
+			if cleanupErr != nil {
+				_ = s.lifecycle.RecordNamespaceError(context.WithoutCancel(leased), namespace, deleting.Generation, cleanupErr.Error())
+				return cleanupErr
+			}
+			if completeErr := s.lifecycle.CompleteDelete(leased, namespace, deleting.Generation); completeErr != nil {
+				_ = s.lifecycle.RecordNamespaceError(context.WithoutCancel(leased), namespace, deleting.Generation, completeErr.Error())
+				return fmt.Errorf("complete namespace deletion: %w", completeErr)
+			}
+			response = &NamespaceDeleteResponse{Namespace: namespace, EventsDeleted: deleted}
+			return nil
+		})
+		if errors.Is(err, nslifecycle.ErrNamespaceNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
 	// Hold the namespace's compute lock for the whole wipe: a cron tick or
 	// manual run in flight would otherwise re-upsert Qdrant collections
 	// after the delete finishes, leaving orphans nothing ever cleans.
@@ -921,6 +974,24 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 	return &NamespaceDeleteResponse{Namespace: namespace, EventsDeleted: deleted}, nil
 }
 
+func (s *Service) deleteNamespaceGeneration(ctx context.Context, namespace string, generation int64) (int, error) {
+	if s.job != nil {
+		release, err := s.job.LockNamespace(ctx, namespace)
+		if err != nil {
+			return 0, fmt.Errorf("acquire namespace compute lock: %w", err)
+		}
+		defer release()
+	}
+	deleted, err := s.clearNamespaceEverywhereGeneration(ctx, namespace, generation)
+	if err != nil {
+		return 0, err
+	}
+	if err := s.verifyNamespaceAbsent(ctx, namespace, generation); err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
 // ResetApp wipes every namespace and its associated data across PostgreSQL,
 // Redis, and Qdrant. The caller is expected to gate this on a typed
 // confirmation string at the HTTP layer.
@@ -930,6 +1001,66 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 // That way orphan rows whose namespace_configs row was already gone (e.g.
 // from a previous partial delete) also get cleaned up.
 func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
+	if s.lifecycle != nil {
+		var response *ResetAppResponse
+		err := s.lifecycle.WithGlobalExclusive(ctx, func(locked context.Context, _ *nslifecycle.SystemLifecycle) error {
+			if err := s.lifecycle.StartReset(locked); err != nil {
+				return fmt.Errorf("persist system reset: %w", err)
+			}
+			fail := func(err error) error {
+				_ = s.lifecycle.RecordResetError(context.WithoutCancel(locked), err.Error())
+				return err
+			}
+			lifecycles, err := s.lifecycle.ListNonDeleted(locked)
+			if err != nil {
+				return fail(fmt.Errorf("list reset lifecycles: %w", err))
+			}
+			names := make([]string, 0, len(lifecycles))
+			for _, lifecycle := range lifecycles {
+				deleting, startErr := s.lifecycle.StartDelete(locked, lifecycle.Namespace)
+				if startErr != nil {
+					return fail(fmt.Errorf("fence namespace %q for reset: %w", lifecycle.Namespace, startErr))
+				}
+				lifecycle.Generation = deleting.Generation
+				names = append(names, lifecycle.Namespace)
+			}
+			if s.job != nil {
+				release, lockErr := s.job.LockAllNamespaces(locked)
+				if lockErr != nil {
+					return fail(fmt.Errorf("acquire maintenance compute lock: %w", lockErr))
+				}
+				defer release()
+			}
+			eventsDeleted, namespacesDeleted, truncateErr := s.repo.TruncateAllNamespaceData(locked)
+			if truncateErr != nil {
+				return fail(fmt.Errorf("truncate postgres data: %w", truncateErr))
+			}
+			if s.redisClient != nil {
+				if err := s.flushAllNamespaceRedis(locked); err != nil {
+					return fail(fmt.Errorf("flush redis: %w", err))
+				}
+			}
+			if s.qdrantClient != nil {
+				if err := s.flushAllNamespaceQdrant(locked); err != nil {
+					return fail(fmt.Errorf("flush qdrant: %w", err))
+				}
+			}
+			for _, lifecycle := range lifecycles {
+				if err := s.verifyNamespaceAbsent(locked, lifecycle.Namespace, lifecycle.Generation); err != nil {
+					return fail(err)
+				}
+				if err := s.lifecycle.CompleteDelete(locked, lifecycle.Namespace, lifecycle.Generation); err != nil {
+					return fail(fmt.Errorf("complete reset deletion for %q: %w", lifecycle.Namespace, err))
+				}
+			}
+			if err := s.lifecycle.CompleteReset(locked); err != nil {
+				return fail(fmt.Errorf("complete system reset: %w", err))
+			}
+			response = &ResetAppResponse{NamespacesDeleted: namespacesDeleted, EventsDeleted: eventsDeleted, Namespaces: names}
+			return nil
+		})
+		return response, err
+	}
 	// Snapshot the namespace list BEFORE truncating so the response body
 	// can echo which namespaces were wiped.
 	namespaces, err := s.repo.ListNamespaces(ctx)
@@ -1043,19 +1174,23 @@ func (s *Service) flushAllNamespaceQdrant(ctx context.Context) error {
 // and Qdrant. Shared by demo cleanup, single-namespace deletion, and the
 // app-wide reset. Returns the number of events removed from Postgres.
 func (s *Service) clearNamespaceEverywhere(ctx context.Context, namespace string) (int, error) {
+	return s.clearNamespaceEverywhereGeneration(ctx, namespace, 1)
+}
+
+func (s *Service) clearNamespaceEverywhereGeneration(ctx context.Context, namespace string, generation int64) (int, error) {
 	deleted, err := s.repo.ClearNamespaceData(ctx, namespace)
 	if err != nil {
 		return 0, fmt.Errorf("clear postgres data for %q: %w", namespace, err)
 	}
 
 	if s.redisClient != nil {
-		if err := s.clearNamespaceRedis(ctx, namespace); err != nil {
+		if err := s.clearNamespaceRedisGeneration(ctx, namespace, generation); err != nil {
 			return 0, fmt.Errorf("clear redis data for %q: %w", namespace, err)
 		}
 	}
 
 	if s.qdrantClient != nil {
-		if err := s.clearNamespaceQdrant(ctx, namespace); err != nil {
+		if err := s.clearNamespaceQdrantGeneration(ctx, namespace, generation); err != nil {
 			return 0, fmt.Errorf("clear qdrant data for %q: %w", namespace, err)
 		}
 	}
@@ -1063,11 +1198,19 @@ func (s *Service) clearNamespaceEverywhere(ctx context.Context, namespace string
 }
 
 func (s *Service) clearNamespaceRedis(ctx context.Context, namespace string) error {
+	return s.clearNamespaceRedisGeneration(ctx, namespace, 1)
+}
+
+func (s *Service) clearNamespaceRedisGeneration(ctx context.Context, namespace string, generation int64) error {
 	keys := []string{
-		"trending:" + namespace,
-		"catalog:embed:" + namespace,
+		nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation),
+		nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation),
 	}
-	encodedNamespace := base64.RawURLEncoding.EncodeToString([]byte(namespace))
+	cacheNamespace := namespace
+	if generation > 1 {
+		cacheNamespace = fmt.Sprintf("%s:g%d", namespace, generation)
+	}
+	encodedNamespace := base64.RawURLEncoding.EncodeToString([]byte(cacheNamespace))
 	iter := s.redisClient.Scan(ctx, 0, "rec:v2:"+encodedNamespace+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
@@ -1085,12 +1228,17 @@ func (s *Service) clearNamespaceRedis(ctx context.Context, namespace string) err
 }
 
 func (s *Service) clearNamespaceQdrant(ctx context.Context, namespace string) error {
-	for _, collection := range []string{
-		namespace + "_subjects",
-		namespace + "_objects",
-		namespace + "_subjects_dense",
-		namespace + "_objects_dense",
+	return s.clearNamespaceQdrantGeneration(ctx, namespace, 1)
+}
+
+func (s *Service) clearNamespaceQdrantGeneration(ctx context.Context, namespace string, generation int64) error {
+	for _, kind := range []nslifecycle.PhysicalKind{
+		nslifecycle.KindSubjects,
+		nslifecycle.KindObjects,
+		nslifecycle.KindSubjectsDense,
+		nslifecycle.KindObjectsDense,
 	} {
+		collection := nslifecycle.MustPhysicalName(kind, namespace, generation)
 		exists, err := s.qdrantClient.CollectionExists(ctx, collection)
 		if err != nil {
 			return fmt.Errorf("check collection %q: %w", collection, err)
@@ -1100,6 +1248,49 @@ func (s *Service) clearNamespaceQdrant(ctx context.Context, namespace string) er
 		}
 		if err := s.qdrantClient.DeleteCollection(ctx, collection); err != nil {
 			return fmt.Errorf("delete collection %q: %w", collection, err)
+		}
+	}
+	return nil
+}
+
+func (s *Service) verifyNamespaceAbsent(ctx context.Context, namespace string, generation int64) error {
+	if cfg, err := s.repo.GetNamespace(ctx, namespace); err != nil {
+		return fmt.Errorf("verify postgres cleanup for %q: %w", namespace, err)
+	} else if cfg != nil {
+		return fmt.Errorf("verify postgres cleanup for %q: namespace config remains", namespace)
+	}
+	if s.redisClient != nil {
+		streamKeys := []string{
+			nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation),
+			nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation),
+		}
+		remaining, err := s.redisClient.Exists(ctx, streamKeys...).Result()
+		if err != nil {
+			return fmt.Errorf("verify redis cleanup for %q: %w", namespace, err)
+		}
+		cacheNamespace := namespace
+		if generation > 1 {
+			cacheNamespace = fmt.Sprintf("%s:g%d", namespace, generation)
+		}
+		iter := s.redisClient.Scan(ctx, 0, "rec:v2:"+base64.RawURLEncoding.EncodeToString([]byte(cacheNamespace))+":*", 1).Iterator()
+		cacheFound := iter.Next(ctx)
+		if err := iter.Err(); err != nil {
+			return fmt.Errorf("verify recommendation cache cleanup for %q: %w", namespace, err)
+		}
+		if remaining != 0 || cacheFound {
+			return fmt.Errorf("verify redis cleanup for %q: generation %d keys remain", namespace, generation)
+		}
+	}
+	if s.qdrantClient != nil {
+		for _, kind := range []nslifecycle.PhysicalKind{nslifecycle.KindSubjects, nslifecycle.KindObjects, nslifecycle.KindSubjectsDense, nslifecycle.KindObjectsDense} {
+			collection := nslifecycle.MustPhysicalName(kind, namespace, generation)
+			exists, err := s.qdrantClient.CollectionExists(ctx, collection)
+			if err != nil {
+				return fmt.Errorf("verify qdrant collection %q: %w", collection, err)
+			}
+			if exists {
+				return fmt.Errorf("verify qdrant cleanup for %q: collection %q remains", namespace, collection)
+			}
 		}
 	}
 	return nil

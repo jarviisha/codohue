@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // fakeProcessor implements eventProcessor for testing.
@@ -16,6 +18,17 @@ type fakeProcessor struct {
 	processErr    error
 	processCalled bool
 	lastPayload   *EventPayload
+}
+
+type fakeLifecycleEvaluator struct {
+	disposition nslifecycle.EnvelopeDisposition
+	err         error
+	calls       int
+}
+
+func (f *fakeLifecycleEvaluator) EvaluateEnvelope(context.Context, string, *int64) (nslifecycle.EnvelopeDisposition, error) {
+	f.calls++
+	return f.disposition, f.err
 }
 
 func (f *fakeProcessor) Process(_ context.Context, p *EventPayload) (int64, error) {
@@ -90,6 +103,28 @@ func TestWorkerHandleMessage_TransientErrorLeavesEntryPending(t *testing.T) {
 
 	if len(acked) != 0 {
 		t.Fatalf("transient failure must not ack, got %v", acked)
+	}
+}
+
+func TestWorkerLifecycleStaleACKsAndStoreFailureRetries(t *testing.T) {
+	for name, tc := range map[string]struct {
+		evaluator   *fakeLifecycleEvaluator
+		wantACK     bool
+		wantProcess bool
+	}{
+		"stale":         {&fakeLifecycleEvaluator{disposition: nslifecycle.EnvelopeStale}, true, false},
+		"store failure": {&fakeLifecycleEvaluator{err: errors.New("postgres down")}, false, false},
+		"accepted":      {&fakeLifecycleEvaluator{disposition: nslifecycle.EnvelopeProcess}, true, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			acked := []string{}
+			processor := &fakeProcessor{}
+			worker := &Worker{service: processor, lifecycle: tc.evaluator, ackFn: ackRecorder(&acked)}
+			worker.handleMessage(context.Background(), eventMessage(t, "1-0"))
+			if (len(acked) == 1) != tc.wantACK || processor.processCalled != tc.wantProcess {
+				t.Fatalf("acked=%v processed=%v", acked, processor.processCalled)
+			}
+		})
 	}
 }
 

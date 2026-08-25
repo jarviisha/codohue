@@ -5,13 +5,76 @@ import (
 	"errors"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	qdrantpb "github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/namespace"
+	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 )
+
+type fakeEmbedRetentionRunner struct {
+	calls chan infraredis.StreamSpec
+}
+
+func (f *fakeEmbedRetentionRunner) RunOnce(_ context.Context, spec infraredis.StreamSpec) (infraredis.RetentionResult, error) {
+	f.calls <- spec
+	return infraredis.RetentionResult{}, nil
+}
+
+func TestEmbedRetentionLoopUsesGenerationOneStreamsAndStops(t *testing.T) {
+	specs := embedRetentionSpecs([]*namespace.Config{{Namespace: "alpha"}, {Namespace: "beta"}})
+	if len(specs) != 2 {
+		t.Fatalf("embed retention specs = %+v", specs)
+	}
+	for _, spec := range specs {
+		if spec.Name != "catalog:embed:"+spec.Namespace {
+			t.Fatalf("generation-1 stream name = %q for namespace %q", spec.Name, spec.Namespace)
+		}
+		if len(spec.ExpectedGroups) != 1 || spec.ExpectedGroups[0] != "embedder" {
+			t.Fatalf("expected groups for %q = %v", spec.Name, spec.ExpectedGroups)
+		}
+	}
+
+	runner := &fakeEmbedRetentionRunner{calls: make(chan infraredis.StreamSpec, len(specs))}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		infraredis.RunRetentionLoop(ctx, time.Hour, runner, func(context.Context) ([]infraredis.StreamSpec, error) {
+			return specs, nil
+		})
+	}()
+	for range specs {
+		select {
+		case <-runner.calls:
+		case <-time.After(time.Second):
+			t.Fatal("embed retention loop did not run each namespace")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("embed retention loop did not stop after cancellation")
+	}
+}
+
+func TestEmbedRetentionSpecsUseGenerationQualifiedStreams(t *testing.T) {
+	specs := embedRetentionSpecs([]*namespace.Config{{Namespace: "legacy", Generation: 1}, {Namespace: "current", Generation: 3}})
+	if len(specs) != 2 || specs[0].Name != "catalog:embed:legacy" || specs[1].Name != "catalog:embed:current:g3" {
+		t.Fatalf("specs = %+v", specs)
+	}
+}
+
+func TestEmbedRetentionDryRunTracksKillSwitch(t *testing.T) {
+	if !retentionDryRun(false) || retentionDryRun(true) {
+		t.Fatal("retention kill-switch mapping is incorrect")
+	}
+}
 
 func TestInitLogger(t *testing.T) {
 	initLogger("json")

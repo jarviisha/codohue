@@ -47,13 +47,14 @@ type PendingItem struct {
 // the worker re-reads everything else from Postgres. The remaining fields
 // are kept for log greppability and audit only.
 type StreamEntry struct {
-	EntryID       string // Redis Streams entry id, e.g. "1700000000-0"
-	CatalogItemID int64
-	Namespace     string
-	ObjectID      string
-	StrategyID    string
-	StrategyVer   string
-	EnqueuedAt    time.Time
+	EntryID             string // Redis Streams entry id, e.g. "1700000000-0"
+	CatalogItemID       int64
+	Namespace           string
+	NamespaceGeneration *int64
+	ObjectID            string
+	StrategyID          string
+	StrategyVer         string
+	EnqueuedAt          time.Time
 }
 
 // DecodeStreamEntry converts a Redis XMessage into a StreamEntry, validating
@@ -81,6 +82,13 @@ func DecodeStreamEntry(msg redis.XMessage) (*StreamEntry, error) {
 		ObjectID:      stringField(msg.Values, "object_id"),
 		StrategyID:    stringField(msg.Values, "strategy_id"),
 		StrategyVer:   stringField(msg.Values, "strategy_version"),
+	}
+	if raw := stringField(msg.Values, "namespace_generation"); raw != "" {
+		generation, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || generation < 1 {
+			return nil, fmt.Errorf("stream entry %s: invalid namespace_generation %q", msg.ID, raw)
+		}
+		entry.NamespaceGeneration = &generation
 	}
 	if raw := stringField(msg.Values, "enqueued_at"); raw != "" {
 		if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {

@@ -43,20 +43,20 @@ func (f *fakeReembedRepo) ListOpenReembedRuns(_ context.Context) ([]ReembedRun, 
 	return out, nil
 }
 
-func (f *fakeReembedRepo) CountStaleCatalogItems(_ context.Context, ns, target string) (int, error) {
+func (f *fakeReembedRepo) CountStaleCatalogItems(_ context.Context, ns, strategyID, target string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.staleTargets = append(f.staleTargets, target)
+	f.staleTargets = append(f.staleTargets, strategyID+"/"+target)
 	if f.staleErr != nil {
 		return 0, f.staleErr
 	}
 	return f.staleCount[ns], nil
 }
 
-func (f *fakeReembedRepo) CountEmbeddedCatalogItems(_ context.Context, ns, target string) (int, error) {
+func (f *fakeReembedRepo) CountEmbeddedCatalogItems(_ context.Context, ns, strategyID, target string) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.embeddedTargets = append(f.embeddedTargets, target)
+	f.embeddedTargets = append(f.embeddedTargets, strategyID+"/"+target)
 	if f.embeddedErr != nil {
 		return 0, f.embeddedErr
 	}
@@ -92,7 +92,7 @@ func TestReembedWatcher_CompletesWhenBacklogEmpty(t *testing.T) {
 	startedAt := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	repo := &fakeReembedRepo{
 		openRuns: []ReembedRun{
-			{ID: 11, Namespace: "ns", TargetStrategyVersion: "v2", StartedAt: startedAt},
+			{ID: 11, Namespace: "ns", TargetStrategyID: "model-a", TargetStrategyVersion: "v2", StartedAt: startedAt},
 		},
 		staleCount:    map[string]int{"ns": 0},
 		embeddedCount: map[string]int{"ns": 25},
@@ -112,8 +112,8 @@ func TestReembedWatcher_CompletesWhenBacklogEmpty(t *testing.T) {
 	if got.duration != 3000 {
 		t.Errorf("expected duration_ms=3000, got %d", got.duration)
 	}
-	if len(repo.staleTargets) != 1 || repo.staleTargets[0] != "v2" ||
-		len(repo.embeddedTargets) != 1 || repo.embeddedTargets[0] != "v2" {
+	if len(repo.staleTargets) != 1 || repo.staleTargets[0] != "model-a/v2" ||
+		len(repo.embeddedTargets) != 1 || repo.embeddedTargets[0] != "model-a/v2" {
 		t.Fatalf("watcher did not use frozen target version: stale=%v embedded=%v", repo.staleTargets, repo.embeddedTargets)
 	}
 }

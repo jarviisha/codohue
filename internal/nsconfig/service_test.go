@@ -7,6 +7,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // fakeRepo implements nsConfigRepository for testing.
@@ -488,5 +489,145 @@ func TestServiceUpsert_CatalogDimMismatchRejected(t *testing.T) {
 	}
 	if repo.upsertCatalogCalledWith != nil {
 		t.Fatal("catalog config must not be persisted on dim mismatch")
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+// fakeLifecycleCoordinator stands in for nslifecycle.Service, recording
+// activations and writer leases separately: creation must activate (which is
+// what mints a new generation on recreate), while ordinary config writes must
+// only take a writer lease.
+type fakeLifecycleCoordinator struct {
+	generation    int64
+	activateErr   error
+	writerErr     error
+	activateCalls int
+	writerCalls   int
+}
+
+func (f *fakeLifecycleCoordinator) Activate(_ context.Context, ns string) (*nslifecycle.NamespaceLifecycle, error) {
+	f.activateCalls++
+	if f.activateErr != nil {
+		return nil, f.activateErr
+	}
+	return &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive}, nil
+}
+
+func (f *fakeLifecycleCoordinator) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.writerCalls++
+	if f.writerErr != nil {
+		return f.writerErr
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+func TestServiceUpsert_ActivatesLifecycleThenWritesUnderLease(t *testing.T) {
+	repo := &fakeRepo{upsertCfg: &namespace.Config{Namespace: "ns", APIKeyHash: "existing"}}
+	svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+	lifecycle := &fakeLifecycleCoordinator{generation: 2}
+	svc.SetLifecycleCoordinator(lifecycle)
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if lifecycle.activateCalls != 1 {
+		t.Errorf("expected 1 activation, got %d", lifecycle.activateCalls)
+	}
+	if lifecycle.writerCalls != 1 {
+		t.Errorf("expected 1 writer lease, got %d", lifecycle.writerCalls)
+	}
+}
+
+// A failed activation is the "system is resetting" / "namespace is mid-delete"
+// path: nothing may be persisted, because the row would outlive the wipe.
+func TestServiceUpsert_ActivationFailureWritesNothing(t *testing.T) {
+	repo := &fakeRepo{upsertCfg: &namespace.Config{Namespace: "ns"}}
+	svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+	svc.SetLifecycleCoordinator(&fakeLifecycleCoordinator{activateErr: nslifecycle.ErrSystemResetting})
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{}); !errors.Is(err, nslifecycle.ErrSystemResetting) {
+		t.Fatalf("expected ErrSystemResetting, got %v", err)
+	}
+	if repo.setAPIKeyHashCalled {
+		t.Error("no API key may be minted when activation fails")
+	}
+}
+
+// Rotating a key and flipping catalog mode are namespace-state mutations, so
+// both are fenced; an inactive namespace must not accept either.
+func TestServiceConfigMutations_RunUnderLifecycleLease(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Service) error
+	}{
+		{"RotateAPIKey", func(s *Service) error {
+			_, err := s.RotateAPIKey(context.Background(), "ns")
+			return err
+		}},
+		{"UpdateCatalogConfig", func(s *Service) error {
+			_, err := s.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{Enabled: false})
+			return err
+		}},
+	} {
+		t.Run(tc.name+" takes a lease", func(t *testing.T) {
+			repo := &fakeRepo{
+				replaceFound:     true,
+				getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128},
+				upsertCatalogCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "disabled"},
+			}
+			svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+			lifecycle := &fakeLifecycleCoordinator{generation: 2}
+			svc.SetLifecycleCoordinator(lifecycle)
+
+			if err := tc.mutate(svc); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if lifecycle.writerCalls != 1 {
+				t.Errorf("expected 1 writer lease, got %d", lifecycle.writerCalls)
+			}
+			if lifecycle.activateCalls != 0 {
+				t.Errorf("%s must not activate a namespace, got %d", tc.name, lifecycle.activateCalls)
+			}
+		})
+
+		t.Run(tc.name+" refuses an inactive namespace", func(t *testing.T) {
+			repo := &fakeRepo{replaceFound: true, getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128}}
+			svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+			svc.SetLifecycleCoordinator(&fakeLifecycleCoordinator{writerErr: nslifecycle.ErrNamespaceNotActive})
+
+			if err := tc.mutate(svc); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+				t.Fatalf("%s: expected ErrNamespaceNotActive, got %v", tc.name, err)
+			}
+			if repo.replacedHash != "" || repo.upsertCatalogCalledWith != nil {
+				t.Errorf("%s reached the repo for an inactive namespace", tc.name)
+			}
+		})
+	}
+}
+
+// Provisioning catalog mode in one request must not deadlock or double-lease:
+// Upsert holds the lease and UpdateCatalogConfig reuses it.
+func TestServiceUpsert_CatalogProvisioningReusesHeldLease(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg, upsertCatalogCfg: cfg}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+	lifecycle := &fakeLifecycleCoordinator{generation: 2}
+	svc.SetLifecycleCoordinator(lifecycle)
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if lifecycle.writerCalls != 1 {
+		t.Errorf("expected the catalog write to reuse the upsert lease, got %d leases", lifecycle.writerCalls)
 	}
 }

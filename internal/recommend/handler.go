@@ -92,6 +92,9 @@ func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Reque
 		Offset:    offset,
 	})
 	if err != nil {
+		if writeNamespaceResolutionError(w, err) {
+			return
+		}
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
@@ -133,6 +136,9 @@ func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.service.Rank(r.Context(), &req, namespace)
 	if err != nil {
+		if writeNamespaceResolutionError(w, err) {
+			return
+		}
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
@@ -178,6 +184,9 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 	// window_hours field reports that actual window.
 	resp, err := h.service.GetTrending(r.Context(), ns, limit, offset)
 	if err != nil {
+		if writeNamespaceResolutionError(w, err) {
+			return
+		}
 		httpapi.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error")
 		return
 	}
@@ -222,6 +231,13 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	}
 
 	if storeErr != nil {
+		if writeNamespaceResolutionError(w, storeErr) {
+			return
+		}
+		if errors.Is(storeErr, ErrInvalidEmbedding) {
+			httpapi.WriteError(w, http.StatusBadRequest, "invalid_embedding", storeErr.Error())
+			return
+		}
 		if errors.Is(storeErr, ErrCatalogActive) {
 			httpapi.WriteError(w, http.StatusConflict, "catalog_active",
 				"namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted")
@@ -237,6 +253,19 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeNamespaceResolutionError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, ErrNamespaceNotFound):
+		httpapi.WriteError(w, http.StatusNotFound, "namespace_not_found", "namespace not found")
+		return true
+	case errors.Is(err, ErrNamespaceConfigUnavailable):
+		httpapi.WriteError(w, http.StatusServiceUnavailable, "namespace_config_unavailable", "namespace configuration is unavailable")
+		return true
+	default:
+		return false
+	}
 }
 
 // DeleteObject handles DELETE /v1/namespaces/{ns}/objects/{id} — removes an
