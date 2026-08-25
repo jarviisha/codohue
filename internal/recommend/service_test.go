@@ -2477,3 +2477,76 @@ func TestNamespaceResolutionErrors_StayDistinguishable(t *testing.T) {
 		t.Error("an unreadable config store must not read as a missing namespace")
 	}
 }
+
+// ─── incomplete deletion is never reported as success ────────────────────────
+
+// Deletion touches three stores. If one fails, every other stage still runs —
+// stopping at the first failure would strand the remaining copies with no
+// second attempt — but the request must still fail, because a 204 tells the
+// caller the object is gone everywhere.
+func TestDeleteObject_AttemptsEveryStageThenFails(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		failOn     string
+		failMeta   bool
+		wantStages []string
+	}{
+		{"sparse fails", "ns_objects", false, []string{"ns_objects", "ns_objects_dense"}},
+		{"dense fails", "ns_objects_dense", false, []string{"ns_objects", "ns_objects_dense"}},
+		{"metadata fails", "", true, []string{"ns_objects", "ns_objects_dense"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stages []string
+			meta := &fakeObjectMetaDeleter{}
+			if tc.failMeta {
+				meta.err = errors.New("objects table down")
+			}
+			svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+			svc.SetObjectMetadataDeleter(meta)
+			svc.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+				stages = append(stages, collection)
+				if collection == tc.failOn {
+					return errors.New("qdrant down")
+				}
+				return nil
+			}
+
+			err := svc.DeleteObject(context.Background(), "ns", "o1")
+
+			if err == nil {
+				t.Fatal("an incomplete deletion must not report success")
+			}
+			if len(stages) != len(tc.wantStages) {
+				t.Errorf("stages attempted = %v, want %v", stages, tc.wantStages)
+			}
+			if !tc.failMeta && len(meta.deleted) != 1 {
+				t.Errorf("metadata stage skipped after a vector failure: %v", meta.deleted)
+			}
+		})
+	}
+}
+
+// Deleting an object that was never ingested is a no-op, not a failure: the
+// endpoint is idempotent, and a retry after a partial failure must be able to
+// succeed once the remaining stages are clean.
+func TestDeleteObject_IdempotentRetryAfterPartialFailure(t *testing.T) {
+	meta := &fakeObjectMetaDeleter{}
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc.SetObjectMetadataDeleter(meta)
+
+	failing := true
+	svc.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+		if failing && collection == "ns_objects_dense" {
+			return errors.New("qdrant down")
+		}
+		return nil
+	}
+
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err == nil {
+		t.Fatal("expected the first attempt to fail")
+	}
+	failing = false
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
+		t.Fatalf("retry after a partial failure must succeed, got %v", err)
+	}
+}

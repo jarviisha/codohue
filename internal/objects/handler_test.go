@@ -7,10 +7,13 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
@@ -98,5 +101,50 @@ func TestUpsertHandler_MapsUnknownErrorTo500(t *testing.T) {
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
+	}
+}
+
+// A namespace that does not exist, or is mid-delete, must be answered
+// distinguishably: 404 is permanent, 409 will clear, 503 is worth retrying.
+// A single 500 for all three tells the caller to retry a write that can never
+// succeed — and admin credentials do not exempt a request from this, because
+// the namespace either accepts writes or it does not.
+func TestUpsertHandler_NamespaceLifecycleContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode int
+		wantBody string
+	}{
+		{"absent namespace", nslifecycle.ErrNamespaceNotFound, http.StatusNotFound, "namespace_not_found"},
+		{"mid-delete", nslifecycle.ErrNamespaceNotActive, http.StatusConflict, "namespace_not_active"},
+		{"system resetting", nslifecycle.ErrSystemResetting, http.StatusConflict, "namespace_not_active"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := NewHandler(&fakeUpserter{err: tc.err})
+			rec := httptest.NewRecorder()
+
+			h.Upsert(rec, newRequest(t, "ns", "o1", `{"author_subject_id":"u1"}`))
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("got %d, want %d (body %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Errorf("expected error code %q, got %s", tc.wantBody, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A wiring bug (a mutation reached without its lease) is not a client error
+// and must not be dressed up as one.
+func TestUpsertHandler_MissingLeaseStaysInternal(t *testing.T) {
+	h := NewHandler(&fakeUpserter{err: nslifecycle.ErrLeaseRequired})
+	rec := httptest.NewRecorder()
+
+	h.Upsert(rec, newRequest(t, "ns", "o1", `{"author_subject_id":"u1"}`))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("got %d, want 500", rec.Code)
 	}
 }

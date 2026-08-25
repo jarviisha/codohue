@@ -168,8 +168,8 @@
 ### Tests for User Story 4
 
 - [X] T080 [P] [US4] Add config-not-found/unavailable tests proving Recommend, Rank, and Trending resolve configuration before cache access and never cache default-backed results in `internal/recommend/service_test.go`
-- [ ] T081 [P] [US4] Add global-admin missing/deleted/deleting namespace mutation and stable 404/409/503 contract tests in `internal/ingest/handler_test.go`, `internal/catalog/handler_test.go`, `internal/objects/handler_test.go`, and `internal/recommend/handler_test.go`
-- [ ] T082 [US4] Add sparse/dense/metadata deletion fault injection, joined-error, NotFound, and safe-retry tests in `internal/recommend/service_test.go` and `internal/recommend/repository_test.go`
+- [X] T081 [P] [US4] Add global-admin missing/deleted/deleting namespace mutation and stable 404/409/503 contract tests in `internal/ingest/handler_test.go`, `internal/catalog/handler_test.go`, `internal/objects/handler_test.go`, and `internal/recommend/handler_test.go`
+- [X] T082 [US4] Add sparse/dense/metadata deletion fault injection, joined-error, NotFound, and safe-retry tests in `internal/recommend/service_test.go` and `internal/recommend/repository_test.go`
 - [X] T083 [P] [US4] Add effective-dimension validation and base/catalog transaction rollback tests in `internal/nsconfig/repository_test.go`, `internal/nsconfig/repository_unit_test.go`, and `internal/nsconfig/service_test.go`
 - [X] T084 [P] [US4] Add content/author transaction rollback and same-content attribution-update tests in `internal/catalog/repository_test.go` and `internal/catalog/service_test.go`
 - [ ] T085 [US4] Add stable 404/409/503, zero-mutation, zero-cache, incomplete-delete, and compound-write rollback scenarios in `e2e/honest_failures_test.go`
@@ -177,7 +177,7 @@
 ### Implementation for User Story 4
 
 - [X] T086 [US4] Resolve required namespace configuration before recommendation, rank, trending, or cache access and return stable `namespace_not_found`/`namespace_config_unavailable` errors in `internal/recommend/service.go` and `internal/recommend/handler.go`
-- [ ] T087 [US4] Require active namespace resolution before event, catalog, object, and BYOE mutations even for global-admin credentials in `internal/ingest/handler.go`, `internal/catalog/handler.go`, `internal/objects/handler.go`, and `internal/recommend/handler.go`
+- [X] T087 [US4] Require active namespace resolution before event, catalog, object, and BYOE mutations even for global-admin credentials in `internal/ingest/handler.go`, `internal/catalog/handler.go`, `internal/objects/handler.go`, and `internal/recommend/handler.go`
 - [X] T088 [US4] Attempt sparse, dense, and metadata deletion stages, ignore only NotFound, join remaining failures, and preserve idempotent retries in `internal/recommend/service.go` and `internal/recommend/repository.go`
 - [X] T089 [US4] Validate the effective namespace/catalog configuration before one atomic base-and-catalog upsert transaction in `internal/nsconfig/service.go` and `internal/nsconfig/repository.go`
 - [X] T090 [US4] Persist catalog content and requested author attribution in one transaction while allowing same-content attribution updates without duplicate embed work in `internal/catalog/service.go` and `internal/catalog/repository.go`

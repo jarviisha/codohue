@@ -260,6 +260,11 @@ func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityT
 }
 
 func writeNamespaceResolutionError(w http.ResponseWriter, err error) bool {
+	// Lifecycle state first: a namespace mid-delete is a 409, which the
+	// domain-level ErrNamespaceNotFound below would otherwise flatten to 404.
+	if httpapi.WriteLifecycleError(w, err) {
+		return true
+	}
 	switch {
 	case errors.Is(err, ErrNamespaceNotFound):
 		httpapi.WriteError(w, http.StatusNotFound, "namespace_not_found", "namespace not found")

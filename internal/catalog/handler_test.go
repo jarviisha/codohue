@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -315,5 +316,55 @@ func TestHandlerBatchIngest_MissingNamespace_400(t *testing.T) {
 	h.BatchIngest(rec, newCatalogPathRequest(http.MethodPost, "/catalog/batch", `{"items":[]}`, ""))
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+}
+
+// Catalog ingest answers "namespace not found" and "catalog not enabled"
+// identically on purpose, so an unauthenticated probe cannot enumerate
+// namespaces. A namespace that is mid-delete is different: the caller already
+// knows it exists (it just wrote to it), and 409 tells it to retry later
+// instead of treating the namespace as permanently gone.
+func TestCatalogIngest_NamespaceLifecycleContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode int
+		wantBody string
+	}{
+		{"absent lifecycle", nslifecycle.ErrNamespaceNotFound, http.StatusNotFound, "namespace_not_found"},
+		{"mid-delete", nslifecycle.ErrNamespaceNotActive, http.StatusConflict, "namespace_not_active"},
+		{"system resetting", nslifecycle.ErrSystemResetting, http.StatusConflict, "namespace_not_active"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{service: &fakeIngester{err: tc.err}}
+			rec := httptest.NewRecorder()
+
+			h.Ingest(rec, newCatalogRequest(`{"object_id":"o1","content":"hello"}`, "ns"))
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("got %d, want %d (body %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Errorf("expected error code %q, got %s", tc.wantBody, rec.Body.String())
+			}
+		})
+	}
+}
+
+// The namespace-enumeration guard still holds: an unknown namespace and a
+// namespace without catalog enabled stay indistinguishable.
+func TestCatalogIngest_UnknownAndDisabledStayIndistinguishable(t *testing.T) {
+	bodies := make([]string, 0, 2)
+	for _, err := range []error{ErrNamespaceNotFound, ErrNamespaceNotEnabled} {
+		h := &Handler{service: &fakeIngester{err: err}}
+		rec := httptest.NewRecorder()
+		h.Ingest(rec, newCatalogRequest(`{"object_id":"o1","content":"hello"}`, "ns"))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("err=%v: got %d, want 404", err, rec.Code)
+		}
+		bodies = append(bodies, rec.Body.String())
+	}
+	if bodies[0] != bodies[1] {
+		t.Errorf("responses differ and leak namespace existence:\n%s\n%s", bodies[0], bodies[1])
 	}
 }

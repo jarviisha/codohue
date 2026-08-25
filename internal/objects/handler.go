@@ -49,6 +49,9 @@ func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
 
 	obj, err := h.service.Upsert(r.Context(), ns, id, &req)
 	if err != nil {
+		if httpapi.WriteLifecycleError(w, err) {
+			return
+		}
 		if errors.Is(err, ErrInvalidRequest) {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return

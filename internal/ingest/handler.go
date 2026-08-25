@@ -46,6 +46,9 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 
 	eventID, err := h.service.Process(r.Context(), &payload)
 	if err != nil {
+		if httpapi.WriteLifecycleError(w, err) {
+			return
+		}
 		if errors.Is(err, ErrInvalidObjectCreatedAt) {
 			httpapi.WriteError(w, http.StatusBadRequest, "invalid_object_created_at", err.Error())
 			return

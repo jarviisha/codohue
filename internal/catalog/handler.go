@@ -150,6 +150,9 @@ func (h *Handler) ListObjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, ns string, err error) {
+	if httpapi.WriteLifecycleError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInvalidRequest):
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
