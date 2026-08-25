@@ -89,6 +89,50 @@ Codohue loads `.env` automatically when present. Required: `DATABASE_URL`, `CODO
 | `CODOHUE_EMBEDDER_HEALTH_PORT`      | `2003`                   | `cmd/embedder` |
 | `CODOHUE_EMBEDDER_REPLICA_NAME`     | hostname                 | `cmd/embedder` consumer name |
 | `CODOHUE_EMBEDDER_POLL_INTERVAL`    | `30s`                    | `cmd/embedder` rescan cadence |
+| `CODOHUE_OBSERVABILITY_TOKEN`       | unset                    | `cmd/api`, `cmd/embedder` — gates `/metrics` and `/healthz?details=true`. Unset means those routes do not exist (404) |
+| `CODOHUE_STREAM_RETENTION_ENABLED`  | `false`                  | `cmd/api`, `cmd/embedder` — exact consumer-progress stream trimming |
+| `CODOHUE_STREAM_RETENTION_INTERVAL` | `1m`                     | how often a retention pass runs |
+
+### Operational endpoints
+
+`/healthz` is public and reports only an aggregate `status` — no component
+names, no dependency errors. Anything more detailed needs the dedicated
+observability credential, which is deliberately **not** the admin key: a
+monitoring agent should not be able to delete namespaces.
+
+```bash
+curl http://localhost:2001/healthz                       # public: {"status":"ok"}
+curl -H "Authorization: Bearer $CODOHUE_OBSERVABILITY_TOKEN" \
+     "http://localhost:2001/healthz?details=true"        # per-component detail
+curl -H "Authorization: Bearer $CODOHUE_OBSERVABILITY_TOKEN" \
+     http://localhost:2001/metrics                       # Prometheus scrape
+```
+
+The embedder exposes the same pair on `CODOHUE_EMBEDDER_HEALTH_PORT`.
+
+### Namespace lifecycle generations
+
+Every namespace carries a monotonic **generation**. Deleting and recreating a
+name mints a new one, and generation 2+ qualifies the namespace's physical
+artifacts (`trending:ns:g2`, `ns_g2_objects_dense`, `catalog:embed:ns:g2`), so
+work published against a deleted incarnation can never become visible to the
+new one. Generation 1 keeps the original unqualified names, so upgrading moves
+nothing.
+
+Event, catalog and embed stream payloads carry an additive
+`namespace_generation`. Producers that predate it keep working during the
+adoption window — see [deploy/backend-audit-remediation.md](deploy/backend-audit-remediation.md).
+
+### Failure contract
+
+Data-plane writes answer distinguishably, so a client knows whether to retry:
+
+| Situation | Status | Code |
+|-----------|--------|------|
+| Namespace absent or deleted | 404 | `namespace_not_found` |
+| Namespace mid-delete, or a system reset in progress | 409 | `namespace_not_active` |
+| Configuration or lifecycle store unreadable | 503 | `namespace_config_unavailable` |
+| `object_created_at` more than five minutes in the future | 400 | `invalid_object_created_at` |
 
 ## Creating a namespace
 

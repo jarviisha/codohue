@@ -236,12 +236,12 @@
 
 **Purpose**: Complete documentation, rollout rehearsal, compatibility gates, and repository-wide release proof.
 
-- [ ] T105 [P] Update lifecycle generation, exact stream retention, catalog cursor, stable error, health-details, metrics-auth, and SDK usage in `README.md`, `sdk/go/README.md`, and `sdk/go/redistream/README.md`
+- [X] T105 [P] Update lifecycle generation, exact stream retention, catalog cursor, stable error, health-details, metrics-auth, and SDK usage in `README.md`, `sdk/go/README.md`, and `sdk/go/redistream/README.md`
 - [X] T106 [P] Document the four gated releases, exact-retention canary and kill switch, generation adoption window, guarded legacy closure, delete/reset enablement, and rollback boundaries in `deploy/backend-audit-remediation.md`
 - [X] T107 Add the compensating `only_state=all` re-embed procedure and namespace completion evidence template in `deploy/backend-audit-remediation.md`
-- [ ] T108 Run `make lint`, `make build`, `make test`, `make test-race`, `make test-e2e`, `make compose-check`, `go mod verify`, and `make vuln`, then record every command result in `specs/007-backend-audit-remediation/verification.md`
-- [ ] T109 Rehearse migrations 024-026, legacy closure, ambiguous repair refusal, repair resume, coordinated snapshot restore, and migration-down safety, then record results in `specs/007-backend-audit-remediation/verification.md`
-- [ ] T110 Confirm `git diff --check` passes and the complete remediation diff contains no changes under `web/admin`, then record the scope check in `specs/007-backend-audit-remediation/verification.md`
+- [~] T108 Run `make lint`, `make build`, `make test`, `make test-race`, `make test-e2e`, `make compose-check`, `go mod verify`, and `make vuln`, then record every command result in `specs/007-backend-audit-remediation/verification.md` — all recorded and passing except `make test-e2e`, which needs a live stack (see verification.md)
+- [~] T109 (blocked on a live environment; rehearsal steps written up in verification.md) Rehearse migrations 024-026, legacy closure, ambiguous repair refusal, repair resume, coordinated snapshot restore, and migration-down safety, then record results in `specs/007-backend-audit-remediation/verification.md`
+- [X] T110 Confirm `git diff --check` passes and the complete remediation diff contains no changes under `web/admin`, then record the scope check in `specs/007-backend-audit-remediation/verification.md`
 
 ---
 
