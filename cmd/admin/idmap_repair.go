@@ -250,27 +250,32 @@ func buildRepairService(ctx context.Context) (*idmap.RepairService, func(), erro
 	nsConfigSvc := nsconfig.NewService(nsconfig.NewRepository(db))
 
 	repairRepo := idmap.NewRepairRepository(db)
+	// One definition of "which generation is this namespace on", shared by the
+	// audit (which derives physical collection names from it) and the rebuild
+	// (which asserts a lease for it). Two resolvers could disagree and the
+	// repair would inspect one generation while rebuilding another.
+	generationOf := func(ctx context.Context, namespace string) (int64, error) {
+		nsCfg, err := nsConfigSvc.Get(ctx, namespace)
+		if err != nil {
+			return 0, fmt.Errorf("load config for %q: %w", namespace, err)
+		}
+		if nsCfg == nil || nsCfg.Generation < 1 {
+			return 1, nil
+		}
+		return nsCfg.Generation, nil
+	}
 	evidence := &repairEvidenceSource{
 		repo:       repairRepo,
 		qdrant:     qdrantClient,
 		namespaces: computeRepo.GetActiveNamespaces,
-		generation: func(ctx context.Context, namespace string) (int64, error) {
-			nsCfg, err := nsConfigSvc.Get(ctx, namespace)
-			if err != nil {
-				return 0, fmt.Errorf("load config for %q: %w", namespace, err)
-			}
-			if nsCfg == nil || nsCfg.Generation < 1 {
-				return 1, nil
-			}
-			return nsCfg.Generation, nil
-		},
+		generation: generationOf,
 	}
 
 	service := idmap.NewRepairService(
 		repairRepo,
 		evidence,
 		&qdrantPointMover{client: qdrantClient},
-		&sparseRebuildAdapter{svc: computeSvc, lambda: defaultRepairLambda},
+		&sparseRebuildAdapter{svc: computeSvc, generation: generationOf, lambda: defaultRepairLambda},
 		&globalFenceAdapter{svc: lifecycleSvc},
 	)
 	return service, func() { db.Close() }, nil

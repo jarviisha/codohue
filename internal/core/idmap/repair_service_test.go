@@ -176,10 +176,17 @@ func TestManifestHash_CoversDecisionsAndIsOrderIndependent(t *testing.T) {
 		t.Error("changing a target must change the hash")
 	}
 
+	// Item state is deliberately outside the hash. Apply advances items as it
+	// runs and both apply and resume check the recorded hash first, so folding
+	// progress in would make the recorded value unreproducible after the first
+	// partial run — resume could never start. The audited decision (which
+	// identities, from which ids, onto which target) is what the hash pins;
+	// quarantine is enforced separately by the explicit quarantined-items gate
+	// in applyFenced, which does not depend on the hash.
 	requarantined := append([]RepairItem(nil), base...)
 	requarantined[0].State = RepairItemQuarantined
-	if ManifestHash(base) == ManifestHash(requarantined) {
-		t.Error("changing an item's state must change the hash")
+	if ManifestHash(base) != ManifestHash(requarantined) {
+		t.Error("item progress must not change the hash, or an interrupted run cannot resume")
 	}
 }
 

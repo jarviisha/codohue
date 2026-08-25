@@ -49,9 +49,16 @@ func ManifestHash(items []RepairItem) string {
 		for i, old := range olds {
 			oldParts[i] = fmt.Sprint(old)
 		}
+		// Deliberately excludes item.State. The hash pins the decision the
+		// operator reviewed — which identities move, from which observed ids,
+		// onto which target. Progress through pending → moved → cleaned is the
+		// execution's own bookkeeping, and apply advances it as it runs: fold
+		// it in and the first partial apply makes the recorded hash
+		// unreachable, so resume can never start and the interrupted run can
+		// only be abandoned.
 		keys = append(keys, strings.Join([]string{
 			item.Namespace, item.EntityType, item.StringID,
-			strings.Join(oldParts, ","), target, string(item.State),
+			strings.Join(oldParts, ","), target,
 		}, "\x1f"))
 	}
 	sort.Strings(keys)

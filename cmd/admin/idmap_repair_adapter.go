@@ -102,12 +102,29 @@ func payloadIDField(collection string) string {
 // subject numeric ids in their coordinates, so once mappings move, the whole
 // vector is stale — there is no incremental edit that fixes it.
 type sparseRebuildAdapter struct {
-	svc    *compute.Service
-	lambda float64
+	svc        *compute.Service
+	generation func(context.Context, string) (int64, error)
+	lambda     float64
 }
 
+// RebuildSparse recomputes one namespace under an explicit namespace lease.
+//
+// The repair holds the global exclusive lease, which freezes every writer in
+// the fleet but carries no per-namespace lease — and minting a numeric id
+// requires one. Without this the rebuild fails on its first subject with
+// ErrLeaseRequired and takes the whole run down with it. Taking a real
+// namespace lease here is not an option either: the fixed lock order is global
+// before namespace, and the global lease is already held, so acquiring one
+// would deadlock against the fence the repair itself installed. Attaching the
+// lease this way is what nslifecycle.ContextWithLease exists for — the caller
+// already holds strictly stronger authority than the lease it is asserting.
 func (a *sparseRebuildAdapter) RebuildSparse(ctx context.Context, namespace string) error {
-	if _, _, err := a.svc.RecomputeNamespace(ctx, namespace, a.lambda); err != nil {
+	generation, err := a.generation(ctx, namespace)
+	if err != nil {
+		return fmt.Errorf("resolve generation for %q: %w", namespace, err)
+	}
+	leased := nslifecycle.ContextWithLease(ctx, namespace, generation, nslifecycle.LockExclusive)
+	if _, _, err := a.svc.RecomputeNamespace(leased, namespace, a.lambda); err != nil {
 		return fmt.Errorf("recompute %q: %w", namespace, err)
 	}
 	return nil

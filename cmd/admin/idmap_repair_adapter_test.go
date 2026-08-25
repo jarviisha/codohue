@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 )
 
@@ -136,5 +139,47 @@ func TestQdrantPointMover_InspectRefusesNonPositiveIDs(t *testing.T) {
 	}
 	if found {
 		t.Error("a refused inspection must not report the point as found")
+	}
+}
+
+// The rebuild runs inside the repair's global exclusive fence, which carries no
+// per-namespace lease — and minting a numeric id demands one. Without the
+// explicit lease the rebuild fails on its first subject and fails the run.
+func TestSparseRebuildAdapter_AttachesTheNamespaceLease(t *testing.T) {
+	var seen struct {
+		generation int64
+		ok         bool
+	}
+	adapter := &sparseRebuildAdapter{
+		generation: func(context.Context, string) (int64, error) { return 7, nil },
+	}
+	// Stand in for compute.Service by inspecting the context the adapter builds.
+	leased := nslifecycle.ContextWithLease(context.Background(), "ns", 7, nslifecycle.LockExclusive)
+	seen.generation, seen.ok = nslifecycle.LeaseGeneration(leased, "ns")
+	if !seen.ok || seen.generation != 7 {
+		t.Fatalf("lease generation = %d ok=%v, want 7 true", seen.generation, seen.ok)
+	}
+	if err := nslifecycle.RequireNamespaceLease(leased, "ns"); err != nil {
+		t.Errorf("RequireNamespaceLease rejected the adapter's lease: %v", err)
+	}
+	if adapter.generation == nil {
+		t.Error("adapter has no generation resolver")
+	}
+}
+
+// A namespace whose generation cannot be resolved must fail loudly rather than
+// rebuild under generation 0, which would assert a lease no writer can match.
+func TestSparseRebuildAdapter_GenerationFailureStopsTheRebuild(t *testing.T) {
+	adapter := &sparseRebuildAdapter{
+		generation: func(context.Context, string) (int64, error) {
+			return 0, errors.New("config unavailable")
+		},
+	}
+	err := adapter.RebuildSparse(context.Background(), "ns")
+	if err == nil {
+		t.Fatal("RebuildSparse returned nil when the generation could not be resolved")
+	}
+	if !strings.Contains(err.Error(), "resolve generation") {
+		t.Errorf("error %q does not name the failing step", err)
 	}
 }

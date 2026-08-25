@@ -526,3 +526,42 @@ func TestRepairRepository_RetargetMappingRefusesAnUnknownIdentity(t *testing.T) 
 		t.Fatal("retargeting a mapping that does not exist must fail loudly")
 	}
 }
+
+// Apply advances every item it completes, and both apply and resume check the
+// recorded hash before doing anything. If progress fed the hash, the first
+// interrupted run would be unresumable — the recorded value could never be
+// reproduced again.
+func TestManifestHash_IgnoresItemProgress(t *testing.T) {
+	ten := int64(10)
+	base := []RepairItem{{
+		Namespace: "ns", EntityType: "object", StringID: "o1",
+		OldNumericIDs: []int64{9}, TargetNumericID: &ten, State: RepairItemPending,
+	}}
+	want := ManifestHash(base)
+
+	for _, state := range []RepairItemState{
+		RepairItemCopied, RepairItemVerified, RepairItemCleaned, RepairItemFailed,
+	} {
+		advanced := append([]RepairItem(nil), base...)
+		advanced[0].State = state
+		if got := ManifestHash(advanced); got != want {
+			t.Errorf("state %q changed the manifest hash; a partly-applied run becomes unresumable", state)
+		}
+	}
+}
+
+// The identity set itself must still be pinned — that is what the operator
+// approved, and a changed one means the world moved under the run.
+func TestManifestHash_StillCatchesADifferentTarget(t *testing.T) {
+	ten, eleven := int64(10), int64(11)
+	base := []RepairItem{{
+		Namespace: "ns", EntityType: "object", StringID: "o1",
+		OldNumericIDs: []int64{9}, TargetNumericID: &ten,
+	}}
+	retargeted := append([]RepairItem(nil), base...)
+	retargeted[0].TargetNumericID = &eleven
+
+	if ManifestHash(base) == ManifestHash(retargeted) {
+		t.Error("a different target id left the manifest hash unchanged")
+	}
+}

@@ -646,8 +646,10 @@ func (s *RepairService) applyItem(ctx context.Context, item RepairItem) error {
 
 // VerifyReport is the outcome of the post-apply verification.
 type VerifyReport struct {
-	RunID     int64
-	Checked   int
+	RunID   int64
+	Checked int
+	// Unmoved holds every item that failed verification — a target point that
+	// never landed as much as an old point that was never cleaned.
 	Unmoved   []RepairItem
 	Remaining []RepairItem
 	// Problems explains what failed, so the operator is not left comparing
@@ -703,7 +705,16 @@ func (s *RepairService) Verify(ctx context.Context, runID int64) (*VerifyReport,
 		}
 		return report, nil
 	}
-	message := fmt.Sprintf("%d item(s) unfinished, %d old point(s) still present", len(report.Remaining), len(report.Unmoved))
+	// Names the counts, not a cause. Unmoved collects every item that failed
+	// verification, and "target point is missing" lands there just as "the old
+	// point is still present" does — asserting the latter sends the operator
+	// looking for leftovers when the collection may be empty. The per-item
+	// Problems lines above already say which it was.
+	message := fmt.Sprintf("%d item(s) unfinished, %d item(s) failed verification",
+		len(report.Remaining), len(report.Unmoved))
+	if len(report.Problems) > 0 {
+		message += ": " + report.Problems[0]
+	}
 	if err := s.repo.SetRunState(ctx, runID, RepairRunFailed, message); err != nil {
 		return nil, err
 	}

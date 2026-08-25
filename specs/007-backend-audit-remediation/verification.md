@@ -129,10 +129,97 @@ convergence rounds in a row have found defects in tests written the round
 before, all of them invisible to compilation.** Running the suites once is
 worth more than another reasoning pass.
 
+## Executed against a live stack — 2026-08-25
+
+Infrastructure: the shared local PostgreSQL 17 / Redis 7 / Qdrant containers,
+`codohue` database only, migrated to 027. Checkpoint dump at
+`/tmp/codohue-backup/t109-checkpoint.dump`; Qdrant snapshots listed inline
+below. Everything under "Outstanding" that follows was superseded by these
+runs and is kept for the command references.
+
+### T108 — full gate set
+
+| Command | Result |
+|---------|--------|
+| `make lint` | 0 issues across all four modules |
+| `make build` | all four binaries |
+| `make test` (with `DATABASE_URL`) | all packages ok |
+| `make test-race` | ok, no data races |
+| `make test-e2e` | **117 passed, 0 failed, 0 skipped** (238s) |
+| `make compose-check` | all three compose files valid |
+| `go mod verify` | all modules verified |
+| `make vuln` | 0 vulnerabilities called |
+
+The first real run was 105/10/2 — ten failures across four distinct causes,
+none of which compilation or reasoning had surfaced:
+
+| Failure | Cause | Resolution |
+|---------|-------|------------|
+| 4 stream-ingest tests | **Production defect.** New namespaces were created with `legacy_messages_allowed = FALSE`, so every envelope published on the documented Redis Streams transport was acked and dropped with nothing returned to the producer | Generation 1 has one incarnation, so an unqualified envelope is unambiguous; both creation paths now seed the gate open unless it was closed fleet-wide. Pinned by three DB-backed tests in `internal/core/nslifecycle/legacy_gate_test.go` |
+| `TestCronRecompute_NamespaceWithoutEventsProducesNoArtifacts` | **Production defect.** Enumerating namespaces from `namespace_configs` (needed for the expiry sweep) also materialised four Qdrant collections for every namespace that had never received an event | Phases 1 and 2 now gate on `Repository.HasAnyEvents`; a namespace whose events merely aged out still reaches the sweep |
+| 2 healthz tests | Stale contract. They asserted per-dependency keys on public `/healthz`, removed when that surface was sanitized | Rewritten to pin both surfaces: public is aggregate-only, `?details=true` carries the breakdown and rejects the admin key |
+| 3 idmap-repair + 2 recommendation-state tests | Defects in tests added by this work — wrong Qdrant vector name, missing FK parents, counting a collection before cron creates it | Fixed against the established patterns |
+
+Running the unit suite with `DATABASE_URL` set (it had been skipping) exposed
+18 further failures across five packages, all the same shape: migration 025's
+foreign keys mean a test that seeds an event, object or catalog item for an
+invented namespace gets an FK error, not a row. Each package now has an
+`ensureNamespace` helper called from its lowest-level seeder.
+
+### T109 — migration and operational rehearsal
+
+| Step | Result |
+|------|--------|
+| 1. Migrations 024–027 up | Clean to 027. Required deleting 339 orphan rows first — migration 025's integrity preflight refuses while they exist, and e2e cleanup had left them behind (see the finding below) |
+| 2. Legacy-gate closure | `changed=true` then `changed=false` on the second run; all 224 namespace gates driven to FALSE. Restored afterwards, since closure is deliberately one-way |
+| 3. Ambiguous repair refusal | Two points claiming one object id → audit quarantined the identity; `apply` refused with **exit code 1** and a byte-identical mapping digest and point count before and after |
+| 4. Repair resume | Interrupted mid-apply (SIGKILL): run left `applying`, 15 items `cleaned`, 14 `pending`. After two fixes below, `resume` continued to 29 cleaned and rebuilt sparse vectors |
+| 5. Coordinated snapshot restore | Collection wiped, then recovered from the checkpoint snapshot; PostgreSQL dump restored to a scratch database. Both stores agreed on the checkpoint — the mapping and the point matched, and a namespace created after the checkpoint was absent |
+| 6. Migration-down safety | `022` down refused on a cross-namespace duplicate `string_id`; `026` down refused on a shared `numeric_id`. Both raised before any constraint mutation — the composite primary key and both repair tables survived intact |
+
+Step 4 did not pass on the first attempt, and what blocked it were two defects
+that only a live interrupt could expose:
+
+- **`ManifestHash` included `item.State`.** Apply advances item state as it
+  runs, and both apply and resume compare the recomputed hash against the
+  recorded one before doing anything — so the first partial apply made the
+  recorded hash unreproducible and `resume` could never start. The hash now
+  covers the audited decision only. Quarantine is still enforced, by the
+  explicit gate in `applyFenced` that never depended on the hash.
+- **The sparse rebuild ran without a namespace lease.** It executes inside the
+  repair's global exclusive fence, which carries no per-namespace lease, while
+  minting a numeric id requires one — so every subject upsert failed with
+  `ErrLeaseRequired` and took the run down. Acquiring a real lease would
+  deadlock against the fence (fixed order: global before namespace), so the
+  adapter now asserts one with `nslifecycle.ContextWithLease`.
+
+Two smaller things the rehearsal surfaced:
+
+- `Verify`'s summary line reported "N old point(s) still present" for every
+  failure, including "target point is missing" — pointing an operator at
+  leftovers when the collection was empty. It now names the count without
+  asserting a cause, and quotes the first specific problem.
+- A failed down migration leaves golang-migrate's `schema_migrations` row
+  `dirty = true` even though the schema is untouched (the transaction rolls
+  back). An operator must `migrate force <version>` before retrying; the
+  refusal messages should say so.
+
+### Findings for the deployment runbook
+
+1. **Migration 025 will refuse on any deployment with historical deleted
+   namespaces.** Its integrity preflight found 339 orphan namespaces here —
+   rows in `batch_run_logs`, `catalog_items`, `objects` and
+   `catalog_backlog_samples` whose `namespace_configs` row was deleted long
+   ago. [deploy/backend-audit-remediation.md](../../deploy/backend-audit-remediation.md)
+   gives no remediation query, so an operator hits a hard stop with no
+   documented next step.
+2. **The e2e cleanup is the source of those orphans.** It deletes
+   `namespace_configs` but not the four tables that reference it, so every
+   suite run leaves more behind.
+
 ## Outstanding — requires a live environment
 
-These cannot be completed from a workstation without the stack running. Each
-needs an operator with infra access.
+Superseded by the runs above; kept for the exact command references.
 
 ### T108 — end-to-end suite
 

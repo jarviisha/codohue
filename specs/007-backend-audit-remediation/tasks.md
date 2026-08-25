@@ -239,8 +239,8 @@
 - [X] T105 [P] Update lifecycle generation, exact stream retention, catalog cursor, stable error, health-details, metrics-auth, and SDK usage in `README.md`, `sdk/go/README.md`, and `sdk/go/redistream/README.md`
 - [X] T106 [P] Document the four gated releases, exact-retention canary and kill switch, generation adoption window, guarded legacy closure, delete/reset enablement, and rollback boundaries in `deploy/backend-audit-remediation.md`
 - [X] T107 Add the compensating `only_state=all` re-embed procedure and namespace completion evidence template in `deploy/backend-audit-remediation.md`
-- [~] T108 Run `make lint`, `make build`, `make test`, `make test-race`, `make test-e2e`, `make compose-check`, `go mod verify`, and `make vuln`, then record every command result in `specs/007-backend-audit-remediation/verification.md` — all recorded and passing except `make test-e2e`, which needs a live stack (see verification.md)
-- [~] T109 (blocked on a live environment; rehearsal steps written up in verification.md) Rehearse migrations 024-026, legacy closure, ambiguous repair refusal, repair resume, coordinated snapshot restore, and migration-down safety, then record results in `specs/007-backend-audit-remediation/verification.md`
+- [X] T108 Run `make lint`, `make build`, `make test`, `make test-race`, `make test-e2e`, `make compose-check`, `go mod verify`, and `make vuln`, then record every command result in `specs/007-backend-audit-remediation/verification.md` — executed 2026-08-25 against a live stack; e2e 117/117
+- [X] T109 Rehearse migrations 024-026, legacy closure, ambiguous repair refusal, repair resume, coordinated snapshot restore, and migration-down safety, then record results in `specs/007-backend-audit-remediation/verification.md` — all six steps executed 2026-08-25
 - [X] T110 Confirm `git diff --check` passes and the complete remediation diff contains no changes under `web/admin`, then record the scope check in `specs/007-backend-audit-remediation/verification.md`
 
 ---
@@ -434,7 +434,7 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 ## Phase 13: Convergence
 
 - [X] T123 Add migration 027 to the Release 4 gate and the per-namespace completion evidence template in `deploy/backend-audit-remediation.md`, so an operator following the rollout does not stop at 026 and leave `rebuilt_namespaces` absent per plan Release 4 step 1 (partial)
-- [X] T124 Add DB-backed coverage for the repair run/item lifecycle — create, snapshot recording, item and run state transitions, mapping retarget, id reservation and the rebuilt-namespace record — in `e2e/idmap_repair_test.go` per FR-021 (partial)
+- [X] T124 Add DB-backed coverage for the repair run/item lifecycle — create, snapshot recording, item and run state transitions, mapping retarget, id reservation and the rebuilt-namespace record — in `e2e/idmap_repair_test.go` per FR-021 (executed; nine tests pass against a migrated database)
 - [X] T125 Bring `CLAUDE.md` up to date with the migration list through 027, the `CODOHUE_STREAM_RETENTION_*` settings, and the changed API contract (`namespace_not_active`, `namespace_config_unavailable`, `invalid_object_created_at`, `next_cursor`, `/healthz?details=true`) per Constitution III documentation conventions (partial)
 
 ---
