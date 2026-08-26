@@ -110,12 +110,21 @@ func postEventIgnoringStatus(namespace, apiKey, subjectID, objectID string) erro
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := raceWriterClient.Do(req)
 	if err != nil {
 		return err
 	}
 	return resp.Body.Close()
 }
+
+// raceWriterClient bounds every write in the race. http.DefaultClient has no
+// timeout, so a server that stops answering turned this test into a silent
+// 15-minute hang ending in a goroutine dump — the writers never re-checked
+// `stop`, so writers.Wait() blocked forever and the failure named a test
+// timeout rather than the stuck request. A write that has not answered in 30s
+// is a defect regardless of what caused it; reporting it as a transport error
+// puts the diagnosis in the test output.
+var raceWriterClient = &http.Client{Timeout: 30 * time.Second}
 
 // Recreating a name mints a new generation, and the new incarnation's physical
 // artifacts are separately named. A delayed writer holding the old generation

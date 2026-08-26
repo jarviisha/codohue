@@ -94,7 +94,12 @@ func run() error {
 	//   - the id_mappings allocator        (idmap.Service)
 	//   - the qdrant client                (for upserts to {ns}_objects_dense)
 	lifecycleRepo := nslifecycle.NewRepository(db)
-	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, nslifecycle.NewPostgresLocker(db))
+	lifecycleLocker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		return fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	defer lifecycleLocker.Close()
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, lifecycleLocker)
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
 

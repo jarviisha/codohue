@@ -220,7 +220,7 @@ func TestIdmapRepair_SnapshotsAreRequiredForEveryAffectedCollection(t *testing.T
 	// one, so a nil fence would short-circuit before the snapshot check and
 	// this test would prove nothing about the guard it names.
 	lifecycleSvc := nslifecycle.NewService(
-		nslifecycle.NewRepository(testDB), nslifecycle.NewPostgresLocker(testDB))
+		nslifecycle.NewRepository(testDB), mustLifecycleLocker(t))
 	service := idmap.NewRepairService(repairRepo, nil, nil, nil, &e2eGlobalFence{svc: lifecycleSvc})
 
 	// The manifest names two collections; only one snapshot is recorded.

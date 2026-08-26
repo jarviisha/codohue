@@ -246,7 +246,12 @@ func buildRepairService(ctx context.Context) (*idmap.RepairService, func(), erro
 	computeRepo := compute.NewRepository(db)
 	idmapSvc := idmap.NewService(idmap.NewRepository(db))
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
-	lifecycleSvc := nslifecycle.NewService(nslifecycle.NewRepository(db), nslifecycle.NewPostgresLocker(db))
+	lifecycleLocker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	lifecycleSvc := nslifecycle.NewService(nslifecycle.NewRepository(db), lifecycleLocker)
 	nsConfigSvc := nsconfig.NewService(nsconfig.NewRepository(db))
 
 	repairRepo := idmap.NewRepairRepository(db)
@@ -278,7 +283,7 @@ func buildRepairService(ctx context.Context) (*idmap.RepairService, func(), erro
 		&sparseRebuildAdapter{svc: computeSvc, generation: generationOf, lambda: defaultRepairLambda},
 		&globalFenceAdapter{svc: lifecycleSvc},
 	)
-	return service, func() { db.Close() }, nil
+	return service, func() { lifecycleLocker.Close(); db.Close() }, nil
 }
 
 // defaultRepairLambda matches the compute job's fallback decay. The rebuild is

@@ -30,34 +30,82 @@ type Locker interface {
 	Acquire(context.Context, string, LockMode) (Lock, error)
 }
 
-type postgresLock struct {
-	conn *pgxpool.Conn
+type heldKey struct {
 	key  int64
 	mode LockMode
+}
+
+type postgresLock struct {
+	conn *pgxpool.Conn
+	held []heldKey
 	once sync.Once
 	err  error
 }
 
-// Release drops the advisory lock and returns the pooled connection. It is
-// idempotent: releasing twice must not return the connection twice.
+func unlockQuery(mode LockMode) string {
+	if mode == LockShared {
+		return `SELECT pg_advisory_unlock_shared($1)`
+	}
+	return `SELECT pg_advisory_unlock($1)`
+}
+
+// Release drops every advisory lock on the session and returns the pooled
+// connection. It is idempotent: releasing twice must not return the connection
+// twice. Keys unlock in reverse acquisition order, and one failure does not
+// skip the rest — a leaked advisory lock outlives the request.
 func (l *postgresLock) Release(ctx context.Context) error {
 	l.once.Do(func() {
-		query := `SELECT pg_advisory_unlock($1)`
-		if l.mode == LockShared {
-			query = `SELECT pg_advisory_unlock_shared($1)`
+		var errs []error
+		for i := len(l.held) - 1; i >= 0; i-- {
+			if _, err := l.conn.Exec(ctx, unlockQuery(l.held[i].mode), l.held[i].key); err != nil {
+				errs = append(errs, err)
+			}
 		}
-		_, l.err = l.conn.Exec(ctx, query, l.key)
+		l.err = errors.Join(errs...)
 		l.conn.Release()
 	})
 	return l.err
 }
 
-// PostgresLocker holds session locks on dedicated pool connections.
-type PostgresLocker struct{ db *pgxpool.Pool }
+// PostgresLocker holds session advisory locks on its own dedicated pool.
+//
+// The pool is deliberately separate from the caller's work pool. A fenced write
+// holds its lock session for the whole request *and* needs a second connection
+// to do the actual write; drawing both from one pool deadlocks as soon as
+// concurrent writes reach the pool size, because every request then holds a
+// connection while waiting for one only another blocked request could release.
+// Two pools make that cycle impossible — a lock holder can always obtain a work
+// connection and finish. See TestPostgresLockerDoesNotDeadlockASaturatedPool.
+type PostgresLocker struct {
+	pool  *pgxpool.Pool
+	owned bool
+}
 
-// NewPostgresLocker builds a locker over the pool. Each held lock pins one
-// connection, because a session advisory lock lives on the session.
-func NewPostgresLocker(db *pgxpool.Pool) *PostgresLocker { return &PostgresLocker{db: db} }
+// NewPostgresLocker builds a locker backed by its own pool, derived from the
+// work pool's configuration so it needs no separate DSN. Sized to the work
+// pool: beyond that many concurrent fenced writes, callers queue for a lock
+// session rather than deadlocking.
+func NewPostgresLocker(db *pgxpool.Pool) (*PostgresLocker, error) {
+	cfg := db.Config().Copy()
+	if cfg.MaxConns < 4 {
+		cfg.MaxConns = 4
+	}
+	// Lock sessions are idle most of their life; keeping a warm minimum would
+	// hold connections a busy work pool may need.
+	cfg.MinConns = 0
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create lifecycle lock pool: %w", err)
+	}
+	return &PostgresLocker{pool: pool, owned: true}, nil
+}
+
+// Close releases the dedicated lock pool.
+func (l *PostgresLocker) Close() {
+	if l != nil && l.owned && l.pool != nil {
+		l.pool.Close()
+	}
+}
 
 func lockKey(name string) int64 {
 	hash := fnv.New64a()
@@ -65,21 +113,56 @@ func lockKey(name string) int64 {
 	return int64(hash.Sum64())
 }
 
+func lockQuery(mode LockMode) string {
+	if mode == LockShared {
+		return `SELECT pg_advisory_lock_shared($1)`
+	}
+	return `SELECT pg_advisory_lock($1)`
+}
+
 // Acquire blocks until the named lock is held in the requested mode.
 func (l *PostgresLocker) Acquire(ctx context.Context, name string, mode LockMode) (Lock, error) {
-	conn, err := l.db.Acquire(ctx)
+	conn, err := l.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("acquire lifecycle lock connection: %w", err)
 	}
-	query := `SELECT pg_advisory_lock($1)`
-	if mode == LockShared {
-		query = `SELECT pg_advisory_lock_shared($1)`
-	}
-	if _, err := conn.Exec(ctx, query, lockKey(name)); err != nil {
+	if _, err := conn.Exec(ctx, lockQuery(mode), lockKey(name)); err != nil {
 		conn.Release()
 		return nil, fmt.Errorf("acquire lifecycle lock %q: %w", name, err)
 	}
-	return &postgresLock{conn: conn, key: lockKey(name), mode: mode}, nil
+	return &postgresLock{conn: conn, held: []heldKey{{key: lockKey(name), mode: mode}}}, nil
+}
+
+// AcquirePair takes the global lock and then the namespace lock on a *single*
+// session, and is why Service.acquirePair is not two Acquire calls.
+//
+// Advisory locks are per-session, so two locks on two pooled connections means
+// a request holds one connection while blocking for a second. N concurrent
+// writers against a pool of N then wedge permanently: each holds the global
+// lock and waits forever for a connection to take the namespace lock. One
+// session for both removes that cycle; the fixed global-before-namespace order
+// is preserved.
+func (l *PostgresLocker) AcquirePair(ctx context.Context, namespace string, namespaceMode LockMode) (Lock, error) {
+	conn, err := l.pool.Acquire(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("acquire lifecycle lock connection: %w", err)
+	}
+	held := &postgresLock{conn: conn}
+	for _, want := range []heldKey{
+		{key: lockKey("global"), mode: LockShared},
+		{key: lockKey("namespace:" + namespace), mode: namespaceMode},
+	} {
+		if _, err := conn.Exec(ctx, lockQuery(want.mode), want.key); err != nil {
+			// Release what this session already holds before handing the
+			// connection back, or the next borrower inherits the locks.
+			if releaseErr := held.Release(context.WithoutCancel(ctx)); releaseErr != nil {
+				slog.Warn("release partial lifecycle lock pair failed", "namespace", namespace, "error", releaseErr)
+			}
+			return nil, fmt.Errorf("acquire lifecycle lock pair for %q: %w", namespace, err)
+		}
+		held.held = append(held.held, want)
+	}
+	return held, nil
 }
 
 type leaseContextKey struct{}
@@ -139,9 +222,29 @@ func NewService(store Store, locker Locker) *Service {
 	return &Service{store: store, locker: locker, now: time.Now}
 }
 
+// pairLocker takes both lifecycle locks on one session. PostgresLocker
+// implements it; the in-memory fakes in tests do not, and fall back to the
+// two-lock path below, which still exercises the ordering contract.
+type pairLocker interface {
+	AcquirePair(ctx context.Context, namespace string, namespaceMode LockMode) (Lock, error)
+}
+
 // acquirePair takes the global lock before the namespace lock, always in that
 // order. Any caller that reversed it could deadlock against one that did not.
+//
+// Against a real database both locks land on one session, so a request never
+// holds a pooled connection while waiting for another one.
 func (s *Service) acquirePair(ctx context.Context, namespace string, namespaceMode LockMode) (global, namespaceLock Lock, err error) {
+	if pairwise, ok := s.locker.(pairLocker); ok {
+		both, pairErr := pairwise.AcquirePair(ctx, namespace, namespaceMode)
+		if pairErr != nil {
+			return nil, nil, pairErr
+		}
+		// releasePair releases namespace-then-global; the single held lock
+		// unlocks both keys, so it stands in for the namespace half and the
+		// global half is a no-op.
+		return noopLock{}, both, nil
+	}
 	global, err = s.locker.Acquire(ctx, "global", LockShared)
 	if err != nil {
 		return nil, nil, err
@@ -155,6 +258,12 @@ func (s *Service) acquirePair(ctx context.Context, namespace string, namespaceMo
 	}
 	return global, namespaceLock, nil
 }
+
+// noopLock stands in for the global half when both locks share one session.
+type noopLock struct{}
+
+// Release does nothing: the paired lock released both keys already.
+func (noopLock) Release(context.Context) error { return nil }
 
 func releasePair(ctx context.Context, namespaceLock, global Lock) error {
 	releaseCtx := context.WithoutCancel(ctx)

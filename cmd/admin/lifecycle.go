@@ -90,7 +90,12 @@ func runLifecycleCLI(args []string) error {
 	}
 	defer db.Close()
 	repo := nslifecycle.NewRepository(db)
-	service := nslifecycle.NewService(repo, nslifecycle.NewPostgresLocker(db))
+	locker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		return fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	defer locker.Close()
+	service := nslifecycle.NewService(repo, locker)
 	changed, err := runLifecycleCommand(ctx, args, service)
 	if err != nil {
 		return err

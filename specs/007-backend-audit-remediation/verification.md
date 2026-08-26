@@ -129,6 +129,77 @@ convergence rounds in a row have found defects in tests written the round
 before, all of them invisible to compilation.** Running the suites once is
 worth more than another reasoning pass.
 
+## Phase 19 — the lifecycle lock pair deadlocked a small pool
+
+CI e2e stayed red after Phase 18. The goroutine dump showed all four writers in
+`TestNamespaceLifecycle_ConcurrentWritersNeverOutliveADelete` blocked inside
+`http.Client.Do` for 14 minutes, so `writers.Wait()` never returned and the
+suite died on its own timeout.
+
+### Root cause — a production deadlock, not a test defect
+
+`WithWriter` fences every data-plane write with `acquirePair`: global-shared,
+then namespace-shared. Each was a **separate** `pg_advisory_lock` on a
+**separate pooled connection**, because a session advisory lock lives on its
+session. So one in-flight write pinned two pool connections and needed a third
+to do its actual work.
+
+`NewPool` never set `MaxConns`, so pgxpool's default applied:
+`max(4, runtime.NumCPU())`. A 16-core dev box got 16 and never saw it; a 4-vCPU
+CI runner got 4 and hit it every run. With four concurrent writers on a pool of
+four, all four took the global lock, exhausted the pool, and then waited forever
+for a connection to take the namespace lock — one only another blocked writer
+could release. Nothing timed out; the requests simply never returned.
+
+Reproduced deterministically at the package level (`MaxConns` pinned to 4):
+`took global=4, took namespace=0`, hung until the probe's own deadline.
+
+**This is not test-only.** Any deployment whose concurrent fenced writes reach
+the pool size wedges the data plane permanently.
+
+### Fix — both halves are load-bearing
+
+| Change | Why it alone is not enough |
+|--------|----------------------------|
+| `AcquirePair` takes **both** locks on one session | With two pools the cycle just moves inside the lock pool: writers still hold connection 1 while waiting for connection 2 |
+| `PostgresLocker` owns a **dedicated pool**, separate from the work pool | With one pool, `k` writers holding `k` lock connections still deadlock waiting for work connections at `k >= MaxConns` |
+
+Each was verified by reverting it in isolation against
+`TestPostgresLockerDoesNotDeadlockASaturatedPool`: sharing the caller's pool
+hangs the full 90s and fails; splitting the pair across two connections hangs
+the full 90s and fails. Both together pass in 0.02s. The test holds the pair
+*and* runs a query on the caller's pool, so it covers both halves of the cycle.
+
+`TestPostgresLockerReleasesBothKeys` pins the other half of a one-session pair:
+a released pair must leave zero advisory locks behind, or the next borrower of
+that connection inherits locks it never took.
+
+### What the e2e suite could and could not prove
+
+Running the suite against an API server pinned to `pool_max_conns=4` — CI's
+effective size, and confirmed honoured by `pgxpool.ParseConfig` — passed **both
+before and after the fix**. The e2e deadlock needs all four writers holding the
+global lock at once, and a fast local machine closes that window. The
+package-level probe is the deterministic guard; the e2e run is not evidence
+either way. It now also passes at `pool_max_conns=2`.
+
+`postEventIgnoringStatus` used `http.DefaultClient`, which has no timeout — the
+reason a stuck server became a silent 15-minute hang with a goroutine dump
+instead of a named failure. It now uses a 30s client, so the writer reports a
+transport error and the test fails with the diagnosis in it.
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues, all four modules |
+| `make build` | **pass** |
+| `make test` | **pass** |
+| `make test-race` | **pass** |
+| `make coverage-check-all` | **pass** |
+| `make test-e2e` | **pass** — 117 passed, 0 failed, 0 skipped (83s) |
+| `make compose-check` | **pass** |
+| `go mod verify` | **pass** |
+| `make vuln` | **pass** — clean in all four modules |
+
 ## Phase 18 — CI parity
 
 Executed 2026-08-26 after the first CI run on the pull request came back red.

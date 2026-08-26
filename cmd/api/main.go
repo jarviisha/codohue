@@ -102,7 +102,12 @@ func run() error {
 
 	// Core
 	lifecycleRepo := nslifecycle.NewRepository(db)
-	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, nslifecycle.NewPostgresLocker(db))
+	lifecycleLocker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		return fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	defer lifecycleLocker.Close()
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, lifecycleLocker)
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
 

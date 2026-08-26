@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/nsconfig"
 	qdrant "github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
@@ -604,4 +605,16 @@ func unavailableTCPAddress(t testing.TB) string {
 		t.Fatalf("close reserved TCP address: %v", err)
 	}
 	return address
+}
+
+// mustLifecycleLocker builds a lifecycle locker over the shared test pool. The
+// locker owns its own connection pool, so the test must close it.
+func mustLifecycleLocker(t testing.TB) *nslifecycle.PostgresLocker {
+	t.Helper()
+	locker, err := nslifecycle.NewPostgresLocker(testDB)
+	if err != nil {
+		t.Fatalf("new lifecycle locker: %v", err)
+	}
+	t.Cleanup(locker.Close)
+	return locker
 }
