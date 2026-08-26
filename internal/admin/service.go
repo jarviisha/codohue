@@ -20,6 +20,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // adminRepo is the repository interface used by Service.
@@ -948,8 +949,13 @@ func (s *Service) DeleteNamespace(ctx context.Context, namespace string) (*Names
 			return nil, nil
 		}
 		if err != nil {
+			// A failed delete leaves the namespace durably in `deleting`, so
+			// this counter is how an operator sees fenced namespaces piling up
+			// without reading the ledger.
+			metrics.NamespaceLifecycleOperationsTotal.WithLabelValues("delete", "failure").Inc()
 			return nil, err
 		}
+		metrics.NamespaceLifecycleOperationsTotal.WithLabelValues("delete", "success").Inc()
 		return response, nil
 	}
 	// Hold the namespace's compute lock for the whole wipe: a cron tick or
@@ -1068,6 +1074,13 @@ func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
 			response = &ResetAppResponse{NamespacesDeleted: namespacesDeleted, EventsDeleted: eventsDeleted, Namespaces: names}
 			return nil
 		})
+		outcome := "success"
+		if err != nil {
+			// A failed reset leaves the system durably in `resetting`, which
+			// blocks every writer until it is resumed.
+			outcome = "failure"
+		}
+		metrics.NamespaceLifecycleOperationsTotal.WithLabelValues("reset", outcome).Inc()
 		return response, err
 	}
 	// Snapshot the namespace list BEFORE truncating so the response body

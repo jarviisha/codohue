@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // ─── fake repo ────────────────────────────────────────────────────────────────
@@ -1212,5 +1214,56 @@ func TestResetApp_PersistsFailureAndResumesDeletingNamespaces(t *testing.T) {
 	}
 	if lifecycle.lifecycles["alpha"].State != nslifecycle.StateDeleted || lifecycle.system != nslifecycle.SystemActive {
 		t.Fatalf("system=%q namespace=%q", lifecycle.system, lifecycle.lifecycles["alpha"].State)
+	}
+}
+
+// TestLifecycleOperationsMetricRecordsBothOutcomes pins the counter at its call
+// sites. It was registered but never observed, so it read zero forever — the
+// failure count in particular is how an operator sees namespaces piling up
+// durably fenced in `deleting` without reading the ledger.
+func TestLifecycleOperationsMetricRecordsBothOutcomes(t *testing.T) {
+	metrics.NamespaceLifecycleOperationsTotal.Reset()
+	t.Cleanup(metrics.NamespaceLifecycleOperationsTotal.Reset)
+
+	count := func(operation, outcome string) float64 {
+		return testutil.ToFloat64(metrics.NamespaceLifecycleOperationsTotal.WithLabelValues(operation, outcome))
+	}
+
+	// A cleanup failure leaves the namespace fenced in `deleting`.
+	failing := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1", Generation: 2}, clearErr: errors.New("redis unavailable")}
+	failingSvc := newTestService(failing, "", "")
+	failingSvc.SetLifecycleCoordinator(newFakeLifecycle("ns1", 2))
+	if _, err := failingSvc.DeleteNamespace(context.Background(), "ns1"); err == nil {
+		t.Fatal("expected partial cleanup failure")
+	}
+	if got := count("delete", "failure"); got != 1 {
+		t.Errorf("delete/failure = %v, want 1", got)
+	}
+	if got := count("delete", "success"); got != 0 {
+		t.Errorf("delete/success = %v, want a failed delete not to count as success", got)
+	}
+
+	ok := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns2", Generation: 1}}
+	okSvc := newTestService(ok, "", "")
+	okSvc.SetLifecycleCoordinator(newFakeLifecycle("ns2", 1))
+	if _, err := okSvc.DeleteNamespace(context.Background(), "ns2"); err != nil {
+		t.Fatalf("DeleteNamespace: %v", err)
+	}
+	if got := count("delete", "success"); got != 1 {
+		t.Errorf("delete/success = %v, want 1", got)
+	}
+
+	resetRepo := &fakeRepo{namespaces: []NamespaceConfig{{Namespace: "ns3", Generation: 1}}}
+	resetSvc := newTestService(resetRepo, "", "")
+	resetSvc.SetLifecycleCoordinator(newFakeLifecycle("ns3", 1))
+	if _, err := resetSvc.ResetApp(context.Background()); err != nil {
+		t.Fatalf("ResetApp: %v", err)
+	}
+	if got := count("reset", "success"); got != 1 {
+		t.Errorf("reset/success = %v, want 1", got)
+	}
+	// Reset and delete are separate operations and must not share a series.
+	if got := count("reset", "failure"); got != 0 {
+		t.Errorf("reset/failure = %v, want 0", got)
 	}
 }

@@ -7,6 +7,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/infra/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func evidenceFor(namespace string, mappings map[string]map[string]int64, points ...CollectionEvidence) *NamespaceEvidence {
@@ -1019,3 +1022,51 @@ func TestVerify_LeavesUnfinishedItemsAlone(t *testing.T) {
 type noopRebuilder struct{}
 
 func (noopRebuilder) RebuildSparse(context.Context, string) error { return nil }
+
+// TestPublishManifestMetricsResetsStaleStates pins the reset: without it a
+// state that drains to zero keeps reporting its last non-zero value, and an
+// operator watching a repair finish would see `pending` frozen forever.
+func TestPublishManifestMetricsResetsStaleStates(t *testing.T) {
+	t.Cleanup(metrics.IDMappingRepairItems.Reset)
+
+	publishManifestMetrics([]RepairItem{
+		{EntityType: "object", State: RepairItemPending},
+		{EntityType: "object", State: RepairItemPending},
+		{EntityType: "subject", State: RepairItemQuarantined},
+	})
+	if got := testutil.ToFloat64(metrics.IDMappingRepairItems.WithLabelValues(string(RepairItemPending), "object")); got != 2 {
+		t.Fatalf("pending/object = %v, want 2", got)
+	}
+	if got := testutil.ToFloat64(metrics.IDMappingRepairItems.WithLabelValues(string(RepairItemQuarantined), "subject")); got != 1 {
+		t.Fatalf("quarantined/subject = %v, want 1", got)
+	}
+
+	// The run drains: nothing is pending or quarantined any more.
+	publishManifestMetrics([]RepairItem{
+		{EntityType: "object", State: RepairItemCleaned},
+		{EntityType: "object", State: RepairItemCleaned},
+		{EntityType: "subject", State: RepairItemCleaned},
+	})
+	if got := testutil.ToFloat64(metrics.IDMappingRepairItems.WithLabelValues(string(RepairItemPending), "object")); got != 0 {
+		t.Errorf("pending/object = %v after draining, want 0", got)
+	}
+	if got := testutil.ToFloat64(metrics.IDMappingRepairItems.WithLabelValues(string(RepairItemQuarantined), "subject")); got != 0 {
+		t.Errorf("quarantined/subject = %v after draining, want 0", got)
+	}
+	if got := testutil.ToFloat64(metrics.IDMappingRepairItems.WithLabelValues(string(RepairItemCleaned), "object")); got != 2 {
+		t.Errorf("cleaned/object = %v, want 2", got)
+	}
+}
+
+// TestPublishManifestMetricsOnAnEmptyManifest guards the zero case: an audit
+// that finds nothing must clear the gauge, not leave the previous run's counts.
+func TestPublishManifestMetricsOnAnEmptyManifest(t *testing.T) {
+	t.Cleanup(metrics.IDMappingRepairItems.Reset)
+
+	publishManifestMetrics([]RepairItem{{EntityType: "object", State: RepairItemPending}})
+	publishManifestMetrics(nil)
+
+	if got := testutil.ToFloat64(metrics.IDMappingRepairItems.WithLabelValues(string(RepairItemPending), "object")); got != 0 {
+		t.Fatalf("pending/object = %v on an empty manifest, want 0", got)
+	}
+}

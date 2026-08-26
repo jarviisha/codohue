@@ -338,9 +338,11 @@ func (w *Worker) reapOnce(ctx context.Context, ns, stream, cursor string) string
 				return cursor
 			}
 			if strings.Contains(err.Error(), "NOGROUP") {
+				metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "nogroup").Inc()
 				return "0-0"
 			}
 			slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "error").Inc()
 			return cursor
 		}
 		for _, msg := range msgs {
@@ -348,9 +350,13 @@ func (w *Worker) reapOnce(ctx context.Context, ns, stream, cursor string) string
 		}
 		cursor = next
 		if next == "0-0" || next == "" {
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "terminal").Inc()
 			return "0-0"
 		}
 	}
+	// The cursor survives the tick, so this is a paced scan rather than a
+	// stall — but it is the only signal that the PEL is deeper than one tick.
+	metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "budget_exhausted").Inc()
 	return cursor
 }
 

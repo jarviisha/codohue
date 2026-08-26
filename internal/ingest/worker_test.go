@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // fakeProcessor implements eventProcessor for testing.
@@ -469,5 +471,56 @@ func TestWorkerReapOnce_PermanentlyFailingHeadDoesNotStarveTheTail(t *testing.T)
 	// Neither entry is acked (both still failing), but both were attempted.
 	if len(processed) != 0 {
 		t.Errorf("transiently failing entries must stay pending, acked %v", processed)
+	}
+}
+
+// TestWorkerReapOnce_RecordsTheTerminalOutcome pins the reclaim-cycle counter.
+// The metric was registered but never observed, so it read zero forever and an
+// operator could not tell a draining PEL from a stalled one.
+func TestWorkerReapOnce_RecordsTheTerminalOutcome(t *testing.T) {
+	// The counter is process-global and every other reap test in this package
+	// bumps it, so start from a known zero rather than from whatever ran first.
+	metrics.StreamReclaimCyclesTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimCyclesTotal.Reset)
+
+	outcome := func(name string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", name))
+	}
+
+	// Terminal: the scan wrapped.
+	w := &Worker{
+		service: &fakeProcessor{},
+		autoClaimFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "0-0", nil
+		},
+		ackFn: func(context.Context, string, string, ...string) error { return nil },
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("terminal"); got != 1 {
+		t.Errorf("terminal = %v, want 1", got)
+	}
+
+	// Error: the call failed, so the pass claimed nothing.
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("redis down")
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("error"); got != 1 {
+		t.Errorf("error = %v, want 1", got)
+	}
+
+	// Budget exhausted: a PEL deeper than one tick can drain.
+	calls := 0
+	w.reapCursor = "0-0"
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		calls++
+		return nil, fmt.Sprintf("%d-0", calls), nil
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("budget_exhausted"); got != 1 {
+		t.Errorf("budget_exhausted = %v, want 1", got)
+	}
+	if got := outcome("terminal"); got != 1 {
+		t.Errorf("terminal = %v after a non-terminal pass, want it unchanged at 1", got)
 	}
 }

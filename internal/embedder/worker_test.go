@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // --- fakes ----------------------------------------------------------------
@@ -615,5 +617,66 @@ func TestWorkerReapOnce_CursorsAreIndependentPerGeneration(t *testing.T) {
 
 	if seen[embedStreamName("ns", 1)] != "100-0" || seen[embedStreamName("ns", 2)] != "200-0" {
 		t.Errorf("generation cursors bled into each other: %v", seen)
+	}
+}
+
+// TestWorkerReapOnce_RecordsTheReclaimOutcome pins the reclaim-cycle counter for
+// the embed streams. It carries a namespace label, so the assertion also covers
+// attribution: a pass for one namespace must not be counted against another.
+func TestWorkerReapOnce_RecordsTheReclaimOutcome(t *testing.T) {
+	// Process-global counter that sibling reap tests bump, so start from zero.
+	metrics.StreamReclaimCyclesTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimCyclesTotal.Reset)
+
+	outcome := func(ns, name string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, name))
+	}
+	newWorker := func(auto func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)) *Worker {
+		return &Worker{
+			redis:   &fakeStreamClient{autoFn: auto},
+			service: &fakeProcessor{out: OutcomeEmbedded},
+			cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+		}
+	}
+
+	terminal := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "0-0", nil
+	})
+	terminal.reapOnce(context.Background(), "tenant-a", "catalog:embed:tenant-a", "0-0")
+	if got := outcome("tenant-a", "terminal"); got != 1 {
+		t.Errorf("tenant-a/terminal = %v, want 1", got)
+	}
+
+	// NOGROUP is its own outcome: the group was recreated, so the cursor is
+	// meaningless — that is not the same failure as Redis being unreachable.
+	nogroup := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("NOGROUP No such consumer group")
+	})
+	nogroup.reapOnce(context.Background(), "tenant-b", "catalog:embed:tenant-b", "400-0")
+	if got := outcome("tenant-b", "nogroup"); got != 1 {
+		t.Errorf("tenant-b/nogroup = %v, want 1", got)
+	}
+
+	failing := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("redis down")
+	})
+	failing.reapOnce(context.Background(), "tenant-b", "catalog:embed:tenant-b", "400-0")
+	if got := outcome("tenant-b", "error"); got != 1 {
+		t.Errorf("tenant-b/error = %v, want 1", got)
+	}
+
+	calls := 0
+	budget := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		calls++
+		return nil, fmt.Sprintf("%d-0", calls), nil
+	})
+	budget.reapOnce(context.Background(), "tenant-a", "catalog:embed:tenant-a", "0-0")
+	if got := outcome("tenant-a", "budget_exhausted"); got != 1 {
+		t.Errorf("tenant-a/budget_exhausted = %v, want 1", got)
+	}
+
+	// tenant-b's failures must not have landed on tenant-a.
+	if got := outcome("tenant-a", "error"); got != 0 {
+		t.Errorf("tenant-a/error = %v, want another namespace's failure not to count here", got)
 	}
 }

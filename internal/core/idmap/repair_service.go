@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // CollectionEvidence is one point as the audit sees it, flattened so this
@@ -182,7 +184,22 @@ func (s *RepairService) Audit(ctx context.Context) (*AuditReport, error) {
 			report.Resolved++
 		}
 	}
+	publishManifestMetrics(items)
 	return report, nil
+}
+
+// publishManifestMetrics republishes the live manifest gauge. It resets first
+// because a state that no longer appears must read zero rather than keep its
+// last value — an operator watching a repair drain would otherwise see
+// `pending` frozen at its starting count forever.
+//
+// Only one manifest is live at a time (a new audit supersedes the previous
+// run), so a whole-gauge reset cannot erase another run's counts.
+func publishManifestMetrics(items []RepairItem) {
+	metrics.IDMappingRepairItems.Reset()
+	for _, item := range items {
+		metrics.IDMappingRepairItems.WithLabelValues(string(item.State), item.EntityType).Inc()
+	}
 }
 
 // numericIDReserver mints numeric ids from the same sequence the hot path uses.
@@ -553,6 +570,7 @@ func (s *RepairService) applyFenced(ctx context.Context, runID int64) error {
 	if err := s.repo.SetRunState(ctx, runID, RepairRunApplying, ""); err != nil {
 		return err
 	}
+	publishManifestMetrics(items)
 
 	namespaces := map[string]struct{}{}
 	for _, item := range items {
@@ -669,6 +687,7 @@ func (s *RepairService) Verify(ctx context.Context, runID int64) (*VerifyReport,
 		return nil, err
 	}
 	report := &VerifyReport{RunID: runID, Checked: len(items)}
+	publishManifestMetrics(items)
 	// A namespace whose mappings moved is only repaired once its sparse
 	// vectors are rebuilt, because those coordinates encode subject numeric
 	// ids. Skipping the rebuild leaves the namespace serving stale vectors.

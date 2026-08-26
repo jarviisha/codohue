@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -356,4 +358,52 @@ func TestCatalogWorkerReapOnce_CursorFairness(t *testing.T) {
 			t.Errorf("cursor after NOGROUP = %q, want 0-0", w.reapCursor)
 		}
 	})
+}
+
+// TestCatalogWorkerReapOnce_RecordsTheTerminalOutcome pins the reclaim-cycle
+// counter for the catalog stream. The metric was registered but never observed,
+// so it read zero forever; without an assertion at the call site that regresses
+// silently.
+func TestCatalogWorkerReapOnce_RecordsTheTerminalOutcome(t *testing.T) {
+	// Process-global counter, and the sibling reap tests bump it, so start from
+	// a known zero rather than from whatever ran first.
+	metrics.StreamReclaimCyclesTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimCyclesTotal.Reset)
+
+	outcome := func(name string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", name))
+	}
+
+	w := &CatalogWorker{
+		autoClaimFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "0-0", nil
+		},
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("terminal"); got != 1 {
+		t.Errorf("terminal = %v, want 1", got)
+	}
+
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("redis down")
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("error"); got != 1 {
+		t.Errorf("error = %v, want 1", got)
+	}
+
+	calls := 0
+	w.reapCursor = "0-0"
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		calls++
+		return nil, fmt.Sprintf("%d-0", calls), nil
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("budget_exhausted"); got != 1 {
+		t.Errorf("budget_exhausted = %v, want 1", got)
+	}
+	// The catalog counter must not be attributed to the events stream.
+	if got := testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "terminal")); got != 0 {
+		t.Errorf("events/terminal = %v, want the catalog pass not to touch it", got)
+	}
 }

@@ -199,6 +199,7 @@ func (w *Worker) reapOnce(ctx context.Context) {
 			} else if ctx.Err() == nil {
 				slog.Warn("ingest xautoclaim failed", "error", err)
 			}
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "error").Inc()
 			return
 		}
 		for _, msg := range msgs {
@@ -207,9 +208,14 @@ func (w *Worker) reapOnce(ctx context.Context) {
 		w.reapCursor = next
 		if next == "0-0" || next == "" {
 			w.reapCursor = "0-0"
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "terminal").Inc()
 			return
 		}
 	}
+	// The cursor survives the tick, so a saturated budget is a paced scan
+	// rather than a stall — but it is the only signal that the PEL is deeper
+	// than one tick can drain.
+	metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "budget_exhausted").Inc()
 }
 
 // handleMessage decodes and processes one stream entry. Permanently

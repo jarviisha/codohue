@@ -183,6 +183,7 @@ func (w *CatalogWorker) reapOnce(ctx context.Context) {
 			} else if ctx.Err() == nil {
 				slog.Warn("catalog ingest xautoclaim failed", "error", err)
 			}
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "error").Inc()
 			return
 		}
 		for _, msg := range msgs {
@@ -191,9 +192,11 @@ func (w *CatalogWorker) reapOnce(ctx context.Context) {
 		w.reapCursor = next
 		if next == "0-0" || next == "" {
 			w.reapCursor = "0-0"
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "terminal").Inc()
 			return
 		}
 	}
+	metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "budget_exhausted").Inc()
 }
 
 // handleMessage decodes and ingests one stream entry. Permanent rejections
