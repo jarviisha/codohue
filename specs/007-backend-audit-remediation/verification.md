@@ -129,6 +129,66 @@ convergence rounds in a row have found defects in tests written the round
 before, all of them invisible to compilation.** Running the suites once is
 worth more than another reasoning pass.
 
+## Phase 18 — CI parity
+
+Executed 2026-08-26 after the first CI run on the pull request came back red.
+**Every gate below had been recorded as passing, and CI still failed** — the
+local gate list and the pipeline were not checking the same things.
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues, all four modules |
+| `make build` | **pass** — all four binaries |
+| `make coverage-check-all` | **pass** — 16/16 package gates and the total |
+| `make test-race` | **pass** |
+| `make vuln` | **pass** — `No vulnerabilities found` in every module |
+| `make compose-check` | **pass** |
+| `go mod verify` | **pass** |
+
+### `make coverage-check-all` was never a gate
+
+It appears in no gate table above. CI runs it as its `test` job, so seventeen
+convergence rounds ran `make test` — which ignores coverage — and never saw
+what the pipeline actually enforces. It failed on three packages in sequence,
+each hidden behind the one before it:
+
+| Package | Was | Min | Why |
+|---------|-----|-----|-----|
+| `internal/core/idmap` | 66.0% | 90 | ~700 statements of repair code whose entry points (`Audit`, `Apply`, `applyFenced`, `applyItem`, `Resume`, `PrepareSnapshots`) had **zero** unit coverage — only e2e touched them, and e2e does not feed the unit profile |
+| `internal/infra/redis` | 70.2% | 95 | `retention.go`'s go-redis adapter and `RunRetentionLoop` |
+| `internal/catalog` | 84.6% | 85 | `UpsertWithAttribution` at 0% — the content+author atomicity contract |
+
+Now 90.8% / 97.5% / 87.6%. The idmap tests were each checked by mutating the
+production code and confirming the failure: dropping the `old == target` guard
+in `applyItem`, the quarantine refusal, the per-collection snapshot check, the
+`supersedable` gate, the manifest-hash comparison, and moving `RetargetMapping`
+after the delete loop. All six were caught, one test each.
+
+`redisRetentionBackend` gained four function seams (`xInfoGroupsFn` and
+friends) so the go-redis translation is testable without a live server — the
+same convention `pingClientFn` and `zRevRangeWithScoresFn` already use.
+
+### `make vuln` passed locally on a technicality
+
+CI installs the Go version named in `go.mod` (`go 1.26.1`); this machine runs a
+newer patch. Every advisory CI reported was **standard library** — `crypto/tls`,
+`crypto/x509`, `html/template`, `net/http`, `net/url`, `encoding/asn1`,
+`encoding/xml` — fixed between go1.26.2 and go1.26.6, so the local pass measured
+the local toolchain, not the one that builds the code.
+
+The `go` directive moves to **1.26.7** in `go.mod`, `go.work` and both example
+modules; `golang.org/x/net` to v0.56.0 and `golang.org/x/crypto` to v0.53.0.
+Every module now reports `No vulnerabilities found`, import-level included. The
+production images were never affected: `Dockerfile` pins `golang:1.26-alpine`,
+which floats to the current patch.
+
+### The e2e timeout fix had not reached CI
+
+`ci.yml` ran `go test -tags=e2e -timeout=120s` directly instead of
+`make test-e2e`, so raising the Makefile cap fixed only half of it — the exact
+two-places-one-fixed drift the change was about. The job now calls the Makefile
+target.
+
 ## Phase 17 (convergence) gates
 
 Executed 2026-08-26 against the live stack.

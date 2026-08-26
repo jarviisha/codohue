@@ -189,8 +189,11 @@ jobs:
       - name: Build E2E binaries
         run: make build
 
+      # Runs the Makefile target rather than a raw `go test` so the timeout has
+      # one definition. The two drifted apart once already: the suite outgrew
+      # the 120s cap and only the Makefile copy was raised.
       - name: Run E2E tests
-        run: go test -v -tags=e2e -timeout=120s ./e2e/...
+        run: make test-e2e
         env:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
           REDIS_URL: redis://localhost:6379

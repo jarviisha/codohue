@@ -469,3 +469,13 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 - [X] T136 [P] Assert the reclaim-outcome and lifecycle-operation counters at the three emission sites that have no test — resetting each counter on entry because they are process-global — in `internal/ingest/catalog_worker_test.go`, `internal/embedder/worker_test.go`, and `internal/admin/service_test.go` per FR-021 (partial)
 - [X] T137 [P] Record that the deleted-generation janitor runs inside `cmd/cron` on `CODOHUE_RETENTION_INTERVAL` and reclaims at most 50 candidates per pass, so an operator closing the legacy gate knows which process and log line to watch, in `deploy/backend-audit-remediation.md` per plan Release 3 step 9 / contracts/operations.md (partial)
 - [X] T138 [P] Name the retention prune and the deleted-generation janitor in the `cmd/cron` responsibilities entry, which still lists only vector and trending recompute, in `CLAUDE.md` per Constitution III / CLAUDE.md four-binary conventions (partial)
+
+---
+
+## Phase 18: CI parity
+
+- [X] T139 Raise `internal/core/idmap` unit coverage past the 90% gate by testing the repair workflow entry points — `Audit`, `PrepareSnapshots`, `Apply`, `applyItem`, `Resume`, `QuarantineReport` — with fakes that record mutations, so every refusal can be shown to move zero points and zero mappings, in `internal/core/idmap/repair_workflow_test.go` and `internal/core/idmap/service_test.go` per FR-021 (missing)
+- [X] T140 Raise `internal/infra/redis` past the 95% gate by covering the retention adapter and `RunRetentionLoop`, adding the four go-redis function seams the rest of the package already uses, in `internal/infra/redis/retention.go`, `internal/infra/redis/retention_test.go` and `internal/infra/redis/redis_test.go` per FR-021 (missing)
+- [X] T141 Cover `UpsertWithAttribution` — the content-and-author single-transaction contract that was at 0% — and the embed stream generation clamp, in `internal/catalog/repository_test.go` and `internal/catalog/service_test.go` per FR-021 (missing)
+- [X] T142 Move the `go` directive to 1.26.7 and bump `golang.org/x/net` / `golang.org/x/crypto`, so the toolchain CI installs from `go.mod` carries the standard-library fixes `make vuln` demands, in `go.mod`, `go.work`, `examples/loadgen/go.mod` and `examples/geminipump/go.mod` per FR-001 (contradicts)
+- [X] T143 Run the e2e job through `make test-e2e` instead of a duplicated `go test -timeout=120s`, so the suite timeout has one definition, in `.github/workflows/ci.yml` per FR-021 (partial)
