@@ -22,7 +22,7 @@ BEGIN
 
     IF duplicate_count > 0 THEN
         RAISE EXCEPTION
-            'refusing to restore the global string_id primary key: % string id(s) are used in more than one (namespace, entity_type) scope, e.g. %. This migration is forward-only once duplicates exist; see deploy/idmap-repair-runbook.md.',
+            'refusing to restore the global string_id primary key: % string id(s) are used in more than one (namespace, entity_type) scope, e.g. %. This migration is forward-only once duplicates exist; see deploy/idmap-repair-runbook.md. The schema is UNCHANGED, but golang-migrate has now marked this version dirty: run `migrate -path migrations -database "$DATABASE_URL" force 021` before any further migration.',
             duplicate_count, sample_id;
     END IF;
 END $$;

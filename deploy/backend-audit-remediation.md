@@ -65,6 +65,76 @@ Apply migrations 024 and 025, then deploy. Every namespace is backfilled to
 generation 1 and keeps its existing physical names, so nothing moves on
 upgrade.
 
+### Orphan preflight before migration 025
+
+Migration 025 adds the namespace foreign keys, and it **refuses to run** while
+any child row points at a `namespace_configs` row that no longer exists:
+
+```text
+ERROR: namespace integrity preflight failed: orphan rows must be repaired before migration 025
+```
+
+Any deployment that has ever deleted a namespace will hit this — namespace
+deletion predates the FKs, so it left child rows behind. The rehearsal for this
+release found 339 orphan namespaces on a development database. Audit first:
+
+```sql
+SELECT 'events' AS child_table, count(*), count(DISTINCT c.namespace) AS namespaces
+  FROM events c LEFT JOIN namespace_configs p USING (namespace) WHERE p.namespace IS NULL
+UNION ALL SELECT 'id_mappings', count(*), count(DISTINCT c.namespace)
+  FROM id_mappings c LEFT JOIN namespace_configs p USING (namespace) WHERE p.namespace IS NULL
+UNION ALL SELECT 'batch_run_logs', count(*), count(DISTINCT c.namespace)
+  FROM batch_run_logs c LEFT JOIN namespace_configs p USING (namespace) WHERE p.namespace IS NULL
+UNION ALL SELECT 'catalog_items', count(*), count(DISTINCT c.namespace)
+  FROM catalog_items c LEFT JOIN namespace_configs p USING (namespace) WHERE p.namespace IS NULL
+UNION ALL SELECT 'catalog_backlog_samples', count(*), count(DISTINCT c.namespace)
+  FROM catalog_backlog_samples c LEFT JOIN namespace_configs p USING (namespace) WHERE p.namespace IS NULL
+UNION ALL SELECT 'objects', count(*), count(DISTINCT c.namespace)
+  FROM objects c LEFT JOIN namespace_configs p USING (namespace) WHERE p.namespace IS NULL;
+```
+
+Review the namespace list before deleting anything — an orphan is normally a
+deleted tenant, but a row here would also be the symptom of a
+`namespace_configs` row lost by accident, and that case wants a restore, not a
+purge:
+
+```sql
+SELECT DISTINCT namespace FROM (
+  SELECT namespace FROM events UNION SELECT namespace FROM id_mappings
+  UNION SELECT namespace FROM batch_run_logs UNION SELECT namespace FROM catalog_items
+  UNION SELECT namespace FROM catalog_backlog_samples UNION SELECT namespace FROM objects
+) AS child
+WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = child.namespace)
+ORDER BY namespace;
+```
+
+Once confirmed to be deleted tenants, purge them in one transaction. Take a
+backup first: this deletes behavioral history that cannot be recomputed.
+
+```sql
+BEGIN;
+DELETE FROM events c WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = c.namespace);
+DELETE FROM id_mappings c WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = c.namespace);
+DELETE FROM batch_run_logs c WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = c.namespace);
+DELETE FROM catalog_items c WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = c.namespace);
+DELETE FROM catalog_backlog_samples c WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = c.namespace);
+DELETE FROM objects c WHERE NOT EXISTS (SELECT 1 FROM namespace_configs p WHERE p.namespace = c.namespace);
+COMMIT;
+```
+
+Re-run the audit — every count must be zero — then apply 025. After it lands
+the FKs cascade, so namespace deletion cannot create new orphans.
+
+**If the migration already failed**, golang-migrate has recorded the version as
+dirty even though the transaction rolled back and the schema is untouched.
+Clear it before retrying:
+
+```bash
+make migrate-version                    # reports the dirty version
+migrate -path migrations -database "$DATABASE_URL" force 024
+make migrate-up
+```
+
 ### Generation adoption window
 
 Producers that predate this release send no `namespace_generation`. Those
@@ -102,6 +172,31 @@ applied. They hold the exclusive lifecycle lease, so they serialize against
 every writer. The deleted-generation janitor — which removes superseded
 generations' Redis keys and Qdrant collections — refuses to run until the
 legacy gate is closed, because an open gate means old work may still arrive.
+
+### Where the janitor runs
+
+It is a background loop inside **`cmd/cron`**, alongside the observability-table
+retention prune. It ticks on `CODOHUE_RETENTION_INTERVAL` (default `1h`), takes
+an immediate first pass at startup, and reclaims at most **50** superseded
+generations per pass, resuming from a keyset cursor so successive passes walk
+the whole ledger rather than re-cleaning the head.
+
+Nothing marks a generation reclaimed, so the walk is cyclic by design: once it
+reaches the end it starts over, and a generation whose artifacts are already
+gone costs one Redis `SCAN` and four Qdrant `CollectionExists` calls that all
+find nothing. That repetition is what makes the pass safe to retry.
+
+What to expect in the cron logs:
+
+| Log line | Meaning |
+|----------|---------|
+| `deleted-generation cleanup idle until legacy envelopes are disabled` | Normal before closure. Logged once per process, not per tick |
+| `reclaimed superseded generations count=N` | A pass removed N generations' artifacts |
+| `deleted-generation cleanup hit its per-pass bound` | More than 50 candidates are waiting; later passes continue through them |
+| `deleted-generation cleanup failed` | A store was unreachable. The pass claims no progress and retries next tick |
+
+The loop never blocks cron's recompute cycle, and a failure here is not fatal to
+the binary — the artifacts simply stay until a later pass succeeds.
 
 **Rollback**: `make migrate-down` twice, *before* the legacy gate is closed.
 After closure the gate timestamp is durable and a down-migration drops it; you

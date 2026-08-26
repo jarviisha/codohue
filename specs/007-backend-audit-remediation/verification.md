@@ -129,6 +129,125 @@ convergence rounds in a row have found defects in tests written the round
 before, all of them invisible to compilation.** Running the suites once is
 worth more than another reasoning pass.
 
+## Phase 17 (convergence) gates
+
+Executed 2026-08-26 against the live stack.
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues across all four modules |
+| `make build` | **pass** — all four binaries |
+| `make test` (with `DATABASE_URL`) | **pass** — every package |
+| `make test-race` | **pass** — no data races |
+| `make test-e2e` | **pass** — **117 passed, 0 failed, 0 skipped** (91s) |
+| `make compose-check` | **pass** |
+| `go mod verify` | **pass** |
+| `make vuln` | **pass** — 0 vulnerabilities called |
+| `git diff --check` | **pass**; 0 files changed under `web/admin` |
+
+### T135 — the first test was too weak, and a mutation proved it
+
+Phase 16 shipped the janitor's keyset query with no test at all; these are the
+first execution of that SQL. Each new test was checked by mutating the query and
+confirming it fails:
+
+| Mutation | Caught |
+|----------|--------|
+| Keyset `>` → `>=` (cursor row repeats — the bug the cursor exists to prevent) | yes |
+| `generate_series` upper bound for an active lifecycle `generation - 1` → `generation` | **no, at first** |
+
+The second mutation is the dangerous one: it makes a **live** namespace's
+current generation a deletion candidate. The original test asked for exactly the
+four expected rows, so the two extra candidates fell past the `LIMIT` and were
+never seen. Over-fetching and filtering to the fixture prefix catches it, and
+the failure now names the live generations that would have been deleted.
+
+The tests are `DATABASE_URL`-gated; confirmed they **skip** without it and
+**pass** (not skip) with it, since a vacuous pass has been a repeated failure
+mode on this feature.
+
+### T136 — verified by removal
+
+All three counter assertions were checked by deleting the `WithLabelValues`
+line at their call site and confirming the test fails. Each also pins label
+attribution — a catalog pass must not increment the events series, one
+namespace's failure must not land on another, and reset must not share a series
+with delete.
+
+## Phase 16 (convergence) gates
+
+Executed 2026-08-26 against the live PostgreSQL 17 / Redis 7 / Qdrant stack.
+
+| Command | Result |
+|---------|--------|
+| `make lint` | **pass** — 0 issues across all four modules |
+| `make build` | **pass** — all four binaries |
+| `make test` (with `DATABASE_URL`) | **pass** — every package |
+| `make test-race` | **pass** — no data races |
+| `make compose-check` | **pass** — all three compose files valid |
+| `go mod verify` | **pass** — all modules verified |
+| `make vuln` | **pass** — 0 vulnerabilities called |
+| `make test-e2e` | **pass** — **117 passed, 0 failed, 0 skipped** (154s) |
+| `git diff --check` | **pass**; 0 files changed under `web/admin` |
+
+### What running the gates found
+
+**`make test-e2e` could not pass, and the timeout was only the symptom.** The
+target carried `-timeout=120s`, so it aborted with `panic: test timed out` and
+reported the tests in flight as failures. Raising the cap to 900s did not help:
+the suite still timed out, now stuck 7 minutes into
+`TestNamespaceLifecycle_ConcurrentWritersNeverOutliveADelete`.
+
+The cause was in `newQdrantTestClient`, which dialled a **fresh gRPC client per
+collection check** — a connect plus a version-check round trip each time — and
+registered a `t.Cleanup` close for every one. The lifecycle race checks four
+collections on each of 100 iterations, so it opened 400 clients and held every
+connection until the test ended. That test alone took **274s**.
+
+One process-wide client, closed in `TestMain`, takes it to **18s** — and the
+whole suite from "times out past 900s" to **90s**. `mustAtoi` lost its only
+caller and was removed. The three e2e targets now carry timeouts above their
+real runtimes.
+
+This is why the T108 entry above could record 117/117 in 238s under a 120s cap:
+that number came from a direct `go test` with a longer timeout, and the
+connection leak has been making the suite slower on every run since.
+
+**A metric test passed alone and failed in the suite.** `StreamReclaimCyclesTotal`
+is process-global and every other reap test in `internal/ingest` increments it,
+so the new assertion had to reset the counter on entry, not only on cleanup.
+Caught by `make test`, not by the focused run that preceded it.
+
+### T130 — the janitor could not have reached most candidates
+
+Wiring the janitor exposed a second defect in code the wiring made reachable:
+`ListCleanupCandidates` took only a `LIMIT` and nothing marks a generation
+reclaimed, so every pass returned the *same* first page forever. This database
+holds 513 candidates against a 50-item batch — 463 of them were unreachable.
+The query now takes a keyset cursor that the janitor carries across passes and
+rewinds on a short page; the cursor advances only past fully cleaned
+candidates, so a mid-page failure resumes on the item that failed. Verified by
+paging the real query against the live ledger.
+
+### T132 — measured before and after
+
+`namespace_lifecycles` held 781 rows, 777 with no `namespace_configs` parent
+and 272 of those still `state <> 'deleted'` — each one walked by
+`ListNonDeleted` on every app-wide reset. The e2e cleanup also scanned
+`rec:<ns>:*`, a pattern the live cache key shape (`rec:v2:<base64>`) has never
+matched, so recommendation cache keys were never cleaned either. Both now
+derive from the lifecycle resolver across every generation the namespace
+reached.
+
+841 already-orphaned lifecycle rows were purged from the development database
+to clear the accumulated backlog; the fix only prevents new ones. A deployment
+that has run these suites wants the same one-off cleanup:
+
+```sql
+DELETE FROM namespace_lifecycles l
+WHERE NOT EXISTS (SELECT 1 FROM namespace_configs c WHERE c.namespace = l.namespace);
+```
+
 ## Executed against a live stack — 2026-08-25
 
 Infrastructure: the shared local PostgreSQL 17 / Redis 7 / Qdrant containers,

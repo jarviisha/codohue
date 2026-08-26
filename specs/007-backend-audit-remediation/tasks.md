@@ -450,3 +450,22 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 
 - [X] T128 Give the snapshot-coverage e2e test a lifecycle fence so `Apply` reaches the per-collection snapshot check instead of short-circuiting on a nil fence, in `e2e/idmap_repair_test.go` per FR-021 / plan Release 4 step 4 (contradicts)
 - [X] T129 Stop calling `t.Fatalf` from the writer goroutines in the delete/recreate race — report transport failures back to the test goroutine — so a failure fails the test instead of silently exiting a worker, in `e2e/namespace_lifecycle_test.go` per FR-021 / SC-003 (contradicts)
+
+---
+
+## Phase 16: Convergence
+
+- [X] T130 Wire the deleted-generation janitor into scheduled maintenance — implement `GenerationCleaner` over the Redis and Qdrant clients and call `Janitor.RunOnce` on a bounded interval — so superseded generations' artifacts are actually reclaimed instead of the janitor having no call site, in `cmd/cron/generation_cleaner.go`, `cmd/cron/generation_cleaner_test.go`, `cmd/cron/main.go`, and `cmd/cron/main_test.go` per plan Release 3 step 9 / contracts/operations.md (partial)
+- [X] T131 Document the migration-025 orphan audit and its remediation queries — the six tables the preflight checks and how to clear rows whose `namespace_configs` parent is gone — in the Release 3 section of `deploy/backend-audit-remediation.md`, so the preflight refusal has a documented next step per plan Release 3 step 2 (missing)
+- [X] T132 Delete the `namespace_lifecycles` row in `cleanupNamespaceData`, along with the `batch_run_logs`, `objects`, and `catalog_backlog_samples` rows for databases predating migration 025's cascade, so repeated suite runs leave no lifecycle residue for reset and janitor enumeration, in `e2e/suite_test.go` per FR-021 (partial)
+- [X] T133 Name the `schema_migrations` dirty state and the required `migrate force <version>` step in both preflight refusal messages, so an operator whose rollback was refused can retry, in `migrations/022_id_mappings_composite.down.sql` and `migrations/026_id_mapping_repair.down.sql` per FR-011 (partial)
+- [X] T134 Observe `StreamReclaimCyclesTotal`, `NamespaceLifecycleOperationsTotal`, and `IDMappingRepairItems` at their call sites, or drop whichever metric has no owner, so no registered series is permanently zero in production, in `internal/ingest/worker.go`, `internal/embedder/recovery_sweeper.go`, `internal/admin/service.go`, `internal/core/idmap/repair_service.go`, and `internal/infra/metrics/metrics.go` per plan Release 2 step 6 (partial)
+
+---
+
+## Phase 17: Convergence
+
+- [X] T135 Add DB-backed coverage for `ListCleanupCandidates` — the `generate_series` bound for `deleted` versus active lifecycles, the keyset resume past a cursor, a short final page, and the `limit <= 0` early return — following the `DATABASE_URL`-gated pattern in `legacy_gate_test.go`, so the query the janitor walks is not verified by hand only, in `internal/core/nslifecycle/repository_test.go` per FR-021 (partial)
+- [X] T136 [P] Assert the reclaim-outcome and lifecycle-operation counters at the three emission sites that have no test — resetting each counter on entry because they are process-global — in `internal/ingest/catalog_worker_test.go`, `internal/embedder/worker_test.go`, and `internal/admin/service_test.go` per FR-021 (partial)
+- [X] T137 [P] Record that the deleted-generation janitor runs inside `cmd/cron` on `CODOHUE_RETENTION_INTERVAL` and reclaims at most 50 candidates per pass, so an operator closing the legacy gate knows which process and log line to watch, in `deploy/backend-audit-remediation.md` per plan Release 3 step 9 / contracts/operations.md (partial)
+- [X] T138 [P] Name the retention prune and the deleted-generation janitor in the `cmd/cron` responsibilities entry, which still lists only vector and trending recompute, in `CLAUDE.md` per Constitution III / CLAUDE.md four-binary conventions (partial)

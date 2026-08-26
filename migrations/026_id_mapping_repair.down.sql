@@ -15,7 +15,7 @@ BEGIN
 
     IF duplicate_count > 0 THEN
         RAISE EXCEPTION
-            'refusing to restore global numeric_id uniqueness: % numeric id(s) are shared across namespace/entity scopes. Resolve them with `cmd/admin idmap-repair audit` before rolling back.',
+            'refusing to restore global numeric_id uniqueness: % numeric id(s) are shared across namespace/entity scopes. Resolve them with `cmd/admin idmap-repair audit` before rolling back. The schema is UNCHANGED, but golang-migrate has now marked this version dirty: run `migrate -path migrations -database "$DATABASE_URL" force 025` before any further migration.',
             duplicate_count;
     END IF;
 END $$;
