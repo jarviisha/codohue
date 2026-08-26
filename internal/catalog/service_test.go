@@ -624,3 +624,21 @@ func TestServiceIngest_ReusesHeldLease(t *testing.T) {
 		t.Errorf("expected the write to reach the repo once, got %d", repo.called)
 	}
 }
+
+// Generation 1 keeps the original unqualified stream name, so upgrading moves
+// nothing. A generation below 1 is not a real lifecycle value; clamping stops
+// a bad caller from publishing to a stream no consumer reads.
+func TestGenerationStreamName_ClampsBelowOne(t *testing.T) {
+	base := generationStreamName("ns", 1)
+	if base != streamName("ns") {
+		t.Fatalf("generation 1 stream = %q, want the unqualified %q", base, streamName("ns"))
+	}
+	for _, generation := range []int64{0, -1} {
+		if got := generationStreamName("ns", generation); got != base {
+			t.Errorf("generation %d gave %q, want %q", generation, got, base)
+		}
+	}
+	if g2 := generationStreamName("ns", 2); g2 == base {
+		t.Error("generation 2 shares generation 1's stream; a deleted incarnation's work would be visible to the new one")
+	}
+}

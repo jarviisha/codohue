@@ -67,11 +67,29 @@ type retentionBackend interface {
 
 type redisRetentionBackend struct{ client *redis.Client }
 
+// The four go-redis calls behind the backend, indirected so the translation
+// from go-redis types can be tested without a live server. Same convention as
+// pingClientFn and zRevRangeWithScoresFn elsewhere in this package.
+var (
+	xInfoGroupsFn = func(ctx context.Context, client *redis.Client, stream string) ([]redis.XInfoGroup, error) {
+		return client.XInfoGroups(ctx, stream).Result()
+	}
+	xPendingFn = func(ctx context.Context, client *redis.Client, stream, group string) (*redis.XPending, error) {
+		return client.XPending(ctx, stream, group).Result()
+	}
+	xLenFn = func(ctx context.Context, client *redis.Client, stream string) (int64, error) {
+		return client.XLen(ctx, stream).Result()
+	}
+	xTrimMinIDFn = func(ctx context.Context, client *redis.Client, stream, frontier string) (int64, error) {
+		return client.XTrimMinID(ctx, stream, frontier).Result()
+	}
+)
+
 // Groups reports every consumer group on the stream. An unknown group is a
 // protected group: the frontier must respect it even though nothing here
 // created it.
 func (b redisRetentionBackend) Groups(ctx context.Context, stream string) ([]retentionGroup, error) {
-	groups, err := b.client.XInfoGroups(ctx, stream).Result()
+	groups, err := xInfoGroupsFn(ctx, b.client, stream)
 	if err != nil {
 		return nil, fmt.Errorf("xinfo groups %s: %w", stream, err)
 	}
@@ -88,7 +106,7 @@ func (b redisRetentionBackend) Groups(ctx context.Context, stream string) ([]ret
 // Pending summarises one group's PEL. The oldest pending id is the group's
 // frontier whenever the PEL is non-empty.
 func (b redisRetentionBackend) Pending(ctx context.Context, stream, group string) (retentionPending, error) {
-	pending, err := b.client.XPending(ctx, stream, group).Result()
+	pending, err := xPendingFn(ctx, b.client, stream, group)
 	if err != nil {
 		return retentionPending{}, fmt.Errorf("xpending %s/%s: %w", stream, group, err)
 	}
@@ -97,7 +115,7 @@ func (b redisRetentionBackend) Pending(ctx context.Context, stream, group string
 
 // Length is the raw XLEN, reported as a gauge alongside the trim result.
 func (b redisRetentionBackend) Length(ctx context.Context, stream string) (int64, error) {
-	n, err := b.client.XLen(ctx, stream).Result()
+	n, err := xLenFn(ctx, b.client, stream)
 	if err != nil {
 		return 0, fmt.Errorf("xlen %s: %w", stream, err)
 	}
@@ -106,7 +124,7 @@ func (b redisRetentionBackend) Length(ctx context.Context, stream string) (int64
 
 // TrimMinID executes the exact (non-approximate) trim below the frontier.
 func (b redisRetentionBackend) TrimMinID(ctx context.Context, stream, frontier string) (int64, error) {
-	trimmed, err := b.client.XTrimMinID(ctx, stream, frontier).Result()
+	trimmed, err := xTrimMinIDFn(ctx, b.client, stream, frontier)
 	if err != nil {
 		return 0, fmt.Errorf("xtrim minid %s %s: %w", stream, frontier, err)
 	}

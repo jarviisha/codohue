@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -462,4 +463,88 @@ func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
 		db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, ns)    //nolint:errcheck // test cleanup
 		db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, ns) //nolint:errcheck // test cleanup
 	})
+}
+
+// UpsertWithAttribution's contract: the content row and the author land
+// together or neither does. Attribution used to be a best-effort write after
+// the row, so a failing objects write returned 202 with the author silently
+// dropped and the caller had no way to learn it never happened.
+
+func upsertRepoWithHash(hash []byte, now time.Time) *Repository {
+	return &Repository{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+			return fakeRow{scanFn: func(dest ...any) error {
+				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
+			}}
+		},
+	}
+}
+
+// Absence means "unspecified", not "clear it": a re-ingest that carries no
+// author must leave any existing attribution alone, so no hook runs at all.
+func TestUpsertWithAttribution_NoAuthorRunsNoHook(t *testing.T) {
+	hash := ContentHash("hello")
+	repo := upsertRepoWithHash(hash, time.Now())
+
+	res, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", hash, nil, nil)
+	if err != nil {
+		t.Fatalf("UpsertWithAttribution: %v", err)
+	}
+	if res == nil || res.Item.ObjectID != "obj1" {
+		t.Fatalf("result = %+v, want the upserted row", res)
+	}
+}
+
+func TestUpsertWithAttribution_RunsTheHookAfterTheContentWrite(t *testing.T) {
+	hash := ContentHash("hello")
+	repo := upsertRepoWithHash(hash, time.Now())
+
+	called := 0
+	res, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", hash, nil,
+		func(context.Context, pgx.Tx) error { called++; return nil })
+	if err != nil {
+		t.Fatalf("UpsertWithAttribution: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("attribution hook ran %d time(s), want 1", called)
+	}
+	if res == nil {
+		t.Fatal("no result returned")
+	}
+}
+
+// The whole point of the single transaction: a failed attribution must fail
+// the request rather than reporting success on a half-written fact.
+func TestUpsertWithAttribution_HookFailureFailsTheCall(t *testing.T) {
+	hash := ContentHash("hello")
+	repo := upsertRepoWithHash(hash, time.Now())
+
+	res, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", hash, nil,
+		func(context.Context, pgx.Tx) error { return errors.New("objects table is unwritable") })
+	if err == nil {
+		t.Fatal("UpsertWithAttribution reported success despite a failed attribution")
+	}
+	if res != nil {
+		t.Errorf("result = %+v, want nil when the attribution failed", res)
+	}
+}
+
+// A content write that never landed has nothing to attribute, so the hook must
+// not run and the original error must surface.
+func TestUpsertWithAttribution_ContentFailureSkipsTheHook(t *testing.T) {
+	repo := &Repository{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
+		},
+	}
+
+	called := 0
+	_, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", ContentHash("hello"), nil,
+		func(context.Context, pgx.Tx) error { called++; return nil })
+	if err == nil {
+		t.Fatal("expected the content write error")
+	}
+	if called != 0 {
+		t.Error("the attribution hook ran even though the content write failed")
+	}
 }
