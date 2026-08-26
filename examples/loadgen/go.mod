@@ -1,6 +1,6 @@
 module github.com/jarviisha/codohue/examples/loadgen
 
-go 1.26.1
+go 1.26.7
 
 // Local development: resolve the SDK and shared wire types from this repo via
 // the go.work workspace. The replace directives keep the module graph

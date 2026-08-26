@@ -1,6 +1,6 @@
 module github.com/jarviisha/codohue/examples/geminipump
 
-go 1.26.1
+go 1.26.7
 
 // Local development: resolve the SDK and shared wire types from this repo via
 // the replace directives below. They keep the module graph self-consistent so
