@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/joho/godotenv"
 	goredis "github.com/redis/go-redis/v9"
 )
@@ -62,6 +63,7 @@ func TestMain(m *testing.M) {
 	}
 	testRedis = goredis.NewClient(redisOpts)
 	defer testRedis.Close()
+	defer closeSharedQdrantClient()
 
 	// Clean up any data left by a previously interrupted run.
 	cleanupNamespaceData(testNS)
@@ -134,36 +136,69 @@ func waitReady(url string, timeout time.Duration) error {
 	return fmt.Errorf("not ready after %s", timeout)
 }
 
-// cleanupNamespaceData removes postgres data and Redis cache keys for a namespace.
+// cleanupNamespaceData removes postgres data and Redis keys for a namespace.
 // Qdrant collections are left in place for now; later suites can add explicit
 // collection cleanup where vector state must be isolated.
+//
+// Every physical name is derived through the lifecycle resolver across every
+// generation the namespace reached, because a suite that deletes and recreates
+// leaves generation-qualified artifacts a bare-name delete cannot see.
 func cleanupNamespaceData(namespace string) {
 	ctx := context.Background()
-	_, _ = testDB.Exec(ctx, "DELETE FROM events WHERE namespace = $1", namespace)
-	_, _ = testDB.Exec(ctx, "DELETE FROM catalog_items WHERE namespace = $1", namespace)
-	_, _ = testDB.Exec(ctx, "DELETE FROM id_mappings WHERE namespace = $1", namespace)
+
+	// Read the generation before the rows go away; a missing lifecycle row just
+	// means generation 1.
+	generation := int64(1)
+	_ = testDB.QueryRow(ctx,
+		"SELECT generation FROM namespace_lifecycles WHERE namespace = $1", namespace).Scan(&generation)
+
+	// Migration 025's foreign keys cascade from namespace_configs, but the
+	// tables are named explicitly so cleanup also works on a database that
+	// predates those keys.
+	for _, table := range []string{
+		"events", "catalog_items", "id_mappings",
+		"batch_run_logs", "objects", "catalog_backlog_samples",
+	} {
+		_, _ = testDB.Exec(ctx, "DELETE FROM "+table+" WHERE namespace = $1", namespace)
+	}
 	_, _ = testDB.Exec(ctx, "DELETE FROM namespace_configs WHERE namespace = $1", namespace)
+	// namespace_configs references namespace_lifecycles, so the parent goes
+	// last. Leaving it behind accumulates a row per suite run that app-wide
+	// reset then has to walk.
+	_, _ = testDB.Exec(ctx, "DELETE FROM namespace_lifecycles WHERE namespace = $1", namespace)
 
-	// Delete the per-namespace catalog embed stream so the next test run
-	// starts with a clean queue + consumer-group offset.
-	testRedis.Del(ctx, "catalog:embed:"+namespace) //nolint:errcheck
+	for gen := int64(1); gen <= generation; gen++ {
+		// Exact keys: the embed stream (so the next run starts with a clean
+		// queue and consumer-group offset) and the trending ZSET.
+		for _, kind := range []nslifecycle.PhysicalKind{
+			nslifecycle.KindEmbedStream,
+			nslifecycle.KindTrending,
+		} {
+			testRedis.Del(ctx, nslifecycle.MustPhysicalName(kind, namespace, gen)) //nolint:errcheck
+		}
+		// The recommendation cache holds one key per (subject, limit), so it is
+		// scanned by prefix. Without this, stale cached responses bleed between
+		// runs.
+		cachePrefix := nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, namespace, gen)
+		deleteRedisKeysByPattern(ctx, cachePrefix+":*")
+	}
+}
 
-	// Delete recommendation cache (rec:<ns>:*) and trending cache for the namespace.
-	// Without this, stale cached responses from previous runs bleed into new runs.
-	for _, pattern := range []string{"rec:" + namespace + ":*", "trending:" + namespace} {
-		var cursor uint64
-		for {
-			keys, next, err := testRedis.Scan(ctx, cursor, pattern, 100).Result()
-			if err != nil {
-				break
-			}
-			if len(keys) > 0 {
-				testRedis.Del(ctx, keys...) //nolint:errcheck
-			}
-			cursor = next
-			if cursor == 0 {
-				break
-			}
+// deleteRedisKeysByPattern removes every key matching pattern, scanning rather
+// than using KEYS so a large cache does not block the server.
+func deleteRedisKeysByPattern(ctx context.Context, pattern string) {
+	var cursor uint64
+	for {
+		keys, next, err := testRedis.Scan(ctx, cursor, pattern, 100).Result()
+		if err != nil {
+			return
+		}
+		if len(keys) > 0 {
+			testRedis.Del(ctx, keys...) //nolint:errcheck
+		}
+		cursor = next
+		if cursor == 0 {
+			return
 		}
 	}
 }

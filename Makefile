@@ -355,14 +355,17 @@ coverage-clean:
 
 # End-to-end tests
 
+# The full suite runs the lifecycle race and retention-window scenarios, which
+# take minutes of wall clock on purpose. The old 120s cap aborted it mid-run,
+# so the gate could never pass.
 test-e2e: build
-	go test -v -tags=e2e -timeout=120s ./e2e/...
+	go test -v -tags=e2e -timeout=900s ./e2e/...
 
 test-e2e-api: build-api
-	go test -v -tags=e2e -timeout=120s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
+	go test -v -tags=e2e -timeout=300s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
 
 test-e2e-heavy: build
-	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog|Admin'
+	go test -v -tags=e2e -timeout=900s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog|Admin'
 
 # Black-box smoke test against a RUNNING stack (api + admin must be up).
 # Seeds demo data, triggers a batch run, asserts the full ingest -> compute

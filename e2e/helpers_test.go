@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -378,21 +379,42 @@ func runCronOnceUntil(t testing.TB, timeout time.Duration, condition func() (boo
 	t.Fatalf("cron condition not met after %s\nCron logs: %s", timeout, strings.TrimSpace(string(logs)))
 }
 
+var (
+	sharedQdrantOnce   sync.Once
+	sharedQdrantClient *qdrant.Client
+	sharedQdrantErr    error
+)
+
+// newQdrantTestClient returns one process-wide client. Every call used to dial
+// a fresh connection and pay a version-check round trip, and the per-call
+// cleanup meant a test asserting in a loop held every connection it had ever
+// opened until it finished — the lifecycle race alone opened 400. Closed once
+// in TestMain via closeSharedQdrantClient.
 func newQdrantTestClient(t testing.TB) *qdrant.Client {
 	t.Helper()
 
-	port := mustAtoi(t, envOrDefault("QDRANT_PORT", "6334"))
-	client, err := qdrant.NewClient(&qdrant.Config{
-		Host: envOrDefault("QDRANT_HOST", "localhost"),
-		Port: port,
+	sharedQdrantOnce.Do(func() {
+		port, err := strconv.Atoi(envOrDefault("QDRANT_PORT", "6334"))
+		if err != nil {
+			sharedQdrantErr = fmt.Errorf("parse QDRANT_PORT: %w", err)
+			return
+		}
+		sharedQdrantClient, sharedQdrantErr = qdrant.NewClient(&qdrant.Config{
+			Host: envOrDefault("QDRANT_HOST", "localhost"),
+			Port: port,
+		})
 	})
-	if err != nil {
-		t.Fatalf("new qdrant client: %v", err)
+	if sharedQdrantErr != nil {
+		t.Fatalf("new qdrant client: %v", sharedQdrantErr)
 	}
-	t.Cleanup(func() {
-		_ = client.Close()
-	})
-	return client
+	return sharedQdrantClient
+}
+
+// closeSharedQdrantClient releases the shared connection at suite teardown.
+func closeSharedQdrantClient() {
+	if sharedQdrantClient != nil {
+		_ = sharedQdrantClient.Close()
+	}
 }
 
 func cleanupQdrantNamespace(t testing.TB, namespace string) {
@@ -474,15 +496,6 @@ func trendingKeyState(t testing.TB, namespace string) (int64, time.Duration) {
 		t.Fatalf("redis ttl %q: %v", key, err)
 	}
 	return card, ttl
-}
-
-func mustAtoi(t testing.TB, value string) int {
-	t.Helper()
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		t.Fatalf("atoi %q: %v", value, err)
-	}
-	return n
 }
 
 type redisGroupProgress struct {
