@@ -77,6 +77,7 @@ func withCronTestHooks(t *testing.T) {
 	origRedis := newRedisFn
 	origNotify := signalNotifyFn
 	origClosePool := closePoolFn
+	origCleanupLoop := runGenerationCleanupLoopFn
 	t.Cleanup(func() {
 		loadConfigFn = origLoad
 		newPoolFn = origPool
@@ -84,6 +85,7 @@ func withCronTestHooks(t *testing.T) {
 		newRedisFn = origRedis
 		signalNotifyFn = origNotify
 		closePoolFn = origClosePool
+		runGenerationCleanupLoopFn = origCleanupLoop
 	})
 	closePoolFn = func(_ *pgxpool.Pool) {}
 }
@@ -147,6 +149,21 @@ func TestRun_HappyPathStartupShutdown(t *testing.T) {
 		go func() { c <- os.Interrupt }()
 	}
 
+	// Pin the call site: the janitor shipped with no caller at all, so the
+	// regression to guard is "run() stopped starting the reclaim loop", which a
+	// clean startup/shutdown on its own would not catch.
+	cleanupStarted := make(chan int, 1)
+	runGenerationCleanupLoopFn = func(ctx context.Context, interval time.Duration, janitor generationCleanupRunner) {
+		if janitor == nil {
+			t.Error("run() started the cleanup loop without a janitor")
+		}
+		select {
+		case cleanupStarted <- int(interval / time.Second):
+		default:
+		}
+		<-ctx.Done()
+	}
+
 	done := make(chan error, 1)
 	go func() { done <- run() }()
 	select {
@@ -156,5 +173,14 @@ func TestRun_HappyPathStartupShutdown(t *testing.T) {
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("run() did not shut down within 20s")
+	}
+
+	select {
+	case interval := <-cleanupStarted:
+		if interval != int(time.Hour/time.Second) {
+			t.Errorf("cleanup loop interval = %ds, want the configured retention interval", interval)
+		}
+	default:
+		t.Fatal("run() did not start the deleted-generation cleanup loop")
 	}
 }

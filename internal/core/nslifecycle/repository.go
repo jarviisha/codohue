@@ -210,8 +210,13 @@ func (r *Repository) DisableLegacy(ctx context.Context, adoptionEvidence string,
 }
 
 // ListCleanupCandidates returns old or deleted physical generations in stable,
-// bounded order. Cleanup is idempotent, so retries are safe.
-func (r *Repository) ListCleanupCandidates(ctx context.Context, limit int) ([]CleanupCandidate, error) {
+// bounded order, starting strictly after the given keyset position. Cleanup is
+// idempotent, so retries are safe.
+//
+// The cursor exists because nothing marks a generation as reclaimed: a plain
+// LIMIT returns the same first page forever, so a fleet with more superseded
+// generations than one batch would re-clean the head and never reach the tail.
+func (r *Repository) ListCleanupCandidates(ctx context.Context, after CleanupCandidate, limit int) ([]CleanupCandidate, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -223,8 +228,9 @@ func (r *Repository) ListCleanupCandidates(ctx context.Context, limit int) ([]Cl
 			CASE WHEN lifecycle.state = 'deleted' THEN lifecycle.generation
 				ELSE lifecycle.generation - 1 END
 		) AS generations(generation)
+		WHERE (lifecycle.namespace, generations.generation) > ($1, $2)
 		ORDER BY lifecycle.namespace, generations.generation
-		LIMIT $1`, limit)
+		LIMIT $3`, after.Namespace, after.Generation, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list lifecycle cleanup candidates: %w", err)
 	}

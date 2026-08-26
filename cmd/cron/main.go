@@ -30,6 +30,9 @@ var (
 	newComputeJobFn = compute.NewJob
 	signalNotifyFn  = signal.Notify
 	closePoolFn     = func(db *pgxpool.Pool) { db.Close() }
+	// Indirected so a test can assert run() actually starts the reclaim loop.
+	// The janitor previously had no call site at all.
+	runGenerationCleanupLoopFn = runGenerationCleanupLoop
 )
 
 func main() {
@@ -107,19 +110,30 @@ func run() error {
 		}
 	}()
 
+	// Reclaim the Redis keys and Qdrant collections left behind by superseded
+	// namespace generations. The janitor refuses to touch anything until the
+	// legacy-envelope gate is closed, so this is inert until an operator runs
+	// `admin lifecycle disable-legacy-envelopes`.
+	janitor := nslifecycle.NewJanitor(lifecycleRepo, newStoreGenerationCleaner(redisClient, qdrantClient))
+	janitorDone := make(chan struct{})
+	go func() {
+		defer close(janitorDone)
+		runGenerationCleanupLoopFn(ctx, cfg.RetentionInterval, janitor)
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signalNotifyFn(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// Cancel first, then join both goroutines BEFORE the deferred pool close
-	// runs — a run interrupted mid-phase still gets to finalize its
+	// Cancel first, then join every background goroutine BEFORE the deferred
+	// pool close runs — a run interrupted mid-phase still gets to finalize its
 	// batch_run_logs row against a live pool.
 	slog.Info("cron shutting down")
 	cancel()
 
 	timer := time.NewTimer(shutdownDrainTimeout)
 	defer timer.Stop()
-	if drainDone([]<-chan struct{}{jobDone, retentionDone}, timer.C) {
+	if drainDone([]<-chan struct{}{jobDone, retentionDone, janitorDone}, timer.C) {
 		slog.Info("cron stopped")
 	} else {
 		slog.Warn("cron shutdown timed out waiting for background jobs")

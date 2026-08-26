@@ -10,7 +10,7 @@ import (
 // Qdrant, only from what the durable ledger says is superseded.
 type JanitorSource interface {
 	GetSystem(context.Context) (*SystemLifecycle, error)
-	ListCleanupCandidates(context.Context, int) ([]CleanupCandidate, error)
+	ListCleanupCandidates(context.Context, CleanupCandidate, int) ([]CleanupCandidate, error)
 }
 
 // GenerationCleaner removes one superseded generation's physical resources.
@@ -24,6 +24,10 @@ type GenerationCleaner interface {
 type Janitor struct {
 	source  JanitorSource
 	cleaner GenerationCleaner
+	// cursor is the keyset position the next pass resumes from, so successive
+	// bounded passes walk the whole candidate space instead of re-cleaning the
+	// first page. It resets on a short page, making the walk cyclic.
+	cursor CleanupCandidate
 }
 
 // NewJanitor wires the ledger read side to the physical cleaner.
@@ -44,12 +48,17 @@ func (j *Janitor) RunOnce(ctx context.Context, limit int) (int, error) {
 	if system.LegacyEnvelopesDisabledAt == nil {
 		return 0, ErrLegacyEnvelopesOpen
 	}
-	candidates, err := j.source.ListCleanupCandidates(ctx, limit)
+	candidates, err := j.source.ListCleanupCandidates(ctx, j.cursor, limit)
 	if err != nil {
 		return 0, fmt.Errorf("list cleanup candidates: %w", err)
 	}
 	if len(candidates) > limit {
 		candidates = candidates[:limit]
+	}
+	// A short page means the walk reached the end; start the next pass over so
+	// generations superseded in the meantime are picked up.
+	if len(candidates) < limit {
+		defer func() { j.cursor = CleanupCandidate{} }()
 	}
 	cleaned := 0
 	for _, candidate := range candidates {
@@ -59,6 +68,9 @@ func (j *Janitor) RunOnce(ctx context.Context, limit int) (int, error) {
 		if err := j.cleaner.DeleteQdrantGeneration(ctx, candidate); err != nil {
 			return cleaned, fmt.Errorf("clean Qdrant generation %s/%d: %w", candidate.Namespace, candidate.Generation, err)
 		}
+		// Advance only past fully cleaned candidates so a failure mid-page
+		// resumes on the one that failed rather than skipping it.
+		j.cursor = candidate
 		cleaned++
 	}
 	return cleaned, nil
