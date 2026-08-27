@@ -202,6 +202,12 @@ func (w *Worker) reapOnce(ctx context.Context) {
 			metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "error").Inc()
 			return
 		}
+		// Counted per page rather than per cycle: a cycle says the scan ran, this
+		// says it found work. Without it a PEL draining steadily and a PEL that
+		// is simply empty produce the same cycle counts.
+		if len(msgs) > 0 {
+			metrics.StreamReclaimedTotal.WithLabelValues("events", "").Add(float64(len(msgs)))
+		}
 		for _, msg := range msgs {
 			w.handleMessage(ctx, msg)
 		}

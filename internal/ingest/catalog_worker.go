@@ -186,6 +186,9 @@ func (w *CatalogWorker) reapOnce(ctx context.Context) {
 			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "error").Inc()
 			return
 		}
+		if len(msgs) > 0 {
+			metrics.StreamReclaimedTotal.WithLabelValues("catalog", "").Add(float64(len(msgs)))
+		}
 		for _, msg := range msgs {
 			w.handleMessage(ctx, msg)
 		}

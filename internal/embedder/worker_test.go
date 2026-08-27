@@ -680,3 +680,36 @@ func TestWorkerReapOnce_RecordsTheReclaimOutcome(t *testing.T) {
 		t.Errorf("tenant-a/error = %v, want another namespace's failure not to count here", got)
 	}
 }
+
+// TestWorkerReapOnce_CountsReclaimedEntriesPerNamespace pins the companion
+// counter. It shares the embed streams' namespace label, so per-tenant
+// attribution has to hold here too.
+func TestWorkerReapOnce_CountsReclaimedEntriesPerNamespace(t *testing.T) {
+	metrics.StreamReclaimedTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimedTotal.Reset)
+
+	reclaimed := func(ns string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("embed", ns))
+	}
+
+	page := 0
+	w := &Worker{
+		redis: &fakeStreamClient{autoFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			page++
+			if page == 1 {
+				return []redis.XMessage{{ID: "1-0"}, {ID: "2-0"}}, "3-0", nil
+			}
+			return []redis.XMessage{{ID: "3-0"}}, "0-0", nil
+		}},
+		service: &fakeProcessor{out: OutcomeEmbedded},
+		cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+	}
+	w.reapOnce(context.Background(), "tenant-a", "catalog:embed:tenant-a", "0-0")
+
+	if got := reclaimed("tenant-a"); got != 3 {
+		t.Errorf("tenant-a reclaimed = %v, want 3 summed across both pages", got)
+	}
+	if got := reclaimed("tenant-b"); got != 0 {
+		t.Errorf("tenant-b reclaimed = %v, want one namespace's reclaim not to count for another", got)
+	}
+}

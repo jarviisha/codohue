@@ -345,6 +345,9 @@ func (w *Worker) reapOnce(ctx context.Context, ns, stream, cursor string) string
 			metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "error").Inc()
 			return cursor
 		}
+		if len(msgs) > 0 {
+			metrics.StreamReclaimedTotal.WithLabelValues("embed", ns).Add(float64(len(msgs)))
+		}
 		for _, msg := range msgs {
 			w.handleMessage(ctx, ns, stream, group, msg)
 		}

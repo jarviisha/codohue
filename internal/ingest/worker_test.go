@@ -524,3 +524,45 @@ func TestWorkerReapOnce_RecordsTheTerminalOutcome(t *testing.T) {
 		t.Errorf("terminal = %v after a non-terminal pass, want it unchanged at 1", got)
 	}
 }
+
+// TestWorkerReapOnce_CountsReclaimedEntries pins the companion counter. Cycles
+// alone cannot distinguish a PEL that is draining from one that is empty —
+// both terminate — so the contract asks for reclaimed entries as well.
+func TestWorkerReapOnce_CountsReclaimedEntries(t *testing.T) {
+	metrics.StreamReclaimedTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimedTotal.Reset)
+
+	reclaimed := func() float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("events", ""))
+	}
+
+	page := 0
+	w := &Worker{
+		service: &fakeProcessor{},
+		autoClaimFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			page++
+			if page == 1 {
+				return []redis.XMessage{{ID: "1-0"}, {ID: "2-0"}}, "3-0", nil
+			}
+			return []redis.XMessage{{ID: "3-0"}}, "0-0", nil
+		},
+		ackFn: func(context.Context, string, string, ...string) error { return nil },
+	}
+	w.reapOnce(context.Background())
+
+	// Summed across both pages, not reset per page.
+	if got := reclaimed(); got != 3 {
+		t.Errorf("reclaimed = %v, want 3", got)
+	}
+
+	// A pass that claims nothing must not move the counter, or an idle worker
+	// would look like a busy one.
+	w.reapCursor = "0-0"
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "0-0", nil
+	}
+	w.reapOnce(context.Background())
+	if got := reclaimed(); got != 3 {
+		t.Errorf("reclaimed = %v after an empty pass, want it unchanged at 3", got)
+	}
+}

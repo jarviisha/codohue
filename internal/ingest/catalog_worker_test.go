@@ -407,3 +407,27 @@ func TestCatalogWorkerReapOnce_RecordsTheTerminalOutcome(t *testing.T) {
 		t.Errorf("events/terminal = %v, want the catalog pass not to touch it", got)
 	}
 }
+
+// TestCatalogWorkerReapOnce_CountsReclaimedEntries pins the companion counter,
+// which reports how much the scan actually took over rather than that it ran.
+func TestCatalogWorkerReapOnce_CountsReclaimedEntries(t *testing.T) {
+	metrics.StreamReclaimedTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimedTotal.Reset)
+
+	// Entries carry no payload field, so each is acked and dropped as malformed
+	// — this test is about the count, not about what the entries mean.
+	w := &CatalogWorker{
+		autoClaimFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return []redis.XMessage{{ID: "1-0"}, {ID: "2-0"}}, "0-0", nil
+		},
+		ackFn: func(context.Context, string, string, ...string) error { return nil },
+	}
+	w.reapOnce(context.Background())
+
+	if got := testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("catalog", "")); got != 2 {
+		t.Errorf("catalog reclaimed = %v, want 2", got)
+	}
+	if got := testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("events", "")); got != 0 {
+		t.Errorf("events reclaimed = %v, want the catalog pass not to touch it", got)
+	}
+}
