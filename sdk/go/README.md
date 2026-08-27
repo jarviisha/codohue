@@ -107,6 +107,43 @@ func main() {
 }
 ```
 
+### Reconciliation paging
+
+A batch ingest gives many rows the same `updated_at`, so offset paging over a
+set that is still being written re-sends rows or skips them. Follow the opaque
+cursor instead — it pages on `(updated_at, id)`, which is stable:
+
+```go
+cursor := ""
+for {
+    page, err := ns.ListCatalogObjectsPage(ctx, changedSince, 100, 0, cursor)
+    if err != nil {
+        return err
+    }
+    for _, item := range page.Items {
+        // re-send anything you no longer have
+    }
+    if page.NextCursor == "" {
+        break // terminal page
+    }
+    cursor = page.NextCursor
+}
+```
+
+The cursor is opaque: echo it back verbatim, never parse it. It is bound to the
+namespace and `changed_since` that produced it — replaying it against a
+different query is a 400 rather than a silent walk through another result set.
+`ListCatalogObjects` (offset paging) still works for one deprecation window,
+but cursor and offset cannot be combined.
+
+### Failure handling
+
+Writes answer distinguishably so a client knows whether to retry: 404
+`namespace_not_found` is permanent, 409 `namespace_not_active` clears when a
+delete or reset finishes, and 503 `namespace_config_unavailable` is worth
+retrying. A creation timestamp more than five minutes in the future is
+rejected with 400 `invalid_object_created_at`.
+
 ### Admin client (provisioning)
 
 `sdk/go/admin` talks to the admin server (port 2002) with

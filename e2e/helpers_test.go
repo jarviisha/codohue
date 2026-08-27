@@ -8,15 +8,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/nsconfig"
 	qdrant "github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
@@ -377,21 +380,42 @@ func runCronOnceUntil(t testing.TB, timeout time.Duration, condition func() (boo
 	t.Fatalf("cron condition not met after %s\nCron logs: %s", timeout, strings.TrimSpace(string(logs)))
 }
 
+var (
+	sharedQdrantOnce   sync.Once
+	sharedQdrantClient *qdrant.Client
+	sharedQdrantErr    error
+)
+
+// newQdrantTestClient returns one process-wide client. Every call used to dial
+// a fresh connection and pay a version-check round trip, and the per-call
+// cleanup meant a test asserting in a loop held every connection it had ever
+// opened until it finished — the lifecycle race alone opened 400. Closed once
+// in TestMain via closeSharedQdrantClient.
 func newQdrantTestClient(t testing.TB) *qdrant.Client {
 	t.Helper()
 
-	port := mustAtoi(t, envOrDefault("QDRANT_PORT", "6334"))
-	client, err := qdrant.NewClient(&qdrant.Config{
-		Host: envOrDefault("QDRANT_HOST", "localhost"),
-		Port: port,
+	sharedQdrantOnce.Do(func() {
+		port, err := strconv.Atoi(envOrDefault("QDRANT_PORT", "6334"))
+		if err != nil {
+			sharedQdrantErr = fmt.Errorf("parse QDRANT_PORT: %w", err)
+			return
+		}
+		sharedQdrantClient, sharedQdrantErr = qdrant.NewClient(&qdrant.Config{
+			Host: envOrDefault("QDRANT_HOST", "localhost"),
+			Port: port,
+		})
 	})
-	if err != nil {
-		t.Fatalf("new qdrant client: %v", err)
+	if sharedQdrantErr != nil {
+		t.Fatalf("new qdrant client: %v", sharedQdrantErr)
 	}
-	t.Cleanup(func() {
-		_ = client.Close()
-	})
-	return client
+	return sharedQdrantClient
+}
+
+// closeSharedQdrantClient releases the shared connection at suite teardown.
+func closeSharedQdrantClient() {
+	if sharedQdrantClient != nil {
+		_ = sharedQdrantClient.Close()
+	}
 }
 
 func cleanupQdrantNamespace(t testing.TB, namespace string) {
@@ -475,11 +499,122 @@ func trendingKeyState(t testing.TB, namespace string) (int64, time.Duration) {
 	return card, ttl
 }
 
-func mustAtoi(t testing.TB, value string) int {
+type redisGroupProgress struct {
+	Name            string
+	Pending         int64
+	OldestPendingID string
+	LastDeliveredID string
+}
+
+func redisGroupProgressFor(t testing.TB, stream, group string) redisGroupProgress {
 	t.Helper()
-	n, err := strconv.Atoi(value)
+	ctx := context.Background()
+	groups, err := testRedis.XInfoGroups(ctx, stream).Result()
 	if err != nil {
-		t.Fatalf("atoi %q: %v", value, err)
+		t.Fatalf("xinfo groups %q: %v", stream, err)
 	}
-	return n
+	for _, info := range groups {
+		if info.Name != group {
+			continue
+		}
+		progress := redisGroupProgress{
+			Name:            info.Name,
+			Pending:         info.Pending,
+			LastDeliveredID: info.LastDeliveredID,
+		}
+		if info.Pending > 0 {
+			pending, err := testRedis.XPending(ctx, stream, group).Result()
+			if err != nil {
+				t.Fatalf("xpending %q/%q: %v", stream, group, err)
+			}
+			progress.OldestPendingID = pending.Lower
+		}
+		return progress
+	}
+	t.Fatalf("consumer group %q not found on stream %q", group, stream)
+	return redisGroupProgress{}
+}
+
+func ensureRedisGroup(t testing.TB, stream, group, start string) {
+	t.Helper()
+	err := testRedis.XGroupCreateMkStream(context.Background(), stream, group, start).Err()
+	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
+		t.Fatalf("create consumer group %q on %q: %v", group, stream, err)
+	}
+}
+
+func assertNoStreamEntryBelow(t testing.TB, stream, frontier string) {
+	t.Helper()
+	entries, err := testRedis.XRangeN(context.Background(), stream, "-", "("+frontier, 1).Result()
+	if err != nil {
+		t.Fatalf("xrange below frontier %q on %q: %v", frontier, stream, err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("stream %q still contains entry %q below frontier %q", stream, entries[0].ID, frontier)
+	}
+}
+
+func namespaceLifecycleGeneration(t testing.TB, namespace string) int64 {
+	t.Helper()
+	var generation int64
+	if err := testDB.QueryRow(context.Background(), `
+		SELECT generation FROM namespace_lifecycles WHERE namespace = $1
+	`, namespace).Scan(&generation); err != nil {
+		t.Fatalf("lifecycle generation for %q: %v", namespace, err)
+	}
+	return generation
+}
+
+func assertNoNamespaceRows(t testing.TB, table, namespace string) {
+	t.Helper()
+	allowed := map[string]bool{
+		"events": true, "catalog_items": true, "objects": true,
+		"id_mappings": true, "namespace_configs": true,
+	}
+	if !allowed[table] {
+		t.Fatalf("unsupported namespace-owned table %q", table)
+	}
+	var count int
+	query := "SELECT COUNT(*) FROM " + table + " WHERE namespace = $1" //nolint:gosec // table is allowlisted above.
+	if err := testDB.QueryRow(context.Background(), query, namespace).Scan(&count); err != nil {
+		t.Fatalf("count namespace rows in %q: %v", table, err)
+	}
+	if count != 0 {
+		t.Fatalf("table %q has %d rows for namespace %q, want zero", table, count, namespace)
+	}
+}
+
+func assertQdrantNamespaceAbsent(t testing.TB, namespace string) {
+	t.Helper()
+	for _, suffix := range []string{"_subjects", "_objects", "_subjects_dense", "_objects_dense"} {
+		collection := namespace + suffix
+		if qdrantCollectionExists(t, collection) {
+			t.Errorf("Qdrant collection %q still exists", collection)
+		}
+	}
+}
+
+func unavailableTCPAddress(t testing.TB) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve unavailable TCP address: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close reserved TCP address: %v", err)
+	}
+	return address
+}
+
+// mustLifecycleLocker builds a lifecycle locker over the shared test pool. The
+// locker owns its own connection pool, so the test must close it.
+func mustLifecycleLocker(t testing.TB) *nslifecycle.PostgresLocker {
+	t.Helper()
+	locker, err := nslifecycle.NewPostgresLocker(testDB)
+	if err != nil {
+		t.Fatalf("new lifecycle locker: %v", err)
+	}
+	t.Cleanup(locker.Close)
+	return locker
 }

@@ -70,6 +70,22 @@ func TestCatalogProducerStreamOverride(t *testing.T) {
 	}
 }
 
+func TestCatalogProducerDefaultGenerationStampsLegacyPayload(t *testing.T) {
+	f := &fakeXAdder{id: "1-0"}
+	p := NewCatalogProducer(f, WithCatalogNamespaceGeneration(4))
+	if _, err := p.Publish(context.Background(), codohuetypes.CatalogStreamItem{Namespace: "feed"}); err != nil {
+		t.Fatal(err)
+	}
+	raw := f.calls[0].Values.(map[string]any)[codohuetypes.PayloadField].(string)
+	var decoded codohuetypes.CatalogStreamItem
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.NamespaceGeneration != 4 {
+		t.Fatalf("generation = %d", decoded.NamespaceGeneration)
+	}
+}
+
 func TestCatalogProducerPublishBatchStopsOnError(t *testing.T) {
 	t.Parallel()
 

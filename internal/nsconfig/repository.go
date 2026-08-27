@@ -47,6 +47,82 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	}
 }
 
+// schemaEmbeddingDim is the DEFAULT on namespace_configs.embedding_dim
+// (migration 005). The service needs it to know a brand-new namespace's
+// effective dimension before the row exists, so a strategy can be validated
+// against it without writing first.
+const schemaEmbeddingDim = 64
+
+// UpsertWithCatalog applies the base config and the catalog config in ONE
+// transaction.
+//
+// Two statements would leave a window where the namespace exists with its new
+// embedding_dim but not its strategy — and if the second failed, the operator
+// would be left with a half-applied config that reads as success. Provisioning
+// catalog mode is one request, so it has to be one write.
+//
+// catalogReq nil means "base config only".
+func (r *Repository) UpsertWithCatalog(ctx context.Context, ns string, req *UpsertRequest, catalogReq *UpdateCatalogRequest) (*namespace.Config, error) {
+	var cfg *namespace.Config
+	err := r.withinTx(ctx, func(tx *Repository) error {
+		var upsertErr error
+		cfg, upsertErr = tx.Upsert(ctx, ns, req)
+		if upsertErr != nil {
+			return upsertErr
+		}
+		if catalogReq == nil {
+			return nil
+		}
+		cfg, upsertErr = tx.UpsertCatalogConfig(ctx, ns, catalogReq)
+		if upsertErr != nil {
+			return upsertErr
+		}
+		if cfg == nil {
+			// The base upsert just created or updated the row, so the catalog
+			// UPDATE matching nothing means the row vanished underneath us.
+			return ErrNamespaceNotFound
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// withinTx runs fn against a Repository whose statement seams are bound to a
+// single transaction. A Repository built without a pool (unit tests drive the
+// seams directly) runs fn unchanged — there is no connection to open a
+// transaction on.
+func (r *Repository) withinTx(ctx context.Context, fn func(*Repository) error) error {
+	if r.db == nil {
+		return fn(r)
+	}
+	if err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
+		return fn(&Repository{
+			execFn: func(ctx context.Context, sql string, args ...any) error {
+				if _, err := tx.Exec(ctx, sql, args...); err != nil {
+					return fmt.Errorf("exec namespace config statement: %w", err)
+				}
+				return nil
+			},
+			execTagFn: func(ctx context.Context, sql string, args ...any) (int64, error) {
+				tag, err := tx.Exec(ctx, sql, args...)
+				if err != nil {
+					return 0, fmt.Errorf("exec namespace config statement: %w", err)
+				}
+				return tag.RowsAffected(), nil
+			},
+			queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+				return tx.QueryRow(ctx, sql, args...)
+			},
+		})
+	}); err != nil {
+		return fmt.Errorf("namespace config transaction: %w", err)
+	}
+	return nil
+}
+
 // Upsert creates or updates the configuration for a namespace.
 //
 // PATCH semantics: a nil field on the request leaves that column untouched.
@@ -86,8 +162,34 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 	}
 
 	if err := r.execFn(ctx, `
-		INSERT INTO namespace_configs (namespace, dense_source)
-		VALUES ($1, 'disabled')
+		WITH system_gate AS (
+			-- Also carries the global legacy gate: a generation-1 namespace
+			-- accepts envelopes that name no generation (the shape the Redis
+			-- Streams transport publishes), unless an operator has closed the
+			-- gate fleet-wide against adoption evidence.
+			SELECT legacy_envelopes_disabled_at IS NULL AS legacy_allowed
+			FROM system_lifecycle WHERE singleton = TRUE AND state = 'active'
+		), activated AS (
+			INSERT INTO namespace_lifecycles
+				(namespace, generation, state, activated_at, legacy_messages_allowed, updated_at)
+			SELECT $1, 1, 'active', NOW(), system_gate.legacy_allowed, NOW() FROM system_gate
+			ON CONFLICT (namespace) DO UPDATE SET
+				generation = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN namespace_lifecycles.generation + 1 ELSE namespace_lifecycles.generation END,
+				state = 'active',
+				activated_at = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN NOW() ELSE namespace_lifecycles.activated_at END,
+				legacy_messages_allowed = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN FALSE ELSE namespace_lifecycles.legacy_messages_allowed END,
+				last_error = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN NULL ELSE namespace_lifecycles.last_error END,
+				updated_at = CASE WHEN namespace_lifecycles.state = 'deleted'
+					THEN NOW() ELSE namespace_lifecycles.updated_at END
+			WHERE namespace_lifecycles.state IN ('active', 'deleted')
+			RETURNING generation
+		)
+		INSERT INTO namespace_configs (namespace, generation, dense_source)
+		SELECT $1, generation, 'disabled' FROM activated
 		ON CONFLICT (namespace) DO NOTHING`,
 		ns,
 	); err != nil {
@@ -124,7 +226,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at`,
+			generation, created_at, updated_at`,
 		ns, weightsJSON, req.Lambda, req.Gamma, req.MaxResults, req.SeenItemsDays,
 		req.ExcludeAuthored,
 		req.Alpha, denseSource, req.EmbeddingDim, req.DenseDistance,
@@ -137,7 +239,7 @@ func (r *Repository) Upsert(ctx context.Context, ns string, req *UpsertRequest) 
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-		&cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert namespace config: %w", err)
@@ -205,7 +307,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at
+			generation, created_at, updated_at
 		FROM namespace_configs
 		WHERE namespace = $1`,
 		ns,
@@ -217,7 +319,7 @@ func (r *Repository) Get(ctx context.Context, ns string) (*namespace.Config, err
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-		&cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil
@@ -258,7 +360,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at
+			generation, created_at, updated_at
 		FROM namespace_configs
 		WHERE dense_source = 'catalog'
 		ORDER BY namespace ASC`,
@@ -281,7 +383,7 @@ func (r *Repository) ListCatalogNamespaces(ctx context.Context) ([]*namespace.Co
 			&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 			&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 			&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-			&cfg.CreatedAt, &cfg.UpdatedAt,
+			&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan namespace config row: %w", err)
@@ -361,7 +463,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 			trending_window, trending_ttl, lambda_trending,
 			COALESCE(catalog_strategy_id, ''), COALESCE(catalog_strategy_version, ''),
 			catalog_strategy_params, COALESCE(catalog_max_attempts, 0), COALESCE(catalog_max_content_bytes, 0),
-			created_at, updated_at`,
+			generation, created_at, updated_at`,
 		ns, req.Enabled, strategyID, strategyVer, paramsJSON, maxAttempts, maxBytes,
 	).Scan(
 		&cfg.Namespace, &weightsRaw, &cfg.Lambda, &cfg.Gamma, &cfg.MaxResults, &cfg.SeenItemsDays,
@@ -371,7 +473,7 @@ func (r *Repository) UpsertCatalogConfig(ctx context.Context, ns string, req *Up
 		&cfg.TrendingWindow, &cfg.TrendingTTL, &cfg.LambdaTrending,
 		&cfg.CatalogStrategyID, &cfg.CatalogStrategyVersion,
 		&paramsRaw, &cfg.CatalogMaxAttempts, &cfg.CatalogMaxContentBytes,
-		&cfg.CreatedAt, &cfg.UpdatedAt,
+		&cfg.Generation, &cfg.CreatedAt, &cfg.UpdatedAt,
 	)
 	if err == pgx.ErrNoRows {
 		return nil, nil

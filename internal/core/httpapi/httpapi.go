@@ -8,6 +8,8 @@ import (
 	"net/http"
 
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 const defaultMaxJSONBodyBytes int64 = 8 << 20
@@ -75,4 +77,34 @@ func WriteError(w http.ResponseWriter, status int, code, message string) {
 			Message: message,
 		},
 	})
+}
+
+// WriteLifecycleError answers a namespace-lifecycle failure with the status
+// the data-plane contract documents, and reports whether it did.
+//
+// The three cases are answered differently because they mean different things
+// to a client: a namespace that is gone will never accept the write (404), one
+// that is mid-delete or in a system reset will accept it again later but not
+// now (409), and an unreadable lifecycle store says nothing about the
+// namespace at all (503, safe to retry). Collapsing them into one 500 — which
+// is what every handler did before — tells the caller to retry a write that
+// can never succeed, or to give up on one that would.
+//
+// Handlers call this first, so the contract is defined once rather than in
+// each domain.
+func WriteLifecycleError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, nslifecycle.ErrNamespaceNotFound):
+		WriteError(w, http.StatusNotFound, "namespace_not_found", "namespace not found")
+	case errors.Is(err, nslifecycle.ErrNamespaceNotActive), errors.Is(err, nslifecycle.ErrSystemResetting):
+		WriteError(w, http.StatusConflict, "namespace_not_active", "namespace is not accepting writes")
+	case errors.Is(err, nslifecycle.ErrLeaseRequired):
+		// A writer reached a mutation without the lease that fences it. That
+		// is a wiring bug, not a client error, so it stays a 500 — but it must
+		// not be mistaken for one of the cases above.
+		return false
+	default:
+		return false
+	}
+	return true
 }

@@ -21,6 +21,7 @@ COVERAGE_RACE_OUT := $(COVERAGE_DIR)/race.out
 # The examples/ modules in go.work are demo apps, deliberately excluded from
 # lint/test/coverage — they are not part of the shipped surface.
 GO_MODULES := . ./pkg/codohuetypes ./sdk/go ./sdk/go/redistream
+GOVULNCHECK_VERSION := v1.7.0
 
 GO_CACHE_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp
 LINT_ENV     := $(GO_CACHE_ENV) GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
@@ -63,6 +64,7 @@ MIN_EMBEDSTRATEGY  ?= 90
 	logs logs-api logs-cron logs-admin logs-embedder logs-app \
 	compose-check compose-check-app compose-check-prod \
 	lint fmt \
+	vuln \
 	test test-pkg test-verbose test-race \
 	coverage coverage-unit coverage-race coverage-report coverage-html \
 	coverage-check coverage-check-pkg coverage-check-all coverage-clean \
@@ -240,6 +242,12 @@ fmt:
 		(cd $$m && $(LINT_ENV) golangci-lint fmt ./...) || exit 1; \
 	done
 
+vuln:
+	@for m in $(GO_MODULES); do \
+		echo "==> govulncheck $$m"; \
+		(cd $$m && $(GO_CACHE_ENV) go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...) || exit 1; \
+	done
+
 # Tests
 
 test:
@@ -347,14 +355,17 @@ coverage-clean:
 
 # End-to-end tests
 
+# The full suite runs the lifecycle race and retention-window scenarios, which
+# take minutes of wall clock on purpose. The old 120s cap aborted it mid-run,
+# so the gate could never pass.
 test-e2e: build
-	go test -v -tags=e2e -timeout=120s ./e2e/...
+	go test -v -tags=e2e -timeout=900s ./e2e/...
 
 test-e2e-api: build-api
-	go test -v -tags=e2e -timeout=120s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
+	go test -v -tags=e2e -timeout=300s ./e2e/... -run 'Ping|Healthz|Config|Embedding|Recommend|Rank|Trending'
 
 test-e2e-heavy: build
-	go test -v -tags=e2e -timeout=180s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog|Admin'
+	go test -v -tags=e2e -timeout=900s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog|Admin'
 
 # Black-box smoke test against a RUNNING stack (api + admin must be up).
 # Seeds demo data, triggers a batch run, asserts the full ingest -> compute

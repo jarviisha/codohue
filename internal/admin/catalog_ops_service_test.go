@@ -162,7 +162,7 @@ func TestTriggerReEmbed_Service_HappyPath(t *testing.T) {
 		insertReembedID:   42,
 		staleResetTargets: []CatalogReembedTarget{{ID: 1, ObjectID: "o1"}, {ID: 2, ObjectID: "o2"}},
 	}
-	picker := &fakeStrategyPicker{id: "internal-hashing-ngrams", version: "v1", enabled: true}
+	picker := &fakeStrategyPicker{id: "internal-hashing-ngrams", version: "v1", generation: 2, enabled: true}
 	svc, pub, _ := withCatalogPlumbing(t, repo, picker)
 
 	resp, err := svc.TriggerReEmbed(context.Background(), "ns", "")
@@ -178,12 +178,18 @@ func TestTriggerReEmbed_Service_HappyPath(t *testing.T) {
 	if len(pub.calls) != 2 {
 		t.Errorf("expected 2 XADD calls, got %d", len(pub.calls))
 	}
-	if pub.calls[0].Stream != "catalog:embed:ns" {
-		t.Errorf("expected stream=catalog:embed:ns, got %q", pub.calls[0].Stream)
+	if pub.calls[0].Stream != "catalog:embed:ns:g2" {
+		t.Errorf("expected stream=catalog:embed:ns:g2, got %q", pub.calls[0].Stream)
+	}
+	if pub.calls[0].MaxLen != 0 || pub.calls[0].Approx {
+		t.Errorf("embed stream must not be producer-trimmed: MaxLen=%d Approx=%v", pub.calls[0].MaxLen, pub.calls[0].Approx)
 	}
 	values := pub.calls[0].Values.(map[string]any)
 	if values["strategy_version"] != "v1" {
 		t.Errorf("expected strategy_version=v1 in payload, got %v", values["strategy_version"])
+	}
+	if values["namespace_generation"] != int64(2) {
+		t.Errorf("expected namespace_generation=2 in payload, got %v", values["namespace_generation"])
 	}
 	if repo.insertedReembed.namespace != "ns" || repo.insertedReembed.strategyVersion != "v1" {
 		t.Errorf("repo insert not called with right args: %+v", repo.insertedReembed)
@@ -488,9 +494,15 @@ func TestReembedResetSQL_StateFilters(t *testing.T) {
 		if !strings.Contains(sql, tc.wantState) {
 			t.Errorf("only_state=%q: missing %q in\n%s", tc.onlyState, tc.wantState, sql)
 		}
-		hasVersion := strings.Contains(sql, "strategy_version <> $2")
+		// The stale filter compares the whole immutable strategy identity, not
+		// the version alone: two strategies can share a version string, so
+		// "same version, different strategy_id" must still count as stale.
+		hasVersion := strings.Contains(sql, "(strategy_id, strategy_version) <> ($2, $3)")
 		if hasVersion != tc.wantVersion {
-			t.Errorf("only_state=%q: version filter present=%v, want %v", tc.onlyState, hasVersion, tc.wantVersion)
+			t.Errorf("only_state=%q: strategy-tuple filter present=%v, want %v", tc.onlyState, hasVersion, tc.wantVersion)
+		}
+		if tc.wantVersion && !strings.Contains(sql, "strategy_id IS NULL OR strategy_version IS NULL") {
+			t.Errorf("only_state=%q: unembedded rows (NULL identity) must stay stale in\n%s", tc.onlyState, sql)
 		}
 		if strings.Contains(sql, tc.onlyState) && tc.onlyState == "bogus" {
 			t.Errorf("only_state=%q leaked into SQL text", tc.onlyState)

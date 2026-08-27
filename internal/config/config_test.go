@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestLoadAPI_RequiresDatabaseURL(t *testing.T) {
 	withEnv(t, map[string]string{
@@ -54,14 +57,17 @@ func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 
 func TestLoadAPI_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":                   "postgres://db",
-		"CODOHUE_ADMIN_API_KEY":          "admin",
-		"REDIS_URL":                      "",
-		"QDRANT_HOST":                    "",
-		"QDRANT_PORT":                    "",
-		"CODOHUE_BATCH_INTERVAL_MINUTES": "",
-		"CODOHUE_LOG_FORMAT":             "",
-		"CODOHUE_API_PORT":               "",
+		"DATABASE_URL":                      "postgres://db",
+		"CODOHUE_ADMIN_API_KEY":             "admin",
+		"REDIS_URL":                         "",
+		"QDRANT_HOST":                       "",
+		"QDRANT_PORT":                       "",
+		"CODOHUE_BATCH_INTERVAL_MINUTES":    "",
+		"CODOHUE_LOG_FORMAT":                "",
+		"CODOHUE_API_PORT":                  "",
+		"CODOHUE_STREAM_RETENTION_ENABLED":  "",
+		"CODOHUE_STREAM_RETENTION_INTERVAL": "",
+		"CODOHUE_OBSERVABILITY_TOKEN":       "",
 	}, func() {
 		cfg, err := LoadAPI()
 		if err != nil {
@@ -85,19 +91,31 @@ func TestLoadAPI_UsesDefaults(t *testing.T) {
 		if cfg.APIPort != "2001" {
 			t.Fatalf("APIPort: got %q", cfg.APIPort)
 		}
+		if cfg.StreamRetentionEnabled {
+			t.Fatal("StreamRetentionEnabled: got true, want false")
+		}
+		if cfg.StreamRetentionInterval != time.Minute {
+			t.Fatalf("StreamRetentionInterval: got %s", cfg.StreamRetentionInterval)
+		}
+		if cfg.ObservabilityToken != "" {
+			t.Fatalf("ObservabilityToken: got %q", cfg.ObservabilityToken)
+		}
 	})
 }
 
 func TestLoadAPI_UsesEnvironmentOverrides(t *testing.T) {
 	withEnv(t, map[string]string{
-		"DATABASE_URL":                   "postgres://custom-db",
-		"CODOHUE_ADMIN_API_KEY":          "custom-admin",
-		"REDIS_URL":                      "redis://custom:6379",
-		"QDRANT_HOST":                    "qdrant.internal",
-		"QDRANT_PORT":                    "7000",
-		"CODOHUE_BATCH_INTERVAL_MINUTES": "15",
-		"CODOHUE_LOG_FORMAT":             "json",
-		"CODOHUE_API_PORT":               "8080",
+		"DATABASE_URL":                      "postgres://custom-db",
+		"CODOHUE_ADMIN_API_KEY":             "custom-admin",
+		"REDIS_URL":                         "redis://custom:6379",
+		"QDRANT_HOST":                       "qdrant.internal",
+		"QDRANT_PORT":                       "7000",
+		"CODOHUE_BATCH_INTERVAL_MINUTES":    "15",
+		"CODOHUE_LOG_FORMAT":                "json",
+		"CODOHUE_API_PORT":                  "8080",
+		"CODOHUE_STREAM_RETENTION_ENABLED":  "true",
+		"CODOHUE_STREAM_RETENTION_INTERVAL": "45s",
+		"CODOHUE_OBSERVABILITY_TOKEN":       "monitor-secret",
 	}, func() {
 		cfg, err := LoadAPI()
 		if err != nil {
@@ -126,6 +144,15 @@ func TestLoadAPI_UsesEnvironmentOverrides(t *testing.T) {
 		}
 		if cfg.APIPort != "8080" {
 			t.Fatalf("APIPort: got %q", cfg.APIPort)
+		}
+		if !cfg.StreamRetentionEnabled {
+			t.Fatal("StreamRetentionEnabled: got false, want true")
+		}
+		if cfg.StreamRetentionInterval != 45*time.Second {
+			t.Fatalf("StreamRetentionInterval: got %s", cfg.StreamRetentionInterval)
+		}
+		if cfg.ObservabilityToken != "monitor-secret" {
+			t.Fatalf("ObservabilityToken: got %q", cfg.ObservabilityToken)
 		}
 	})
 }
@@ -251,6 +278,9 @@ func TestLoadEmbedder_UsesDefaults(t *testing.T) {
 		"CODOHUE_EMBEDDER_HEALTH_PORT":      "",
 		"CODOHUE_EMBEDDER_REPLICA_NAME":     "",
 		"CODOHUE_EMBEDDER_POLL_INTERVAL":    "",
+		"CODOHUE_STREAM_RETENTION_ENABLED":  "",
+		"CODOHUE_STREAM_RETENTION_INTERVAL": "",
+		"CODOHUE_OBSERVABILITY_TOKEN":       "",
 	}, func() {
 		cfg, err := LoadEmbedder()
 		if err != nil {
@@ -280,6 +310,15 @@ func TestLoadEmbedder_UsesDefaults(t *testing.T) {
 		if cfg.NamespacePollInterval.String() != "30s" {
 			t.Fatalf("NamespacePollInterval: got %s", cfg.NamespacePollInterval)
 		}
+		if cfg.StreamRetentionEnabled {
+			t.Fatal("StreamRetentionEnabled: got true, want false")
+		}
+		if cfg.StreamRetentionInterval != time.Minute {
+			t.Fatalf("StreamRetentionInterval: got %s", cfg.StreamRetentionInterval)
+		}
+		if cfg.ObservabilityToken != "" {
+			t.Fatalf("ObservabilityToken: got %q", cfg.ObservabilityToken)
+		}
 	})
 }
 
@@ -295,6 +334,9 @@ func TestLoadEmbedder_UsesEnvironmentOverrides(t *testing.T) {
 		"CODOHUE_EMBEDDER_HEALTH_PORT":      "9003",
 		"CODOHUE_EMBEDDER_REPLICA_NAME":     "embedder-1",
 		"CODOHUE_EMBEDDER_POLL_INTERVAL":    "1m",
+		"CODOHUE_STREAM_RETENTION_ENABLED":  "true",
+		"CODOHUE_STREAM_RETENTION_INTERVAL": "30s",
+		"CODOHUE_OBSERVABILITY_TOKEN":       "embed-monitor-secret",
 	}, func() {
 		cfg, err := LoadEmbedder()
 		if err != nil {
@@ -318,7 +360,45 @@ func TestLoadEmbedder_UsesEnvironmentOverrides(t *testing.T) {
 		if cfg.NamespacePollInterval.String() != "1m0s" {
 			t.Fatalf("NamespacePollInterval: got %s", cfg.NamespacePollInterval)
 		}
+		if !cfg.StreamRetentionEnabled {
+			t.Fatal("StreamRetentionEnabled: got false, want true")
+		}
+		if cfg.StreamRetentionInterval != 30*time.Second {
+			t.Fatalf("StreamRetentionInterval: got %s", cfg.StreamRetentionInterval)
+		}
+		if cfg.ObservabilityToken != "embed-monitor-secret" {
+			t.Fatalf("ObservabilityToken: got %q", cfg.ObservabilityToken)
+		}
 	})
+}
+
+func TestLoadAPI_InvalidStreamRetentionConfig(t *testing.T) {
+	tests := []struct {
+		name   string
+		values map[string]string
+	}{
+		{name: "enabled", values: map[string]string{"CODOHUE_STREAM_RETENTION_ENABLED": "sometimes"}},
+		{name: "interval", values: map[string]string{"CODOHUE_STREAM_RETENTION_INTERVAL": "never"}},
+		{name: "non-positive interval", values: map[string]string{"CODOHUE_STREAM_RETENTION_INTERVAL": "0s"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]string{
+				"DATABASE_URL":                      "postgres://db",
+				"CODOHUE_ADMIN_API_KEY":             "admin",
+				"CODOHUE_STREAM_RETENTION_ENABLED":  "false",
+				"CODOHUE_STREAM_RETENTION_INTERVAL": "1m",
+			}
+			for key, value := range tt.values {
+				values[key] = value
+			}
+			withEnv(t, values, func() {
+				if _, err := LoadAPI(); err == nil {
+					t.Fatal("expected error, got nil")
+				}
+			})
+		})
+	}
 }
 
 func TestLoadEmbedder_InvalidQdrantPort(t *testing.T) {

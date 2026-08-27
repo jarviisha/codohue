@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 func openTestDB(t *testing.T) *pgxpool.Pool {
@@ -25,6 +28,7 @@ func openTestDB(t *testing.T) *pgxpool.Pool {
 
 func seedRecommendEvent(t *testing.T, db *pgxpool.Pool, ns, subjectID, objectID string, weight float64, occurredAt time.Time) {
 	t.Helper()
+	ensureNamespace(t, db, ns)
 	_, err := db.Exec(context.Background(), `
 		INSERT INTO events (namespace, subject_id, object_id, action, weight, occurred_at)
 		VALUES ($1, $2, $3, 'VIEW', $4, $5)`,
@@ -37,6 +41,7 @@ func seedRecommendEvent(t *testing.T, db *pgxpool.Pool, ns, subjectID, objectID 
 
 func cleanupRecommendNS(t *testing.T, db *pgxpool.Pool, ns string) {
 	t.Helper()
+	ensureNamespace(t, db, ns)
 	t.Cleanup(func() {
 		db.Exec(context.Background(), //nolint:errcheck // test cleanup, failure is not critical
 			`DELETE FROM events WHERE namespace = $1`, ns)
@@ -164,6 +169,7 @@ func TestRepositoryGetPopularItems_Empty(t *testing.T) {
 // there and never creates a catalog row.
 func seedAuthoredItem(t *testing.T, db *pgxpool.Pool, ns, objectID, author string, createdAt time.Time) {
 	t.Helper()
+	ensureNamespace(t, db, ns)
 	_, err := db.Exec(context.Background(), `
 		INSERT INTO objects (namespace, object_id, author_subject_id, created_at, updated_at)
 		VALUES ($1, $2, NULLIF($3, ''), $4, $4)`,
@@ -260,4 +266,89 @@ func TestRepositoryGetAuthoredObjects_NonCatalogNamespace(t *testing.T) {
 	if len(got) != 0 || truncated {
 		t.Errorf("expected empty result, got %v truncated=%v", got, truncated)
 	}
+}
+
+// ─── generation-qualified physical names ─────────────────────────────────────
+
+// The recommendation cache and the trending ZSET are Redis keys the recompute
+// job wrote under the namespace's generation. Reading them under any other
+// qualification serves a recreated namespace the previous incarnation's
+// results — the exact failure the generation was introduced to prevent.
+func TestPhysicalNamespaces_MatchLifecycleResolver(t *testing.T) {
+	for _, generation := range []int64{0, 1, 2, 17} {
+		cfg := &namespace.Config{Namespace: "tenant", Generation: generation}
+		want := max(generation, 1)
+
+		gotRedis := redisPhysicalNamespace("tenant", cfg)
+		if wantRedis := nslifecycle.RedisNamespace("tenant", want); gotRedis != wantRedis {
+			t.Errorf("generation=%d redis namespace: got %q, want %q", generation, gotRedis, wantRedis)
+		}
+		gotQdrant := qdrantPhysicalNamespace("tenant", cfg)
+		if wantQdrant := nslifecycle.QdrantNamespace("tenant", want); gotQdrant != wantQdrant {
+			t.Errorf("generation=%d qdrant namespace: got %q, want %q", generation, gotQdrant, wantQdrant)
+		}
+	}
+
+	// A nil config is the "config unavailable" path; it must not silently
+	// resolve to some other generation's keys.
+	if got := redisPhysicalNamespace("tenant", nil); got != "tenant" {
+		t.Errorf("nil config redis namespace: got %q, want tenant", got)
+	}
+}
+
+// Cache keys of two generations must not collide, and generation 1 must keep
+// the key shape that is already live in Redis.
+func TestRecCacheKey_SeparatesGenerations(t *testing.T) {
+	legacy := recCacheKey("tenant", 1, "u1", 10, 0)
+	recreated := recCacheKey("tenant", 2, "u1", 10, 0)
+	if legacy == recreated {
+		t.Errorf("generations share cache key %q", legacy)
+	}
+	// Generation 1 must keep the key shape that is already live in Redis.
+	if want := "rec:v2:dGVuYW50:dTE:limit=10:offset=0"; legacy != want {
+		t.Errorf("generation 1 key changed: got %q, want %q", legacy, want)
+	}
+	// Paging and subject stay part of the key regardless of generation.
+	if recCacheKey("tenant", 2, "u1", 10, 0) == recCacheKey("tenant", 2, "u1", 10, 10) {
+		t.Error("offset must remain part of the cache key")
+	}
+}
+
+// The trending key the serving path reads must be byte-identical to the one
+// cmd/cron writes for that generation.
+func TestTrendingKey_MatchesWriterForEveryGeneration(t *testing.T) {
+	for _, generation := range []int64{1, 2, 9} {
+		physical := redisPhysicalNamespace("tenant", &namespace.Config{Generation: generation})
+		read := nslifecycle.MustPhysicalName(nslifecycle.KindTrending, physical, 1)
+		written := nslifecycle.MustPhysicalName(nslifecycle.KindTrending, "tenant", generation)
+		if read != written {
+			t.Errorf("generation=%d: serving reads %q, cron writes %q", generation, read, written)
+		}
+	}
+}
+
+// ensureNamespace creates the rows a namespace-scoped row depends on.
+//
+// Migration 025 gave the data tables a foreign key onto namespace_configs,
+// which in turn references namespace_lifecycles (024). Seeding a row for an
+// invented namespace is therefore an FK error rather than a row — and these
+// tests skip unless DATABASE_URL is set, so the break went unseen.
+func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW()) ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace lifecycle %q: %v", ns, err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace config %q: %v", ns, err)
+	}
+	t.Cleanup(func() {
+		clean := context.Background()
+		db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, ns)    //nolint:errcheck // test cleanup
+		db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, ns) //nolint:errcheck // test cleanup
+	})
 }

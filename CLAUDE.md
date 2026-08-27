@@ -65,8 +65,10 @@ Live reload in development uses `air` (configured in `.air.toml`), auto-rebuilds
 ### Four Binaries
 
 - **`cmd/api`** — HTTP API server (port **2001**) + two Redis Streams worker goroutines: the events ingest worker (`codohue:events`) and the catalog ingest worker (`codohue:catalog`, feeding `internal/catalog` through a `cmd/api` adapter)
-- **`cmd/cron`** — Batch job daemon that recomputes sparse and dense vectors plus trending data on a configurable interval (default: 5 min)
-- **`cmd/admin`** — Admin server (port **2002**) that serves the embedded `web/admin` SPA, the session-cookie auth API, and the `/api/admin/v1/*` operational dashboard endpoints
+- **`cmd/cron`** — Batch job daemon that recomputes sparse and dense vectors plus trending data on a configurable interval (default: 5 min). It also runs two background maintenance loops on `CODOHUE_RETENTION_INTERVAL` (default 1h): the **retention prune** (`internal/retention`), which bounds `batch_run_logs` and `catalog_backlog_samples`; and the **deleted-generation janitor** (`nslifecycle.Janitor`), which reclaims the Redis keys and Qdrant collections of superseded namespace generations, 50 per pass via a keyset cursor. The janitor refuses to touch anything until the legacy-envelope gate is closed fleet-wide, so it is inert until an operator runs `cmd/admin lifecycle disable-legacy-envelopes`
+- **`cmd/admin`** — Admin server (port **2002**) that serves the embedded `web/admin` SPA, the session-cookie auth API, and the `/api/admin/v1/*` operational dashboard endpoints. Run with no arguments it is that server; it also carries two operator CLIs that mutate fleet-wide state and are **not** reachable over HTTP:
+  - `lifecycle disable-legacy-envelopes --all --adoption-evidence <ref>` — permanently closes the generation-less envelope window. One-way door; requires evidence that every producer stamps a generation.
+  - `idmap-repair audit | quarantine --run <id> | apply --run <id> --pg-snapshot <ref> --qdrant-snapshot <collection>=<ref> | verify --run <id> | resume --run <id>` — the migration-022 identity reconciliation. `audit` is read-only; `apply` holds the global exclusive lifecycle lease and deletes points, so it demands a snapshot per affected collection. See [deploy/idmap-repair-runbook.md](deploy/idmap-repair-runbook.md).
 - **`cmd/embedder`** — Catalog auto-embedding worker (port **2003** for `/healthz` + `/metrics`); consumes raw catalog content from per-namespace `catalog:embed:{ns}` Redis streams, embeds it via the configured `embedstrategy.Strategy`, and upserts dense vectors into `{ns}_objects_dense`. Also runs the re-embed completion watcher that closes admin-triggered batch runs when the namespace's catalog backlog drains, the recovery sweeper that re-publishes rows whose stream entry was lost, and the liveness heartbeat (`codohue:embedder:heartbeat`, TTL 90s) the admin overview reads.
 
 ### Go Workspace
@@ -122,7 +124,7 @@ Each feature domain lives in `internal/<domain>/` with a consistent `handler.go`
 | `catalog`              | Data-plane HTTP ingest path for raw catalog content; persists `catalog_items` and publishes to embed streams      |
 | `objects`              | Per-object metadata independent of embedding (currently author attribution); the `objects` table, usable under every `dense_source` |
 | `embedder`             | Per-item embed pipeline (load → embed → upsert dense vector → mark embedded), worker, re-embed completion watcher |
-| `auth`                 | Bearer token validation — global admin key and per-namespace bcrypt-hashed keys                                   |
+| `auth`                 | Application and operational bearer validation — global admin, per-namespace bcrypt, and dedicated observability credentials |
 | `config`               | Loads and validates application configuration from environment variables                                          |
 | `core/embedstrategy`   | Forward-compat seam for embedding strategies — `Strategy` interface + registry; both `catalog` and `embedder` depend on it (and never on each other) |
 | `core/namespace`       | Shared namespace configuration contracts (`namespace.Config`) consumed by every domain                            |
@@ -166,18 +168,22 @@ The cron binary runs three phases per namespace on each tick:
 - **Time decay**: Events older than 90 days excluded. Freshness multiplier `e^(-λ × days_since)` applied during vector build; γ-based object freshness applied at rerank time.
 - **Cold start**: 0 interactions → Redis trending ZSET (fallback to DB popular); <5 interactions → 70% trending + 30% CF hybrid.
 - **Recommendation cache**: Results cached in Redis for 5 minutes per `(namespace, subject_id, limit)` key.
-- **Two-tier auth**: Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and to authenticate its data-plane proxy reads (recommendations, trending, event injection). Namespace configuration mutation lives only on the admin plane. Per-namespace bcrypt-hashed keys (stored in `namespace_configs.api_key_hash`) authenticate client data-plane requests; the global admin key is **accepted for every namespace** (a DB-free constant-time compare checked before the hash lookup) because the admin server must reach all namespaces through it — and it already grants full control via the admin-plane login, so restricting its data-plane reach bought little while breaking the admin panel. A leaked namespace key is rotated via `POST /api/admin/v1/namespaces/{ns}/api-key` (plaintext returned once). All plain-string credential compares are constant-time; the public admin login endpoint is per-IP rate-limited on **failed** attempts only (a correct key is never throttled); repeated bad data-plane tokens hit a 30s negative cache (only definitive rejections, never infra blips) instead of a bcrypt compare each time. Admin sessions are HMAC JWTs signed with an independent secret (`CODOHUE_ADMIN_SESSION_SECRET`, or fresh random material each boot), carry a `jti`, and logout revokes the token server-side.
+- **Application and operational auth**: Application authorization has two authority tiers. Global `CODOHUE_ADMIN_API_KEY` is used by the admin server (`cmd/admin`) for session creation and its data-plane proxy reads; server-issued admin sessions carry the same admin authority. Per-namespace bcrypt-hashed keys authenticate client data-plane requests, while the global admin key remains the documented fallback. Operational monitoring is separate: protected metrics and detailed diagnostics use `CODOHUE_OBSERVABILITY_TOKEN`, never a namespace key or the global admin key; unauthenticated health exposes sanitized aggregate state only. All plain-string credential compares are constant-time. Failed admin login attempts are rate-limited, definitive bad data-plane tokens use the negative cache, and admin sessions are HMAC JWTs with server-side revocation.
+- **Data-plane failures are classifiable, not a blanket 500**: a namespace that is gone answers **404 `namespace_not_found`**, one mid-delete or caught in a system reset answers **409 `namespace_not_active`**, and an unreadable config/lifecycle store answers **503 `namespace_config_unavailable`**. The three are mapped once by `httpapi.WriteLifecycleError` and shared by ingest, catalog, objects and recommend, so one definition covers every write path. Global admin authority does not exempt a request — an authorization tier does not make a namespace exist. A missing lifecycle lease stays 500 on purpose: that is a wiring bug, not a client error. A client-supplied `object_created_at` more than five minutes ahead of server time is rejected with **400 `invalid_object_created_at`** on both event ingest and BYOE, because a future timestamp makes the γ-freshness age negative and boosts the item instead of decaying it.
+- **Namespace lifecycle generations**: every namespace carries a monotonic generation (migration 024). Delete/recreate mints a new one, and generation 2+ qualifies the namespace's physical artifacts — `trending:ns:g2`, `ns_g2_objects_dense`, `catalog:embed:ns:g2` — so work published against a deleted incarnation can never become visible to the new one. Generation 1 keeps the original unqualified names, so upgrading moves nothing. All physical naming derives from `nslifecycle.PhysicalName` / `RedisNamespace` / `QdrantNamespace`; re-deriving `_g{N}` locally is what lets a reader and its writer disagree. Event, catalog and embed stream payloads carry an additive `namespace_generation`; a generation-less envelope is accepted only for generation-1 namespaces while the global legacy gate is open (`cmd/admin lifecycle disable-legacy-envelopes`).
+- **Catalog reconciliation pages by keyset, not offset**: `GET /catalog/objects` returns an additive `next_cursor` encoding `(updated_at, id)`. A batch ingest gives many rows the same `updated_at`, so offset paging over a set still being written re-sends rows or skips them; the id breaks the tie. The cursor is opaque and bound to the namespace and `changed_since` that produced it — replaying it against a different query is a 400, not a silent walk through another result set. Offset paging still works for one deprecation window, but the two cannot be combined.
 - **Locked client wire contract**: The client-facing JSON types live once in `pkg/codohuetypes` and are re-exported into the server domains via type aliases (e.g. `type Response = codohuetypes.Response`), so the server marshals the exact struct the SDK unmarshals. Request bodies are decoded with `httpapi.DecodeStrict` (rejects unknown fields + trailing data → 400), so client typos fail loudly instead of being silently dropped — a redundant `namespace` in the rankings/catalog body is rejected (the URL path is authoritative; `events` still carries `namespace` because the Redis-stream transport needs it). The marshaled shape of every wire type is pinned by golden snapshots in `pkg/codohuetypes/testdata/` (see the wire-contract convention below).
 
 ### REST API — `cmd/api` (port 2001)
 
-**Infra / ops (no auth, unversioned)**
+**Infra / ops (unversioned; authentication as noted)**
 
-| Method  | Path       | Description                              |
-| ------- | ---------- | ---------------------------------------- |
-| `GET`   | `/ping`    | Liveness probe                           |
-| `GET`   | `/healthz` | Health check for postgres, redis, qdrant |
-| `GET`   | `/metrics` | Prometheus metrics                       |
+| Method  | Path       | Authentication | Description |
+| ------- | ---------- | -------------- | ----------- |
+| `GET`   | `/ping`    | none | Liveness probe |
+| `GET`   | `/healthz` | none | Sanitized aggregate health; no raw dependency errors |
+| `GET`   | `/healthz?details=true` | observability bearer | Per-component dependency detail; 404 when the credential is not configured, 401 without it. A bad `Authorization` header on plain `/healthz` is ignored — a liveness probe never sends one |
+| `GET`   | `/metrics` | observability bearer | Prometheus metrics; route absent when the credential is not configured |
 
 **Client-facing — per-namespace Bearer token (falls back to `CODOHUE_ADMIN_API_KEY`)**
 
@@ -283,6 +289,11 @@ Key columns added by later migrations:
 - **020** — `exclude_authored` on namespace_configs (default FALSE) — opt-in filter dropping a subject's own authored objects from their recommendations
 - **021** — `objects` table (`namespace`, `object_id`, `author_subject_id`) + partial index; **moves** `author_subject_id` off `catalog_items` and drops that column, so attribution works under every `dense_source`
 - **022** — re-keys `id_mappings` on `PRIMARY KEY (namespace, entity_type, string_id)` (was a global `string_id` PK that let two namespaces — or a subject and an object — share one row); run a full recompute per namespace after deploying so Qdrant points use the newly minted numeric ids
+- **023** — makes `catalog_max_attempts` / `catalog_max_content_bytes` nullable so a namespace with no override inherits the global default
+- **024** — `namespace_lifecycles` + `system_lifecycle`: durable delete/reset states, a monotonic per-namespace `generation` (backfilled to 1), and the legacy-envelope gate. Every writer is fenced by a lease taken against these rows
+- **025** — `NOT VALID` namespace foreign keys (validated after an orphan preflight) plus the catalog keyset index backing `next_cursor`
+- **026** — scopes `id_mappings.numeric_id` uniqueness to `(namespace, entity_type)` (was global) and adds `id_mapping_repair_runs` / `id_mapping_repair_items`, the durable manifest `cmd/admin idmap-repair` works from
+- **027** — `id_mapping_repair_runs.rebuilt_namespaces`: which namespaces had their sparse vectors rebuilt, so verification can confirm it instead of inferring it from the run phase
 
 ## Environment Variables
 
@@ -313,6 +324,17 @@ CODOHUE_EMBEDDER_POLL_INTERVAL=30s       # how often the worker rescans for newl
 CODOHUE_BATCH_RUN_RETENTION_DAYS=30       # batch_run_logs older than this are deleted
 CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS=7  # catalog_backlog_samples older than this are deleted
 CODOHUE_RETENTION_INTERVAL=1h             # how often the prune fires
+
+# Operational monitoring — gates /metrics and /healthz?details=true on cmd/api
+# and cmd/embedder. Unset means those routes do not exist (404). Deliberately
+# NOT the admin key: a scrape credential must not grant namespace deletion.
+CODOHUE_OBSERVABILITY_TOKEN=
+
+# Exact stream retention (cmd/api, cmd/embedder). Off by default for the first
+# rollout; a pass trims strictly below the slowest consumer group's frontier,
+# so an entry pending in any group is never removed.
+CODOHUE_STREAM_RETENTION_ENABLED=false
+CODOHUE_STREAM_RETENTION_INTERVAL=1m
 ```
 
 ## Conventions

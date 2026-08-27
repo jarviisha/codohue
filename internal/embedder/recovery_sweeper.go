@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // sweepRepo is the slice of [Repository] the sweeper needs. Declared as an
@@ -56,11 +58,21 @@ type RecoverySweeperConfig struct {
 // and an empty PEL. Anything still owed will be delivered by the consumer or
 // reclaimed by the reaper; the sweeper only handles what no longer exists.
 type RecoverySweeper struct {
-	repo     sweepRepo
-	redis    sweepStream
-	nsLister nsLister
-	cfg      RecoverySweeperConfig
-	clock    func() time.Time
+	repo      sweepRepo
+	redis     sweepStream
+	nsLister  nsLister
+	cfg       RecoverySweeperConfig
+	clock     func() time.Time
+	lifecycle interface {
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
+}
+
+// SetLifecycleWriter fences recovery mutations against delete and reset.
+func (s *RecoverySweeper) SetLifecycleWriter(writer interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	s.lifecycle = writer
 }
 
 // NewRecoverySweeper builds a sweeper. Production wiring lives in
@@ -126,12 +138,25 @@ func (s *RecoverySweeper) tick(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		s.sweepNamespace(ctx, cfg.Namespace, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion)
+		if s.lifecycle == nil {
+			s.sweepNamespace(ctx, cfg.Namespace, cfg.Generation, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion)
+			continue
+		}
+		err := s.lifecycle.WithWriter(ctx, cfg.Namespace, func(leased context.Context, current *nslifecycle.NamespaceLifecycle) error {
+			if current.Generation != cfg.Generation {
+				return nil
+			}
+			s.sweepNamespace(leased, cfg.Namespace, cfg.Generation, cfg.CatalogStrategyID, cfg.CatalogStrategyVersion)
+			return nil
+		})
+		if err != nil {
+			slog.WarnContext(ctx, "recovery sweep: lifecycle lease failed", slog.String("namespace", cfg.Namespace), slog.String("error", err.Error()))
+		}
 	}
 }
 
-func (s *RecoverySweeper) sweepNamespace(ctx context.Context, ns, strategyID, strategyVersion string) {
-	drained, err := s.streamDrained(ctx, ns)
+func (s *RecoverySweeper) sweepNamespace(ctx context.Context, ns string, generation int64, strategyID, strategyVersion string) {
+	drained, err := s.streamDrained(ctx, ns, generation)
 	if err != nil {
 		slog.WarnContext(ctx, "recovery sweep: stream inspect failed",
 			slog.String("namespace", ns), slog.String("error", err.Error()))
@@ -165,7 +190,7 @@ func (s *RecoverySweeper) sweepNamespace(ctx context.Context, ns, strategyID, st
 
 	republished := 0
 	for _, item := range stranded {
-		if err := s.publish(ctx, ns, item, strategyID, strategyVersion, now); err != nil {
+		if err := s.publish(ctx, ns, generation, item, strategyID, strategyVersion, now); err != nil {
 			// The row is (still) pending, so the next tick retries it.
 			slog.WarnContext(ctx, "recovery sweep: republish failed",
 				slog.String("namespace", ns),
@@ -186,13 +211,14 @@ func (s *RecoverySweeper) sweepNamespace(ctx context.Context, ns, strategyID, st
 // its consumer group: no undelivered entries and an empty PEL. A missing
 // stream or group counts as drained — with no entries at all, every stale row
 // is stranded by definition.
-func (s *RecoverySweeper) streamDrained(ctx context.Context, ns string) (bool, error) {
-	groups, err := s.redis.XInfoGroups(ctx, streamName(ns)).Result()
+func (s *RecoverySweeper) streamDrained(ctx context.Context, ns string, generation int64) (bool, error) {
+	stream := embedStreamName(ns, generation)
+	groups, err := s.redis.XInfoGroups(ctx, stream).Result()
 	if err != nil {
 		if isMissingStreamErr(err) {
 			return true, nil
 		}
-		return false, fmt.Errorf("xinfo groups %s: %w", streamName(ns), err)
+		return false, fmt.Errorf("xinfo groups %s: %w", stream, err)
 	}
 	for _, g := range groups {
 		if g.Name != defaultConsumerGroup {
@@ -205,28 +231,32 @@ func (s *RecoverySweeper) streamDrained(ctx context.Context, ns string) (bool, e
 	return true, nil
 }
 
-func (s *RecoverySweeper) publish(ctx context.Context, ns string, item StrandedItem, strategyID, strategyVersion string, now time.Time) error {
+func (s *RecoverySweeper) publish(ctx context.Context, ns string, generation int64, item StrandedItem, strategyID, strategyVersion string, now time.Time) error {
 	// Field layout mirrors internal/catalog's producer; only catalog_item_id
 	// is authoritative (see StreamEntry).
 	err := s.redis.XAdd(ctx, &redis.XAddArgs{
-		Stream: streamName(ns),
-		// Approximate cap; keep in sync with internal/catalog's
-		// catalogStreamMaxLen (peer-domain imports are forbidden).
-		MaxLen: 100_000,
-		Approx: true,
+		Stream: embedStreamName(ns, generation),
 		Values: map[string]any{
-			"catalog_item_id":  item.ID,
-			"namespace":        ns,
-			"object_id":        item.ObjectID,
-			"strategy_id":      strategyID,
-			"strategy_version": strategyVersion,
-			"enqueued_at":      now.UTC().Format(time.RFC3339Nano),
+			"catalog_item_id":      item.ID,
+			"namespace":            ns,
+			"namespace_generation": generation,
+			"object_id":            item.ObjectID,
+			"strategy_id":          strategyID,
+			"strategy_version":     strategyVersion,
+			"enqueued_at":          now.UTC().Format(time.RFC3339Nano),
 		},
 	}).Err()
 	if err != nil {
-		return fmt.Errorf("xadd %s: %w", streamName(ns), err)
+		return fmt.Errorf("xadd %s: %w", embedStreamName(ns, generation), err)
 	}
 	return nil
+}
+
+func embedStreamName(ns string, generation int64) string {
+	if generation < 1 {
+		generation = 1
+	}
+	return nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, ns, generation)
 }
 
 func isMissingStreamErr(err error) bool {

@@ -13,6 +13,9 @@ services:
       - CODOHUE_LOG_FORMAT=json
       - CODOHUE_BATCH_INTERVAL_MINUTES=${CODOHUE_BATCH_INTERVAL_MINUTES:-5}
       - CODOHUE_CATALOG_MAX_CONTENT_BYTES=${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}
+      - CODOHUE_STREAM_RETENTION_ENABLED=${CODOHUE_STREAM_RETENTION_ENABLED:-false}
+      - CODOHUE_STREAM_RETENTION_INTERVAL=${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}
+      - CODOHUE_OBSERVABILITY_TOKEN=${CODOHUE_OBSERVABILITY_TOKEN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -67,6 +70,9 @@ services:
       - CODOHUE_LOG_FORMAT=json
       - CODOHUE_CATALOG_MAX_CONTENT_BYTES=${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}
       - CODOHUE_EMBED_MAX_ATTEMPTS=${CODOHUE_EMBED_MAX_ATTEMPTS:-5}
+      - CODOHUE_STREAM_RETENTION_ENABLED=${CODOHUE_STREAM_RETENTION_ENABLED:-false}
+      - CODOHUE_STREAM_RETENTION_INTERVAL=${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}
+      - CODOHUE_OBSERVABILITY_TOKEN=${CODOHUE_OBSERVABILITY_TOKEN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -163,12 +169,9 @@ services:
     image: redis:7-alpine
     profiles: ["local-redis"]
     restart: unless-stopped
-    # volatile-lru evicts only TTL'd keys (recommendation cache, trending
-    # ZSETs) under memory pressure. Stream keys (codohue:events ingest
-    # transport, catalog:embed:{ns} queues) carry no TTL and are never
-    # evicted — once caches are exhausted, writes fail loudly instead of
-    # queue data disappearing silently (which allkeys-lru allowed).
-    command: redis-server --appendonly yes --maxmemory ${CODOHUE_REDIS_MAXMEMORY:-256mb} --maxmemory-policy volatile-lru
+    # Retention owns stream reclamation. noeviction makes every producer see
+    # an explicit write failure under pressure; queue data is never discarded.
+    command: redis-server --appendonly yes --maxmemory ${CODOHUE_REDIS_MAXMEMORY:-256mb} --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
     healthcheck:

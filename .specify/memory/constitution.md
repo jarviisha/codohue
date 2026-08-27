@@ -1,18 +1,27 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: [UNVERSIONED] → 1.0.0
-Modified principles: N/A (initial ratification)
-Added sections:
-  - Core Principles (I–IV)
-  - Architecture Constraints
-  - Quality Gates & Review Process
-  - Governance
-Removed sections: N/A (initial ratification)
+Version change: 1.0.0 → 2.0.0
+Modified principles:
+  - III. API Consistency → III. API and Operational Endpoint Consistency
+  - Architecture Constraints: exactly two binaries → exactly four approved binaries
+  - Quality Gates: build both binaries → build all four approved binaries
+Added sections: None
+Removed sections: None
 Templates requiring updates:
-  ✅ .specify/templates/plan-template.md — Constitution Check gates aligned
-  ✅ .specify/templates/spec-template.md — No structural changes required
-  ✅ .specify/templates/tasks-template.md — No structural changes required
+  ✅ .specify/templates/plan-template.md — auth and four-binary gates aligned
+  ✅ .specify/templates/spec-template.md — verified; no structural change required
+  ✅ .specify/templates/tasks-template.md — mandatory business-logic tests aligned
+  ✅ .specify/templates/constitution-template.md — verified; remains project-neutral
+Command guidance:
+  ✅ .agents/skills/speckit-tasks/SKILL.md — mandatory business-logic tests aligned
+  ✅ .specify/templates/commands/ — directory absent; no command templates to update
+Runtime guidance:
+  ✅ CLAUDE.md — four-binary and operational-auth guidance aligned
+  ✅ .github/copilot-instructions.md — four-binary guidance aligned
+  ✅ AGENTS.md and README.md — verified; four-binary architecture already aligned
+Feature artifacts:
+  ✅ specs/007-backend-audit-remediation/plan.md — obsolete conflicts removed
 Follow-up TODOs: None — all placeholders resolved.
 -->
 
@@ -57,21 +66,28 @@ verify the changed behavior before the change is considered complete.
 regressions in the ingest, compute, and recommend pipelines. The rule is
 structural — tied to file names — to make compliance easy to audit via tooling.
 
-### III. API Consistency
+### III. API and Operational Endpoint Consistency
 
-All REST endpoints MUST follow the `/v1/<resource>` path convention. Error
-responses MUST use a uniform JSON structure across all handlers. Authentication
-MUST use the two-tier model: the global `CODOHUE_ADMIN_API_KEY` for admin routes
-(namespace config upsert); per-namespace bcrypt-hashed keys for data routes,
-with fallback to the global key when a namespace has no provisioned key.
+Data-plane REST endpoints MUST follow the `/v1/<resource>` convention. Admin
+REST endpoints MUST follow `/api/admin/v1/<resource>`. Unversioned `/ping`,
+`/healthz`, and `/metrics` paths are reserved for operational probes. Error
+responses MUST use a uniform JSON structure across application handlers.
+
+Application authorization MUST preserve two authority tiers: global admin
+authority, represented by `CODOHUE_ADMIN_API_KEY` or a server-issued admin
+session, for the admin plane; and per-namespace bcrypt-hashed keys for data
+routes, with the documented global-admin fallback. Operational monitoring is a
+separate least-privilege trust boundary: metrics and detailed dependency
+diagnostics MUST require a dedicated `CODOHUE_OBSERVABILITY_TOKEN` and MUST NOT
+accept namespace keys or the global admin key. Unauthenticated health responses
+MUST expose only sanitized aggregate status.
 
 No new endpoint MAY be added without a corresponding entry in the REST API
-table in `CLAUDE.md`. Endpoint behavior MUST be idempotent where specified
-(e.g., `DELETE /v1/objects/{ns}/{id}` is explicitly idempotent).
+table in `CLAUDE.md`. Endpoint behavior MUST be idempotent where specified.
 
-**Why**: Inconsistent auth or error shapes break downstream consumers silently.
-The API table in CLAUDE.md is the authoritative contract — keeping it current
-prevents drift between implementation and documentation.
+**Why**: Stable paths, error shapes, and explicit trust boundaries prevent
+silent client breakage and stop monitoring access from granting application
+administration privileges.
 
 ### IV. Performance Requirements
 
@@ -98,9 +114,12 @@ recommendation serving latency.
 
 ## Architecture Constraints
 
-The system MUST run as exactly two binaries: `cmd/api` (HTTP + Redis Streams
-ingest worker) and `cmd/cron` (batch recompute daemon). Adding a third binary
-requires explicit governance approval and a documented rationale.
+The system MUST ship exactly four service binaries: `cmd/api` for the
+data-plane HTTP API and Redis Streams ingest workers; `cmd/cron` for batch
+recompute; `cmd/admin` for the admin API and embedded admin application; and
+`cmd/embedder` for catalog auto-embedding. Adding a fifth binary, removing an
+approved binary, or consolidating these responsibilities requires explicit
+governance approval and a documented migration rationale.
 
 All string ID → numeric Qdrant point ID mappings MUST go through the
 `id_mappings` table (BIGSERIAL). Hash-based ID generation is prohibited due to
@@ -119,7 +138,7 @@ cause catastrophic forgetting in the embedding models.
 Every pull request MUST pass:
 - `make lint` — zero golangci-lint violations
 - `make test` — all tests green
-- `make build` — both binaries compile without error
+- `make build` — all four approved binaries compile without error
 
 A PR that adds a new domain MUST include `docs.go`, at least one `_test.go`
 for business logic files, and an updated CLAUDE.md REST API table entry for
@@ -150,4 +169,4 @@ All PRs and code reviews MUST verify compliance with this constitution.
 Complexity violations require justification in the Complexity Tracking section
 of the relevant `plan.md`. Runtime development guidance lives in `CLAUDE.md`.
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-04-28
+**Version**: 2.0.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-08-25

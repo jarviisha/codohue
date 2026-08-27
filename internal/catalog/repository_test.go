@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -321,6 +322,7 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 	db := openCatalogTestDB(t)
 	repo := NewRepository(db)
 	ns := "catalog_listobjects_test"
+	ensureNamespace(t, db, ns)
 	t.Cleanup(func() {
 		db.Exec(context.Background(), //nolint:errcheck // test cleanup
 			`DELETE FROM catalog_items WHERE namespace = $1`, ns)
@@ -333,14 +335,14 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 		}
 	}
 
-	rows, total, err := repo.ListObjects(ctx, ns, nil, 2, 0)
+	rows, total, err := repo.ListObjects(ctx, ns, nil, 2, 0, nil)
 	if err != nil {
 		t.Fatalf("ListObjects: %v", err)
 	}
 	if total != 3 || len(rows) != 2 {
 		t.Fatalf("paging wrong: total=%d rows=%d", total, len(rows))
 	}
-	rows2, _, err := repo.ListObjects(ctx, ns, nil, 2, 2)
+	rows2, _, err := repo.ListObjects(ctx, ns, nil, 2, 2, nil)
 	if err != nil {
 		t.Fatalf("ListObjects offset: %v", err)
 	}
@@ -350,11 +352,199 @@ func TestRepositoryListObjects_PagingAndChangedSince(t *testing.T) {
 
 	// changed_since after every row's updated_at → empty.
 	future := time.Now().Add(time.Hour)
-	rows3, total3, err := repo.ListObjects(ctx, ns, &future, 10, 0)
+	rows3, total3, err := repo.ListObjects(ctx, ns, &future, 10, 0, nil)
 	if err != nil {
 		t.Fatalf("ListObjects changed_since: %v", err)
 	}
 	if total3 != 0 || len(rows3) != 0 {
 		t.Fatalf("future changed_since must be empty: total=%d rows=%d", total3, len(rows3))
+	}
+}
+
+// ─── keyset cursor ───────────────────────────────────────────────────────────
+
+// The reconciliation read is ordered by updated_at, and a batch ingest gives
+// many rows the same timestamp. Offset paging over a set that is still being
+// written re-sends rows or skips them; a keyset over (updated_at, id) is
+// stable because id breaks the tie deterministically.
+func TestObjectCursor_RoundTripsAndBindsToItsQuery(t *testing.T) {
+	updatedAt := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	raw, err := encodeObjectCursor(objectCursor{
+		Version: 1, Namespace: "ns", ChangedSince: "2026-08-01T00:00:00Z",
+		UpdatedAt: updatedAt, ID: 42,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	got, err := decodeObjectCursor(raw, "ns", "2026-08-01T00:00:00Z")
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.ID != 42 || !got.UpdatedAt.Equal(updatedAt) {
+		t.Errorf("round trip lost the key: %+v", got)
+	}
+
+	// A cursor is only meaningful for the query that produced it. Replaying a
+	// cursor from one namespace against another, or after changing
+	// changed_since, would silently page through a different result set.
+	if _, err := decodeObjectCursor(raw, "other-ns", "2026-08-01T00:00:00Z"); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("cursor accepted for a different namespace: %v", err)
+	}
+	if _, err := decodeObjectCursor(raw, "ns", "2026-01-01T00:00:00Z"); !errors.Is(err, ErrInvalidRequest) {
+		t.Errorf("cursor accepted for a different changed_since: %v", err)
+	}
+}
+
+// A malformed cursor is a client error, not a silent restart from the
+// beginning: restarting would re-send the whole corpus without saying so.
+func TestObjectCursor_MalformedIsRejected(t *testing.T) {
+	valid, err := encodeObjectCursor(objectCursor{
+		Version: 1, Namespace: "ns", UpdatedAt: time.Now().UTC(), ID: 1,
+	})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	zeroID, err := encodeObjectCursor(objectCursor{Version: 1, Namespace: "ns", UpdatedAt: time.Now().UTC(), ID: 0})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	futureVersion, err := encodeObjectCursor(objectCursor{Version: 99, Namespace: "ns", UpdatedAt: time.Now().UTC(), ID: 1})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	for _, tc := range []struct{ name, raw string }{
+		{"not base64", "!!!not-base64!!!"},
+		{"base64 but not JSON", "bm90LWpzb24"},
+		{"zero id", zeroID},
+		{"unknown version", futureVersion},
+		{"truncated", valid[:len(valid)/2]},
+	} {
+		if _, err := decodeObjectCursor(tc.raw, "ns", ""); !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("%s: expected ErrInvalidRequest, got %v", tc.name, err)
+		}
+	}
+}
+
+// An absent cursor is the first page, not an error — the legacy offset caller
+// keeps working through the same endpoint.
+func TestObjectCursor_EmptyMeansFirstPage(t *testing.T) {
+	got, err := decodeObjectCursor("", "ns", "")
+	if err != nil {
+		t.Fatalf("empty cursor: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil cursor, got %+v", got)
+	}
+}
+
+// ensureNamespace creates the rows a namespace-scoped row depends on.
+//
+// Migration 025 gave the data tables a foreign key onto namespace_configs,
+// which in turn references namespace_lifecycles (024). Seeding a row for an
+// invented namespace is therefore an FK error rather than a row — and these
+// tests skip unless DATABASE_URL is set, so the break went unseen.
+func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_lifecycles (namespace, generation, state, activated_at)
+		VALUES ($1, 1, 'active', NOW()) ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace lifecycle %q: %v", ns, err)
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO namespace_configs (namespace) VALUES ($1)
+		ON CONFLICT (namespace) DO NOTHING`, ns); err != nil {
+		t.Fatalf("ensure namespace config %q: %v", ns, err)
+	}
+	t.Cleanup(func() {
+		clean := context.Background()
+		db.Exec(clean, `DELETE FROM namespace_configs WHERE namespace = $1`, ns)    //nolint:errcheck // test cleanup
+		db.Exec(clean, `DELETE FROM namespace_lifecycles WHERE namespace = $1`, ns) //nolint:errcheck // test cleanup
+	})
+}
+
+// UpsertWithAttribution's contract: the content row and the author land
+// together or neither does. Attribution used to be a best-effort write after
+// the row, so a failing objects write returned 202 with the author silently
+// dropped and the caller had no way to learn it never happened.
+
+func upsertRepoWithHash(hash []byte, now time.Time) *Repository {
+	return &Repository{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+			return fakeRow{scanFn: func(dest ...any) error {
+				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
+			}}
+		},
+	}
+}
+
+// Absence means "unspecified", not "clear it": a re-ingest that carries no
+// author must leave any existing attribution alone, so no hook runs at all.
+func TestUpsertWithAttribution_NoAuthorRunsNoHook(t *testing.T) {
+	hash := ContentHash("hello")
+	repo := upsertRepoWithHash(hash, time.Now())
+
+	res, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", hash, nil, nil)
+	if err != nil {
+		t.Fatalf("UpsertWithAttribution: %v", err)
+	}
+	if res == nil || res.Item.ObjectID != "obj1" {
+		t.Fatalf("result = %+v, want the upserted row", res)
+	}
+}
+
+func TestUpsertWithAttribution_RunsTheHookAfterTheContentWrite(t *testing.T) {
+	hash := ContentHash("hello")
+	repo := upsertRepoWithHash(hash, time.Now())
+
+	called := 0
+	res, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", hash, nil,
+		func(context.Context, pgx.Tx) error { called++; return nil })
+	if err != nil {
+		t.Fatalf("UpsertWithAttribution: %v", err)
+	}
+	if called != 1 {
+		t.Errorf("attribution hook ran %d time(s), want 1", called)
+	}
+	if res == nil {
+		t.Fatal("no result returned")
+	}
+}
+
+// The whole point of the single transaction: a failed attribution must fail
+// the request rather than reporting success on a half-written fact.
+func TestUpsertWithAttribution_HookFailureFailsTheCall(t *testing.T) {
+	hash := ContentHash("hello")
+	repo := upsertRepoWithHash(hash, time.Now())
+
+	res, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", hash, nil,
+		func(context.Context, pgx.Tx) error { return errors.New("objects table is unwritable") })
+	if err == nil {
+		t.Fatal("UpsertWithAttribution reported success despite a failed attribution")
+	}
+	if res != nil {
+		t.Errorf("result = %+v, want nil when the attribution failed", res)
+	}
+}
+
+// A content write that never landed has nothing to attribute, so the hook must
+// not run and the original error must surface.
+func TestUpsertWithAttribution_ContentFailureSkipsTheHook(t *testing.T) {
+	repo := &Repository{
+		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
+		},
+	}
+
+	called := 0
+	_, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", ContentHash("hello"), nil,
+		func(context.Context, pgx.Tx) error { called++; return nil })
+	if err == nil {
+		t.Fatal("expected the content write error")
+	}
+	if called != 0 {
+		t.Error("the attribution hook ran even though the content write failed")
 	}
 }

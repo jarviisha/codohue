@@ -1,6 +1,7 @@
 package metrics_test
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/jarviisha/codohue/internal/infra/metrics"
@@ -19,6 +20,53 @@ func TestRegisterDoesNotPanic(t *testing.T) {
 		metrics.BatchEntitiesProcessed,
 		metrics.IDMappingErrors,
 	)
+}
+
+func TestRemediationMetricsUseBoundedLabels(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	registry.MustRegister(
+		metrics.StreamLength,
+		metrics.StreamPending,
+		metrics.StreamUndelivered,
+		metrics.StreamRetentionFrontierMilliseconds,
+		metrics.StreamTrimmedTotal,
+		metrics.StreamRetentionErrorsTotal,
+		metrics.StreamUnexpectedGroups,
+		metrics.StreamReclaimedTotal,
+		metrics.StreamReclaimCyclesTotal,
+		metrics.StaleGenerationTotal,
+		metrics.NamespaceLifecycleOperationsTotal,
+		metrics.IDMappingRepairItems,
+	)
+
+	metrics.StreamLength.WithLabelValues("events", "").Set(10)
+	metrics.StreamRetentionErrorsTotal.WithLabelValues("catalog", "", "pel").Inc()
+	metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", "tenant-a", "terminal").Inc()
+	metrics.StaleGenerationTotal.WithLabelValues("event", "mismatch").Inc()
+	metrics.NamespaceLifecycleOperationsTotal.WithLabelValues("delete", "success").Inc()
+	metrics.IDMappingRepairItems.WithLabelValues("quarantined", "object").Set(1)
+
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatalf("gather remediation metrics: %v", err)
+	}
+	want := []string{
+		"codohue_idmap_repair_items",
+		"codohue_namespace_lifecycle_operations_total",
+		"codohue_stale_generation_total",
+		"codohue_stream_length",
+		"codohue_stream_reclaim_cycles_total",
+		"codohue_stream_retention_errors_total",
+	}
+	got := make([]string, 0, len(families))
+	for _, family := range families {
+		got = append(got, family.GetName())
+	}
+	for _, name := range want {
+		if !slices.Contains(got, name) {
+			t.Errorf("metric family %q was not gathered; got %v", name, got)
+		}
+	}
 }
 
 func TestCounterIncrements(t *testing.T) {

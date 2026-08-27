@@ -25,10 +25,11 @@ const (
 // honest failure; the Redis path ignores unknown fields, so old producers
 // keep working there.
 type EventPayload struct {
-	Namespace       string     `json:"namespace"`
-	SubjectID       string     `json:"subject_id"`
-	ObjectID        string     `json:"object_id"`
-	Action          Action     `json:"action"`
-	OccurredAt      time.Time  `json:"occurred_at"`
-	ObjectCreatedAt *time.Time `json:"object_created_at,omitempty"`
+	Namespace           string     `json:"namespace"`
+	NamespaceGeneration int64      `json:"namespace_generation,omitempty"`
+	SubjectID           string     `json:"subject_id"`
+	ObjectID            string     `json:"object_id"`
+	Action              Action     `json:"action"`
+	OccurredAt          time.Time  `json:"occurred_at"`
+	ObjectCreatedAt     *time.Time `json:"object_created_at,omitempty"`
 }

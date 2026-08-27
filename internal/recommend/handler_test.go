@@ -579,3 +579,39 @@ type readCloser struct {
 }
 
 func (readCloser) Close() error { return nil }
+
+// The contract names a distinct error code for a rejected creation timestamp,
+// so a client can tell "your timestamp is wrong" apart from "your vector is
+// wrong" without parsing prose.
+func TestStoreEmbedding_FutureObjectCreatedAt_Returns400WithItsOwnCode(t *testing.T) {
+	h := &Handler{service: &fakeSvc{storeErr: fmt.Errorf("%w: object_created_at is more than five minutes in the future", ErrInvalidObjectCreatedAt)}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
+		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2],"object_created_at":"2999-01-01T00:00:00Z"}`)
+	rec := httptest.NewRecorder()
+
+	h.StoreObjectEmbedding(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_object_created_at") {
+		t.Errorf("expected error code invalid_object_created_at, got %s", rec.Body.String())
+	}
+}
+
+// A non-finite vector keeps its own code — the two 400s must not collapse.
+func TestStoreEmbedding_NonFiniteVector_KeepsInvalidEmbeddingCode(t *testing.T) {
+	h := &Handler{service: &fakeSvc{storeErr: fmt.Errorf("%w: vector contains non-finite values", ErrInvalidEmbedding)}}
+	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
+		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
+	rec := httptest.NewRecorder()
+
+	h.StoreObjectEmbedding(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_embedding") {
+		t.Errorf("expected error code invalid_embedding, got %s", rec.Body.String())
+	}
+}

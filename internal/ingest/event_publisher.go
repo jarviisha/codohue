@@ -20,13 +20,14 @@ import (
 // which proxy to the HTTP endpoint). A stream-tail of `codohue:events` would
 // miss the HTTP path entirely, which is why this uses a dedicated fan-out.
 type EventTailMessage struct {
-	ID         int64     `json:"id"`
-	Namespace  string    `json:"namespace"`
-	SubjectID  string    `json:"subject_id"`
-	ObjectID   string    `json:"object_id"`
-	Action     string    `json:"action"`
-	Weight     float64   `json:"weight"`
-	OccurredAt time.Time `json:"occurred_at"`
+	ID                  int64     `json:"id"`
+	Namespace           string    `json:"namespace"`
+	NamespaceGeneration int64     `json:"namespace_generation,omitempty"`
+	SubjectID           string    `json:"subject_id"`
+	ObjectID            string    `json:"object_id"`
+	Action              string    `json:"action"`
+	Weight              float64   `json:"weight"`
+	OccurredAt          time.Time `json:"occurred_at"`
 }
 
 // EventTailChannel is the per-namespace Redis pub/sub channel the tail flows

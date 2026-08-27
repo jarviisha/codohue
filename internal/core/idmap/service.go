@@ -25,6 +25,16 @@ func NewService(repo idmapRepo) *Service {
 	return &Service{repo: repo}
 }
 
+// LookupSubjectID returns an existing numeric subject id without creating one.
+func (s *Service) LookupSubjectID(ctx context.Context, subjectID, namespace string) (numericID uint64, found bool, err error) {
+	id, found, err := s.repo.Lookup(ctx, subjectID, namespace, "subject")
+	if err != nil {
+		metrics.IDMappingErrors.WithLabelValues("subject").Inc()
+		return 0, false, fmt.Errorf("lookup subject id: %w", err)
+	}
+	return id, found, nil
+}
+
 // GetOrCreateSubjectID returns the numeric ID for the given subjectID, creating it if absent.
 func (s *Service) GetOrCreateSubjectID(ctx context.Context, subjectID, namespace string) (uint64, error) {
 	id, err := s.repo.GetOrCreate(ctx, subjectID, namespace, "subject")
@@ -53,6 +63,32 @@ func (s *Service) LookupObjectID(ctx context.Context, objectID, namespace string
 		return 0, false, fmt.Errorf("lookup object id: %w", err)
 	}
 	return id, found, nil
+}
+
+// LookupObjectIDs resolves existing object mappings without creating rows.
+func (s *Service) LookupObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error) {
+	batchRepo, ok := s.repo.(interface {
+		LookupBatch(context.Context, []string, string, string) (map[string]uint64, error)
+	})
+	if !ok {
+		ids := make(map[string]uint64, len(objectIDs))
+		for _, objectID := range objectIDs {
+			numericID, found, err := s.repo.Lookup(ctx, objectID, namespace, "object")
+			if err != nil {
+				return nil, fmt.Errorf("batch lookup object ids: %w", err)
+			}
+			if found {
+				ids[objectID] = numericID
+			}
+		}
+		return ids, nil
+	}
+	ids, err := batchRepo.LookupBatch(ctx, objectIDs, namespace, "object")
+	if err != nil {
+		metrics.IDMappingErrors.WithLabelValues("object").Inc()
+		return nil, fmt.Errorf("batch lookup object ids: %w", err)
+	}
+	return ids, nil
 }
 
 // GetOrCreateObjectIDs resolves many object ids in a single round-trip.

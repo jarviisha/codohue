@@ -9,6 +9,109 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
 
 Nothing yet.
 
+## v0.6.0 — 2026-08-27
+
+Backend audit remediation. Server tag: `v0.10.0`.
+
+No wire type or public Go API was removed, renamed, or retyped — every module
+change is additive. The breaking items below are all **server behaviour**: each
+one replaces a false success, a silent default, or an unauthenticated
+operational surface with an explicit, honest failure.
+
+### Breaking
+
+- **`/metrics` now requires `CODOHUE_OBSERVABILITY_TOKEN`.** The route was
+  public. It is now registered only when the token is configured (absent → 404)
+  and rejects a missing or wrong bearer with 401. The global admin key is
+  deliberately **not** accepted. **Existing Prometheus scrapes stop collecting
+  until they are given the token** — this fails silently, so configure the
+  scraper before or with the deploy. Applies to the `api` and `embedder`
+  listeners alike.
+- **Unauthenticated `/healthz` no longer discloses dependency detail.** Component
+  values are now only `ok` or `error`; dependency addresses and raw driver errors
+  are gone. Anything parsing those strings breaks. Detail moved to
+  `GET /healthz?details=true` behind the same observability token.
+- **A namespace that is missing or not active now fails the request.** Every
+  namespace-scoped mutation resolves the lifecycle first, including calls
+  authenticated by the global admin key, which no longer exempts a request:
+  missing/deleted → 404 `namespace_not_found`; deleting or system resetting →
+  409 `namespace_not_active`; config or lifecycle store unreachable → 503
+  `namespace_config_unavailable`. A 503 is never cached and no default-backed
+  response is served in its place.
+- **`object_created_at` more than five minutes ahead of server time is
+  rejected** with 400 `invalid_object_created_at`, on both event ingest and
+  BYOE object embeddings. A future timestamp made the γ-freshness age negative
+  and boosted the item instead of decaying it. The exact boundary is accepted.
+- **Object deletion reports cleanup failures.** `DELETE /objects/{id}` attempts
+  the sparse point, the dense point, and the `objects` metadata row, ignores
+  only NotFound, and returns a retryable 5xx joining whatever else failed —
+  instead of a 204 that hid a surviving dense point. Retrying converges.
+- **Producers no longer set `MAXLEN` on any stream.** Nothing is trimmed at
+  publish time, so streams grow until exact retention is enabled
+  (`CODOHUE_STREAM_RETENTION_ENABLED`, default `false`). Run Redis with
+  `maxmemory-policy noeviction` so a full instance rejects new publishes rather
+  than evicting unprocessed work.
+- **Redis-stream producers must stamp `namespace_generation` before the legacy
+  gate closes.** Entries without it are accepted only for namespaces still at
+  generation 1, and only while the gate is open. A namespace that has been
+  deleted and recreated (generation 2+) rejects them immediately, and
+  `cmd/admin lifecycle disable-legacy-envelopes` rejects them fleet-wide and
+  permanently. HTTP clients are unaffected — the server stamps that path itself.
+
+### Added
+
+- **Wire: namespace lifecycle generation.** `NamespaceGeneration` on
+  `EventPayload` and `CatalogStreamItem`, plus the `NamespaceGenerationField`
+  envelope key. Additive and `omitempty`; zero means the legacy path.
+- **Wire: keyset catalog reconciliation.** `NextCursor` on
+  `CatalogObjectsResponse`, an opaque `(updated_at, id)` cursor that totally
+  orders rows sharing one `updated_at`. Omitted on the terminal page; a cursor
+  replayed against a different query is a 400. Legacy `offset` still works for
+  one compatibility window but cannot be combined with it.
+- **SDK: generation-aware namespace wrappers.** `Client.NamespaceWithOptions`,
+  `WithNamespaceGeneration`, and `Namespace.Generation()`. Existing
+  `Client.Namespace` callers keep working at generation zero.
+- **SDK: cursor pagination.** `Namespace.ListCatalogObjectsPage` alongside the
+  existing `ListCatalogObjects`.
+- **SDK (`redistream`): generation stamping.** `WithNamespaceGeneration` and
+  `WithCatalogNamespaceGeneration` for the event and catalog producers.
+
+### Fixed
+
+- Resolve namespace configuration before touching the recommendation cache, so
+  a config failure can no longer populate or serve a default-backed entry.
+- Compare the full `(strategy_id, strategy_version)` pair throughout re-embed
+  selection, progress, and completion — a strategy swapped at the same version
+  label previously reported completion without reprocessing anything.
+- Enumerate every configured namespace during scheduled maintenance, including
+  namespaces with no events in the active window, and clear stale sparse and
+  system-owned dense vectors when the keep set is empty.
+- Commit namespace and catalog configuration in one validated transaction, and
+  catalog content with its requested author attribution in another, so a
+  rejected multi-part write leaves nothing committed.
+- Carry `XAUTOCLAIM` cursors across pages and ticks so a permanently failing
+  entry at the head of the PEL can no longer starve everything behind it.
+- Upgrade `pgx`, `golang.org/x/text`, gRPC, `golang.org/x/net`, and
+  `golang.org/x/crypto`, and move the `go` directive to 1.26.7 so the toolchain
+  CI installs carries the standard-library fixes. `govulncheck` reports zero
+  reachable vulnerabilities across all four modules.
+
+### Changed
+
+- Migrations 024–027 add the namespace lifecycle ledger, validated namespace
+  foreign keys, and the ID-mapping repair manifest. **Migration 025 refuses to
+  run while orphan rows exist** — audit and clear them first; any deployment
+  that has ever deleted a namespace will hit this. Migration 022 is forward-only
+  once composite duplicates exist, and its down path refuses before mutating.
+- Each binary now opens a **second PostgreSQL pool** for lifecycle lock
+  sessions. Neither pool sets `MaxConns`, so pgxpool's `max(4, NumCPU)` applies
+  to both; four binaries on a 16-core host reach 128 connections against a
+  default `max_connections` of 100. Raise the server limit or cap each binary
+  with the `pool_max_conns` DSN parameter.
+- Roll this out as four gated releases — dependency and correctness fixes,
+  stream retention, lifecycle fencing, then identity reconciliation. See
+  [deploy/backend-audit-remediation.md](deploy/backend-audit-remediation.md).
+
 ## v0.5.1 — 2026-08-10
 
 Audit remediation maintenance release. Server tag: `v0.9.0`.

@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/qdrant/go-client/qdrant"
+
+	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 )
 
 // pointScroller is the slice of *qdrant.Client the stale-point cleanup needs.
@@ -80,7 +82,7 @@ func CleanupStaleItemDensePoints(ctx context.Context, client pointScroller, idma
 		}
 		keep[numID] = struct{}{}
 	}
-	return CleanupStalePoints(ctx, client, ns+"_objects_dense", keep)
+	return CleanupStalePoints(ctx, client, collectionForContext(ctx, ns, infraqdrant.CollectionObjectsDense), keep)
 }
 
 // CleanupStaleSubjectDensePoints removes {ns}_subjects_dense points for
@@ -94,5 +96,5 @@ func CleanupStaleSubjectDensePoints(ctx context.Context, client pointScroller, i
 		}
 		keep[numID] = struct{}{}
 	}
-	return CleanupStalePoints(ctx, client, ns+"_subjects_dense", keep)
+	return CleanupStalePoints(ctx, client, collectionForContext(ctx, ns, infraqdrant.CollectionSubjectsDense), keep)
 }

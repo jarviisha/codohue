@@ -2,11 +2,48 @@ package catalog
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
+
+type objectCursor struct {
+	Version      int       `json:"v"`
+	Namespace    string    `json:"ns"`
+	ChangedSince string    `json:"since,omitempty"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ID           int64     `json:"id"`
+}
+
+func encodeObjectCursor(cursor objectCursor) (string, error) {
+	raw, err := json.Marshal(cursor)
+	if err != nil {
+		return "", fmt.Errorf("encode catalog cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func decodeObjectCursor(raw, namespace, changedSince string) (*objectCursor, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%w: malformed cursor", ErrInvalidRequest)
+	}
+	var cursor objectCursor
+	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.Version != 1 || cursor.ID < 1 || cursor.UpdatedAt.IsZero() {
+		return nil, fmt.Errorf("%w: malformed cursor", ErrInvalidRequest)
+	}
+	if cursor.Namespace != namespace || cursor.ChangedSince != changedSince {
+		return nil, fmt.Errorf("%w: cursor does not match namespace or changed_since", ErrInvalidRequest)
+	}
+	return &cursor, nil
+}
 
 // State enumerates the lifecycle states of a catalog item, matching the
 // 'state' column on the catalog_items table (migration 010). Re-declared

@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 type fakeHTTPProcessor struct {
@@ -113,5 +115,52 @@ func TestHandlerIngestInternalError(t *testing.T) {
 func TestNewHandler(t *testing.T) {
 	if NewHandler(nil) == nil {
 		t.Fatal("NewHandler returned nil")
+	}
+}
+
+// Ingest is a write, so a namespace that is gone or mid-delete gets the same
+// stable contract as every other mutation: 404 permanent, 409 retry later.
+// Answering 500 would have clients retrying events into a namespace that will
+// never accept them.
+func TestHandlerIngest_NamespaceLifecycleContract(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		err      error
+		wantCode int
+		wantBody string
+	}{
+		{"absent namespace", nslifecycle.ErrNamespaceNotFound, http.StatusNotFound, "namespace_not_found"},
+		{"mid-delete", nslifecycle.ErrNamespaceNotActive, http.StatusConflict, "namespace_not_active"},
+		{"system resetting", nslifecycle.ErrSystemResetting, http.StatusConflict, "namespace_not_active"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &Handler{service: &fakeHTTPProcessor{err: tc.err}}
+			rec := httptest.NewRecorder()
+
+			h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW"}`, "ns"))
+
+			if rec.Code != tc.wantCode {
+				t.Fatalf("got %d, want %d (body %s)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantBody) {
+				t.Errorf("expected error code %q, got %s", tc.wantBody, rec.Body.String())
+			}
+		})
+	}
+}
+
+// A future creation timestamp is a client mistake with its own documented
+// code, distinct from the generic invalid_event.
+func TestHandlerIngest_FutureObjectCreatedAtHasItsOwnCode(t *testing.T) {
+	h := &Handler{service: &fakeHTTPProcessor{err: fmt.Errorf("%w: object_created_at is in the future", ErrInvalidObjectCreatedAt)}}
+	rec := httptest.NewRecorder()
+
+	h.Ingest(rec, newIngestRequest(`{"subject_id":"u1","object_id":"o1","action":"VIEW"}`, "ns"))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_object_created_at") {
+		t.Errorf("expected invalid_object_created_at, got %s", rec.Body.String())
 	}
 }

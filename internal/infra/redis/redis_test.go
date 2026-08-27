@@ -47,20 +47,19 @@ func TestTrendingKey(t *testing.T) {
 	}
 }
 
-func TestStoreTrending_EmptyScoresIsNoOp(t *testing.T) {
-	called := false
+func TestStoreTrending_EmptyScoresClearsStaleKey(t *testing.T) {
+	pipe := &fakePipeline{}
 	orig := newPipelineFn
 	t.Cleanup(func() { newPipelineFn = orig })
 	newPipelineFn = func(_ *goredis.Client) trendingPipeline {
-		called = true
-		return &fakePipeline{}
+		return pipe
 	}
 
 	if err := StoreTrending(context.Background(), nil, "ns", nil, time.Minute); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if called {
-		t.Fatal("expected pipeline not to be created for empty scores")
+	if pipe.delKey != "trending:ns" || pipe.zaddKey != "" || pipe.expireKey != "" {
+		t.Fatalf("empty scores must only delete stale key: %+v", pipe)
 	}
 }
 
@@ -154,5 +153,35 @@ func TestNewClient_PingError(t *testing.T) {
 
 	if _, err := NewClient("redis://localhost:6379"); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestNewClient_Success(t *testing.T) {
+	original := pingClientFn
+	t.Cleanup(func() { pingClientFn = original })
+	pingClientFn = func(context.Context, *goredis.Client) error { return nil }
+
+	client, err := NewClient("redis://localhost:6379")
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if client == nil {
+		t.Fatal("NewClient returned no client")
+	}
+	t.Cleanup(func() { _ = client.Close() })
+}
+
+// Generation 1 keeps the original unqualified key, so an upgrade moves
+// nothing. A generation below 1 is not a real lifecycle value; clamping keeps
+// a bad caller from inventing a key no writer will ever produce.
+func TestTrendingKeyForGeneration_ClampsBelowOne(t *testing.T) {
+	base := trendingKeyForGeneration("ns", 1)
+	for _, generation := range []int64{0, -1} {
+		if got := trendingKeyForGeneration("ns", generation); got != base {
+			t.Errorf("generation %d gave key %q, want %q", generation, got, base)
+		}
+	}
+	if g2 := trendingKeyForGeneration("ns", 2); g2 == base {
+		t.Error("generation 2 shares generation 1's key; a deleted incarnation would stay visible")
 	}
 }

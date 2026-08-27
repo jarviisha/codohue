@@ -3,6 +3,8 @@ package compute
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
@@ -63,6 +66,9 @@ func newTestJob(svc recomputer, nsCfg jobNsConfigReader, repo jobComputeRepo) *J
 		repo:        repo,
 		redis:       nil, // phase 3 skipped by default
 
+		// Default to a namespace that has seen traffic; the tests covering the
+		// never-used case override this.
+		hasAnyEventsFn:           func(_ context.Context, _ string) (bool, error) { return true, nil },
 		ensureCollectionsFn:      func(_ context.Context, _ string) error { return nil },
 		ensureDenseCollectionsFn: func(_ context.Context, _ string, _ uint64, _ string) error { return nil },
 		upsertItemDenseFn:        func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error { return nil },
@@ -629,6 +635,7 @@ type fakeBatchLogger struct {
 	insertID  int64
 	insertErr error
 	updated   chan int64
+	inserted  atomic.Int64
 }
 
 func newFakeBatchLogger(id int64) *fakeBatchLogger {
@@ -636,6 +643,7 @@ func newFakeBatchLogger(id int64) *fakeBatchLogger {
 }
 
 func (f *fakeBatchLogger) InsertBatchRunLog(_ context.Context, _ string, _ time.Time, _ batchrun.TriggerSource) (int64, error) {
+	f.inserted.Add(1)
 	return f.insertID, f.insertErr
 }
 
@@ -814,4 +822,337 @@ func (l *successCapturingLogger) UpdateBatchRunLog(ctx context.Context, id int64
 	default:
 	}
 	return l.fakeBatchLogger.UpdateBatchRunLog(ctx, id, at, dur, entities, success, errMsg, lines)
+}
+
+// ─── lifecycle fencing ───────────────────────────────────────────────────────
+
+// fakeLifecycleWriter records the order in which the lifecycle lease is taken
+// relative to the compute lock.
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+	order      *[]string
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.order != nil {
+		*f.order = append(*f.order, "lifecycle_lease")
+	}
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+// Lock order is fixed: the lifecycle lease first, then the per-namespace
+// compute lock. Taking them the other way round lets a delete holding the
+// lifecycle lock wait on a run that is itself waiting for the lifecycle lease.
+func TestRunNamespace_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
+	var order []string
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	lifecycle := &fakeLifecycleWriter{generation: 4, order: &order}
+	job.SetLifecycleWriter(lifecycle)
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		order = append(order, "compute_lock")
+		return func() {}, true, nil
+	}
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("RunNamespace: %v", err)
+	}
+	if len(order) != 2 || order[0] != "lifecycle_lease" || order[1] != "compute_lock" {
+		t.Errorf("lock order: got %v, want [lifecycle_lease compute_lock]", order)
+	}
+}
+
+// A namespace mid-delete must not be recomputed: the vectors would be written
+// back into collections the delete is in the middle of dropping.
+func TestRunNamespace_InactiveNamespaceNeverTakesComputeLock(t *testing.T) {
+	locked := false
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		locked = true
+		return func() {}, true, nil
+	}
+
+	err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron)
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if locked {
+		t.Error("compute lock must not be taken for an inactive namespace")
+	}
+	if svc.called {
+		t.Error("recompute must not run for an inactive namespace")
+	}
+}
+
+func TestStartNamespaceRun_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
+	var mu sync.Mutex
+	var order []string
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.batchLog = newFakeBatchLogger(7)
+	lifecycle := &fakeLifecycleWriter{generation: 4}
+	job.SetLifecycleWriter(lifecycle)
+	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+		mu.Lock()
+		order = append(order, "compute_lock")
+		mu.Unlock()
+		return func() {}, true, nil
+	}
+
+	runID, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute)
+	if err != nil {
+		t.Fatalf("StartNamespaceRun: %v", err)
+	}
+	if runID != 7 {
+		t.Errorf("run id: got %d, want 7", runID)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(order) != 1 {
+		t.Errorf("compute lock taken %d times, want 1", len(order))
+	}
+}
+
+// An admin-triggered run against a deleted namespace fails before a
+// batch_run_logs row is written — an orphan row would show a run for a
+// namespace the operator was told is gone.
+func TestStartNamespaceRun_InactiveNamespaceLogsNoRun(t *testing.T) {
+	logger := newFakeBatchLogger(7)
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.batchLog = logger
+	job.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	_, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute)
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if logger.inserted.Load() != 0 {
+		t.Errorf("expected no batch_run_logs insert, got %d", logger.inserted.Load())
+	}
+}
+
+// ─── dense ownership matrix on an empty window ───────────────────────────────
+
+// When a namespace's events have all aged out, whatever this run owns must be
+// cleared — otherwise the last vectors linger forever with frozen scores and
+// keep matching searches. What "owns" means depends on dense_source, and
+// getting it wrong either strands stale data or deletes another process's work.
+func TestRunPhase2Dense_EmptyWindowClearsOnlyWhatThisRunOwns(t *testing.T) {
+	for _, tc := range []struct {
+		denseSource      string
+		wantItemCleared  bool
+		wantSubjCleared  bool
+		ownershipComment string
+	}{
+		{"item2vec", true, true, "cron trains and owns both collections"},
+		{"svd", true, true, "cron trains and owns both collections"},
+		{"catalog", false, true, "cmd/embedder owns {ns}_objects_dense"},
+	} {
+		t.Run(tc.denseSource, func(t *testing.T) {
+			job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{}) // no events
+			itemCleared, subjCleared := false, false
+			job.cleanupItemDenseFn = func(_ context.Context, _ string, keep []string) (int, error) {
+				itemCleared = true
+				if len(keep) != 0 {
+					t.Errorf("empty window must clear with an empty keep set, got %v", keep)
+				}
+				return 0, nil
+			}
+			job.cleanupSubjectDenseFn = func(_ context.Context, _ string, keep []string) (int, error) {
+				subjCleared = true
+				if len(keep) != 0 {
+					t.Errorf("empty window must clear with an empty keep set, got %v", keep)
+				}
+				return 0, nil
+			}
+
+			if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
+				&namespace.Config{DenseSource: tc.denseSource, EmbeddingDim: 2}, &LogCapture{}); err != nil {
+				t.Fatalf("runPhase2Dense: %v", err)
+			}
+			if itemCleared != tc.wantItemCleared {
+				t.Errorf("%s: item dense cleared=%v, want %v (%s)", tc.denseSource, itemCleared, tc.wantItemCleared, tc.ownershipComment)
+			}
+			if subjCleared != tc.wantSubjCleared {
+				t.Errorf("%s: subject dense cleared=%v, want %v", tc.denseSource, subjCleared, tc.wantSubjCleared)
+			}
+		})
+	}
+}
+
+// Under catalog mode the embedder's vectors must survive an empty event
+// window: they are the namespace's corpus, not this run's output.
+func TestRunPhase2Dense_CatalogEmptyWindowPreservesEmbedderVectors(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+		t.Fatal("catalog mode must never clear {ns}_objects_dense — cmd/embedder owns it")
+		return 0, nil
+	}
+	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
+
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
+		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase2Dense: %v", err)
+	}
+}
+
+// A namespace with no events at all still needs a compute pass, so the
+// enumeration is over configured namespaces rather than over namespaces that
+// happen to have recent events. Otherwise a namespace that goes quiet keeps
+// its last vectors forever.
+func TestRunOnce_SchedulesConfiguredNamespacesWithNoEvents(t *testing.T) {
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc,
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "disabled"}},
+		&fakeJobRepo{namespaces: []string{"quiet-ns"}}, // configured, zero events
+	)
+
+	job.runOnce(context.Background())
+
+	if !svc.called {
+		t.Error("a configured namespace with no events must still be recomputed")
+	}
+}
+
+func TestRunOnce_NamespaceEnumerationFailureSkipsTheTick(t *testing.T) {
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{err: errors.New("db down")})
+
+	job.runOnce(context.Background())
+
+	if svc.called {
+		t.Error("an unreadable namespace list must not be treated as an empty one")
+	}
+}
+
+// ─── quiet namespaces ────────────────────────────────────────────────────────
+
+// The job enumerates every configured namespace, not just those with recent
+// events — that is how a namespace whose events aged out gets swept. The cost
+// of that breadth is that a namespace which has never received an event also
+// reaches phase 1, and creating its collections there would leave four empty
+// Qdrant collections behind for every namespace anyone ever configured.
+func TestRunPhase1_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return false, nil }
+
+	ensured := false
+	job.ensureCollectionsFn = func(_ context.Context, _ string) error {
+		ensured = true
+		return nil
+	}
+	svc := &fakeRecomputer{}
+	job.service = svc
+
+	subjects, objects, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{})
+	if err != nil {
+		t.Fatalf("runPhase1: %v", err)
+	}
+	if ensured {
+		t.Error("collections were created for a namespace that has never received an event")
+	}
+	if svc.called {
+		t.Error("recompute ran for a namespace with no events at all")
+	}
+	if subjects != 0 || objects != 0 {
+		t.Errorf("counts = (%d, %d), want (0, 0)", subjects, objects)
+	}
+}
+
+// The distinction is "never received an event", not "has no recent events".
+// A namespace whose every event aged out still holds vectors that must be
+// swept, so it has to reach the recompute path.
+func TestRunPhase1_ExpiredEventsStillReachTheSweep(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return true, nil }
+
+	ensured := false
+	job.ensureCollectionsFn = func(_ context.Context, _ string) error {
+		ensured = true
+		return nil
+	}
+	svc := &fakeRecomputer{}
+	job.service = svc
+
+	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase1: %v", err)
+	}
+	if !ensured || !svc.called {
+		t.Errorf("ensured=%v recomputed=%v, want both true: aged-out events still need a sweep", ensured, svc.called)
+	}
+}
+
+// A failed lookup must not be read as "never used" — that would silently skip
+// the sweep for a namespace that does hold vectors.
+func TestRunPhase1_EventLookupFailureIsNotTreatedAsQuiet(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) {
+		return false, errors.New("connection refused")
+	}
+
+	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{}); err == nil {
+		t.Fatal("runPhase1 returned nil error when the event lookup failed")
+	}
+}
+
+// Phase 2 carries the same rule as phase 1, and needs its own check: it has a
+// separate ensure call, so gating only phase 1 still leaves an empty
+// {ns}_subjects_dense behind for every namespace that was merely configured.
+func TestRunPhase2Dense_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return false, nil }
+
+	ensured := false
+	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+		ensured = true
+		return nil
+	}
+	cleared := false
+	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+		cleared = true
+		return 0, nil
+	}
+
+	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase2Dense: %v", err)
+	}
+	if ensured {
+		t.Error("dense collections were created for a namespace that has never received an event")
+	}
+	if cleared {
+		t.Error("cleared dense state for a namespace that never had any")
+	}
+}
+
+// An aged-out namespace has dense state that must be cleared, so it has to get
+// past the gate and reach the cleanup.
+func TestRunPhase2Dense_ExpiredEventsStillClearDenseState(t *testing.T) {
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
+	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return true, nil }
+
+	cleared := false
+	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+		cleared = true
+		return 0, nil
+	}
+	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
+
+	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, &LogCapture{}); err != nil {
+		t.Fatalf("runPhase2Dense: %v", err)
+	}
+	if !cleared {
+		t.Error("aged-out namespace did not reach the dense cleanup")
+	}
 }

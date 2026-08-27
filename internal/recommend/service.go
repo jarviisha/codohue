@@ -16,6 +16,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -53,6 +54,28 @@ const (
 // Subject embeddings are unaffected.
 var ErrCatalogActive = errors.New("recommend: namespace uses catalog auto-embedding; BYOE writes for object dense vectors are not accepted")
 
+// ErrInvalidEmbedding identifies non-finite vector values.
+var ErrInvalidEmbedding = errors.New("recommend: invalid embedding")
+
+// ErrInvalidObjectCreatedAt identifies a BYOE object_created_at beyond the
+// permitted future skew. Separate from ErrInvalidEmbedding so the handler can
+// answer with the documented error code.
+var ErrInvalidObjectCreatedAt = errors.New("recommend: invalid object_created_at")
+
+// maxObjectCreatedAtSkew mirrors ingest's maxOccurredAtSkew: one documented
+// clock-skew rule for every client-supplied creation timestamp. The domains
+// cannot share the constant (peer imports are forbidden), so keep them in step
+// by hand. Exactly at the boundary is accepted.
+const maxObjectCreatedAtSkew = 5 * time.Minute
+
+// Namespace resolution failures are split so the handler can answer honestly:
+// a namespace that does not exist is 404, one whose config could not be read is
+// 503 and safe to retry.
+var (
+	ErrNamespaceNotFound          = errors.New("recommend: namespace not found")
+	ErrNamespaceConfigUnavailable = errors.New("recommend: namespace config unavailable")
+)
+
 type recommendRepo interface {
 	CountInteractions(ctx context.Context, namespace, subjectID string) (int, error)
 	GetSeenItems(ctx context.Context, namespace, subjectID string, seenItemsDays int) ([]string, error)
@@ -80,7 +103,9 @@ type recommendIDMapper interface {
 	GetOrCreateSubjectID(ctx context.Context, subjectID, namespace string) (uint64, error)
 	GetOrCreateObjectID(ctx context.Context, objectID, namespace string) (uint64, error)
 	GetOrCreateObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error)
+	LookupSubjectID(ctx context.Context, subjectID, namespace string) (uint64, bool, error)
 	LookupObjectID(ctx context.Context, objectID, namespace string) (uint64, bool, error)
+	LookupObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error)
 }
 
 // Service serves recommendations via collaborative filtering or fallback to popular items.
@@ -89,25 +114,29 @@ type Service struct {
 	nsConfigSvc recommendNsConfig
 	idmapSvc    recommendIDMapper
 	qdrant      *qdrant.Client
+	lifecycle   interface {
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
 
 	// optional; object metadata cleanup is skipped when nil
 	objectMeta objectMetadataDeleter
 
 	// injectable for testing — wired to real implementations in NewService
-	getCacheFn               func(ctx context.Context, key string) (string, error)
-	setCacheFn               func(ctx context.Context, key, value string, ttl time.Duration)
-	getTrendingFn            func(ctx context.Context, ns string, offset, limit int) ([]infraredis.TrendingEntry, error)
-	fetchSubjectVecFn        func(ctx context.Context, ns string, numID uint64) (*qdrant.SparseVector, error)
-	fetchSubjectDenseVecFn   func(ctx context.Context, ns string, numID uint64) ([]float32, error)
-	searchObjectsFn          func(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
-	searchObjectsDenseFn     func(ctx context.Context, namespace string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
-	deleteFromCollectionFn   func(ctx context.Context, collection string, ids []*qdrant.PointId) error
-	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
-	qdrantGetFn              func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
-	qdrantSearchFn           func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error)
-	qdrantQueryFn            func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error)
-	qdrantUpsertFn           func(ctx context.Context, points *qdrant.UpsertPoints) error
-	qdrantDeleteFn           func(ctx context.Context, points *qdrant.DeletePoints) error
+	getCacheFn                            func(ctx context.Context, key string) (string, error)
+	setCacheFn                            func(ctx context.Context, key, value string, ttl time.Duration)
+	getTrendingFn                         func(ctx context.Context, ns string, offset, limit int) ([]infraredis.TrendingEntry, error)
+	fetchSubjectVecFn                     func(ctx context.Context, ns string, numID uint64) (*qdrant.SparseVector, error)
+	fetchSubjectDenseVecFn                func(ctx context.Context, ns string, numID uint64) ([]float32, error)
+	searchObjectsFn                       func(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
+	searchObjectsDenseFn                  func(ctx context.Context, namespace string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
+	deleteFromCollectionFn                func(ctx context.Context, collection string, ids []*qdrant.PointId) error
+	ensureDenseCollectionsFn              func(ctx context.Context, ns string, dim uint64, distance string) error
+	ensureDenseCollectionsForGenerationFn func(ctx context.Context, ns string, generation int64, dim uint64, distance string) error
+	qdrantGetFn                           func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
+	qdrantSearchFn                        func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error)
+	qdrantQueryFn                         func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error)
+	qdrantUpsertFn                        func(ctx context.Context, points *qdrant.UpsertPoints) error
+	qdrantDeleteFn                        func(ctx context.Context, points *qdrant.DeletePoints) error
 }
 
 // NewService creates a new Service with all required dependencies.
@@ -168,6 +197,9 @@ func NewService(
 	s.ensureDenseCollectionsFn = func(ctx context.Context, ns string, dim uint64, distance string) error {
 		return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, ns, dim, distance)
 	}
+	s.ensureDenseCollectionsForGenerationFn = func(ctx context.Context, ns string, generation int64, dim uint64, distance string) error {
+		return infraqdrant.EnsureDenseCollectionsForGeneration(ctx, qdrantClient, ns, generation, dim, distance)
+	}
 	return s
 }
 
@@ -175,6 +207,13 @@ func NewService(
 // drop the object's metadata row alongside its vectors. The wiring layer
 // calls this once at startup.
 func (s *Service) SetObjectMetadataDeleter(d objectMetadataDeleter) { s.objectMeta = d }
+
+// SetLifecycleWriter fences BYOE and delete mutations.
+func (s *Service) SetLifecycleWriter(writer interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	s.lifecycle = writer
+}
 
 // StoreObjectEmbedding stores a BYOE dense vector for an object in
 // {ns}_objects_dense. createdAt (optional) lands in the point payload so the
@@ -189,9 +228,32 @@ func (s *Service) StoreSubjectEmbedding(ctx context.Context, ns, subjectID strin
 }
 
 func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType string, vector []float32, createdAt *time.Time) error {
+	for _, value := range vector {
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return fmt.Errorf("%w: vector contains non-finite values", ErrInvalidEmbedding)
+		}
+	}
+	// A future creation time makes the γ-freshness age negative, which boosts
+	// the item instead of decaying it. Scoring clamps as a backstop, but the
+	// value is rejected here so the stored payload is not quietly wrong.
+	if createdAt != nil && createdAt.After(time.Now().UTC().Add(maxObjectCreatedAtSkew)) {
+		return fmt.Errorf("%w: object_created_at is more than five minutes in the future", ErrInvalidObjectCreatedAt)
+	}
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		return s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			return s.storeEmbeddingActive(leased, ns, entityID, entityType, vector, createdAt)
+		})
+	}
+	return s.storeEmbeddingActive(ctx, ns, entityID, entityType, vector, createdAt)
+}
+
+func (s *Service) storeEmbeddingActive(ctx context.Context, ns, entityID, entityType string, vector []float32, createdAt *time.Time) error {
 	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
-		return fmt.Errorf("get ns config: %w", err)
+		return fmt.Errorf("%w: %v", ErrNamespaceConfigUnavailable, err)
+	}
+	if cfg == nil {
+		return ErrNamespaceNotFound
 	}
 
 	// FR-018 / R8 source-of-truth precedence: when dense_source is "catalog",
@@ -219,12 +281,26 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 			distance = cfg.DenseDistance
 		}
 	}
-	if err := s.ensureDenseCollectionsFn(ctx, ns, dim, distance); err != nil {
-		return fmt.Errorf("ensure dense collections: %w", err)
+	generation := int64(1)
+	if cfg != nil && cfg.Generation > 0 {
+		generation = cfg.Generation
+	}
+	var ensureErr error
+	if s.ensureDenseCollectionsForGenerationFn != nil {
+		ensureErr = s.ensureDenseCollectionsForGenerationFn(ctx, ns, generation, dim, distance)
+	} else {
+		ensureErr = s.ensureDenseCollectionsFn(ctx, ns, dim, distance)
+	}
+	if ensureErr != nil {
+		return fmt.Errorf("ensure dense collections: %w", ensureErr)
 	}
 
 	// Resolve collection name.
-	collection := ns + "_" + entityType + "s_dense"
+	kind := infraqdrant.CollectionSubjectsDense
+	if entityType == "object" {
+		kind = infraqdrant.CollectionObjectsDense
+	}
+	collection := infraqdrant.CollectionName(ns, generation, kind)
 	idKey := entityType + "_id"
 
 	// Get or create numeric ID.
@@ -282,14 +358,17 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 
 	cfg, err := s.nsConfigSvc.Get(ctx, req.Namespace)
 	if err != nil {
-		slog.Error("get ns config failed", "namespace", req.Namespace, "error", err)
+		return nil, fmt.Errorf("%w: %v", ErrNamespaceConfigUnavailable, err)
+	}
+	if cfg == nil {
+		return nil, ErrNamespaceNotFound
 	}
 	maxResults := req.Limit
 	if cfg != nil && cfg.MaxResults > 0 && cfg.MaxResults < maxResults {
 		maxResults = cfg.MaxResults
 	}
 
-	cacheKey := recCacheKey(req.Namespace, req.SubjectID, maxResults, req.Offset)
+	cacheKey := recCacheKey(req.Namespace, namespaceGeneration(cfg), req.SubjectID, maxResults, req.Offset)
 	if cached, err := s.getCacheFn(ctx, cacheKey); err == nil {
 		var resp Response
 		if json.Unmarshal([]byte(cached), &resp) == nil &&
@@ -334,14 +413,15 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 }
 
 func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
-	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, req.Namespace)
-	if err != nil {
+	subjectNumID, found, err := s.idmapSvc.LookupSubjectID(ctx, req.SubjectID, req.Namespace)
+	if err != nil || !found {
 		slog.Error("get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		req.degraded = true
 		return s.fallbackPopular(ctx, req, limit, cfg, nil)
 	}
 
-	subjectVec, err := s.fetchSubjectVecFn(ctx, req.Namespace, subjectNumID)
+	physicalNamespace := qdrantPhysicalNamespace(req.Namespace, cfg)
+	subjectVec, err := s.fetchSubjectVecFn(ctx, physicalNamespace, subjectNumID)
 	if err != nil || subjectVec == nil {
 		slog.Error("fetch subject vector failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		// err != nil is an infra failure; a nil vector without error just
@@ -371,7 +451,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	// against vectors recomputed in the same batch. To reduce staleness, decrease
 	// CODOHUE_BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
 	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
-		denseVec, err := s.fetchSubjectDenseVecFn(ctx, req.Namespace, subjectNumID)
+		denseVec, err := s.fetchSubjectDenseVecFn(ctx, physicalNamespace, subjectNumID)
 		if err == nil && denseVec != nil {
 			return s.hybridRecommend(ctx, req, limit, cfg, subjectVec, denseVec, seenFilter)
 		}
@@ -387,7 +467,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 
 	// Over-fetch enough to cover offset + limit after reranking.
 	fetchLimit := uint64((req.Offset + limit) * cfOverFetchFactor)
-	results, err := s.searchObjectsFn(ctx, req.Namespace, subjectVec, seenFilter, fetchLimit)
+	results, err := s.searchObjectsFn(ctx, physicalNamespace, subjectVec, seenFilter, fetchLimit)
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		req.degraded = true
@@ -427,13 +507,14 @@ func (s *Service) hybridRecommend(
 	seenFilter *qdrant.Filter,
 ) (*Response, error) {
 	alpha := cfg.Alpha
+	physicalNamespace := qdrantPhysicalNamespace(req.Namespace, cfg)
 
 	// Over-fetch enough to cover offset + limit.
 	sparseTopK := uint64((req.Offset + limit) * cfOverFetchFactor)
 	denseTopK := uint64((req.Offset + limit) * denseOverFetchFactor)
 
 	// Sparse retrieval.
-	sparseResults, err := s.searchObjectsFn(ctx, req.Namespace, subjectSparseVec, seenFilter, sparseTopK)
+	sparseResults, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec, seenFilter, sparseTopK)
 	if err != nil {
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
@@ -441,7 +522,7 @@ func (s *Service) hybridRecommend(
 	}
 
 	// Dense retrieval.
-	denseResults, err := s.searchObjectsDenseFn(ctx, req.Namespace, subjectDenseVec, seenFilter, denseTopK)
+	denseResults, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec, seenFilter, denseTopK)
 	if err != nil {
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
@@ -547,6 +628,9 @@ func extractScores(points []*qdrant.ScoredPoint) map[string]float64 {
 func saturateScores(scores map[string]float64) map[string]float64 {
 	result := make(map[string]float64, len(scores))
 	for id, v := range scores {
+		if !finiteScore(v) {
+			continue
+		}
 		if v <= 0 {
 			result[id] = 0
 			continue
@@ -564,6 +648,9 @@ func saturateScores(scores map[string]float64) map[string]float64 {
 func boundDenseScores(scores map[string]float64, distance string) map[string]float64 {
 	result := make(map[string]float64, len(scores))
 	for id, v := range scores {
+		if !finiteScore(v) {
+			continue
+		}
 		switch {
 		case v <= 0:
 			result[id] = 0
@@ -607,8 +694,10 @@ func blendHybridScores(sparseResults, denseResults []*qdrant.ScoredPoint, alpha,
 	for objectID := range candidateSet {
 		blended := alpha*normSparse[objectID] + (1-alpha)*normDense[objectID]
 		if t, ok := createdAt[objectID]; ok {
-			daysSince := now.Sub(t).Hours() / 24
-			blended *= math.Exp(-gamma * daysSince)
+			blended *= freshnessMultiplier(now, t, gamma)
+		}
+		if !finiteScore(blended) {
+			continue
 		}
 		candidates = append(candidates, blendedCandidate{objectID: objectID, score: blended})
 	}
@@ -752,7 +841,10 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int)
 
 	cfg, err := s.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
-		slog.Error("get trending ns config", "namespace", ns, "error", err)
+		return nil, fmt.Errorf("%w: %v", ErrNamespaceConfigUnavailable, err)
+	}
+	if cfg == nil {
+		return nil, ErrNamespaceNotFound
 	}
 
 	actualWindow := 24
@@ -760,7 +852,7 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int)
 		actualWindow = cfg.TrendingWindow
 	}
 
-	entries, err := s.getTrendingFn(ctx, ns, offset, limit)
+	entries, err := s.getTrendingFn(ctx, redisPhysicalNamespace(ns, cfg), offset, limit)
 	if err != nil {
 		slog.Error("get trending from redis", "namespace", ns, "error", err)
 		entries = nil
@@ -800,7 +892,8 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 		fetchOffset, fetchLimit = 0, req.Offset+limit+len(excluded)
 	}
 
-	entries, err := s.getTrendingFn(ctx, req.Namespace, fetchOffset, fetchLimit)
+	physicalNamespace := redisPhysicalNamespace(req.Namespace, cfg)
+	entries, err := s.getTrendingFn(ctx, physicalNamespace, fetchOffset, fetchLimit)
 	if err != nil {
 		slog.Error("get trending failed, serving popular", "namespace", req.Namespace, "error", err)
 		req.degraded = true
@@ -811,7 +904,7 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	if !hasTrending && fetchOffset > 0 {
 		// Empty page at a non-zero offset: distinguish "past the end of
 		// trending" from "no trending data" by probing rank 0.
-		if probe, probeErr := s.getTrendingFn(ctx, req.Namespace, 0, 1); probeErr == nil && len(probe) > 0 {
+		if probe, probeErr := s.getTrendingFn(ctx, physicalNamespace, 0, 1); probeErr == nil && len(probe) > 0 {
 			hasTrending = true
 		}
 	}
@@ -949,7 +1042,7 @@ func (s *Service) buildSeenItemsFilter(ctx context.Context, ns string, excludedS
 	// One round-trip for the whole exclusion set — at the 5000-id authored
 	// cap the per-id variant was ~5000 sequential queries per uncached
 	// request. Errors degrade to an unfiltered search, same as before.
-	numIDs, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, excludedStringIDs, ns)
+	numIDs, err := s.idmapSvc.LookupObjectIDs(ctx, excludedStringIDs, ns)
 	if err != nil {
 		slog.Error("build seen filter: batch id mapping failed, serving unfiltered", "namespace", ns, "error", err)
 		return nil
@@ -1077,12 +1170,17 @@ func rerankScored(points []*qdrant.ScoredPoint, gamma float64, limit int) []scor
 			continue
 		}
 		finalScore := float64(p.Score)
+		if !finiteScore(finalScore) {
+			continue
+		}
 
 		if createdAtVal, ok := p.Payload["created_at"]; ok {
 			if t, err := time.Parse(time.RFC3339, createdAtVal.GetStringValue()); err == nil {
-				daysSince := now.Sub(t).Hours() / 24
-				finalScore *= math.Exp(-gamma * daysSince)
+				finalScore *= freshnessMultiplier(now, t, gamma)
 			}
+		}
+		if !finiteScore(finalScore) {
+			continue
 		}
 		scored = append(scored, scoredItem{objectID: objVal.GetStringValue(), finalScore: finalScore})
 	}
@@ -1197,6 +1295,13 @@ func blendItems(popular, cf []string, popularRatio float64, limit int) []string 
 // full weight. Only a subject with neither vector gets the whole candidate
 // list back unscored in request order.
 func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankResponse, error) {
+	cfg, err := s.nsConfigSvc.Get(ctx, ns)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrNamespaceConfigUnavailable, err)
+	}
+	if cfg == nil {
+		return nil, ErrNamespaceNotFound
+	}
 	if len(req.Candidates) == 0 {
 		return &RankResponse{
 			SubjectID:   req.SubjectID,
@@ -1208,18 +1313,14 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		}, nil
 	}
 
-	cfg, err := s.nsConfigSvc.Get(ctx, ns)
-	if err != nil {
-		slog.Error("rank: get ns config failed", "namespace", ns, "error", err)
-	}
-
-	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, req.SubjectID, ns)
-	if err != nil {
+	subjectNumID, found, err := s.idmapSvc.LookupSubjectID(ctx, req.SubjectID, ns)
+	if err != nil || !found {
 		slog.Error("rank: get subject numeric id failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 		return s.rankFallback(req, ns), nil
 	}
 
-	sparseVec, err := s.fetchSubjectVecFn(ctx, ns, subjectNumID)
+	physicalNamespace := qdrantPhysicalNamespace(ns, cfg)
+	sparseVec, err := s.fetchSubjectVecFn(ctx, physicalNamespace, subjectNumID)
 	if err != nil {
 		slog.Error("rank: fetch subject sparse vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 		sparseVec = nil
@@ -1230,7 +1331,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	// the cron tick.
 	var denseVec []float32
 	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
-		denseVec, err = s.fetchSubjectDenseVecFn(ctx, ns, subjectNumID)
+		denseVec, err = s.fetchSubjectDenseVecFn(ctx, physicalNamespace, subjectNumID)
 		if err != nil {
 			slog.Error("rank: fetch subject dense vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			denseVec = nil
@@ -1247,10 +1348,9 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		return s.rankFallback(req, ns), nil
 	}
 
-	// One round-trip for all candidates (up to 500). GetOrCreate rather than
-	// Lookup on purpose: candidates about to be ranked are usually about to
-	// be interacted with, so pre-minting their ids is not junk.
-	numIDs, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, req.Candidates, ns)
+	// Ranking is read-only: unknown candidates remain unscored and must not
+	// mint durable mappings merely because a client asked about them.
+	numIDs, err := s.idmapSvc.LookupObjectIDs(ctx, req.Candidates, ns)
 	if err != nil {
 		slog.Error("rank: batch id mapping failed", "namespace", ns, "error", err)
 		return s.rankFallback(req, ns), nil
@@ -1291,7 +1391,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	var sparseResults, denseResults []*qdrant.ScoredPoint
 	sparseOK, denseOK := false, false
 	if sparseVec != nil {
-		sparseResults, err = s.searchObjectsFn(ctx, ns, sparseVec, filter, uint64(len(ids)))
+		sparseResults, err = s.searchObjectsFn(ctx, physicalNamespace, sparseVec, filter, uint64(len(ids)))
 		if err != nil {
 			slog.Error("rank: sparse search failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			sparseResults = nil
@@ -1300,7 +1400,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		}
 	}
 	if denseVec != nil {
-		denseResults, err = s.searchObjectsDenseFn(ctx, ns, denseVec, filter, uint64(len(ids)))
+		denseResults, err = s.searchObjectsDenseFn(ctx, physicalNamespace, denseVec, filter, uint64(len(ids)))
 		if err != nil {
 			slog.Error("rank: dense search failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			denseResults = nil
@@ -1387,28 +1487,38 @@ func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 // recCacheTTL (5 minutes) after deletion, since the cache is keyed by subject rather than
 // by individual objects.
 func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		return s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, lifecycle *nslifecycle.NamespaceLifecycle) error {
+			return s.deleteObjectActive(leased, ns, objectID, lifecycle.Generation)
+		})
+	}
+	return s.deleteObjectActive(ctx, ns, objectID, 1)
+}
+
+func (s *Service) deleteObjectActive(ctx context.Context, ns, objectID string, generation int64) error {
 	// Lookup, not GetOrCreate: deleting a never-ingested object must be an
 	// idempotent no-op on the vector store, not a write that mints a mapping
 	// for it. A missing mapping only means there are no Qdrant points — the
 	// object may still carry an objects-table metadata row (e.g. an author
 	// set via PUT /objects/{id} on an object never referenced by an event),
 	// which must still be dropped below.
-	numID, found, err := s.idmapSvc.LookupObjectID(ctx, objectID, ns)
-	if err != nil {
-		return fmt.Errorf("get numeric id: %w", err)
+	numID, found, lookupErr := s.idmapSvc.LookupObjectID(ctx, objectID, ns)
+	var cleanupErr error
+	if lookupErr != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("get numeric id: %w", lookupErr))
 	}
 
-	if found {
+	if lookupErr == nil && found {
 		pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}
 
-		if err := s.deleteFromCollectionFn(ctx, ns+"_objects", pointIDs); err != nil {
-			return err
+		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(ns, generation, infraqdrant.CollectionObjects), pointIDs); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
 		}
 
-		// Dense collection is optional — it may not exist when dense_source is "disabled"
-		// or no embeddings have been pushed yet. Treat cleanup errors as best-effort.
-		if err := s.deleteFromCollectionFn(ctx, ns+"_objects_dense", pointIDs); err != nil {
-			slog.Debug("delete object: dense collection cleanup skipped", "namespace", ns, "object_id", objectID, "error", err)
+		// Dense collection is optional; deleteFromCollection treats NotFound as
+		// success, while every other failure must remain visible and retryable.
+		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(ns, generation, infraqdrant.CollectionObjectsDense), pointIDs); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
 
@@ -1418,16 +1528,13 @@ func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
 	// inflates author coverage and pads the exclude_authored filter with a
 	// dead id.
 	//
-	// Best-effort: the vectors (if any) are already gone, which is what the
-	// caller asked for, and a stale metadata row is recoverable by re-deleting.
 	if s.objectMeta != nil {
 		if err := s.objectMeta.Delete(ctx, ns, objectID); err != nil {
-			slog.Error("delete object: metadata row cleanup failed",
-				"namespace", ns, "object_id", objectID, "error", err)
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete object metadata: %w", err))
 		}
 	}
 
-	return nil
+	return cleanupErr
 }
 
 func (s *Service) deleteFromCollection(ctx context.Context, collection string, ids []*qdrant.PointId) error {
@@ -1452,13 +1559,34 @@ func (s *Service) deleteFromCollection(ctx context.Context, collection string, i
 	return nil
 }
 
-func recCacheKey(ns, subjectID string, limit, offset int) string {
-	return fmt.Sprintf("rec:v2:%s:%s:limit=%d:offset=%d",
-		base64.RawURLEncoding.EncodeToString([]byte(ns)),
+// recCacheKey builds the per-subject cache key under the namespace-generation
+// prefix owned by nslifecycle. Namespace deletion scans that same prefix, so
+// the two must not each spell the key out.
+func recCacheKey(ns string, generation int64, subjectID string, limit, offset int) string {
+	return fmt.Sprintf("%s:%s:limit=%d:offset=%d",
+		nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, ns, generation),
 		base64.RawURLEncoding.EncodeToString([]byte(subjectID)),
 		limit,
 		offset,
 	)
+}
+
+func namespaceGeneration(cfg *namespace.Config) int64 {
+	if cfg == nil || cfg.Generation < 1 {
+		return 1
+	}
+	return cfg.Generation
+}
+
+// The physical-name rules live in nslifecycle so the serving path and the
+// writers that created those keys cannot disagree about which generation a
+// name belongs to.
+func qdrantPhysicalNamespace(ns string, cfg *namespace.Config) string {
+	return nslifecycle.QdrantNamespace(ns, namespaceGeneration(cfg))
+}
+
+func redisPhysicalNamespace(ns string, cfg *namespace.Config) string {
+	return nslifecycle.RedisNamespace(ns, namespaceGeneration(cfg))
 }
 
 // mergeExclusions unions two exclusion sets, returning nil when both are

@@ -10,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // ─── fake repo ────────────────────────────────────────────────────────────────
@@ -207,11 +210,18 @@ func (f *fakeRepo) SeedDemoCatalogItems(_ context.Context, namespace string, ite
 func (f *fakeRepo) ClearNamespaceData(_ context.Context, namespace string) (int, error) {
 	f.clearNamespace = namespace
 	f.clearNamespaces = append(f.clearNamespaces, namespace)
+	if f.clearErr == nil {
+		f.namespace = nil
+	}
 	return f.clearDeleted, f.clearErr
 }
 
 func (f *fakeRepo) TruncateAllNamespaceData(_ context.Context) (eventsDeleted, namespacesDeleted int, err error) {
 	f.truncateCalled++
+	if f.truncateErr == nil {
+		f.namespace = nil
+		f.namespaces = nil
+	}
 	return f.truncateEvents, f.truncateNamespaces, f.truncateErr
 }
 
@@ -238,7 +248,7 @@ func (f *fakeRepo) InsertReembedRun(_ context.Context, namespace, strategyID, st
 	return f.insertReembedID, f.insertReembedErr
 }
 
-func (f *fakeRepo) SelectAndResetStaleCatalogItems(_ context.Context, namespace, version, onlyState string) ([]CatalogReembedTarget, error) {
+func (f *fakeRepo) SelectAndResetStaleCatalogItems(_ context.Context, namespace, _, version, onlyState string) ([]CatalogReembedTarget, error) {
 	f.staleResetCalled.namespace = namespace
 	f.staleResetCalled.version = version
 	f.staleResetCalled.onlyState = onlyState
@@ -250,7 +260,7 @@ func (f *fakeRepo) StartReembedRun(ctx context.Context, namespace, strategyID, s
 	if err != nil {
 		return 0, nil, err
 	}
-	targets, err := f.SelectAndResetStaleCatalogItems(ctx, namespace, strategyVersion, onlyState)
+	targets, err := f.SelectAndResetStaleCatalogItems(ctx, namespace, strategyID, strategyVersion, onlyState)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -310,12 +320,16 @@ func (f *fakeStreamPublisher) XAdd(_ context.Context, args *goredis.XAddArgs) *g
 
 type fakeStrategyPicker struct {
 	id, version string
+	generation  int64
 	enabled     bool
 	err         error
 }
 
-func (f *fakeStrategyPicker) GetCatalogStrategy(_ context.Context, _ string) (strategyID, strategyVersion string, enabled bool, err error) {
-	return f.id, f.version, f.enabled, f.err
+func (f *fakeStrategyPicker) GetCatalogStrategy(_ context.Context, _ string) (strategyID, strategyVersion string, generation int64, enabled bool, err error) {
+	if f.generation < 1 {
+		f.generation = 1
+	}
+	return f.id, f.version, f.generation, f.enabled, f.err
 }
 
 // ─── fake qdrant point deleter ────────────────────────────────────────────────
@@ -790,6 +804,96 @@ type fakeBatchRunner struct {
 	releaseAll int
 }
 
+type fakeLifecycleCoordinator struct {
+	lifecycles       map[string]*nslifecycle.NamespaceLifecycle
+	system           nslifecycle.SystemState
+	namespaceErrors  []string
+	resetErrors      []string
+	completeDeletes  []string
+	startDeleteCalls int
+	completeReset    int
+}
+
+func newFakeLifecycle(namespace string, generation int64) *fakeLifecycleCoordinator {
+	return &fakeLifecycleCoordinator{
+		lifecycles: map[string]*nslifecycle.NamespaceLifecycle{namespace: {
+			Namespace: namespace, Generation: generation, State: nslifecycle.StateActive,
+		}},
+		system: nslifecycle.SystemActive,
+	}
+}
+
+func (f *fakeLifecycleCoordinator) WithWriter(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	lifecycle, ok := f.lifecycles[namespace]
+	if !ok || lifecycle.State != nslifecycle.StateActive {
+		return nslifecycle.ErrNamespaceNotActive
+	}
+	return fn(nslifecycle.ContextWithLease(ctx, namespace, lifecycle.Generation, nslifecycle.LockShared), lifecycle)
+}
+
+func (f *fakeLifecycleCoordinator) WithNamespaceExclusive(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	lifecycle, ok := f.lifecycles[namespace]
+	if !ok {
+		return nslifecycle.ErrNamespaceNotFound
+	}
+	return fn(nslifecycle.ContextWithLease(ctx, namespace, lifecycle.Generation, nslifecycle.LockExclusive), lifecycle)
+}
+
+func (f *fakeLifecycleCoordinator) WithGlobalExclusive(ctx context.Context, fn func(context.Context, *nslifecycle.SystemLifecycle) error) error {
+	return fn(ctx, &nslifecycle.SystemLifecycle{State: f.system})
+}
+
+func (f *fakeLifecycleCoordinator) StartDelete(_ context.Context, namespace string) (*nslifecycle.NamespaceLifecycle, error) {
+	f.startDeleteCalls++
+	lifecycle, ok := f.lifecycles[namespace]
+	if !ok || lifecycle.State == nslifecycle.StateDeleted {
+		return nil, nslifecycle.ErrNamespaceNotFound
+	}
+	lifecycle.State = nslifecycle.StateDeleting
+	return lifecycle, nil
+}
+
+func (f *fakeLifecycleCoordinator) CompleteDelete(_ context.Context, namespace string, generation int64) error {
+	lifecycle := f.lifecycles[namespace]
+	if lifecycle == nil || lifecycle.Generation != generation || lifecycle.State != nslifecycle.StateDeleting {
+		return nslifecycle.ErrNamespaceNotActive
+	}
+	lifecycle.State = nslifecycle.StateDeleted
+	f.completeDeletes = append(f.completeDeletes, namespace)
+	return nil
+}
+
+func (f *fakeLifecycleCoordinator) RecordNamespaceError(_ context.Context, namespace string, _ int64, message string) error {
+	f.namespaceErrors = append(f.namespaceErrors, namespace+":"+message)
+	return nil
+}
+
+func (f *fakeLifecycleCoordinator) StartReset(context.Context) error {
+	f.system = nslifecycle.SystemResetting
+	return nil
+}
+
+func (f *fakeLifecycleCoordinator) CompleteReset(context.Context) error {
+	f.system = nslifecycle.SystemActive
+	f.completeReset++
+	return nil
+}
+
+func (f *fakeLifecycleCoordinator) RecordResetError(_ context.Context, message string) error {
+	f.resetErrors = append(f.resetErrors, message)
+	return nil
+}
+
+func (f *fakeLifecycleCoordinator) ListNonDeleted(context.Context) ([]*nslifecycle.NamespaceLifecycle, error) {
+	out := make([]*nslifecycle.NamespaceLifecycle, 0, len(f.lifecycles))
+	for _, lifecycle := range f.lifecycles {
+		if lifecycle.State != nslifecycle.StateDeleted {
+			out = append(out, lifecycle)
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeBatchRunner) StartNamespaceRun(_ context.Context, _ string, _ batchrun.TriggerSource, _ time.Duration) (int64, error) {
 	f.started++
 	return f.runID, f.startErr
@@ -955,6 +1059,41 @@ func TestDeleteNamespace_NotFoundCleansOrphanedState(t *testing.T) {
 	}
 }
 
+func TestDeleteNamespace_PartialFailureStaysFencedAndRetryCompletes(t *testing.T) {
+	repo := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1", Generation: 2}, clearErr: errors.New("redis unavailable")}
+	lifecycle := newFakeLifecycle("ns1", 2)
+	svc := newTestService(repo, "", "")
+	svc.SetLifecycleCoordinator(lifecycle)
+
+	if _, err := svc.DeleteNamespace(context.Background(), "ns1"); err == nil {
+		t.Fatal("expected partial cleanup failure")
+	}
+	if got := lifecycle.lifecycles["ns1"].State; got != nslifecycle.StateDeleting {
+		t.Fatalf("state=%q, want deleting", got)
+	}
+	if len(lifecycle.namespaceErrors) != 1 {
+		t.Fatalf("persisted errors=%v, want one", lifecycle.namespaceErrors)
+	}
+	if err := lifecycle.WithWriter(context.Background(), "ns1", func(context.Context, *nslifecycle.NamespaceLifecycle) error { return nil }); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("writer error=%v, want namespace-not-active", err)
+	}
+
+	repo.clearErr = nil
+	resp, err := svc.DeleteNamespace(context.Background(), "ns1")
+	if err != nil {
+		t.Fatalf("retry DeleteNamespace: %v", err)
+	}
+	if resp == nil || resp.Namespace != "ns1" {
+		t.Fatalf("retry response=%+v", resp)
+	}
+	if got := lifecycle.lifecycles["ns1"].State; got != nslifecycle.StateDeleted {
+		t.Fatalf("state=%q, want deleted", got)
+	}
+	if lifecycle.startDeleteCalls != 2 || len(lifecycle.completeDeletes) != 1 {
+		t.Fatalf("start=%d complete=%v", lifecycle.startDeleteCalls, lifecycle.completeDeletes)
+	}
+}
+
 func TestResetApp_TruncatesEverythingInOneCall(t *testing.T) {
 	repo := &fakeRepo{
 		namespaces: []NamespaceConfig{
@@ -1040,5 +1179,91 @@ func TestResetApp_PropagatesTruncateError(t *testing.T) {
 
 	if _, err := svc.ResetApp(context.Background()); err == nil {
 		t.Fatal("expected error from ResetApp when TruncateAllNamespaceData fails, got nil")
+	}
+}
+
+func TestResetApp_PersistsFailureAndResumesDeletingNamespaces(t *testing.T) {
+	repo := &fakeRepo{
+		namespace:          &NamespaceConfig{Namespace: "alpha", Generation: 3},
+		namespaces:         []NamespaceConfig{{Namespace: "alpha", Generation: 3}},
+		truncateErr:        errors.New("postgres unavailable"),
+		truncateEvents:     9,
+		truncateNamespaces: 1,
+	}
+	lifecycle := newFakeLifecycle("alpha", 3)
+	svc := newTestService(repo, "", "")
+	svc.SetLifecycleCoordinator(lifecycle)
+
+	if _, err := svc.ResetApp(context.Background()); err == nil {
+		t.Fatal("expected reset failure")
+	}
+	if lifecycle.system != nslifecycle.SystemResetting || lifecycle.lifecycles["alpha"].State != nslifecycle.StateDeleting {
+		t.Fatalf("system=%q namespace=%q", lifecycle.system, lifecycle.lifecycles["alpha"].State)
+	}
+	if len(lifecycle.resetErrors) != 1 {
+		t.Fatalf("reset errors=%v", lifecycle.resetErrors)
+	}
+
+	repo.truncateErr = nil
+	resp, err := svc.ResetApp(context.Background())
+	if err != nil {
+		t.Fatalf("resume ResetApp: %v", err)
+	}
+	if resp == nil || resp.EventsDeleted != 9 || lifecycle.completeReset != 1 {
+		t.Fatalf("response=%+v completeReset=%d", resp, lifecycle.completeReset)
+	}
+	if lifecycle.lifecycles["alpha"].State != nslifecycle.StateDeleted || lifecycle.system != nslifecycle.SystemActive {
+		t.Fatalf("system=%q namespace=%q", lifecycle.system, lifecycle.lifecycles["alpha"].State)
+	}
+}
+
+// TestLifecycleOperationsMetricRecordsBothOutcomes pins the counter at its call
+// sites. It was registered but never observed, so it read zero forever — the
+// failure count in particular is how an operator sees namespaces piling up
+// durably fenced in `deleting` without reading the ledger.
+func TestLifecycleOperationsMetricRecordsBothOutcomes(t *testing.T) {
+	metrics.NamespaceLifecycleOperationsTotal.Reset()
+	t.Cleanup(metrics.NamespaceLifecycleOperationsTotal.Reset)
+
+	count := func(operation, outcome string) float64 {
+		return testutil.ToFloat64(metrics.NamespaceLifecycleOperationsTotal.WithLabelValues(operation, outcome))
+	}
+
+	// A cleanup failure leaves the namespace fenced in `deleting`.
+	failing := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1", Generation: 2}, clearErr: errors.New("redis unavailable")}
+	failingSvc := newTestService(failing, "", "")
+	failingSvc.SetLifecycleCoordinator(newFakeLifecycle("ns1", 2))
+	if _, err := failingSvc.DeleteNamespace(context.Background(), "ns1"); err == nil {
+		t.Fatal("expected partial cleanup failure")
+	}
+	if got := count("delete", "failure"); got != 1 {
+		t.Errorf("delete/failure = %v, want 1", got)
+	}
+	if got := count("delete", "success"); got != 0 {
+		t.Errorf("delete/success = %v, want a failed delete not to count as success", got)
+	}
+
+	ok := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns2", Generation: 1}}
+	okSvc := newTestService(ok, "", "")
+	okSvc.SetLifecycleCoordinator(newFakeLifecycle("ns2", 1))
+	if _, err := okSvc.DeleteNamespace(context.Background(), "ns2"); err != nil {
+		t.Fatalf("DeleteNamespace: %v", err)
+	}
+	if got := count("delete", "success"); got != 1 {
+		t.Errorf("delete/success = %v, want 1", got)
+	}
+
+	resetRepo := &fakeRepo{namespaces: []NamespaceConfig{{Namespace: "ns3", Generation: 1}}}
+	resetSvc := newTestService(resetRepo, "", "")
+	resetSvc.SetLifecycleCoordinator(newFakeLifecycle("ns3", 1))
+	if _, err := resetSvc.ResetApp(context.Background()); err != nil {
+		t.Fatalf("ResetApp: %v", err)
+	}
+	if got := count("reset", "success"); got != 1 {
+		t.Errorf("reset/success = %v, want 1", got)
+	}
+	// Reset and delete are separate operations and must not share a series.
+	if got := count("reset", "failure"); got != 0 {
+		t.Errorf("reset/failure = %v, want 0", got)
 	}
 }

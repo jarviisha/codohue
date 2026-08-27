@@ -68,3 +68,23 @@ fails. This lets callers resume from the last successfully published event.
 This module lives inside the main Codohue repo under `sdk/go/redistream/`.
 Its local `go.mod` replaces `github.com/jarviisha/codohue/pkg/codohuetypes`
 with the in-repo module during local development.
+
+## Namespace generations
+
+Event and catalog payloads carry an additive `namespace_generation`. It is
+omitted for generation-1 namespaces, so a producer written before the field
+existed keeps working during the adoption window.
+
+Stamp it once a namespace has been deleted and recreated: its generation is no
+longer 1, and a generation-less envelope for it is stale — the consumer acks
+and drops it rather than retrying, because no retry can make it valid. The
+generation is returned at namespace provisioning; pass it through
+`WithNamespaceGeneration` so every publish carries it.
+
+## Retention
+
+Producers here set no `MAXLEN` and the streams have no TTL. Trimming is the
+server's job: a retention pass reads every consumer group's progress and
+removes only entries below the slowest group's frontier, so an entry still
+pending anywhere survives. A producer-side cap would delete unprocessed work
+during an outage — exactly when it matters most.

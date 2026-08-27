@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -28,6 +30,9 @@ type fakeRepo struct {
 	lastSince  *time.Time
 	lastLimit  int
 	lastOffset int
+
+	authorHookCalls int
+	rolledBack      bool
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ map[string]any) (*UpsertResult, error) {
@@ -38,7 +43,25 @@ func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ m
 	return f.res, f.err
 }
 
-func (f *fakeRepo) ListObjects(_ context.Context, _ string, since *time.Time, limit, offset int) ([]ObjectRow, int, error) {
+// UpsertWithAttribution mirrors the real repository: the content write and the
+// attribution hook succeed or fail together, so a failing hook must leave the
+// caller with an error and no result.
+func (f *fakeRepo) UpsertWithAttribution(ctx context.Context, ns, obj, content string, hash []byte, meta map[string]any, writeAuthor AttributionWriter) (*UpsertResult, error) {
+	res, err := f.Upsert(ctx, ns, obj, content, hash, meta)
+	if err != nil {
+		return nil, err
+	}
+	if writeAuthor != nil {
+		f.authorHookCalls++
+		if hookErr := writeAuthor(ctx, nil); hookErr != nil {
+			f.rolledBack = true
+			return nil, hookErr
+		}
+	}
+	return res, nil
+}
+
+func (f *fakeRepo) ListObjects(_ context.Context, _ string, since *time.Time, limit, offset int, _ *objectCursor) ([]ObjectRow, int, error) {
 	f.lastSince = since
 	f.lastLimit = limit
 	f.lastOffset = offset
@@ -51,7 +74,7 @@ type fakeAuthorWriter struct {
 	err   error
 }
 
-func (f *fakeAuthorWriter) SetAuthor(_ context.Context, ns, obj, author string) error {
+func (f *fakeAuthorWriter) SetAuthorTx(_ context.Context, _ pgx.Tx, ns, obj, author string) error {
 	f.calls = append(f.calls, ns+"/"+obj+"/"+author)
 	return f.err
 }
@@ -88,6 +111,7 @@ func (f *fakeXAdder) XAdd(_ context.Context, args *redis.XAddArgs) *redis.String
 func enabledCfg() *namespace.Config {
 	return &namespace.Config{
 		Namespace:              "ns",
+		Generation:             7,
 		DenseSource:            "catalog",
 		CatalogStrategyID:      "internal-hashing-ngrams",
 		CatalogStrategyVersion: "v1",
@@ -214,17 +238,52 @@ func TestServiceIngest_NoAuthorSkipsWriteThrough(t *testing.T) {
 	}
 }
 
-// The catalog row is already durable when attribution is attempted, so a
-// failure there must not fail the ingest.
-func TestServiceIngest_AuthorWriteFailureIsNotFatal(t *testing.T) {
+// Content and attribution are one request, so they are one write. Reporting
+// 202 with the author silently dropped left the caller no way to learn its
+// attribution never happened — the request now fails and nothing is committed.
+func TestServiceIngest_AttributionFailureRollsBackTheContentWrite(t *testing.T) {
 	writer := &fakeAuthorWriter{err: errors.New("objects table down")}
-	svc := newSvc(&fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}, NeedsPublish: true}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
+	svc.SetAuthorWriter(writer)
+
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u1",
+	})
+
+	if err == nil {
+		t.Fatal("a dropped attribution must not be reported as success")
+	}
+	if !repo.rolledBack {
+		t.Error("the content write must roll back with the attribution")
+	}
+	// Nothing was committed, so nothing may be queued for embedding.
+	if len(pub.calls) != 0 {
+		t.Errorf("rolled-back ingest must not publish embed work, got %v", pub.calls)
+	}
+}
+
+// A re-ingest of identical content is a no-op for embedding (NeedsPublish
+// false) but must still apply a new attribution — otherwise correcting an
+// author would require editing the content to force a write.
+func TestServiceIngest_SameContentStillUpdatesAttribution(t *testing.T) {
+	writer := &fakeAuthorWriter{}
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}, NeedsPublish: false}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
 	svc.SetAuthorWriter(writer)
 
 	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
-		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u1",
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "u2",
 	}); err != nil {
-		t.Fatalf("ingest must survive an attribution failure, got: %v", err)
+		t.Fatalf("Ingest: %v", err)
+	}
+	if len(writer.calls) != 1 || writer.calls[0] != "ns/o1/u2" {
+		t.Errorf("attribution not applied: %v", writer.calls)
+	}
+	if len(pub.calls) != 0 {
+		t.Errorf("unchanged content must not redo embed work, got %v", pub.calls)
 	}
 }
 
@@ -259,8 +318,11 @@ func TestServiceIngest_HappyPath_PublishesToStream(t *testing.T) {
 		t.Fatalf("expected 1 XAdd call, got %d", len(pub.calls))
 	}
 	xa := pub.calls[0]
-	if xa.Stream != "catalog:embed:ns" {
+	if xa.Stream != "catalog:embed:ns:g7" {
 		t.Errorf("stream: got %q", xa.Stream)
+	}
+	if xa.MaxLen != 0 || xa.Approx {
+		t.Errorf("embed stream must not be producer-trimmed: MaxLen=%d Approx=%v", xa.MaxLen, xa.Approx)
 	}
 	v, ok := xa.Values.(map[string]any)
 	if !ok {
@@ -271,6 +333,9 @@ func TestServiceIngest_HappyPath_PublishesToStream(t *testing.T) {
 	}
 	if v["namespace"] != "ns" {
 		t.Errorf("namespace: got %v", v["namespace"])
+	}
+	if v["namespace_generation"] != int64(7) {
+		t.Errorf("namespace_generation: got %v", v["namespace_generation"])
 	}
 	if v["object_id"] != "o1" {
 		t.Errorf("object_id: got %v", v["object_id"])
@@ -472,5 +537,108 @@ func TestNewServiceAndSetters(t *testing.T) {
 	}
 	if NewHandler(svc) == nil {
 		t.Fatal("NewHandler returned nil")
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+// Catalog ingest writes a row AND publishes embed work, so it must hold the
+// lease across both: a delete landing between the two would leave a stream
+// entry pointing at a row that no longer exists.
+func TestServiceIngest_RunsUnderLifecycleLease(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: true}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
+	lifecycle := &fakeLifecycleWriter{generation: 7}
+	svc.SetLifecycleWriter(lifecycle)
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	if len(pub.calls) != 1 {
+		t.Fatalf("expected 1 XADD, got %d", len(pub.calls))
+	}
+	// The embed work lands on the generation's own stream, so an embedder
+	// consuming the previous incarnation never sees it.
+	if pub.calls[0].Stream != "catalog:embed:ns:g7" {
+		t.Errorf("stream: got %q, want catalog:embed:ns:g7", pub.calls[0].Stream)
+	}
+	values, ok := pub.calls[0].Values.(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected XADD values type %T", pub.calls[0].Values)
+	}
+	if values["namespace_generation"] != int64(7) {
+		t.Errorf("payload generation: got %v, want 7", values["namespace_generation"])
+	}
+}
+
+func TestServiceIngest_InactiveNamespaceWritesNothing(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: true}}
+	pub := &fakeXAdder{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, pub)
+	svc.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"})
+	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if repo.called != 0 || len(pub.calls) != 0 {
+		t.Errorf("inactive namespace reached storage: repo=%d xadds=%d", repo.called, len(pub.calls))
+	}
+}
+
+// The stream worker evaluates the envelope under its own lease and then calls
+// Ingest; that lease must be reused rather than re-acquired.
+func TestServiceIngest_ReusesHeldLease(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1, Namespace: "ns", ObjectID: "o1"}, NeedsPublish: true}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	lifecycle := &fakeLifecycleWriter{generation: 7}
+	svc.SetLifecycleWriter(lifecycle)
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 7, nslifecycle.LockShared)
+	if _, err := svc.Ingest(ctx, "ns", &IngestRequest{ObjectID: "o1", Content: "hello"}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Errorf("held lease must be reused, got %d acquisitions", lifecycle.calls)
+	}
+	if repo.called != 1 {
+		t.Errorf("expected the write to reach the repo once, got %d", repo.called)
+	}
+}
+
+// Generation 1 keeps the original unqualified stream name, so upgrading moves
+// nothing. A generation below 1 is not a real lifecycle value; clamping stops
+// a bad caller from publishing to a stream no consumer reads.
+func TestGenerationStreamName_ClampsBelowOne(t *testing.T) {
+	base := generationStreamName("ns", 1)
+	if base != streamName("ns") {
+		t.Fatalf("generation 1 stream = %q, want the unqualified %q", base, streamName("ns"))
+	}
+	for _, generation := range []int64{0, -1} {
+		if got := generationStreamName("ns", generation); got != base {
+			t.Errorf("generation %d gave %q, want %q", generation, got, base)
+		}
+	}
+	if g2 := generationStreamName("ns", 2); g2 == base {
+		t.Error("generation 2 shares generation 1's stream; a deleted incarnation's work would be visible to the new one")
 	}
 }

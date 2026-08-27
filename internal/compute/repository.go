@@ -157,11 +157,11 @@ func (r *Repository) GetNamespaceEventsInWindow(ctx context.Context, namespace s
 	return events, nil
 }
 
-// GetActiveNamespaces returns namespaces that have events within the last 90 days.
+// GetActiveNamespaces returns every configured namespace. Empty active windows
+// still need a compute pass so owned Qdrant and Redis state is removed.
 func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) {
 	rows, err := r.queryFn(ctx, `
-		SELECT DISTINCT namespace FROM events
-		WHERE occurred_at > NOW() - INTERVAL '90 days'`,
+		SELECT namespace FROM namespace_configs ORDER BY namespace`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get active namespaces: %w", err)
@@ -180,6 +180,27 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 		return ns, fmt.Errorf("iterate active namespaces: %w", err)
 	}
 	return ns, nil
+}
+
+// HasAnyEvents reports whether the namespace has ever received an event,
+// regardless of age.
+//
+// The compute job enumerates every configured namespace, not only those with
+// recent activity — that is how a namespace whose events all aged out gets its
+// stale vectors swept. But "enumerate it" must not mean "materialize four
+// Qdrant collections for it": a namespace that has never received an event has
+// nothing to sweep, and creating the collections anyway leaves empty
+// collections behind for every namespace that was merely configured.
+//
+// Deliberately unwindowed. Expired-but-present rows are exactly the case that
+// still needs a sweep, so restricting this to the decay window would skip it.
+func (r *Repository) HasAnyEvents(ctx context.Context, namespace string) (bool, error) {
+	var exists bool
+	if err := r.db.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM events WHERE namespace = $1)`, namespace).Scan(&exists); err != nil {
+		return false, fmt.Errorf("check namespace events: %w", err)
+	}
+	return exists, nil
 }
 
 // InsertBatchRunLog inserts a new in-progress batch run log row and returns its ID.

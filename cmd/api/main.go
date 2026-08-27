@@ -24,6 +24,7 @@ import (
 	"github.com/jarviisha/codohue/internal/catalog"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
@@ -100,6 +101,13 @@ func run() error {
 	}
 
 	// Core
+	lifecycleRepo := nslifecycle.NewRepository(db)
+	lifecycleLocker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		return fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	defer lifecycleLocker.Close()
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, lifecycleLocker)
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
 
@@ -111,6 +119,7 @@ func run() error {
 	// ingest
 	ingestRepo := ingest.NewRepository(db)
 	ingestSvc := ingest.NewService(ingestRepo, nsConfigSvc)
+	ingestSvc.SetLifecycleWriter(lifecycleSvc)
 	// Live event tail: every processed event (HTTP or Redis-stream path) is
 	// published best-effort to Redis pub/sub so cmd/admin's SSE tail can fan
 	// it out. Async + drop-on-full → never back-pressures ingest.
@@ -119,6 +128,7 @@ func run() error {
 	ingestHandler := ingest.NewHandler(ingestSvc)
 	consumerName := resolveConsumerName(cfg.IngestReplicaName, hostnameFn)
 	ingestWorker := ingest.NewWorker(redisClient, ingestSvc, consumerName)
+	ingestWorker.SetLifecycleEvaluator(lifecycleSvc)
 
 	if err := ingestWorker.Init(ctx); err != nil {
 		return fmt.Errorf("init ingest worker: %w", err)
@@ -129,26 +139,31 @@ func run() error {
 	// the request, persists the row, and publishes to Redis Streams.
 	catalogRepo := catalog.NewRepository(db)
 	catalogSvc := catalog.NewService(catalogRepo, nsConfigSvc, redisClient)
+	catalogSvc.SetLifecycleWriter(lifecycleSvc)
 	catalogSvc.SetDefaultMaxContentBytes(cfg.CatalogMaxContentBytes)
 	catalogHandler := catalog.NewHandler(catalogSvc)
 
 	// per-object metadata, independent of embedding. Wired into catalog as an
 	// interface so catalog never imports this peer domain directly.
 	objectsSvc := objects.NewService(objects.NewRepository(db))
+	objectsSvc.SetLifecycleWriter(lifecycleSvc)
 	objectsHandler := objects.NewHandler(objectsSvc)
-	catalogSvc.SetAuthorWriter(objectsSvc)
+	catalogSvc.SetAuthorWriter(&objectAttributionAdapter{svc: objectsSvc})
 
 	// Durable catalog transport: the ingest worker consumes codohue:catalog
 	// and hands entries to catalog.Service through the adapter (the import
 	// rule keeps ingest and catalog apart).
 	catalogWorker := ingest.NewCatalogWorker(redisClient, &catalogStreamAdapter{svc: catalogSvc}, consumerName)
+	catalogWorker.SetLifecycleEvaluator(lifecycleSvc)
 	if err := catalogWorker.Init(ctx); err != nil {
 		return fmt.Errorf("init catalog ingest worker: %w", err)
 	}
+	streamRetention := infraredis.NewRetention(redisClient, retentionDryRun(cfg.StreamRetentionEnabled))
 
 	// recommend
 	recommendRepo := recommend.NewRepository(db)
 	recommendSvc := recommend.NewService(recommendRepo, nsConfigSvc, idmapSvc, qdrantClient, redisClient)
+	recommendSvc.SetLifecycleWriter(lifecycleSvc)
 	recommendSvc.SetObjectMetadataDeleter(objectsSvc)
 
 	// keyHashFn bridges nsconfig.Service to auth.KeyHashFn without coupling packages.
@@ -170,8 +185,9 @@ func run() error {
 	r.Use(middleware.Recoverer)
 
 	r.Get("/ping", pingHandler())
-	r.Get("/healthz", healthzHandler(db, redisClient, qdrantClient))
-	r.Handle("/metrics", promhttp.Handler())
+	r.Get("/healthz", observabilityHealthHandler(cfg.ObservabilityToken,
+		healthzHandler(db, redisClient, qdrantClient), healthzDetailsHandler(db, redisClient, qdrantClient)))
+	r.Handle("/metrics", auth.RequireObservability(cfg.ObservabilityToken)(promhttp.Handler()))
 
 	// All client-facing routes live under /v1/namespaces/{ns}/* and authenticate
 	// via per-namespace bcrypt-hashed keys (with fallback to the global
@@ -196,7 +212,7 @@ func run() error {
 	// Goroutines. Joined on shutdown before the deferred pool/redis closes
 	// fire, so in-flight events finish their write + XACK against live clients.
 	var workerWG sync.WaitGroup
-	workerWG.Add(3)
+	workerWG.Add(4)
 	go func() {
 		defer workerWG.Done()
 		ingestWorker.Run(ctx)
@@ -208,6 +224,12 @@ func run() error {
 	go func() {
 		defer workerWG.Done()
 		tailPublisher.Run(ctx)
+	}()
+	go func() {
+		defer workerWG.Done()
+		infraredis.RunRetentionLoop(ctx, cfg.StreamRetentionInterval, streamRetention, func(context.Context) ([]infraredis.StreamSpec, error) {
+			return apiRetentionSpecs(), nil
+		})
 	}()
 
 	// HTTP Server
@@ -253,6 +275,15 @@ func run() error {
 
 	slog.Info("API stopped")
 	return nil
+}
+
+func retentionDryRun(enabled bool) bool { return !enabled }
+
+func apiRetentionSpecs() []infraredis.StreamSpec {
+	return []infraredis.StreamSpec{
+		{Name: "codohue:events", Kind: "events", ExpectedGroups: []string{"codohue-ingest"}},
+		{Name: "codohue:catalog", Kind: "catalog", ExpectedGroups: []string{"codohue-catalog-ingest"}},
+	}
 }
 
 func initLogger(format string) {
@@ -306,15 +337,51 @@ func healthzHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantp
 				break
 			}
 		}
-		checks["status"] = status
-
 		code := http.StatusOK
 		if status != "ok" {
 			code = http.StatusServiceUnavailable
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
-		json.NewEncoder(w).Encode(checks) //nolint:errcheck // writing to ResponseWriter never returns a meaningful error
+		json.NewEncoder(w).Encode(map[string]string{"status": status}) //nolint:errcheck // writing to ResponseWriter never returns a meaningful error
+	}
+}
+
+func healthzDetailsHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantpb.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		checks := map[string]string{
+			"postgres": checkPostgresFn(ctx, db), "redis": checkRedisFn(ctx, rdb), "qdrant": checkQdrantFn(ctx, qdrantClient),
+		}
+		status := "ok"
+		for _, value := range checks {
+			if value != "ok" {
+				status = "degraded"
+				break
+			}
+		}
+		checks["status"] = status
+		code := http.StatusOK
+		if status != "ok" {
+			code = http.StatusServiceUnavailable
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		if err := json.NewEncoder(w).Encode(checks); err != nil {
+			slog.Warn("write health response failed", "error", err)
+		}
+	}
+}
+
+func observabilityHealthHandler(token string, public, detailed http.Handler) http.HandlerFunc {
+	protected := auth.RequireObservability(token)(detailed)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("details") == "true" {
+			protected.ServeHTTP(w, r)
+			return
+		}
+		public.ServeHTTP(w, r)
 	}
 }
 

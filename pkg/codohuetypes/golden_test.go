@@ -53,7 +53,7 @@ func TestGoldenWireContract(t *testing.T) {
 		}},
 		{"embedding_request", codohuetypes.EmbeddingRequest{Vector: []float32{0.1, 0.2, 0.3, 0.4}, ObjectCreatedAt: &objCreated}},
 		{"event_payload", codohuetypes.EventPayload{
-			Namespace: "feed", SubjectID: "subj-1", ObjectID: "obj-1", Action: codohuetypes.ActionLike,
+			Namespace: "feed", NamespaceGeneration: 3, SubjectID: "subj-1", ObjectID: "obj-1", Action: codohuetypes.ActionLike,
 			OccurredAt: ts, ObjectCreatedAt: &objCreated,
 		}},
 		{"object_upsert_request", codohuetypes.ObjectUpsertRequest{AuthorSubjectID: "subj-1"}},
@@ -66,7 +66,7 @@ func TestGoldenWireContract(t *testing.T) {
 			Metadata: map[string]any{"lang": "en"},
 		}},
 		{"catalog_stream_item", codohuetypes.CatalogStreamItem{
-			Namespace: "feed", ObjectID: "obj-1", Content: "hello world",
+			Namespace: "feed", NamespaceGeneration: 3, ObjectID: "obj-1", Content: "hello world",
 			AuthorSubjectID: "subj-1", Metadata: map[string]any{"lang": "en"},
 		}},
 		{"catalog_batch_ingest_request", codohuetypes.CatalogBatchIngestRequest{
@@ -81,11 +81,20 @@ func TestGoldenWireContract(t *testing.T) {
 				{ObjectID: "obj-2", Accepted: false, Error: "empty_content"},
 			},
 		}},
+		// next_cursor is additive and omitempty: a full page carries it, and a
+		// terminal page must marshal exactly as it did before cursors existed.
 		{"catalog_objects_response", codohuetypes.CatalogObjectsResponse{
 			Namespace: "feed", Total: 1, Limit: 100, Offset: 0,
 			Items: []codohuetypes.CatalogObjectSummary{
 				{ObjectID: "obj-1", UpdatedAt: "2026-01-02T03:04:05Z"},
 			},
+		}},
+		{"catalog_objects_response_paged", codohuetypes.CatalogObjectsResponse{
+			Namespace: "feed", Total: 250, Limit: 100, Offset: 0,
+			Items: []codohuetypes.CatalogObjectSummary{
+				{ObjectID: "obj-1", UpdatedAt: "2026-01-02T03:04:05Z"},
+			},
+			NextCursor: "eyJ2IjoxfQ",
 		}},
 		{"error_detail", codohuetypes.ErrorDetail{Code: "invalid_request", Message: "invalid request body"}},
 		{"error_response", codohuetypes.ErrorResponse{

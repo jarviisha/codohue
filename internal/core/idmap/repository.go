@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 type rowScanner interface {
@@ -25,15 +27,16 @@ type rowsIterator interface {
 
 // Repository manages the mapping from string IDs to numeric IDs in the id_mappings table.
 type Repository struct {
-	db         *pgxpool.Pool
-	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
-	queryFn    func(ctx context.Context, sql string, args ...any) (rowsIterator, error)
+	db           *pgxpool.Pool
+	requireLease bool
+	queryRowFn   func(ctx context.Context, sql string, args ...any) rowScanner
+	queryFn      func(ctx context.Context, sql string, args ...any) (rowsIterator, error)
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
-		db: db,
+		db: db, requireLease: true,
 		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
 			return db.QueryRow(ctx, sql, args...)
 		},
@@ -49,6 +52,11 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 // GetOrCreate returns the numeric_id for the given string_id, inserting a new row if absent.
 func (r *Repository) GetOrCreate(ctx context.Context, stringID, namespace, entityType string) (uint64, error) {
+	if r.requireLease {
+		if err := nslifecycle.RequireNamespaceLease(ctx, namespace); err != nil {
+			return 0, err
+		}
+	}
 	var numID int64
 	err := r.queryRowFn(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
@@ -83,12 +91,46 @@ func (r *Repository) Lookup(ctx context.Context, stringID, namespace, entityType
 	return uint64(numID), true, nil
 }
 
+// LookupBatch resolves existing mappings without creating rows. Missing ids
+// are omitted from the result map.
+func (r *Repository) LookupBatch(ctx context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
+	if len(stringIDs) == 0 {
+		return map[string]uint64{}, nil
+	}
+	rows, err := r.queryFn(ctx, `
+		SELECT string_id, numeric_id FROM id_mappings
+		WHERE namespace = $1 AND entity_type = $2 AND string_id = ANY($3::text[])`,
+		namespace, entityType, stringIDs)
+	if err != nil {
+		return nil, fmt.Errorf("batch lookup id mappings: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]uint64, len(stringIDs))
+	for rows.Next() {
+		var stringID string
+		var numericID int64
+		if err := rows.Scan(&stringID, &numericID); err != nil {
+			return nil, fmt.Errorf("scan id mapping lookup: %w", err)
+		}
+		out[stringID] = uint64(numericID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate id mapping lookup: %w", err)
+	}
+	return out, nil
+}
+
 // GetOrCreateBatch resolves many string ids in one round-trip. With the
 // exclude_authored cap at 5000, the per-id variant cost ~5000 sequential
 // queries per uncached recommendation request.
 func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
 	if len(stringIDs) == 0 {
 		return map[string]uint64{}, nil
+	}
+	if r.requireLease {
+		if err := nslifecycle.RequireNamespaceLease(ctx, namespace); err != nil {
+			return nil, err
+		}
 	}
 	// Deduplicate before unnest: ON CONFLICT DO UPDATE errors with "cannot
 	// affect row a second time" if the same key appears twice in one INSERT,

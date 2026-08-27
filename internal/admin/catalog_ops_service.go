@@ -11,6 +11,8 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 	"google.golang.org/grpc/codes"
 	grpcstatus "google.golang.org/grpc/status"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // Sentinel errors surfaced by the catalog operator endpoints.
@@ -67,28 +69,30 @@ func (q *qdrantClientPointDeleter) DeletePoint(ctx context.Context, collection s
 // streamName returns the per-namespace embed stream name. Mirrors the
 // definition in internal/catalog so we keep the on-the-wire format aligned
 // across packages without a forbidden cross-domain import.
-func catalogStreamName(ns string) string { return "catalog:embed:" + ns }
+func catalogStreamName(ns string, generation int64) string {
+	if generation < 1 {
+		generation = 1
+	}
+	return nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, ns, generation)
+}
 
 // publishCatalogEnqueue writes one XADD to catalog:embed:{ns}. The payload
 // matches what internal/catalog publishes on first ingest so the embedder
 // worker decodes both with the same code path.
-func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, target CatalogReembedTarget, strategyID, strategyVersion string) error {
+func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, generation int64, target CatalogReembedTarget, strategyID, strategyVersion string) error {
 	if s.streamPublisher == nil {
 		return errors.New("admin: stream publisher not wired")
 	}
 	args := &goredis.XAddArgs{
-		Stream: catalogStreamName(ns),
-		// Approximate cap; keep in sync with internal/catalog's
-		// catalogStreamMaxLen (peer-domain imports are forbidden).
-		MaxLen: 100_000,
-		Approx: true,
+		Stream: catalogStreamName(ns, generation),
 		Values: map[string]any{
-			"catalog_item_id":  target.ID,
-			"namespace":        ns,
-			"object_id":        target.ObjectID,
-			"strategy_id":      strategyID,
-			"strategy_version": strategyVersion,
-			"enqueued_at":      s.nowFn().UTC().Format(time.RFC3339Nano),
+			"catalog_item_id":      target.ID,
+			"namespace":            ns,
+			"namespace_generation": generation,
+			"object_id":            target.ObjectID,
+			"strategy_id":          strategyID,
+			"strategy_version":     strategyVersion,
+			"enqueued_at":          s.nowFn().UTC().Format(time.RFC3339Nano),
 		},
 	}
 	if err := s.streamPublisher.XAdd(ctx, args).Err(); err != nil {
@@ -125,7 +129,7 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace, onlyState strin
 		return nil, ErrCatalogStrategyPickerUnavailable
 	}
 
-	strategyID, strategyVersion, enabled, err := s.catalogPicker.GetCatalogStrategy(ctx, namespace)
+	strategyID, strategyVersion, generation, enabled, err := s.catalogPicker.GetCatalogStrategy(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("get catalog strategy: %w", err)
 	}
@@ -162,7 +166,7 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace, onlyState strin
 	}
 
 	for _, t := range targets {
-		if err := s.publishCatalogEnqueue(ctx, namespace, t, strategyID, strategyVersion); err != nil {
+		if err := s.publishCatalogEnqueue(ctx, namespace, generation, t, strategyID, strategyVersion); err != nil {
 			slog.WarnContext(ctx, "catalog reembed publish failed; recovery sweep will retry",
 				slog.String("namespace", namespace),
 				slog.Int64("catalog_item_id", t.ID),
@@ -280,7 +284,7 @@ func (s *Service) RedriveCatalogItem(ctx context.Context, namespace string, id i
 		return nil, ErrCatalogStrategyPickerUnavailable
 	}
 
-	strategyID, strategyVersion, enabled, err := s.catalogPicker.GetCatalogStrategy(ctx, namespace)
+	strategyID, strategyVersion, generation, enabled, err := s.catalogPicker.GetCatalogStrategy(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("get catalog strategy: %w", err)
 	}
@@ -296,7 +300,7 @@ func (s *Service) RedriveCatalogItem(ctx context.Context, namespace string, id i
 		return nil, nil
 	}
 
-	if err := s.publishCatalogEnqueue(ctx, namespace,
+	if err := s.publishCatalogEnqueue(ctx, namespace, generation,
 		CatalogReembedTarget{ID: item.ID, ObjectID: item.ObjectID},
 		strategyID, strategyVersion); err != nil {
 		slog.WarnContext(ctx, "catalog redrive publish failed; recovery sweep will retry",
@@ -320,7 +324,7 @@ func (s *Service) BulkRedriveDeadletter(ctx context.Context, namespace string) (
 		return nil, ErrCatalogStrategyPickerUnavailable
 	}
 
-	strategyID, strategyVersion, enabled, err := s.catalogPicker.GetCatalogStrategy(ctx, namespace)
+	strategyID, strategyVersion, generation, enabled, err := s.catalogPicker.GetCatalogStrategy(ctx, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("get catalog strategy: %w", err)
 	}
@@ -334,7 +338,7 @@ func (s *Service) BulkRedriveDeadletter(ctx context.Context, namespace string) (
 	}
 
 	for _, t := range targets {
-		if err := s.publishCatalogEnqueue(ctx, namespace, t, strategyID, strategyVersion); err != nil {
+		if err := s.publishCatalogEnqueue(ctx, namespace, generation, t, strategyID, strategyVersion); err != nil {
 			slog.WarnContext(ctx, "catalog bulk redrive publish failed; recovery sweep will retry",
 				slog.String("namespace", namespace),
 				slog.Int64("catalog_item_id", t.ID),

@@ -1,0 +1,13 @@
+{
+  "namespace": "feed",
+  "items": [
+    {
+      "object_id": "obj-1",
+      "updated_at": "2026-01-02T03:04:05Z"
+    }
+  ],
+  "total": 250,
+  "limit": 100,
+  "offset": 0,
+  "next_cursor": "eyJ2IjoxfQ"
+}

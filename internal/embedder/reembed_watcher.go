@@ -10,12 +10,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // ReembedRun is the watcher's view of one open re-embed batch_run_logs row.
 type ReembedRun struct {
 	ID                    int64
 	Namespace             string
+	TargetStrategyID      string
 	TargetStrategyVersion string
 	StartedAt             time.Time
 }
@@ -24,8 +26,8 @@ type ReembedRun struct {
 // Defined here so the watcher tests can mock storage without a real DB.
 type ReembedWatcherRepo interface {
 	ListOpenReembedRuns(ctx context.Context) ([]ReembedRun, error)
-	CountStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) (int, error)
-	CountEmbeddedCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) (int, error)
+	CountStaleCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error)
+	CountEmbeddedCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error)
 	CompleteReembedRun(ctx context.Context, id int64, processed int, success bool, errorMessage string, completedAt time.Time, durationMs int) error
 }
 
@@ -43,6 +45,9 @@ type ReembedWatcher struct {
 	interval  time.Duration
 	clock     func() time.Time
 	publisher CatalogEventPublisher // optional; nil = no progress events
+	lifecycle interface {
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
 }
 
 // NewReembedWatcher creates a new watcher with sane defaults. interval=0
@@ -61,6 +66,13 @@ func NewReembedWatcher(repo ReembedWatcherRepo, interval time.Duration) *Reembed
 // SetEventPublisher wires the publisher used to emit reembed_progress events.
 // Safe to call before Run.
 func (w *ReembedWatcher) SetEventPublisher(p CatalogEventPublisher) { w.publisher = p }
+
+// SetLifecycleWriter fences completion writes against delete and reset.
+func (w *ReembedWatcher) SetLifecycleWriter(writer interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	w.lifecycle = writer
+}
 
 // Run blocks until ctx is cancelled, polling the repo every Interval.
 // Returns nil on graceful shutdown (context.Canceled / DeadlineExceeded
@@ -94,7 +106,7 @@ func (w *ReembedWatcher) tick(ctx context.Context) {
 	}
 
 	for _, run := range runs {
-		stale, err := w.repo.CountStaleCatalogItems(ctx, run.Namespace, run.TargetStrategyVersion)
+		stale, err := w.repo.CountStaleCatalogItems(ctx, run.Namespace, run.TargetStrategyID, run.TargetStrategyVersion)
 		if err != nil {
 			slog.WarnContext(ctx, "reembed watcher: count stale items failed",
 				slog.Int64("batch_run_id", run.ID),
@@ -106,7 +118,7 @@ func (w *ReembedWatcher) tick(ctx context.Context) {
 		// Emit progress every tick (even when stale > 0) so the SPA
 		// overlay updates while the run is still in flight. embedded =
 		// processed; embedded + stale = total expected.
-		processed, err := w.repo.CountEmbeddedCatalogItems(ctx, run.Namespace, run.TargetStrategyVersion)
+		processed, err := w.repo.CountEmbeddedCatalogItems(ctx, run.Namespace, run.TargetStrategyID, run.TargetStrategyVersion)
 		if err != nil {
 			slog.WarnContext(ctx, "reembed watcher: count embedded items failed",
 				slog.Int64("batch_run_id", run.ID),
@@ -130,11 +142,22 @@ func (w *ReembedWatcher) tick(ctx context.Context) {
 
 		now := w.clock().UTC()
 		duration := int(now.Sub(run.StartedAt) / time.Millisecond)
-		if err := w.repo.CompleteReembedRun(ctx, run.ID, processed, true, "", now, duration); err != nil {
+		complete := func(writeCtx context.Context) error {
+			return w.repo.CompleteReembedRun(writeCtx, run.ID, processed, true, "", now, duration)
+		}
+		var completeErr error
+		if w.lifecycle != nil {
+			completeErr = w.lifecycle.WithWriter(ctx, run.Namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+				return complete(leased)
+			})
+		} else {
+			completeErr = complete(ctx)
+		}
+		if completeErr != nil {
 			slog.WarnContext(ctx, "reembed watcher: complete run failed",
 				slog.Int64("batch_run_id", run.ID),
 				slog.String("namespace", run.Namespace),
-				slog.String("error", err.Error()))
+				slog.String("error", completeErr.Error()))
 			continue
 		}
 		slog.InfoContext(ctx, "reembed watcher: completed re-embed run",
@@ -162,7 +185,7 @@ func NewPgReembedRepo(db *pgxpool.Pool) ReembedWatcherRepo {
 // re-embed orchestrator that has not yet been closed.
 func (r *pgReembedRepo) ListOpenReembedRuns(ctx context.Context) ([]ReembedRun, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, namespace, COALESCE(target_strategy_version, ''), started_at
+		SELECT id, namespace, COALESCE(target_strategy_id, ''), COALESCE(target_strategy_version, ''), started_at
 		FROM batch_run_logs
 		WHERE trigger_source = $1
 		  AND completed_at IS NULL`,
@@ -176,7 +199,7 @@ func (r *pgReembedRepo) ListOpenReembedRuns(ctx context.Context) ([]ReembedRun, 
 	var out []ReembedRun
 	for rows.Next() {
 		var run ReembedRun
-		if err := rows.Scan(&run.ID, &run.Namespace, &run.TargetStrategyVersion, &run.StartedAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.Namespace, &run.TargetStrategyID, &run.TargetStrategyVersion, &run.StartedAt); err != nil {
 			return nil, fmt.Errorf("scan reembed run: %w", err)
 		}
 		out = append(out, run)
@@ -195,15 +218,15 @@ func (r *pgReembedRepo) ListOpenReembedRuns(ctx context.Context) ([]ReembedRun, 
 // Items in 'dead_letter' are NOT counted — they require explicit operator
 // redrive via the admin API and should not block re-embed completion (per R6).
 // Items in 'embedded' state at the right version are also excluded.
-func (r *pgReembedRepo) CountStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) (int, error) {
+func (r *pgReembedRepo) CountStaleCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM catalog_items
 		WHERE namespace = $1
 		  AND state IN ('pending', 'in_flight', 'failed')
-		  AND (strategy_version IS NULL OR strategy_version <> $2)`,
-		namespace, targetStrategyVersion,
+		  AND (strategy_id IS NULL OR strategy_version IS NULL OR (strategy_id, strategy_version) <> ($2, $3))`,
+		namespace, targetStrategyID, targetStrategyVersion,
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count stale catalog items: %w", err)
@@ -214,15 +237,15 @@ func (r *pgReembedRepo) CountStaleCatalogItems(ctx context.Context, namespace, t
 // CountEmbeddedCatalogItems returns the number of catalog_items currently in
 // 'embedded' state at the batch run's target strategy version. Used as the
 // "entities_processed" tally written to batch_run_logs on completion.
-func (r *pgReembedRepo) CountEmbeddedCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) (int, error) {
+func (r *pgReembedRepo) CountEmbeddedCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM catalog_items
 		WHERE namespace = $1
 		  AND state = 'embedded'
-		  AND strategy_version = $2`,
-		namespace, targetStrategyVersion,
+		  AND (strategy_id, strategy_version) = ($2, $3)`,
+		namespace, targetStrategyID, targetStrategyVersion,
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count embedded catalog items: %w", err)

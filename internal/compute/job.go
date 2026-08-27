@@ -13,6 +13,7 @@ import (
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -83,12 +84,16 @@ type Job struct {
 	redis       *goredis.Client
 	interval    time.Duration
 	observer    BatchRunObserver // optional; nil = no-op
+	lifecycle   interface {
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
 
 	// injectable for testing — wired to real implementations in NewJob
 	tryLockFn                func(ctx context.Context, ns string) (release func(), ok bool, err error)
 	lockFn                   func(ctx context.Context, ns string) (release func(), err error)
 	lockAllFn                func(ctx context.Context) (release func(), err error)
 	finalizeOrphansFn        func(ctx context.Context, cutoff time.Time) (int64, error)
+	hasAnyEventsFn           func(ctx context.Context, ns string) (bool, error)
 	ensureCollectionsFn      func(ctx context.Context, ns string) error
 	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
 	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error
@@ -103,6 +108,14 @@ type Job struct {
 // its event bus at startup. Passing nil clears the observer. Safe to call
 // before Run starts; not safe to swap observers while a run is in flight.
 func (j *Job) SetObserver(o BatchRunObserver) { j.observer = o }
+
+// SetLifecycleWriter enforces global→namespace lifecycle lease ordering before
+// the existing compute lock.
+func (j *Job) SetLifecycleWriter(writer interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	j.lifecycle = writer
+}
 
 // NewJob creates a new Job with the given run interval in minutes.
 // redisClient may be nil; Phase 3 (trending) is skipped when it is.
@@ -119,11 +132,20 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		lockFn:            repo.LockNamespace,
 		lockAllFn:         repo.LockAllNamespaces,
 		finalizeOrphansFn: repo.FinalizeOrphanRuns,
+		hasAnyEventsFn:    repo.HasAnyEvents,
 		ensureCollectionsFn: func(ctx context.Context, ns string) error {
-			return infraqdrant.EnsureCollections(ctx, qdrantClient, ns)
+			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
+			if generation < 1 {
+				generation = 1
+			}
+			return infraqdrant.EnsureCollectionsForGeneration(ctx, qdrantClient, ns, generation)
 		},
 		ensureDenseCollectionsFn: func(ctx context.Context, ns string, dim uint64, distance string) error {
-			return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, ns, dim, distance)
+			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
+			if generation < 1 {
+				generation = 1
+			}
+			return infraqdrant.EnsureDenseCollectionsForGeneration(ctx, qdrantClient, ns, generation, dim, distance)
 		},
 		upsertItemDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
 			return UpsertItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs, createdAt)
@@ -141,7 +163,11 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 			return FetchItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, objectIDs)
 		},
 		storeTrendingFn: func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
-			return infraredis.StoreTrending(ctx, redisClient, ns, scores, ttl)
+			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
+			if generation < 1 {
+				generation = 1
+			}
+			return infraredis.StoreTrendingForGeneration(ctx, redisClient, ns, generation, scores, ttl)
 		},
 	}
 }
@@ -219,6 +245,15 @@ func (j *Job) runOnce(ctx context.Context) {
 // without running the remaining phases. Mid-phase cancel is intentionally
 // unsupported — see BUILD_PLAN §9.2.
 func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) error {
+	if j.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		return j.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			return j.runNamespaceWithComputeLock(leased, ns, triggerSource)
+		})
+	}
+	return j.runNamespaceWithComputeLock(ctx, ns, triggerSource)
+}
+
+func (j *Job) runNamespaceWithComputeLock(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) error {
 	release, ok, err := j.tryLock(ctx, ns)
 	if err != nil {
 		return fmt.Errorf("namespace lock %s: %w", ns, err)
@@ -238,6 +273,46 @@ func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchru
 // without aborting the run. Returns the run id for the Location header.
 // The lock is held for exactly the run's lifetime; timeout bounds the run.
 func (j *Job) StartNamespaceRun(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, timeout time.Duration) (int64, error) {
+	if j.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+		type startResult struct {
+			id  int64
+			err error
+		}
+		started := make(chan startResult, 1)
+		go func() {
+			signaled := false
+			err := j.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+				release, ok, err := j.tryLock(leased, ns)
+				if err != nil {
+					return fmt.Errorf("namespace lock %s: %w", ns, err)
+				}
+				if !ok {
+					return fmt.Errorf("%w: %s", batchrun.ErrRunInProgress, ns)
+				}
+				defer release()
+				var logID int64
+				if j.batchLog != nil {
+					logID, err = j.batchLog.InsertBatchRunLog(leased, ns, time.Now(), triggerSource)
+					if err != nil {
+						return fmt.Errorf("insert batch_run_log: %w", err)
+					}
+				}
+				runCtx, cancel := context.WithTimeout(context.WithoutCancel(leased), timeout)
+				defer cancel()
+				started <- startResult{id: logID}
+				signaled = true
+				j.runNamespaceLocked(runCtx, ns, triggerSource, logID)
+				return nil
+			})
+			if !signaled {
+				started <- startResult{err: err}
+			} else if err != nil {
+				slog.Warn("manual run lifecycle release failed", "namespace", ns, "error", err)
+			}
+		}()
+		result := <-started
+		return result.id, result.err
+	}
 	release, ok, err := j.tryLock(ctx, ns)
 	if err != nil {
 		return 0, fmt.Errorf("namespace lock %s: %w", ns, err)
@@ -490,6 +565,21 @@ func (j *Job) checkCancelBetweenPhases(ctx context.Context, runID int64, afterPh
 func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (subjects, objects int, err error) {
 	start := time.Now()
 
+	// Every configured namespace is enumerated, including quiet ones, so that a
+	// namespace whose events all aged out still gets its stale vectors swept.
+	// A namespace that has never received an event is a different case: there
+	// is nothing to write and nothing to sweep, and creating its collections
+	// anyway would leave four empty Qdrant collections behind for every
+	// namespace that was merely configured.
+	seen, err := j.hasAnyEventsFn(ctx, ns)
+	if err != nil {
+		return 0, 0, fmt.Errorf("check namespace events: %w", err)
+	}
+	if !seen {
+		capture.Info("namespace has never received an event — no collections to create or sweep")
+		return 0, 0, nil
+	}
+
 	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
 		return 0, 0, fmt.Errorf("ensure collections: %w", err)
 	}
@@ -555,6 +645,19 @@ func phase2Runs(denseSource string) bool {
 func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items, subjectCount int, err error) {
 	start := time.Now()
 
+	// Same rule as phase 1: a namespace that has never received an event has no
+	// dense state to write and none to clear, so creating its collections would
+	// only leave empty ones behind. A namespace whose events merely aged out
+	// still passes this gate and reaches the cleanup below.
+	seen, err := j.hasAnyEventsFn(ctx, ns)
+	if err != nil {
+		return 0, 0, fmt.Errorf("check namespace events: %w", err)
+	}
+	if !seen {
+		capture.Info("namespace has never received an event — no dense collections to create or clear")
+		return 0, 0, nil
+	}
+
 	embeddingDim := 64
 	if cfg.EmbeddingDim > 0 {
 		embeddingDim = cfg.EmbeddingDim
@@ -573,8 +676,18 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		return 0, 0, fmt.Errorf("get namespace events: %w", err)
 	}
 	if len(events) == 0 {
-		slog.Info("phase 2: no events, skipping dense computation", "namespace", ns)
-		capture.Info("no events — dense computation skipped")
+		if (cfg.DenseSource == codohuetypes.DenseSourceItem2Vec || cfg.DenseSource == codohuetypes.DenseSourceSVD) && j.cleanupItemDenseFn != nil {
+			if _, err := j.cleanupItemDenseFn(ctx, ns, nil); err != nil {
+				return 0, 0, fmt.Errorf("clear item dense vectors: %w", err)
+			}
+		}
+		if j.cleanupSubjectDenseFn != nil {
+			if _, err := j.cleanupSubjectDenseFn(ctx, ns, nil); err != nil {
+				return 0, 0, fmt.Errorf("clear subject dense vectors: %w", err)
+			}
+		}
+		slog.Info("phase 2: no events, cleared compute-owned dense state", "namespace", ns)
+		capture.Info("no events — compute-owned dense state cleared")
 		return 0, 0, nil
 	}
 	capture.Info(fmt.Sprintf("fetched %d events for embedding", len(events)))
@@ -629,6 +742,16 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 			slog.Warn("phase 2: no catalog item vectors available yet", "namespace", ns)
 			capture.Warn("no catalog embeddings for interacted items yet — subject vectors unchanged")
 		}
+		if trained && j.cleanupItemDenseFn != nil {
+			if _, err := j.cleanupItemDenseFn(ctx, ns, nil); err != nil {
+				return 0, 0, fmt.Errorf("clear item dense vectors: %w", err)
+			}
+		}
+		if j.cleanupSubjectDenseFn != nil {
+			if _, err := j.cleanupSubjectDenseFn(ctx, ns, nil); err != nil {
+				return 0, 0, fmt.Errorf("clear subject dense vectors: %w", err)
+			}
+		}
 		return 0, 0, nil
 	}
 
@@ -667,7 +790,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 				capture.Info(fmt.Sprintf("removed %d stale item dense vectors", n))
 			}
 		}
-		if len(subjectVecs) > 0 && j.cleanupSubjectDenseFn != nil {
+		if j.cleanupSubjectDenseFn != nil {
 			if n, err := j.cleanupSubjectDenseFn(ctx, ns, mapKeys(subjectVecs)); err != nil {
 				slog.Warn("stale subject dense cleanup failed", "namespace", ns, "error", err)
 			} else if n > 0 {
@@ -714,8 +837,11 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.C
 		return 0, fmt.Errorf("get events in window: %w", err)
 	}
 	if len(events) == 0 {
-		slog.Info("phase 3 trending: no events in window", "namespace", ns, "window_hours", windowHours)
-		capture.Info(fmt.Sprintf("no events in %dh window — trending skipped", windowHours))
+		if err := j.storeTrendingFn(ctx, ns, map[string]float64{}, time.Duration(ttlSeconds)*time.Second); err != nil {
+			return 0, fmt.Errorf("clear trending: %w", err)
+		}
+		slog.Info("phase 3 trending: no events in window; stale state cleared", "namespace", ns, "window_hours", windowHours)
+		capture.Info(fmt.Sprintf("no events in %dh window — stale trending cleared", windowHours))
 		return 0, nil
 	}
 	capture.Info(fmt.Sprintf("scoring %d events in %dh window (λ: %.3f)", len(events), windowHours, lambdaTrending))

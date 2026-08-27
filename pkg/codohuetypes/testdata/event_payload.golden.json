@@ -1,5 +1,6 @@
 {
   "namespace": "feed",
+  "namespace_generation": 3,
   "subject_id": "subj-1",
   "object_id": "obj-1",
   "action": "LIKE",

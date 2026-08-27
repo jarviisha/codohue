@@ -7,17 +7,25 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
-// maxOccurredAtSkew is how far into the future occurred_at may point —
-// generous enough for ordinary clock skew, tight enough to reject unit
-// mistakes (epoch millis land ~year 56000).
+// maxOccurredAtSkew is how far into the future a client-supplied timestamp may
+// point — generous enough for ordinary clock skew, tight enough to reject unit
+// mistakes (epoch millis land ~year 56000). Exactly at the boundary is
+// accepted. The BYOE embedding endpoint applies the same rule to
+// object_created_at; the two cannot share a constant because the domains may
+// not import each other, so keep them in step by hand.
 const maxOccurredAtSkew = 5 * time.Minute
 
 var (
 	// ErrInvalidPayload indicates that the inbound event payload is missing required fields or is otherwise malformed.
 	ErrInvalidPayload = errors.New("invalid payload")
+	// ErrInvalidObjectCreatedAt indicates object_created_at points further into
+	// the future than the permitted clock skew. Separate from ErrInvalidPayload
+	// so the handler can answer with the documented error code.
+	ErrInvalidObjectCreatedAt = errors.New("invalid object_created_at")
 	// ErrUnknownAction indicates that the event action cannot be resolved to a configured or default weight.
 	ErrUnknownAction = errors.New("unknown action")
 	// ErrNamespaceNotFound indicates that an event targets a namespace that no longer exists.
@@ -32,11 +40,16 @@ type nsConfigGetter interface {
 	Get(ctx context.Context, namespace string) (*namespace.Config, error)
 }
 
+type lifecycleWriter interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}
+
 // Service processes and persists behavioral events received from Redis Streams.
 type Service struct {
 	repo          eventInserter
 	nsConfigSvc   nsConfigGetter
 	tailPublisher EventTailPublisher
+	lifecycle     lifecycleWriter
 }
 
 // NewService creates a new Service with the given repository and namespace config service.
@@ -49,6 +62,9 @@ func NewService(repo *Repository, nsConfigSvc nsConfigGetter) *Service {
 func (s *Service) SetTailPublisher(p EventTailPublisher) {
 	s.tailPublisher = p
 }
+
+// SetLifecycleWriter fences every event mutation with the active generation.
+func (s *Service) SetLifecycleWriter(writer lifecycleWriter) { s.lifecycle = writer }
 
 // Process validates the payload, resolves the action weight, and stores the
 // event. On success it returns the generated event id, increments the ingest
@@ -73,6 +89,29 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 		return 0, fmt.Errorf("%w: occurred_at %s is in the future", ErrInvalidPayload, payload.OccurredAt.Format(time.RFC3339))
 	}
 
+	// object_created_at drives the γ-freshness rerank (e^(-γ·ageDays)). A
+	// future value makes ageDays negative, which would boost the item instead
+	// of decaying it. Scoring clamps the age as a backstop, but the value is
+	// rejected here so the stored row is not quietly wrong.
+	if payload.ObjectCreatedAt != nil && payload.ObjectCreatedAt.After(now.Add(maxOccurredAtSkew)) {
+		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, "future_object_created_at").Inc()
+		return 0, fmt.Errorf("%w: object_created_at %s is in the future", ErrInvalidObjectCreatedAt, payload.ObjectCreatedAt.Format(time.RFC3339))
+	}
+
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, payload.Namespace) != nil {
+		var id int64
+		err := s.lifecycle.WithWriter(ctx, payload.Namespace, func(leased context.Context, lifecycle *nslifecycle.NamespaceLifecycle) error {
+			payload.NamespaceGeneration = lifecycle.Generation
+			var processErr error
+			id, processErr = s.processActive(leased, payload)
+			return processErr
+		})
+		return id, err
+	}
+	return s.processActive(ctx, payload)
+}
+
+func (s *Service) processActive(ctx context.Context, payload *EventPayload) (int64, error) {
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)
 	if err != nil {
 		reason := "config"
@@ -103,13 +142,14 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 	metrics.EventsIngestedTotal.WithLabelValues(event.Namespace, string(event.Action)).Inc()
 	if s.tailPublisher != nil {
 		s.tailPublisher.Publish(EventTailMessage{
-			ID:         event.ID,
-			Namespace:  event.Namespace,
-			SubjectID:  event.SubjectID,
-			ObjectID:   event.ObjectID,
-			Action:     string(event.Action),
-			Weight:     event.Weight,
-			OccurredAt: event.OccurredAt,
+			ID:                  event.ID,
+			Namespace:           event.Namespace,
+			NamespaceGeneration: payload.NamespaceGeneration,
+			SubjectID:           event.SubjectID,
+			ObjectID:            event.ObjectID,
+			Action:              string(event.Action),
+			Weight:              event.Weight,
+			OccurredAt:          event.OccurredAt,
 		})
 	}
 	return event.ID, nil

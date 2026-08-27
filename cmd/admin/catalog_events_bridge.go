@@ -122,12 +122,13 @@ func (b *catalogEventsBridge) handle(ctx context.Context, msg *goredis.Message) 
 			Namespace: ns,
 			EntityID:  strconv.FormatInt(ev.ItemID, 10),
 			Payload: map[string]any{
-				"namespace": ev.Namespace,
-				"item_id":   ev.ItemID,
-				"object_id": ev.ObjectID,
-				"from":      ev.From,
-				"to":        ev.To,
-				"at":        ev.At,
+				"namespace":            ev.Namespace,
+				"namespace_generation": ev.NamespaceGeneration,
+				"item_id":              ev.ItemID,
+				"object_id":            ev.ObjectID,
+				"from":                 ev.From,
+				"to":                   ev.To,
+				"at":                   ev.At,
 			},
 		})
 	case "backlog_snapshot":

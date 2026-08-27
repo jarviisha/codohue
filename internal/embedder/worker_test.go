@@ -3,14 +3,18 @@ package embedder
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 // --- fakes ----------------------------------------------------------------
@@ -111,6 +115,15 @@ func (f *fakeProcessor) ProcessItem(ctx context.Context, id int64) (ProcessOutco
 type fakeNSLister struct {
 	cfgs []*namespace.Config
 	err  error
+}
+
+type fakeEmbedLifecycleEvaluator struct {
+	disposition nslifecycle.EnvelopeDisposition
+	err         error
+}
+
+func (f *fakeEmbedLifecycleEvaluator) EvaluateEnvelope(context.Context, string, *int64) (nslifecycle.EnvelopeDisposition, error) {
+	return f.disposition, f.err
 }
 
 func (f *fakeNSLister) ListCatalogNamespaces(_ context.Context) ([]*namespace.Config, error) {
@@ -219,6 +232,29 @@ func TestWorker_HandleMessage_FailedOutcome_DoesNotACK(t *testing.T) {
 	// processor still called
 	if proc.calls != 1 {
 		t.Errorf("processor calls=%d", proc.calls)
+	}
+}
+
+func TestWorker_HandleMessageLifecycleStaleACKsAndStoreFailureRetries(t *testing.T) {
+	for name, tc := range map[string]struct {
+		evaluator *fakeEmbedLifecycleEvaluator
+		wantACK   bool
+	}{
+		"stale":         {&fakeEmbedLifecycleEvaluator{disposition: nslifecycle.EnvelopeStale}, true},
+		"store failure": {&fakeEmbedLifecycleEvaluator{err: errors.New("postgres down")}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &fakeStreamClient{}
+			processor := &fakeProcessor{out: OutcomeEmbedded}
+			worker := newTestWorker(client, processor, &fakeNSLister{})
+			worker.lifecycle = tc.evaluator
+			entry := validEntry("1-0", 7, "ns")
+			entry.Values["namespace_generation"] = "2"
+			worker.handleMessage(context.Background(), "ns", "catalog:embed:ns:g2", "embedder", entry)
+			if (len(client.acked()) == 1) != tc.wantACK || processor.calls != 0 {
+				t.Fatalf("acked=%v processCalls=%d", client.acked(), processor.calls)
+			}
+		})
 	}
 }
 
@@ -445,5 +481,235 @@ func TestWorker_ConsumeStream_DispatchesAndACKs(t *testing.T) {
 func TestStreamName(t *testing.T) {
 	if got := streamName("foo"); got != "catalog:embed:foo" {
 		t.Errorf("streamName(foo) = %q", got)
+	}
+}
+
+func TestDecodeStreamEntryNamespaceGeneration(t *testing.T) {
+	entry, err := DecodeStreamEntry(redis.XMessage{ID: "1-0", Values: map[string]any{
+		"catalog_item_id": "7", "namespace": "ns", "namespace_generation": "3",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry.NamespaceGeneration == nil || *entry.NamespaceGeneration != 3 {
+		t.Fatalf("generation = %v", entry.NamespaceGeneration)
+	}
+}
+
+// ─── reclaim cursor fairness ─────────────────────────────────────────────────
+
+// Each (namespace, generation) stream keeps its own cursor and continues from
+// where the last tick stopped. Restarting at "0-0" every tick would re-examine
+// the head of the PEL forever, so a permanently failing item at the front
+// starves every catalog item behind it.
+func TestWorkerReapOnce_CursorFairness(t *testing.T) {
+	newWorker := func(auto func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)) *Worker {
+		return &Worker{
+			redis:   &fakeStreamClient{autoFn: auto},
+			service: &fakeProcessor{out: OutcomeEmbedded},
+			cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+		}
+	}
+
+	t.Run("continues from the returned cursor", func(t *testing.T) {
+		var starts []string
+		w := newWorker(func(_ context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			starts = append(starts, a.Start)
+			if len(starts) == 1 {
+				return nil, "400-0", nil
+			}
+			return nil, "0-0", nil
+		})
+
+		got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "0-0")
+
+		if len(starts) != 2 || starts[1] != "400-0" {
+			t.Errorf("cursor not carried across pages: %v", starts)
+		}
+		if got != "0-0" {
+			t.Errorf("terminal cursor must reset, got %q", got)
+		}
+	})
+
+	t.Run("stops at the page budget and returns the cursor", func(t *testing.T) {
+		calls := 0
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			calls++
+			return nil, fmt.Sprintf("%d-0", calls), nil
+		})
+
+		got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "0-0")
+
+		if calls != defaultReapPageBudget {
+			t.Errorf("scanned %d pages, want the %d-page budget", calls, defaultReapPageBudget)
+		}
+		if got == "0-0" || got == "" {
+			t.Errorf("cursor must be carried to the next tick, got %q", got)
+		}
+	})
+
+	t.Run("empty page still advances", func(t *testing.T) {
+		var starts []string
+		w := newWorker(func(_ context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			starts = append(starts, a.Start)
+			if len(starts) == 1 {
+				return nil, "600-0", nil
+			}
+			return nil, "0-0", nil
+		})
+
+		w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "0-0")
+
+		if len(starts) != 2 || starts[1] != "600-0" {
+			t.Errorf("an empty page must not stop the scan: %v", starts)
+		}
+	})
+
+	t.Run("error retains the cursor", func(t *testing.T) {
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("redis down")
+		})
+
+		if got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "900-0"); got != "900-0" {
+			t.Errorf("cursor after an error = %q, want it retained", got)
+		}
+	})
+
+	t.Run("NOGROUP resets the cursor", func(t *testing.T) {
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("NOGROUP No such consumer group")
+		})
+
+		if got := w.reapOnce(context.Background(), "ns", "catalog:embed:ns", "900-0"); got != "0-0" {
+			t.Errorf("cursor after NOGROUP = %q, want 0-0", got)
+		}
+	})
+
+	t.Run("cancellation keeps the cursor", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		w := newWorker(func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", context.Canceled
+		})
+
+		if got := w.reapOnce(ctx, "ns", "catalog:embed:ns", "950-0"); got != "950-0" {
+			t.Errorf("shutdown must not rewind the cursor, got %q", got)
+		}
+	})
+}
+
+// Two generations of the same namespace are two streams with two PELs. Their
+// scans must not share a cursor, or the newer generation's reaper would skip
+// entries the older one happened to walk past.
+func TestWorkerReapOnce_CursorsAreIndependentPerGeneration(t *testing.T) {
+	seen := map[string]string{}
+	w := &Worker{
+		redis: &fakeStreamClient{autoFn: func(_ context.Context, a *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			seen[a.Stream] = a.Start
+			return nil, "0-0", nil
+		}},
+		service: &fakeProcessor{out: OutcomeEmbedded},
+		cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+	}
+
+	w.reapOnce(context.Background(), "ns", embedStreamName("ns", 1), "100-0")
+	w.reapOnce(context.Background(), "ns", embedStreamName("ns", 2), "200-0")
+
+	if seen[embedStreamName("ns", 1)] != "100-0" || seen[embedStreamName("ns", 2)] != "200-0" {
+		t.Errorf("generation cursors bled into each other: %v", seen)
+	}
+}
+
+// TestWorkerReapOnce_RecordsTheReclaimOutcome pins the reclaim-cycle counter for
+// the embed streams. It carries a namespace label, so the assertion also covers
+// attribution: a pass for one namespace must not be counted against another.
+func TestWorkerReapOnce_RecordsTheReclaimOutcome(t *testing.T) {
+	// Process-global counter that sibling reap tests bump, so start from zero.
+	metrics.StreamReclaimCyclesTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimCyclesTotal.Reset)
+
+	outcome := func(ns, name string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, name))
+	}
+	newWorker := func(auto func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)) *Worker {
+		return &Worker{
+			redis:   &fakeStreamClient{autoFn: auto},
+			service: &fakeProcessor{out: OutcomeEmbedded},
+			cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+		}
+	}
+
+	terminal := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "0-0", nil
+	})
+	terminal.reapOnce(context.Background(), "tenant-a", "catalog:embed:tenant-a", "0-0")
+	if got := outcome("tenant-a", "terminal"); got != 1 {
+		t.Errorf("tenant-a/terminal = %v, want 1", got)
+	}
+
+	// NOGROUP is its own outcome: the group was recreated, so the cursor is
+	// meaningless — that is not the same failure as Redis being unreachable.
+	nogroup := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("NOGROUP No such consumer group")
+	})
+	nogroup.reapOnce(context.Background(), "tenant-b", "catalog:embed:tenant-b", "400-0")
+	if got := outcome("tenant-b", "nogroup"); got != 1 {
+		t.Errorf("tenant-b/nogroup = %v, want 1", got)
+	}
+
+	failing := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("redis down")
+	})
+	failing.reapOnce(context.Background(), "tenant-b", "catalog:embed:tenant-b", "400-0")
+	if got := outcome("tenant-b", "error"); got != 1 {
+		t.Errorf("tenant-b/error = %v, want 1", got)
+	}
+
+	calls := 0
+	budget := newWorker(func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		calls++
+		return nil, fmt.Sprintf("%d-0", calls), nil
+	})
+	budget.reapOnce(context.Background(), "tenant-a", "catalog:embed:tenant-a", "0-0")
+	if got := outcome("tenant-a", "budget_exhausted"); got != 1 {
+		t.Errorf("tenant-a/budget_exhausted = %v, want 1", got)
+	}
+
+	// tenant-b's failures must not have landed on tenant-a.
+	if got := outcome("tenant-a", "error"); got != 0 {
+		t.Errorf("tenant-a/error = %v, want another namespace's failure not to count here", got)
+	}
+}
+
+// TestWorkerReapOnce_CountsReclaimedEntriesPerNamespace pins the companion
+// counter. It shares the embed streams' namespace label, so per-tenant
+// attribution has to hold here too.
+func TestWorkerReapOnce_CountsReclaimedEntriesPerNamespace(t *testing.T) {
+	metrics.StreamReclaimedTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimedTotal.Reset)
+
+	reclaimed := func(ns string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("embed", ns))
+	}
+
+	page := 0
+	w := &Worker{
+		redis: &fakeStreamClient{autoFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			page++
+			if page == 1 {
+				return []redis.XMessage{{ID: "1-0"}, {ID: "2-0"}}, "3-0", nil
+			}
+			return []redis.XMessage{{ID: "3-0"}}, "0-0", nil
+		}},
+		service: &fakeProcessor{out: OutcomeEmbedded},
+		cfg:     WorkerConfig{ConsumerName: "c1", ReapBatchSize: 10},
+	}
+	w.reapOnce(context.Background(), "tenant-a", "catalog:embed:tenant-a", "0-0")
+
+	if got := reclaimed("tenant-a"); got != 3 {
+		t.Errorf("tenant-a reclaimed = %v, want 3 summed across both pages", got)
+	}
+	if got := reclaimed("tenant-b"); got != 0 {
+		t.Errorf("tenant-b reclaimed = %v, want one namespace's reclaim not to count for another", got)
 	}
 }

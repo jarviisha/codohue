@@ -114,15 +114,15 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req
 // namespace's active (strategy_id, strategy_version) pair via nsconfig.Service.
 // enabled=false is returned for both "namespace missing" and "catalog disabled"
 // so the caller can map to a single 404 (FR-008).
-func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, ns string) (strategyID, strategyVersion string, enabled bool, err error) {
+func (a *catalogConfigAdapter) GetCatalogStrategy(ctx context.Context, ns string) (strategyID, strategyVersion string, generation int64, enabled bool, err error) {
 	cfg, err := a.nsSvc.Get(ctx, ns)
 	if err != nil {
-		return "", "", false, fmt.Errorf("get namespace: %w", err)
+		return "", "", 0, false, fmt.Errorf("get namespace: %w", err)
 	}
 	if cfg == nil || cfg.DenseSource != codohuetypes.DenseSourceCatalog {
-		return "", "", false, nil
+		return "", "", 0, false, nil
 	}
-	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, true, nil
+	return cfg.CatalogStrategyID, cfg.CatalogStrategyVersion, cfg.Generation, true, nil
 }
 
 // AvailableStrategies returns every registered strategy variant whose Dim

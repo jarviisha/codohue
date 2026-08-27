@@ -16,6 +16,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
@@ -107,6 +108,9 @@ type Service struct {
 	// CatalogItemStateChangedEvent after every successful state transition
 	// so the admin plane can fan progress out to operators over SSE.
 	eventPublisher CatalogEventPublisher
+	lifecycle      interface {
+		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+	}
 }
 
 // SetDefaultMaxAttempts wires the global retry budget. Call once at startup.
@@ -117,6 +121,13 @@ func (s *Service) SetDefaultMaxAttempts(n int) { s.defaultMaxAttempts = n }
 // backed publisher; tests inject a fake or leave it nil. Safe to call
 // before Run.
 func (s *Service) SetEventPublisher(p CatalogEventPublisher) { s.eventPublisher = p }
+
+// SetLifecycleWriter fences the full PostgreSQL/Qdrant embed mutation.
+func (s *Service) SetLifecycleWriter(writer interface {
+	WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
+}) {
+	s.lifecycle = writer
+}
 
 type cachedStrategy struct {
 	strategy embedstrategy.Strategy
@@ -170,7 +181,19 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("load catalog item: %w", err)
 	}
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, item.Namespace) != nil {
+		var outcome ProcessOutcome
+		err := s.lifecycle.WithWriter(ctx, item.Namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			var processErr error
+			outcome, processErr = s.processLoadedItem(leased, item)
+			return processErr
+		})
+		return outcome, err
+	}
+	return s.processLoadedItem(ctx, item)
+}
 
+func (s *Service) processLoadedItem(ctx context.Context, item *PendingItem) (ProcessOutcome, error) {
 	cfg, err := s.nsCfg.Get(ctx, item.Namespace)
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("load namespace config: %w", err)
@@ -358,13 +381,20 @@ func (s *Service) publishItemStateChanged(ctx context.Context, item *PendingItem
 	if s.eventPublisher == nil || item == nil {
 		return
 	}
+	// Generation 1 stays unstamped: the field is omitempty and legacy
+	// namespaces have no qualified incarnation to disambiguate.
+	generation, _ := nslifecycle.LeaseGeneration(ctx, item.Namespace)
+	if generation < 2 {
+		generation = 0
+	}
 	s.eventPublisher.PublishItemStateChanged(ctx, CatalogItemStateChangedEvent{
-		Namespace: item.Namespace,
-		ItemID:    item.ID,
-		ObjectID:  item.ObjectID,
-		From:      from,
-		To:        to,
-		At:        s.clock().UTC(),
+		Namespace:           item.Namespace,
+		NamespaceGeneration: generation,
+		ItemID:              item.ID,
+		ObjectID:            item.ObjectID,
+		From:                from,
+		To:                  to,
+		At:                  s.clock().UTC(),
 	})
 }
 
@@ -460,7 +490,15 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	if distance == "" {
 		distance = "cosine"
 	}
-	key := fmt.Sprintf("%s|%d|%s", ns, dim, distance)
+	generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+	if !ok {
+		generation = cfg.Generation
+	}
+	if generation < 1 {
+		generation = 1
+	}
+	physicalNamespace := nslifecycle.QdrantNamespace(ns, generation)
+	key := fmt.Sprintf("%s|%d|%s", physicalNamespace, dim, distance)
 
 	s.ensuredMu.Lock()
 	if _, done := s.ensured[key]; done {
@@ -469,7 +507,7 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	}
 	s.ensuredMu.Unlock()
 
-	if err := s.ensureCollFn(ctx, ns, dim, distance); err != nil {
+	if err := s.ensureCollFn(ctx, physicalNamespace, dim, distance); err != nil {
 		return err
 	}
 
@@ -485,7 +523,7 @@ func (s *Service) invalidateEnsured(ns string) {
 	s.ensuredMu.Lock()
 	defer s.ensuredMu.Unlock()
 	for key := range s.ensured {
-		if strings.HasPrefix(key, ns+"|") {
+		if strings.HasPrefix(key, ns+"|") || strings.HasPrefix(key, ns+"_g") {
 			delete(s.ensured, key)
 		}
 	}
@@ -496,7 +534,11 @@ func (s *Service) invalidateEnsured(ns string) {
 // creation time) is what the recommend service's γ-freshness rerank reads —
 // without it, catalog-embedded items would never decay.
 func (s *Service) upsertVector(ctx context.Context, item *PendingItem, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
-	collection := item.Namespace + "_objects_dense"
+	generation, _ := nslifecycle.LeaseGeneration(ctx, item.Namespace)
+	if generation < 1 {
+		generation = 1
+	}
+	collection := infraqdrant.CollectionName(item.Namespace, generation, infraqdrant.CollectionObjectsDense)
 
 	payload := map[string]*qdrant.Value{
 		"object_id":        qdrant.NewValueString(item.ObjectID),

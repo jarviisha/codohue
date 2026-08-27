@@ -12,6 +12,7 @@ import (
 	"gonum.org/v1/gonum/mat"
 
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	"github.com/qdrant/go-client/qdrant"
 )
 
@@ -290,7 +291,7 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 			return nil
 		}
 		points, err := qdrantGetDenseFn(ctx, qdrantClient, &qdrant.GetPoints{
-			CollectionName: namespace + "_objects_dense",
+			CollectionName: collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense),
 			Ids:            batch,
 			WithVectors:    qdrant.NewWithVectorsInclude(denseVectorName),
 		})
@@ -342,12 +343,12 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 // γ-freshness rerank reads this key — without it, items surfaced only by the
 // dense path would never decay while sparse-path items do.
 func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, itemVecs map[string][]float32, createdAt map[string]string) error {
-	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, namespace+"_objects_dense", namespace, "object", strategy, itemVecs, createdAt)
+	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense), namespace, "object", strategy, itemVecs, createdAt)
 }
 
 // UpsertSubjectDenseVectors upserts subject dense vectors into {ns}_subjects_dense.
 func UpsertSubjectDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, subjectVecs map[string][]float32) error {
-	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, namespace+"_subjects_dense", namespace, "subject", strategy, subjectVecs, nil)
+	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collectionForContext(ctx, namespace, infraqdrant.CollectionSubjectsDense), namespace, "subject", strategy, subjectVecs, nil)
 }
 
 func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, collection, namespace, entityType, strategy string, vecs map[string][]float32, createdAt map[string]string) error {

@@ -32,6 +32,20 @@ jobs:
           version: v2.11.4
           working-directory: ${{ matrix.module }}
 
+  vulnerability:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Scan every production Go module
+        run: make vuln
+
   test:
     runs-on: ubuntu-latest
     services:
@@ -126,7 +140,7 @@ jobs:
           fi
 
   e2e:
-    needs: [lint, test]
+    needs: [lint, test, vulnerability]
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -175,8 +189,11 @@ jobs:
       - name: Build E2E binaries
         run: make build
 
+      # Runs the Makefile target rather than a raw `go test` so the timeout has
+      # one definition. The two drifted apart once already: the suite outgrew
+      # the 120s cap and only the Makefile copy was raised.
       - name: Run E2E tests
-        run: go test -v -tags=e2e -timeout=120s ./e2e/...
+        run: make test-e2e
         env:
           DATABASE_URL: postgres://codohue:secret@localhost:5432/codohue?sslmode=disable
           REDIS_URL: redis://localhost:6379

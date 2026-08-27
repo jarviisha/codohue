@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
 
 const (
@@ -24,9 +27,10 @@ const (
 	// reapInterval is how often the pending-entries list is scanned for
 	// entries whose consumer died or whose processing failed; minIdleReap is
 	// how long an entry must sit unacknowledged before it is reclaimed.
-	reapInterval  = time.Minute
-	minIdleReap   = time.Minute
-	reapBatchSize = 100
+	reapInterval   = time.Minute
+	minIdleReap    = time.Minute
+	reapBatchSize  = 100
+	reapPageBudget = 10
 
 	readErrBackoffMin = time.Second
 	readErrBackoffMax = 30 * time.Second
@@ -36,16 +40,26 @@ type eventProcessor interface {
 	Process(ctx context.Context, payload *EventPayload) (int64, error)
 }
 
+type lifecycleEvaluator interface {
+	EvaluateEnvelope(context.Context, string, *int64) (nslifecycle.EnvelopeDisposition, error)
+}
+
 // Worker consumes events from Redis Streams and forwards them to the Service for processing.
 type Worker struct {
 	redis         *redis.Client
 	service       eventProcessor
+	lifecycle     lifecycleEvaluator
 	consumer      string
 	createGroupFn func(ctx context.Context, stream, group, start string) error
 	readGroupFn   func(ctx context.Context, args *redis.XReadGroupArgs) ([]redis.XStream, error)
 	autoClaimFn   func(ctx context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)
 	ackFn         func(ctx context.Context, stream, group string, ids ...string) error
+	reapCursor    string
 }
+
+// SetLifecycleEvaluator enables durable generation enforcement. It is wired
+// by cmd/api after migration 024 is available.
+func (w *Worker) SetLifecycleEvaluator(evaluator lifecycleEvaluator) { w.lifecycle = evaluator }
 
 // NewWorker creates a new Worker with the given Redis client and ingest
 // service. consumer is the name this replica joins the consumer group with;
@@ -55,9 +69,10 @@ func NewWorker(redisClient *redis.Client, service *Service, consumer string) *Wo
 		consumer = defaultConsumerName
 	}
 	return &Worker{
-		redis:    redisClient,
-		service:  service,
-		consumer: consumer,
+		redis:      redisClient,
+		service:    service,
+		consumer:   consumer,
+		reapCursor: "0-0",
 		createGroupFn: func(ctx context.Context, stream, group, start string) error {
 			return redisClient.XGroupCreateMkStream(ctx, stream, group, start).Err()
 		},
@@ -169,25 +184,44 @@ func (w *Worker) reapPending(ctx context.Context) {
 
 // reapOnce runs a single XAUTOCLAIM pass and re-processes what it claimed.
 func (w *Worker) reapOnce(ctx context.Context) {
-	msgs, _, err := w.autoClaimFn(ctx, &redis.XAutoClaimArgs{
-		Stream:   streamName,
-		Group:    consumerGroup,
-		Consumer: w.consumer,
-		MinIdle:  minIdleReap,
-		Start:    "0",
-		Count:    reapBatchSize,
-	})
-	if err != nil {
-		// NOGROUP here just means nothing has been ingested since the
-		// stream vanished; the read loop recreates the group.
-		if ctx.Err() == nil && !isNoGroupErr(err) {
-			slog.Warn("ingest xautoclaim failed", "error", err)
+	if w.reapCursor == "" {
+		w.reapCursor = "0-0"
+	}
+	for page := 0; page < reapPageBudget; page++ {
+		start := w.reapCursor
+		msgs, next, err := w.autoClaimFn(ctx, &redis.XAutoClaimArgs{
+			Stream: streamName, Group: consumerGroup, Consumer: w.consumer,
+			MinIdle: minIdleReap, Start: start, Count: reapBatchSize,
+		})
+		if err != nil {
+			if isNoGroupErr(err) {
+				w.reapCursor = "0-0"
+			} else if ctx.Err() == nil {
+				slog.Warn("ingest xautoclaim failed", "error", err)
+			}
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "error").Inc()
+			return
 		}
-		return
+		// Counted per page rather than per cycle: a cycle says the scan ran, this
+		// says it found work. Without it a PEL draining steadily and a PEL that
+		// is simply empty produce the same cycle counts.
+		if len(msgs) > 0 {
+			metrics.StreamReclaimedTotal.WithLabelValues("events", "").Add(float64(len(msgs)))
+		}
+		for _, msg := range msgs {
+			w.handleMessage(ctx, msg)
+		}
+		w.reapCursor = next
+		if next == "0-0" || next == "" {
+			w.reapCursor = "0-0"
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "terminal").Inc()
+			return
+		}
 	}
-	for _, msg := range msgs {
-		w.handleMessage(ctx, msg)
-	}
+	// The cursor survives the tick, so a saturated budget is a paced scan
+	// rather than a stall — but it is the only signal that the PEL is deeper
+	// than one tick can drain.
+	metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "budget_exhausted").Inc()
 }
 
 // handleMessage decodes and processes one stream entry. Permanently
@@ -201,9 +235,27 @@ func (w *Worker) handleMessage(ctx context.Context, msg redis.XMessage) {
 		w.ack(ctx, msg.ID)
 		return
 	}
+	if w.lifecycle != nil {
+		var generation *int64
+		if payload.NamespaceGeneration > 0 {
+			generation = &payload.NamespaceGeneration
+		}
+		disposition, lifecycleErr := w.lifecycle.EvaluateEnvelope(ctx, payload.Namespace, generation)
+		if lifecycleErr != nil {
+			slog.Warn("ingest lifecycle check failed; leaving entry pending", "entry_id", msg.ID, "error", lifecycleErr)
+			return
+		}
+		if disposition == nslifecycle.EnvelopeStale {
+			metrics.StaleGenerationTotal.WithLabelValues("event", "stale").Inc()
+			w.ack(ctx, msg.ID)
+			return
+		}
+	}
 
 	if _, err := w.service.Process(ctx, payload); err != nil {
-		if errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction) || errors.Is(err, ErrNamespaceNotFound) {
+		if errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction) ||
+			errors.Is(err, ErrNamespaceNotFound) || errors.Is(err, ErrInvalidObjectCreatedAt) {
+			// Permanent: no retry can make a future timestamp valid.
 			slog.Warn("ingest dropping unprocessable event", "entry_id", msg.ID, "error", err)
 			w.ack(ctx, msg.ID)
 			return

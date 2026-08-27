@@ -62,6 +62,7 @@ func (f *fakeSweepStream) XAdd(_ context.Context, a *redis.XAddArgs) *redis.Stri
 func sweeperWith(repo sweepRepo, rdb sweepStream, ns string) *RecoverySweeper {
 	lister := &fakeNsLister{configs: []*namespace.Config{{
 		Namespace:              ns,
+		Generation:             7,
 		CatalogStrategyID:      "hashing",
 		CatalogStrategyVersion: "v1",
 	}}}
@@ -70,7 +71,7 @@ func sweeperWith(repo sweepRepo, rdb sweepStream, ns string) *RecoverySweeper {
 
 func drainedGroups(ns string) map[string][]redis.XInfoGroup {
 	return map[string][]redis.XInfoGroup{
-		streamName(ns): {{Name: defaultConsumerGroup, Lag: 0, Pending: 0}},
+		embedStreamName(ns, 7): {{Name: defaultConsumerGroup, Lag: 0, Pending: 0}},
 	}
 }
 
@@ -84,14 +85,20 @@ func TestSweeperRepublishesStrandedPending(t *testing.T) {
 		t.Fatalf("expected 1 republish, got %d", len(rdb.added))
 	}
 	args := rdb.added[0]
-	if args.Stream != streamName("ns") {
+	if args.Stream != embedStreamName("ns", 7) {
 		t.Errorf("stream: got %q", args.Stream)
+	}
+	if args.MaxLen != 0 || args.Approx {
+		t.Errorf("embed stream must not be producer-trimmed: MaxLen=%d Approx=%v", args.MaxLen, args.Approx)
 	}
 	if got := args.Values.(map[string]any)["catalog_item_id"]; got != int64(7) {
 		t.Errorf("catalog_item_id: got %v", got)
 	}
 	if got := args.Values.(map[string]any)["strategy_id"]; got != "hashing" {
 		t.Errorf("strategy_id: got %v", got)
+	}
+	if got := args.Values.(map[string]any)["namespace_generation"]; got != int64(7) {
+		t.Errorf("namespace_generation: got %v", got)
 	}
 }
 
@@ -102,7 +109,7 @@ func TestSweeperSkipsWhenStreamNotDrained(t *testing.T) {
 	} {
 		repo := &fakeSweepRepo{pending: []StrandedItem{{ID: 7, ObjectID: "obj-7"}}}
 		rdb := &fakeSweepStream{groups: map[string][]redis.XInfoGroup{
-			streamName("ns"): {group},
+			embedStreamName("ns", 7): {group},
 		}}
 
 		sweeperWith(repo, rdb, "ns").tick(context.Background())

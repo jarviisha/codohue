@@ -28,6 +28,9 @@ services:
       - CODOHUE_LOG_FORMAT=${CODOHUE_LOG_FORMAT:-text}
       - CODOHUE_API_PORT=${CODOHUE_API_PORT:-2001}
       - CODOHUE_CATALOG_MAX_CONTENT_BYTES=${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}
+      - CODOHUE_STREAM_RETENTION_ENABLED=${CODOHUE_STREAM_RETENTION_ENABLED:-false}
+      - CODOHUE_STREAM_RETENTION_INTERVAL=${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}
+      - CODOHUE_OBSERVABILITY_TOKEN=${CODOHUE_OBSERVABILITY_TOKEN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -87,6 +90,9 @@ services:
       - CODOHUE_EMBEDDER_HEALTH_PORT=${CODOHUE_EMBEDDER_HEALTH_PORT:-2003}
       - CODOHUE_EMBEDDER_REPLICA_NAME=${CODOHUE_EMBEDDER_REPLICA_NAME:-}
       - CODOHUE_EMBEDDER_POLL_INTERVAL=${CODOHUE_EMBEDDER_POLL_INTERVAL:-30s}
+      - CODOHUE_STREAM_RETENTION_ENABLED=${CODOHUE_STREAM_RETENTION_ENABLED:-false}
+      - CODOHUE_STREAM_RETENTION_INTERVAL=${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}
+      - CODOHUE_OBSERVABILITY_TOKEN=${CODOHUE_OBSERVABILITY_TOKEN:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -141,7 +147,9 @@ services:
     container_name: codohue-redis
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes
+    # Retention owns stream reclamation. Redis must reject writes under memory
+    # pressure instead of silently evicting stream or queue keys.
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
     volumes:
       - redis_data:/data
 

@@ -9,12 +9,68 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jarviisha/codohue/internal/config"
+	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	qdrantpb "github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 )
+
+type fakeRetentionRunner struct {
+	calls chan infraredis.StreamSpec
+}
+
+func (f *fakeRetentionRunner) RunOnce(_ context.Context, spec infraredis.StreamSpec) (infraredis.RetentionResult, error) {
+	f.calls <- spec
+	return infraredis.RetentionResult{}, nil
+}
+
+func TestAPIRetentionLoopStartsAndStops(t *testing.T) {
+	specs := apiRetentionSpecs()
+	if len(specs) != 2 || specs[0].Name != "codohue:events" || specs[1].Name != "codohue:catalog" {
+		t.Fatalf("api retention specs = %+v", specs)
+	}
+	if got := specs[0].ExpectedGroups; len(got) != 1 || got[0] != "codohue-ingest" {
+		t.Fatalf("event expected groups = %v", got)
+	}
+	if got := specs[1].ExpectedGroups; len(got) != 1 || got[0] != "codohue-catalog-ingest" {
+		t.Fatalf("catalog expected groups = %v", got)
+	}
+
+	runner := &fakeRetentionRunner{calls: make(chan infraredis.StreamSpec, len(specs))}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		infraredis.RunRetentionLoop(ctx, time.Hour, runner, func(context.Context) ([]infraredis.StreamSpec, error) {
+			return specs, nil
+		})
+	}()
+	for range specs {
+		select {
+		case <-runner.calls:
+		case <-time.After(time.Second):
+			t.Fatal("retention loop did not run initial pass")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("retention loop did not stop after cancellation")
+	}
+}
+
+func TestAPIRetentionDryRunTracksKillSwitch(t *testing.T) {
+	if !retentionDryRun(false) {
+		t.Fatal("disabled retention must inspect in dry-run mode")
+	}
+	if retentionDryRun(true) {
+		t.Fatal("enabled retention must execute exact trimming")
+	}
+}
 
 func TestPingHandler(t *testing.T) {
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ping", http.NoBody)

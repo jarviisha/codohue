@@ -127,7 +127,7 @@ func (s *BacklogSampler) tick(ctx context.Context) {
 	}
 	now := time.Now().UTC()
 	for _, cfg := range cfgs {
-		if err := s.sampleOne(ctx, cfg.Namespace, now); err != nil {
+		if err := s.sampleOne(ctx, cfg.Namespace, cfg.Generation, now); err != nil {
 			slog.Warn("backlog sampler: sample failed", "namespace", cfg.Namespace, "error", err)
 		}
 	}
@@ -135,12 +135,12 @@ func (s *BacklogSampler) tick(ctx context.Context) {
 
 // sampleOne snapshots one namespace and writes the row if either the counts
 // changed or ForceWriteAfter has elapsed since the last write.
-func (s *BacklogSampler) sampleOne(ctx context.Context, namespace string, now time.Time) error {
+func (s *BacklogSampler) sampleOne(ctx context.Context, namespace string, generation int64, now time.Time) error {
 	counts, err := s.repo.CountBacklogStates(ctx, namespace)
 	if err != nil {
 		return err
 	}
-	streamLen, err := s.streamLen(ctx, namespace)
+	streamLen, err := s.streamLen(ctx, namespace, generation)
 	if err != nil {
 		return err
 	}
@@ -229,7 +229,7 @@ func (s *BacklogSampler) sampleOne(ctx context.Context, namespace string, now ti
 	// Consumer-lag = XINFO GROUPS pending count for the embedder consumer
 	// group on this stream. Logged + zeroed on error rather than failing
 	// the whole sample; the rest of the snapshot is still useful.
-	if lag, err := s.consumerLag(ctx, namespace); err != nil {
+	if lag, err := s.consumerLag(ctx, namespace, generation); err != nil {
 		slog.Warn("backlog sampler: consumer lag lookup failed", "namespace", namespace, "error", err)
 		metrics.CatalogConsumerLag.WithLabelValues(namespace).Set(0)
 	} else {
@@ -241,11 +241,11 @@ func (s *BacklogSampler) sampleOne(ctx context.Context, namespace string, now ti
 // consumerLag reports the embedder consumer group's PEL depth via XINFO
 // GROUPS. Returns 0 when the stream or group doesn't exist yet (cold start)
 // rather than a hard error.
-func (s *BacklogSampler) consumerLag(ctx context.Context, namespace string) (int64, error) {
+func (s *BacklogSampler) consumerLag(ctx context.Context, namespace string, generation int64) (int64, error) {
 	if s.redis == nil {
 		return 0, nil
 	}
-	groups, err := s.redis.XInfoGroups(ctx, streamName(namespace)).Result()
+	groups, err := s.redis.XInfoGroups(ctx, embedStreamName(namespace, generation)).Result()
 	if err != nil {
 		if errors.Is(err, redis.Nil) {
 			return 0, nil
@@ -264,11 +264,12 @@ func (s *BacklogSampler) consumerLag(ctx context.Context, namespace string) (int
 // the embedder group: undelivered entries (lag) plus the PEL. Raw XLEN would
 // be an all-time total — XACK never deletes entries — so it only serves as
 // the fallback when the group doesn't exist yet (everything undelivered).
-func (s *BacklogSampler) streamLen(ctx context.Context, namespace string) (int, error) {
+func (s *BacklogSampler) streamLen(ctx context.Context, namespace string, generation int64) (int, error) {
 	if s.redis == nil {
 		return 0, nil
 	}
-	groups, err := s.redis.XInfoGroups(ctx, streamName(namespace)).Result()
+	stream := embedStreamName(namespace, generation)
+	groups, err := s.redis.XInfoGroups(ctx, stream).Result()
 	if err == nil {
 		for _, g := range groups {
 			if g.Name == defaultConsumerGroup {
@@ -276,7 +277,7 @@ func (s *BacklogSampler) streamLen(ctx context.Context, namespace string) (int, 
 			}
 		}
 	}
-	cmd := s.redis.XLen(ctx, streamName(namespace))
+	cmd := s.redis.XLen(ctx, stream)
 	n, err := cmd.Result()
 	if err != nil {
 		// Stream not yet created shows up as redis.Nil — treat as zero

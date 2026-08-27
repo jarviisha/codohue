@@ -15,8 +15,9 @@ import (
 // Codohue is unreachable sits in the stream until the ingest worker consumes
 // it — no producer retry, no repair pass.
 type CatalogProducer struct {
-	rdb    XAdder
-	stream string
+	rdb                 XAdder
+	stream              string
+	namespaceGeneration int64
 }
 
 // CatalogOption configures a CatalogProducer.
@@ -28,6 +29,16 @@ func WithCatalogStream(name string) CatalogOption {
 	return func(p *CatalogProducer) {
 		if name != "" {
 			p.stream = name
+		}
+	}
+}
+
+// WithCatalogNamespaceGeneration stamps catalog items that do not already
+// carry a namespace generation.
+func WithCatalogNamespaceGeneration(generation int64) CatalogOption {
+	return func(p *CatalogProducer) {
+		if generation > 0 {
+			p.namespaceGeneration = generation
 		}
 	}
 }
@@ -47,6 +58,9 @@ func NewCatalogProducer(rdb XAdder, opts ...CatalogOption) *CatalogProducer {
 
 // Publish XADDs a single catalog item and returns the assigned stream ID.
 func (p *CatalogProducer) Publish(ctx context.Context, item codohuetypes.CatalogStreamItem) (string, error) {
+	if item.NamespaceGeneration == 0 && p.namespaceGeneration > 0 {
+		item.NamespaceGeneration = p.namespaceGeneration
+	}
 	raw, err := json.Marshal(item)
 	if err != nil {
 		return "", fmt.Errorf("codohue/redistream: marshal catalog item: %w", err)

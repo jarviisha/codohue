@@ -11,14 +11,16 @@ import (
 
 // fakeScroller pages through preset point ids and records deletions.
 type fakeScroller struct {
-	ids       []uint64
-	pageSize  int
-	scrollErr error
-	deleteErr error
-	deleted   []uint64
+	ids            []uint64
+	pageSize       int
+	scrollErr      error
+	deleteErr      error
+	deleted        []uint64
+	lastCollection string
 }
 
 func (f *fakeScroller) ScrollAndOffset(_ context.Context, req *qdrant.ScrollPoints) ([]*qdrant.RetrievedPoint, *qdrant.PointId, error) {
+	f.lastCollection = req.CollectionName
 	if f.scrollErr != nil {
 		return nil, nil, f.scrollErr
 	}

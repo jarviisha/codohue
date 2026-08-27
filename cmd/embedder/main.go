@@ -18,9 +18,12 @@ import (
 	qdrantpb "github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/jarviisha/codohue/internal/auth"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/embedder"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
@@ -90,6 +93,13 @@ func run() error {
 	//                                       internal/embedder/strategy.go init)
 	//   - the id_mappings allocator        (idmap.Service)
 	//   - the qdrant client                (for upserts to {ns}_objects_dense)
+	lifecycleRepo := nslifecycle.NewRepository(db)
+	lifecycleLocker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		return fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	defer lifecycleLocker.Close()
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, lifecycleLocker)
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
 
@@ -104,6 +114,7 @@ func run() error {
 		idmapSvc,
 		qdrantClient,
 	)
+	embedderSvc.SetLifecycleWriter(lifecycleSvc)
 	// Pub/sub publisher broadcasts item state changes + backlog snapshots
 	// + dead-letter growth alerts to codohue:catalog-events:{ns}; cmd/admin's
 	// catalog bridge subscribes and republishes onto the admin event bus
@@ -126,12 +137,14 @@ func run() error {
 		ConsumerName: consumerName,
 		PollInterval: cfg.NamespacePollInterval,
 	})
+	worker.SetLifecycleEvaluator(lifecycleSvc)
 
 	// Re-embed completion watcher (US3): closes batch_run_logs rows once a
 	// namespace's catalog backlog at the new strategy_version has drained.
 	// Also emits one reembed_progress event per open run per tick so the
 	// SPA overlay can render a live progress bar.
 	reembedWatcher := embedder.NewReembedWatcher(embedder.NewPgReembedRepo(db), 5*time.Second)
+	reembedWatcher.SetLifecycleWriter(lifecycleSvc)
 	reembedWatcher.SetEventPublisher(catalogPublisher)
 
 	// Backlog sampler — snapshots per-namespace catalog backlog into
@@ -147,6 +160,8 @@ func run() error {
 	// so nothing stays 'pending'/'in_flight' forever. Only acts on
 	// namespaces whose stream is fully drained; see RecoverySweeper docs.
 	recoverySweeper := embedder.NewRecoverySweeper(embedderRepo, redisClient, nsConfigSvc, embedder.RecoverySweeperConfig{})
+	recoverySweeper.SetLifecycleWriter(lifecycleSvc)
+	streamRetention := infraredis.NewRetention(redisClient, retentionDryRun(cfg.StreamRetentionEnabled))
 
 	// Liveness signal for the admin overview — without it that page has no
 	// way to tell a running embedder from a dead one.
@@ -154,7 +169,7 @@ func run() error {
 
 	// Liveness + Prometheus metrics endpoint runs on a separate port from
 	// cmd/api so production deployments can scrape both independently.
-	healthSrv := newHealthServer(cfg.HealthPort, db, redisClient, qdrantClient)
+	healthSrv := newHealthServer(cfg.HealthPort, cfg.ObservabilityToken, db, redisClient, qdrantClient)
 	go func() {
 		slog.Info("embedder health endpoint listening", "addr", ":"+cfg.HealthPort)
 		if err := healthSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -195,6 +210,18 @@ func run() error {
 	go func() {
 		defer close(heartbeatDone)
 		heartbeat.Run(ctx)
+	}()
+
+	retentionDone := make(chan struct{})
+	go func() {
+		defer close(retentionDone)
+		infraredis.RunRetentionLoop(ctx, cfg.StreamRetentionInterval, streamRetention, func(ctx context.Context) ([]infraredis.StreamSpec, error) {
+			configs, err := nsConfigSvc.ListCatalogNamespaces(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return embedRetentionSpecs(configs), nil
+		})
 	}()
 
 	slog.Info("embedder started",
@@ -266,8 +293,34 @@ func run() error {
 		slog.Warn("heartbeat shutdown timed out")
 	}
 
+	select {
+	case <-retentionDone:
+	case <-shutdownCtx.Done():
+		slog.Warn("stream retention shutdown timed out")
+	}
+
 	slog.Info("embedder stopped")
 	return nil
+}
+
+func retentionDryRun(enabled bool) bool { return !enabled }
+
+func embedRetentionSpecs(configs []*namespace.Config) []infraredis.StreamSpec {
+	specs := make([]infraredis.StreamSpec, 0, len(configs))
+	for _, cfg := range configs {
+		if cfg == nil || cfg.Namespace == "" {
+			continue
+		}
+		generation := cfg.Generation
+		if generation < 1 {
+			generation = 1
+		}
+		specs = append(specs, infraredis.StreamSpec{
+			Name: nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, cfg.Namespace, generation), Kind: "embed", Namespace: cfg.Namespace,
+			ExpectedGroups: []string{"embedder"},
+		})
+	}
+	return specs
 }
 
 func initLogger(format string) {
@@ -281,10 +334,11 @@ func initLogger(format string) {
 	slog.SetDefault(slog.New(handler))
 }
 
-func newHealthServer(port string, db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantpb.Client) *http.Server {
+func newHealthServer(port, observabilityToken string, db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantpb.Client) *http.Server {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", healthzHandler(db, rdb, qdrantClient))
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/healthz", embedderObservabilityHealthHandler(observabilityToken,
+		healthzHandler(db, rdb, qdrantClient), healthzDetailsHandler(db, rdb, qdrantClient)))
+	mux.Handle("/metrics", auth.RequireObservability(observabilityToken)(promhttp.Handler()))
 	return &http.Server{
 		Addr:         ":" + port,
 		Handler:      mux,
@@ -310,6 +364,30 @@ func healthzHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantp
 				break
 			}
 		}
+		code := http.StatusOK
+		if status != "ok" {
+			code = http.StatusServiceUnavailable
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": status}); err != nil {
+			slog.Warn("healthz encode failed", "error", err)
+		}
+	}
+}
+
+func healthzDetailsHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantpb.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		checks := map[string]string{"postgres": pingPostgres(ctx, db), "redis": pingRedis(ctx, rdb), "qdrant": pingQdrant(ctx, qdrantClient)}
+		status := "ok"
+		for _, value := range checks {
+			if value != "ok" {
+				status = "degraded"
+				break
+			}
+		}
 		checks["status"] = status
 		code := http.StatusOK
 		if status != "ok" {
@@ -318,8 +396,19 @@ func healthzHandler(db *pgxpool.Pool, rdb *goredis.Client, qdrantClient *qdrantp
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
 		if err := json.NewEncoder(w).Encode(checks); err != nil {
-			slog.Warn("healthz encode failed", "error", err)
+			slog.Warn("detailed healthz encode failed", "error", err)
 		}
+	}
+}
+
+func embedderObservabilityHealthHandler(token string, public, detailed http.Handler) http.HandlerFunc {
+	protected := auth.RequireObservability(token)(detailed)
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("details") == "true" {
+			protected.ServeHTTP(w, r)
+			return
+		}
+		public.ServeHTTP(w, r)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc/codes"
@@ -50,11 +51,15 @@ func (f *fakeRepo) GetPopularItems(_ context.Context, _ string, _ int) ([]string
 }
 
 type fakeNsConfig struct {
-	cfg *namespace.Config
-	err error
+	cfg     *namespace.Config
+	err     error
+	missing bool
 }
 
 func (f *fakeNsConfig) Get(_ context.Context, _ string) (*namespace.Config, error) {
+	if f.cfg == nil && f.err == nil && !f.missing {
+		return &namespace.Config{}, nil
+	}
 	return f.cfg, f.err
 }
 
@@ -73,6 +78,13 @@ func newFakeIDMapper() *fakeIDMapper {
 
 func (f *fakeIDMapper) GetOrCreateSubjectID(_ context.Context, _, _ string) (uint64, error) {
 	return f.subjectID, f.subjectErr
+}
+
+func (f *fakeIDMapper) LookupSubjectID(_ context.Context, _, _ string) (numericID uint64, found bool, err error) {
+	if f.subjectErr != nil {
+		return 0, false, f.subjectErr
+	}
+	return f.subjectID, f.subjectID != 0, nil
 }
 
 func (f *fakeIDMapper) GetOrCreateObjectID(_ context.Context, id, _ string) (uint64, error) {
@@ -108,6 +120,20 @@ func (f *fakeIDMapper) LookupObjectID(ctx context.Context, id, ns string) (numer
 		return 0, false, err
 	}
 	return numID, true, nil
+}
+
+func (f *fakeIDMapper) LookupObjectIDs(ctx context.Context, ids []string, ns string) (map[string]uint64, error) {
+	out := make(map[string]uint64, len(ids))
+	for _, id := range ids {
+		numericID, found, err := f.LookupObjectID(ctx, id, ns)
+		if err != nil {
+			continue
+		}
+		if found {
+			out[id] = numericID
+		}
+	}
+	return out, nil
 }
 
 // newTestService builds a Service with all infra replaced by no-ops / fakes.
@@ -448,21 +474,20 @@ func TestGetTrending_NormalizesLimitAndOffset(t *testing.T) {
 	}
 }
 
-func TestGetTrending_ConfigAndRedisErrorsStillReturnResponse(t *testing.T) {
+func TestGetTrending_ConfigErrorFailsBeforeRedis(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("config failed")}, newFakeIDMapper())
+	redisCalled := false
 	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+		redisCalled = true
 		return nil, errors.New("redis failed")
 	}
 
 	resp, err := s.GetTrending(context.Background(), "ns", 10, 0)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, ErrNamespaceConfigUnavailable) || resp != nil {
+		t.Fatalf("response=%+v error=%v", resp, err)
 	}
-	if resp.WindowHours != 24 {
-		t.Fatalf("expected default window 24, got %d", resp.WindowHours)
-	}
-	if len(resp.Items) != 0 {
-		t.Fatalf("expected empty items on redis error, got %v", resp.Items)
+	if redisCalled {
+		t.Fatal("Redis must not be accessed when namespace config is unavailable")
 	}
 }
 
@@ -1630,7 +1655,7 @@ func TestDeleteObject_DeletesSparseAndDense(t *testing.T) {
 	}
 }
 
-func TestDeleteObject_IgnoresDenseCleanupFailure(t *testing.T) {
+func TestDeleteObject_ReturnsDenseCleanupFailureAfterAllStages(t *testing.T) {
 	var collections []string
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	s.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
@@ -1641,8 +1666,8 @@ func TestDeleteObject_IgnoresDenseCleanupFailure(t *testing.T) {
 		return nil
 	}
 
-	if err := s.DeleteObject(context.Background(), "ns", "obj-1"); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if err := s.DeleteObject(context.Background(), "ns", "obj-1"); err == nil {
+		t.Fatal("expected dense cleanup error")
 	}
 	if len(collections) != 2 {
 		t.Fatalf("unexpected delete calls: %v", collections)
@@ -1670,13 +1695,13 @@ func TestDeleteFromCollection_Error(t *testing.T) {
 }
 
 func TestRecCacheKey(t *testing.T) {
-	key := recCacheKey("ns_feed", "user123", 20, 0)
+	key := recCacheKey("ns_feed", 1, "user123", 20, 0)
 	want := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=0"
 	if key != want {
 		t.Errorf("got %q, want %q", key, want)
 	}
 
-	keyWithOffset := recCacheKey("ns_feed", "user123", 20, 10)
+	keyWithOffset := recCacheKey("ns_feed", 1, "user123", 20, 10)
 	wantWithOffset := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=10"
 	if keyWithOffset != wantWithOffset {
 		t.Errorf("got %q, want %q", keyWithOffset, wantWithOffset)
@@ -1684,8 +1709,8 @@ func TestRecCacheKey(t *testing.T) {
 }
 
 func TestRecCacheKey_DelimiterCannotCollide(t *testing.T) {
-	first := recCacheKey("a", "b:c", 20, 0)
-	second := recCacheKey("a:b", "c", 20, 0)
+	first := recCacheKey("a", 1, "b:c", 20, 0)
+	second := recCacheKey("a:b", 1, "c", 20, 0)
 	if first == second {
 		t.Fatalf("cache keys collided: %q", first)
 	}
@@ -1854,16 +1879,14 @@ func TestDeleteObject_DropsMetadataRow(t *testing.T) {
 	}
 }
 
-// The vectors are already gone by then — what the caller asked for — so a
-// metadata cleanup failure must not turn the delete into an error.
-func TestDeleteObject_MetadataFailureIsNotFatal(t *testing.T) {
+func TestDeleteObject_MetadataFailureIsReturnedForSafeRetry(t *testing.T) {
 	meta := &fakeObjectMetaDeleter{err: errors.New("db down")}
 	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	svc.SetObjectMetadataDeleter(meta)
 	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
 
-	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
-		t.Fatalf("expected the delete to survive a metadata failure, got %v", err)
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err == nil {
+		t.Fatal("expected metadata cleanup failure")
 	}
 }
 
@@ -2226,5 +2249,304 @@ func TestMergeExclusions(t *testing.T) {
 	}
 	if got := mergeExclusions(a, b); len(got) != 3 {
 		t.Fatalf("union must dedupe to 3, got %v", got)
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+// Object deletion touches two Qdrant collections plus the metadata row, so it
+// runs under a lease and resolves collection names from the generation that
+// lease reports — deleting from the previous incarnation's collections would
+// silently leave the live ones intact.
+func TestDeleteObject_RunsUnderLeaseAndTargetsLeaseGeneration(t *testing.T) {
+	var collections []string
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+		collections = append(collections, collection)
+		return nil
+	}
+	lifecycle := &fakeLifecycleWriter{generation: 3}
+	s.SetLifecycleWriter(lifecycle)
+
+	if err := s.DeleteObject(context.Background(), "ns", "obj-1"); err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+	want := []string{"ns_g3_objects", "ns_g3_objects_dense"}
+	if len(collections) != 2 || collections[0] != want[0] || collections[1] != want[1] {
+		t.Errorf("collections: got %v, want %v", collections, want)
+	}
+}
+
+func TestDeleteObject_InactiveNamespaceTouchesNothing(t *testing.T) {
+	var collections []string
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+		collections = append(collections, collection)
+		return nil
+	}
+	s.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	if err := s.DeleteObject(context.Background(), "ns", "obj-1"); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if len(collections) != 0 {
+		t.Errorf("inactive namespace reached qdrant: %v", collections)
+	}
+}
+
+// BYOE vectors are client-owned writes into namespace state; the same fence
+// applies, and an inactive namespace must not accept one.
+func TestStoreEmbedding_RunsUnderLifecycleLease(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error { return nil }
+	lifecycle := &fakeLifecycleWriter{generation: 3}
+	s.SetLifecycleWriter(lifecycle)
+
+	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, nil); err != nil {
+		t.Fatalf("StoreObjectEmbedding: %v", err)
+	}
+	if lifecycle.calls != 1 {
+		t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+	}
+
+	s.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+	var upserted bool
+	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+		upserted = true
+		return nil
+	}
+	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, nil); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("expected ErrNamespaceNotActive, got %v", err)
+	}
+	if upserted {
+		t.Error("inactive namespace must not accept a BYOE vector")
+	}
+}
+
+// ─── BYOE creation-timestamp validation ──────────────────────────────────────
+
+// One documented clock-skew rule covers events and BYOE alike: at most five
+// minutes ahead, boundary inclusive.
+func TestStoreObjectEmbedding_FutureCreatedAtRejectedAtTheSameBoundaryAsEvents(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name       string
+		createdAt  time.Time
+		wantReject bool
+	}{
+		{"past", now.Add(-time.Hour), false},
+		{"exactly at the boundary", now.Add(maxObjectCreatedAtSkew), false},
+		{"beyond the boundary", now.Add(maxObjectCreatedAtSkew + time.Minute), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
+			var upserted bool
+			s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+			s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+				upserted = true
+				return nil
+			}
+
+			createdAt := tc.createdAt
+			err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{0.1, 0.2}, &createdAt)
+
+			if tc.wantReject {
+				if !errors.Is(err, ErrInvalidObjectCreatedAt) {
+					t.Fatalf("expected ErrInvalidObjectCreatedAt, got %v", err)
+				}
+				if upserted {
+					t.Error("a rejected timestamp must not reach qdrant")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected rejection: %v", err)
+			}
+			if !upserted {
+				t.Error("expected the vector to be stored")
+			}
+		})
+	}
+}
+
+// A non-finite vector value is a separate failure from a bad timestamp: both
+// are 400s, but they must not be reported as the same thing.
+func TestStoreObjectEmbedding_NonFiniteVectorIsNotATimestampError(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2}}, newFakeIDMapper())
+
+	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{float32(math.NaN()), 0.2}, nil)
+
+	if !errors.Is(err, ErrInvalidEmbedding) {
+		t.Fatalf("expected ErrInvalidEmbedding, got %v", err)
+	}
+	if errors.Is(err, ErrInvalidObjectCreatedAt) {
+		t.Error("a non-finite vector must not be reported as a timestamp problem")
+	}
+}
+
+// ─── fail-closed namespace configuration ─────────────────────────────────────
+
+// Configuration decides max_results, alpha, gamma and which generation's keys
+// to read. Serving a request before resolving it means serving defaults — and
+// caching the result would persist that wrong answer for the whole TTL, long
+// after the config store recovered.
+func TestReadPaths_ResolveConfigBeforeTouchingTheCache(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		nsCfg   *fakeNsConfig
+		wantErr error
+	}{
+		{"namespace does not exist", &fakeNsConfig{missing: true}, ErrNamespaceNotFound},
+		{"config store unavailable", &fakeNsConfig{err: errors.New("db down")}, ErrNamespaceConfigUnavailable},
+	} {
+		for _, path := range []struct {
+			name string
+			call func(*Service) error
+		}{
+			{"Recommend", func(s *Service) error {
+				_, err := s.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1", Limit: 10})
+				return err
+			}},
+			{"Rank", func(s *Service) error {
+				_, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"o1"}}, "ns")
+				return err
+			}},
+			{"GetTrending", func(s *Service) error {
+				_, err := s.GetTrending(context.Background(), "ns", 10, 0)
+				return err
+			}},
+		} {
+			t.Run(path.name+"/"+tc.name, func(t *testing.T) {
+				s := newTestService(&fakeRepo{}, tc.nsCfg, newFakeIDMapper())
+				cacheRead, cacheWritten := false, false
+				s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+					cacheRead = true
+					return "", errors.New("cache miss")
+				}
+				s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cacheWritten = true }
+
+				err := path.call(s)
+
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("got %v, want %v", err, tc.wantErr)
+				}
+				if cacheRead {
+					t.Error("the cache was consulted before the namespace was known to exist")
+				}
+				if cacheWritten {
+					t.Error("a result computed without configuration must never be cached")
+				}
+			})
+		}
+	}
+}
+
+// The two failures are answered differently by the handler (404 vs 503), so
+// they must stay distinguishable all the way up: a missing namespace is
+// permanent, an unreadable config store is worth retrying.
+func TestNamespaceResolutionErrors_StayDistinguishable(t *testing.T) {
+	missing := newTestService(&fakeRepo{}, &fakeNsConfig{missing: true}, newFakeIDMapper())
+	_, missingErr := missing.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1"})
+
+	unavailable := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("db down")}, newFakeIDMapper())
+	_, unavailableErr := unavailable.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1"})
+
+	if errors.Is(missingErr, ErrNamespaceConfigUnavailable) {
+		t.Error("a missing namespace must not read as a transient store failure")
+	}
+	if errors.Is(unavailableErr, ErrNamespaceNotFound) {
+		t.Error("an unreadable config store must not read as a missing namespace")
+	}
+}
+
+// ─── incomplete deletion is never reported as success ────────────────────────
+
+// Deletion touches three stores. If one fails, every other stage still runs —
+// stopping at the first failure would strand the remaining copies with no
+// second attempt — but the request must still fail, because a 204 tells the
+// caller the object is gone everywhere.
+func TestDeleteObject_AttemptsEveryStageThenFails(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		failOn     string
+		failMeta   bool
+		wantStages []string
+	}{
+		{"sparse fails", "ns_objects", false, []string{"ns_objects", "ns_objects_dense"}},
+		{"dense fails", "ns_objects_dense", false, []string{"ns_objects", "ns_objects_dense"}},
+		{"metadata fails", "", true, []string{"ns_objects", "ns_objects_dense"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stages []string
+			meta := &fakeObjectMetaDeleter{}
+			if tc.failMeta {
+				meta.err = errors.New("objects table down")
+			}
+			svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+			svc.SetObjectMetadataDeleter(meta)
+			svc.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+				stages = append(stages, collection)
+				if collection == tc.failOn {
+					return errors.New("qdrant down")
+				}
+				return nil
+			}
+
+			err := svc.DeleteObject(context.Background(), "ns", "o1")
+
+			if err == nil {
+				t.Fatal("an incomplete deletion must not report success")
+			}
+			if len(stages) != len(tc.wantStages) {
+				t.Errorf("stages attempted = %v, want %v", stages, tc.wantStages)
+			}
+			if !tc.failMeta && len(meta.deleted) != 1 {
+				t.Errorf("metadata stage skipped after a vector failure: %v", meta.deleted)
+			}
+		})
+	}
+}
+
+// Deleting an object that was never ingested is a no-op, not a failure: the
+// endpoint is idempotent, and a retry after a partial failure must be able to
+// succeed once the remaining stages are clean.
+func TestDeleteObject_IdempotentRetryAfterPartialFailure(t *testing.T) {
+	meta := &fakeObjectMetaDeleter{}
+	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc.SetObjectMetadataDeleter(meta)
+
+	failing := true
+	svc.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+		if failing && collection == "ns_objects_dense" {
+			return errors.New("qdrant down")
+		}
+		return nil
+	}
+
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err == nil {
+		t.Fatal("expected the first attempt to fail")
+	}
+	failing = false
+	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
+		t.Fatalf("retry after a partial failure must succeed, got %v", err)
 	}
 }

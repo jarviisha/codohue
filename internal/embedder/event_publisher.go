@@ -19,14 +19,20 @@ import (
 // time (LoadByID returns the row before MarkInFlight runs, so we know "from
 // pending → in_flight"; for subsequent transitions we only know "from
 // in_flight → {embedded, failed, dead_letter}").
+// NamespaceGeneration carries the lifecycle generation the transition belongs
+// to. It is additive and omitted for generation 1, so an admin build that
+// predates lifecycle generations still decodes the payload. During a
+// delete/recreate two generations can be in flight at once; without it an
+// operator cannot tell which namespace incarnation an item belongs to.
 type CatalogItemStateChangedEvent struct {
-	Kind      string    `json:"kind"` // always "item_state_changed"
-	Namespace string    `json:"namespace"`
-	ItemID    int64     `json:"item_id"`
-	ObjectID  string    `json:"object_id"`
-	From      string    `json:"from,omitempty"`
-	To        string    `json:"to"`
-	At        time.Time `json:"at"`
+	Kind                string    `json:"kind"` // always "item_state_changed"
+	Namespace           string    `json:"namespace"`
+	NamespaceGeneration int64     `json:"namespace_generation,omitempty"`
+	ItemID              int64     `json:"item_id"`
+	ObjectID            string    `json:"object_id"`
+	From                string    `json:"from,omitempty"`
+	To                  string    `json:"to"`
+	At                  time.Time `json:"at"`
 }
 
 // CatalogBacklogSnapshotPayload is the structured backlog body inside a

@@ -19,7 +19,7 @@ import (
 type catalogIngester interface {
 	Ingest(ctx context.Context, namespace string, req *IngestRequest) (*Item, error)
 	IngestBatch(ctx context.Context, namespace string, req *BatchIngestRequest) (*codohuetypes.CatalogBatchIngestResponse, error)
-	ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int) (*codohuetypes.CatalogObjectsResponse, error)
+	ListObjectsPage(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int, cursor string) (*codohuetypes.CatalogObjectsResponse, error)
 }
 
 // Handler exposes the data-plane catalog routes under
@@ -135,8 +135,13 @@ func (h *Handler) ListObjects(w http.ResponseWriter, r *http.Request) {
 		}
 		offset = n
 	}
+	cursor := r.URL.Query().Get("cursor")
+	if cursor != "" && offset != 0 {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "cursor and offset cannot be combined")
+		return
+	}
 
-	resp, err := h.service.ListObjects(r.Context(), ns, changedSince, limit, offset)
+	resp, err := h.service.ListObjectsPage(r.Context(), ns, changedSince, limit, offset, cursor)
 	if err != nil {
 		h.writeError(w, r, ns, err)
 		return
@@ -145,6 +150,9 @@ func (h *Handler) ListObjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, ns string, err error) {
+	if httpapi.WriteLifecycleError(w, err) {
+		return
+	}
 	switch {
 	case errors.Is(err, ErrInvalidRequest):
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())

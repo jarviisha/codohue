@@ -11,6 +11,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
@@ -42,12 +43,17 @@ type catalogIngestor interface {
 // content-hash short-circuit.
 type CatalogWorker struct {
 	service       catalogIngestor
+	lifecycle     lifecycleEvaluator
 	consumer      string
 	createGroupFn func(ctx context.Context, stream, group, start string) error
 	readGroupFn   func(ctx context.Context, args *redis.XReadGroupArgs) ([]redis.XStream, error)
 	autoClaimFn   func(ctx context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)
 	ackFn         func(ctx context.Context, stream, group string, ids ...string) error
+	reapCursor    string
 }
+
+// SetLifecycleEvaluator enables durable generation enforcement.
+func (w *CatalogWorker) SetLifecycleEvaluator(evaluator lifecycleEvaluator) { w.lifecycle = evaluator }
 
 // NewCatalogWorker creates a CatalogWorker consuming as the given consumer
 // name (empty falls back to the same default as the event worker).
@@ -56,8 +62,9 @@ func NewCatalogWorker(redisClient *redis.Client, service catalogIngestor, consum
 		consumer = defaultConsumerName
 	}
 	return &CatalogWorker{
-		service:  service,
-		consumer: consumer,
+		service:    service,
+		consumer:   consumer,
+		reapCursor: "0-0",
 		createGroupFn: func(ctx context.Context, stream, group, start string) error {
 			return redisClient.XGroupCreateMkStream(ctx, stream, group, start).Err()
 		},
@@ -161,23 +168,38 @@ func (w *CatalogWorker) reapPending(ctx context.Context) {
 }
 
 func (w *CatalogWorker) reapOnce(ctx context.Context) {
-	msgs, _, err := w.autoClaimFn(ctx, &redis.XAutoClaimArgs{
-		Stream:   codohuetypes.CatalogStreamName,
-		Group:    catalogConsumerGroup,
-		Consumer: w.consumer,
-		MinIdle:  minIdleReap,
-		Start:    "0",
-		Count:    reapBatchSize,
-	})
-	if err != nil {
-		if ctx.Err() == nil && !isNoGroupErr(err) {
-			slog.Warn("catalog ingest xautoclaim failed", "error", err)
+	if w.reapCursor == "" {
+		w.reapCursor = "0-0"
+	}
+	for page := 0; page < reapPageBudget; page++ {
+		start := w.reapCursor
+		msgs, next, err := w.autoClaimFn(ctx, &redis.XAutoClaimArgs{
+			Stream: codohuetypes.CatalogStreamName, Group: catalogConsumerGroup, Consumer: w.consumer,
+			MinIdle: minIdleReap, Start: start, Count: reapBatchSize,
+		})
+		if err != nil {
+			if isNoGroupErr(err) {
+				w.reapCursor = "0-0"
+			} else if ctx.Err() == nil {
+				slog.Warn("catalog ingest xautoclaim failed", "error", err)
+			}
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "error").Inc()
+			return
 		}
-		return
+		if len(msgs) > 0 {
+			metrics.StreamReclaimedTotal.WithLabelValues("catalog", "").Add(float64(len(msgs)))
+		}
+		for _, msg := range msgs {
+			w.handleMessage(ctx, msg)
+		}
+		w.reapCursor = next
+		if next == "0-0" || next == "" {
+			w.reapCursor = "0-0"
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "terminal").Inc()
+			return
+		}
 	}
-	for _, msg := range msgs {
-		w.handleMessage(ctx, msg)
-	}
+	metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "budget_exhausted").Inc()
 }
 
 // handleMessage decodes and ingests one stream entry. Permanent rejections
@@ -191,6 +213,22 @@ func (w *CatalogWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
 		metrics.CatalogStreamRejectsTotal.WithLabelValues("", "malformed").Inc()
 		w.ack(ctx, msg.ID)
 		return
+	}
+	if w.lifecycle != nil {
+		var generation *int64
+		if item.NamespaceGeneration > 0 {
+			generation = &item.NamespaceGeneration
+		}
+		disposition, lifecycleErr := w.lifecycle.EvaluateEnvelope(ctx, item.Namespace, generation)
+		if lifecycleErr != nil {
+			slog.Warn("catalog lifecycle check failed; leaving entry pending", "entry_id", msg.ID, "error", lifecycleErr)
+			return
+		}
+		if disposition == nslifecycle.EnvelopeStale {
+			metrics.StaleGenerationTotal.WithLabelValues("catalog", "stale").Inc()
+			w.ack(ctx, msg.ID)
+			return
+		}
 	}
 
 	if err := w.service.IngestStreamItem(ctx, item); err != nil {

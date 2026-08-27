@@ -7,6 +7,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/namespace"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // fakeRepo implements nsConfigRepository for testing.
@@ -27,10 +28,22 @@ type fakeRepo struct {
 	upsertCatalogCalledWith *UpdateCatalogRequest
 	listCfgs                []*namespace.Config
 	listErr                 error
+	upsertWithCatalogCalls  int
 }
 
 func (f *fakeRepo) Upsert(_ context.Context, _ string, _ *UpsertRequest) (*namespace.Config, error) {
 	return f.upsertCfg, f.upsertErr
+}
+
+// UpsertWithCatalog mirrors the real repository: both halves land together, so
+// a failure in either leaves nothing behind.
+func (f *fakeRepo) UpsertWithCatalog(ctx context.Context, ns string, req *UpsertRequest, catalogReq *UpdateCatalogRequest) (*namespace.Config, error) {
+	f.upsertWithCatalogCalls++
+	cfg, err := f.Upsert(ctx, ns, req)
+	if err != nil || catalogReq == nil {
+		return cfg, err
+	}
+	return f.UpsertCatalogConfig(ctx, ns, catalogReq)
 }
 
 func (f *fakeRepo) SetAPIKeyHash(_ context.Context, _, _ string) (bool, error) {
@@ -488,5 +501,266 @@ func TestServiceUpsert_CatalogDimMismatchRejected(t *testing.T) {
 	}
 	if repo.upsertCatalogCalledWith != nil {
 		t.Fatal("catalog config must not be persisted on dim mismatch")
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+// fakeLifecycleCoordinator stands in for nslifecycle.Service, recording
+// activations and writer leases separately: creation must activate (which is
+// what mints a new generation on recreate), while ordinary config writes must
+// only take a writer lease.
+type fakeLifecycleCoordinator struct {
+	generation    int64
+	activateErr   error
+	writerErr     error
+	activateCalls int
+	writerCalls   int
+}
+
+func (f *fakeLifecycleCoordinator) Activate(_ context.Context, ns string) (*nslifecycle.NamespaceLifecycle, error) {
+	f.activateCalls++
+	if f.activateErr != nil {
+		return nil, f.activateErr
+	}
+	return &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive}, nil
+}
+
+func (f *fakeLifecycleCoordinator) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.writerCalls++
+	if f.writerErr != nil {
+		return f.writerErr
+	}
+	leased := nslifecycle.ContextWithLease(ctx, ns, f.generation, nslifecycle.LockShared)
+	return fn(leased, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: f.generation, State: nslifecycle.StateActive})
+}
+
+func TestServiceUpsert_ActivatesLifecycleThenWritesUnderLease(t *testing.T) {
+	repo := &fakeRepo{upsertCfg: &namespace.Config{Namespace: "ns", APIKeyHash: "existing"}}
+	svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+	lifecycle := &fakeLifecycleCoordinator{generation: 2}
+	svc.SetLifecycleCoordinator(lifecycle)
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if lifecycle.activateCalls != 1 {
+		t.Errorf("expected 1 activation, got %d", lifecycle.activateCalls)
+	}
+	if lifecycle.writerCalls != 1 {
+		t.Errorf("expected 1 writer lease, got %d", lifecycle.writerCalls)
+	}
+}
+
+// A failed activation is the "system is resetting" / "namespace is mid-delete"
+// path: nothing may be persisted, because the row would outlive the wipe.
+func TestServiceUpsert_ActivationFailureWritesNothing(t *testing.T) {
+	repo := &fakeRepo{upsertCfg: &namespace.Config{Namespace: "ns"}}
+	svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+	svc.SetLifecycleCoordinator(&fakeLifecycleCoordinator{activateErr: nslifecycle.ErrSystemResetting})
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{}); !errors.Is(err, nslifecycle.ErrSystemResetting) {
+		t.Fatalf("expected ErrSystemResetting, got %v", err)
+	}
+	if repo.setAPIKeyHashCalled {
+		t.Error("no API key may be minted when activation fails")
+	}
+}
+
+// Rotating a key and flipping catalog mode are namespace-state mutations, so
+// both are fenced; an inactive namespace must not accept either.
+func TestServiceConfigMutations_RunUnderLifecycleLease(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Service) error
+	}{
+		{"RotateAPIKey", func(s *Service) error {
+			_, err := s.RotateAPIKey(context.Background(), "ns")
+			return err
+		}},
+		{"UpdateCatalogConfig", func(s *Service) error {
+			_, err := s.UpdateCatalogConfig(context.Background(), "ns", &UpdateCatalogRequest{Enabled: false})
+			return err
+		}},
+	} {
+		t.Run(tc.name+" takes a lease", func(t *testing.T) {
+			repo := &fakeRepo{
+				replaceFound:     true,
+				getCfg:           &namespace.Config{Namespace: "ns", EmbeddingDim: 128},
+				upsertCatalogCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128, DenseSource: "disabled"},
+			}
+			svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+			lifecycle := &fakeLifecycleCoordinator{generation: 2}
+			svc.SetLifecycleCoordinator(lifecycle)
+
+			if err := tc.mutate(svc); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if lifecycle.writerCalls != 1 {
+				t.Errorf("expected 1 writer lease, got %d", lifecycle.writerCalls)
+			}
+			if lifecycle.activateCalls != 0 {
+				t.Errorf("%s must not activate a namespace, got %d", tc.name, lifecycle.activateCalls)
+			}
+		})
+
+		t.Run(tc.name+" refuses an inactive namespace", func(t *testing.T) {
+			repo := &fakeRepo{replaceFound: true, getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 128}}
+			svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+			svc.SetLifecycleCoordinator(&fakeLifecycleCoordinator{writerErr: nslifecycle.ErrNamespaceNotActive})
+
+			if err := tc.mutate(svc); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+				t.Fatalf("%s: expected ErrNamespaceNotActive, got %v", tc.name, err)
+			}
+			if repo.replacedHash != "" || repo.upsertCatalogCalledWith != nil {
+				t.Errorf("%s reached the repo for an inactive namespace", tc.name)
+			}
+		})
+	}
+}
+
+// Provisioning catalog mode in one request must not deadlock or double-lease:
+// Upsert holds the lease and UpdateCatalogConfig reuses it.
+func TestServiceUpsert_CatalogProvisioningReusesHeldLease(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg, upsertCatalogCfg: cfg}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+	lifecycle := &fakeLifecycleCoordinator{generation: 2}
+	svc.SetLifecycleCoordinator(lifecycle)
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if lifecycle.writerCalls != 1 {
+		t.Errorf("expected the catalog write to reuse the upsert lease, got %d leases", lifecycle.writerCalls)
+	}
+}
+
+// ─── atomic base + catalog write ─────────────────────────────────────────────
+
+// The strategy is validated against the dimension THIS request will leave
+// behind. A body that raises embedding_dim and picks a matching strategy in
+// one call must be accepted — validating against the stored dimension would
+// reject the only request that could ever set both.
+func TestServiceUpsert_ValidatesStrategyAgainstTheRequestedDimension(t *testing.T) {
+	stored := &namespace.Config{Namespace: "ns", EmbeddingDim: 64, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: stored, getCfg: stored, upsertCatalogCfg: stored}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	dim := 128
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		EmbeddingDim:           &dim,
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	}); err != nil {
+		t.Fatalf("raising embedding_dim alongside a matching strategy must be accepted: %v", err)
+	}
+}
+
+// A brand-new namespace has no stored dimension, so validation falls back to
+// the schema default rather than treating "absent" as "matches".
+func TestServiceUpsert_NewNamespaceValidatesAgainstTheSchemaDefault(t *testing.T) {
+	repo := &fakeRepo{upsertCfg: &namespace.Config{Namespace: "ns"}} // getCfg nil = does not exist
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	})
+
+	var dimErr *DimensionMismatchError
+	if !errors.As(err, &dimErr) {
+		t.Fatalf("expected DimensionMismatchError, got %v", err)
+	}
+	if dimErr.NamespaceEmbeddingDim != schemaEmbeddingDim {
+		t.Errorf("compared against dim %d, want the schema default %d", dimErr.NamespaceEmbeddingDim, schemaEmbeddingDim)
+	}
+}
+
+// Validation happens before the write, so a rejected request leaves no trace:
+// no namespace row, no API key, no half-applied config.
+func TestServiceUpsert_RejectedStrategyWritesNothing(t *testing.T) {
+	stored := &namespace.Config{Namespace: "ns", EmbeddingDim: 64}
+	repo := &fakeRepo{upsertCfg: stored, getCfg: stored}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	})
+
+	if err == nil {
+		t.Fatal("expected a dimension mismatch")
+	}
+	if repo.upsertWithCatalogCalls != 0 {
+		t.Error("a rejected request must not reach the write path at all")
+	}
+	if repo.setAPIKeyHashCalled {
+		t.Error("a rejected request must not mint an API key")
+	}
+}
+
+// The base config and the catalog config are one write, so provisioning
+// catalog mode cannot leave a namespace that exists without its strategy.
+func TestServiceUpsert_BaseAndCatalogGoThroughOneWrite(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg, upsertCatalogCfg: cfg}
+	reg := embedstrategy.NewRegistry()
+	reg.Register("hash", "v1", func(_ embedstrategy.Params) (embedstrategy.Strategy, error) {
+		return &stubStrategyT{id: "hash", version: "v1", dim: 128}, nil
+	})
+	svc := &Service{repo: repo, registry: reg}
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{
+		DenseSource:            strPtr("catalog"),
+		CatalogStrategyID:      strPtr("hash"),
+		CatalogStrategyVersion: strPtr("v1"),
+	}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if repo.upsertWithCatalogCalls != 1 {
+		t.Errorf("expected exactly 1 combined write, got %d", repo.upsertWithCatalogCalls)
+	}
+	if repo.upsertCatalogCalledWith == nil || !repo.upsertCatalogCalledWith.Enabled {
+		t.Errorf("catalog half not applied: %+v", repo.upsertCatalogCalledWith)
+	}
+}
+
+// A request that does not ask for catalog mode must not drag the catalog half
+// into the write — it would null the strategy of a namespace already in
+// catalog mode.
+func TestServiceUpsert_NonCatalogRequestLeavesCatalogConfigAlone(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", EmbeddingDim: 128, APIKeyHash: "existing"}
+	repo := &fakeRepo{upsertCfg: cfg, getCfg: cfg}
+	svc := &Service{repo: repo, registry: embedstrategy.NewRegistry()}
+
+	if _, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{}); err != nil {
+		t.Fatalf("Upsert: %v", err)
+	}
+	if repo.upsertCatalogCalledWith != nil {
+		t.Errorf("catalog config touched by a base-only request: %+v", repo.upsertCatalogCalledWith)
 	}
 }

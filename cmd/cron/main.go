@@ -14,6 +14,7 @@ import (
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/idmap"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	infrapg "github.com/jarviisha/codohue/internal/infra/postgres"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
@@ -29,6 +30,9 @@ var (
 	newComputeJobFn = compute.NewJob
 	signalNotifyFn  = signal.Notify
 	closePoolFn     = func(db *pgxpool.Pool) { db.Close() }
+	// Indirected so a test can assert run() actually starts the reclaim loop.
+	// The janitor previously had no call site at all.
+	runGenerationCleanupLoopFn = runGenerationCleanupLoop
 )
 
 func main() {
@@ -68,6 +72,13 @@ func run() error {
 
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)
+	lifecycleRepo := nslifecycle.NewRepository(db)
+	lifecycleLocker, err := nslifecycle.NewPostgresLocker(db)
+	if err != nil {
+		return fmt.Errorf("create lifecycle locker: %w", err)
+	}
+	defer lifecycleLocker.Close()
+	lifecycleSvc := nslifecycle.NewService(lifecycleRepo, lifecycleLocker)
 
 	nsConfigRepo := nsconfig.NewRepository(db)
 	nsConfigSvc := nsconfig.NewService(nsConfigRepo)
@@ -75,6 +86,7 @@ func run() error {
 	computeRepo := compute.NewRepository(db)
 	computeSvc := compute.NewService(computeRepo, idmapSvc, qdrantClient)
 	job := newComputeJobFn(computeSvc, nsConfigSvc, computeRepo, qdrantClient, idmapSvc, redisClient, cfg.BatchIntervalMinutes)
+	job.SetLifecycleWriter(lifecycleSvc)
 	// Publish run lifecycle events so cmd/admin can stream cron runs live —
 	// its in-process observer never sees them (different process).
 	if obs := compute.NewRedisBatchRunObserver(redisClient); obs != nil {
@@ -103,19 +115,30 @@ func run() error {
 		}
 	}()
 
+	// Reclaim the Redis keys and Qdrant collections left behind by superseded
+	// namespace generations. The janitor refuses to touch anything until the
+	// legacy-envelope gate is closed, so this is inert until an operator runs
+	// `admin lifecycle disable-legacy-envelopes`.
+	janitor := nslifecycle.NewJanitor(lifecycleRepo, newStoreGenerationCleaner(redisClient, qdrantClient))
+	janitorDone := make(chan struct{})
+	go func() {
+		defer close(janitorDone)
+		runGenerationCleanupLoopFn(ctx, cfg.RetentionInterval, janitor)
+	}()
+
 	quit := make(chan os.Signal, 1)
 	signalNotifyFn(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// Cancel first, then join both goroutines BEFORE the deferred pool close
-	// runs — a run interrupted mid-phase still gets to finalize its
+	// Cancel first, then join every background goroutine BEFORE the deferred
+	// pool close runs — a run interrupted mid-phase still gets to finalize its
 	// batch_run_logs row against a live pool.
 	slog.Info("cron shutting down")
 	cancel()
 
 	timer := time.NewTimer(shutdownDrainTimeout)
 	defer timer.Stop()
-	if drainDone([]<-chan struct{}{jobDone, retentionDone}, timer.C) {
+	if drainDone([]<-chan struct{}{jobDone, retentionDone, janitorDone}, timer.C) {
 		slog.Info("cron stopped")
 	} else {
 		slog.Warn("cron shutdown timed out waiting for background jobs")

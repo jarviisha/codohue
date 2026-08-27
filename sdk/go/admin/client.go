@@ -77,8 +77,9 @@ type ProvisionCatalogRequest struct {
 
 // ProvisionResult reports the outcome of a provisioning call.
 type ProvisionResult struct {
-	Namespace string    `json:"namespace"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Namespace  string    `json:"namespace"`
+	Generation int64     `json:"generation"`
+	UpdatedAt  time.Time `json:"updated_at"`
 	// APIKey is the namespace's data-plane key, returned exactly once on
 	// first creation; empty on updates.
 	APIKey string `json:"api_key"`
@@ -125,14 +126,15 @@ func (c *Client) ProvisionCatalogNamespace(ctx context.Context, ns string, req P
 	}
 
 	var out struct {
-		Namespace string    `json:"namespace"`
-		UpdatedAt time.Time `json:"updated_at"`
-		APIKey    *string   `json:"api_key"`
+		Namespace  string    `json:"namespace"`
+		Generation int64     `json:"generation"`
+		UpdatedAt  time.Time `json:"updated_at"`
+		APIKey     *string   `json:"api_key"`
 	}
 	if err := c.do(ctx, http.MethodPut, "/api/admin/v1/namespaces/"+url.PathEscape(ns), body, &out); err != nil {
 		return nil, err
 	}
-	res := &ProvisionResult{Namespace: out.Namespace, UpdatedAt: out.UpdatedAt}
+	res := &ProvisionResult{Namespace: out.Namespace, Generation: out.Generation, UpdatedAt: out.UpdatedAt}
 	if out.APIKey != nil {
 		res.APIKey = *out.APIKey
 	}

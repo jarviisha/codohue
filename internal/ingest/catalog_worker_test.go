@@ -8,8 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -106,6 +109,28 @@ func TestCatalogWorkerHandleMessage_TransientErrorLeavesEntryPending(t *testing.
 
 	if len(acked) != 0 {
 		t.Fatalf("transient failure must leave the entry pending for the reaper, got %v", acked)
+	}
+}
+
+func TestCatalogWorkerLifecycleStaleACKsAndStoreFailureRetries(t *testing.T) {
+	for name, tc := range map[string]struct {
+		evaluator *fakeLifecycleEvaluator
+		wantACK   bool
+		wantCall  bool
+	}{
+		"stale":         {&fakeLifecycleEvaluator{disposition: nslifecycle.EnvelopeStale}, true, false},
+		"store failure": {&fakeLifecycleEvaluator{err: errors.New("postgres down")}, false, false},
+		"accepted":      {&fakeLifecycleEvaluator{disposition: nslifecycle.EnvelopeProcess}, true, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			acked := []string{}
+			svc := &fakeCatalogIngestor{}
+			worker := &CatalogWorker{service: svc, lifecycle: tc.evaluator, ackFn: ackRecorder(&acked)}
+			worker.handleMessage(context.Background(), catalogMessage(t, "1-0", codohuetypes.CatalogStreamItem{Namespace: "ns", NamespaceGeneration: 2}))
+			if (len(acked) == 1) != tc.wantACK || (svc.called == 1) != tc.wantCall {
+				t.Fatalf("acked=%v calls=%d", acked, svc.called)
+			}
+		})
 	}
 }
 
@@ -259,4 +284,150 @@ func TestCatalogWorkerAck_LogsAckFailure(t *testing.T) {
 		return errors.New("ack failed")
 	}}
 	w.ack(context.Background(), "1-0") // must not panic
+}
+
+// The catalog stream's PEL is scanned under the same fairness rules as the
+// event stream: continue from the returned cursor, keep it across ticks, and
+// reset only at a terminal cursor or after the group is recreated. Restarting
+// at "0-0" every tick lets one permanently failing entry at the head starve
+// every catalog item behind it.
+func TestCatalogWorkerReapOnce_CursorFairness(t *testing.T) {
+	t.Run("continues from the returned cursor and resets at terminal", func(t *testing.T) {
+		var starts []string
+		w := &CatalogWorker{
+			service: &fakeCatalogIngestor{},
+			autoClaimFn: func(_ context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+				starts = append(starts, args.Start)
+				if len(starts) == 1 {
+					return nil, "300-0", nil
+				}
+				return nil, "0-0", nil
+			},
+			ackFn: func(context.Context, string, string, ...string) error { return nil },
+		}
+
+		w.reapOnce(context.Background())
+
+		if len(starts) != 2 || starts[0] != "0-0" || starts[1] != "300-0" {
+			t.Errorf("cursor not carried: %v", starts)
+		}
+		if w.reapCursor != "0-0" {
+			t.Errorf("terminal cursor must reset, got %q", w.reapCursor)
+		}
+	})
+
+	t.Run("stops at the page budget and keeps the cursor", func(t *testing.T) {
+		calls := 0
+		w := &CatalogWorker{
+			service: &fakeCatalogIngestor{},
+			autoClaimFn: func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+				calls++
+				return nil, fmt.Sprintf("%d-0", calls), nil
+			},
+			ackFn: func(context.Context, string, string, ...string) error { return nil },
+		}
+
+		w.reapOnce(context.Background())
+
+		if calls != reapPageBudget {
+			t.Errorf("scanned %d pages, want %d", calls, reapPageBudget)
+		}
+		if w.reapCursor == "0-0" || w.reapCursor == "" {
+			t.Errorf("cursor must survive the tick, got %q", w.reapCursor)
+		}
+	})
+
+	t.Run("error retains, NOGROUP resets", func(t *testing.T) {
+		w := &CatalogWorker{
+			service:    &fakeCatalogIngestor{},
+			reapCursor: "800-0",
+			autoClaimFn: func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+				return nil, "", errors.New("redis down")
+			},
+		}
+		w.reapOnce(context.Background())
+		if w.reapCursor != "800-0" {
+			t.Errorf("cursor after error = %q, want it retained", w.reapCursor)
+		}
+
+		w.autoClaimFn = func(_ context.Context, _ *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "", errors.New("NOGROUP No such consumer group")
+		}
+		w.reapOnce(context.Background())
+		if w.reapCursor != "0-0" {
+			t.Errorf("cursor after NOGROUP = %q, want 0-0", w.reapCursor)
+		}
+	})
+}
+
+// TestCatalogWorkerReapOnce_RecordsTheTerminalOutcome pins the reclaim-cycle
+// counter for the catalog stream. The metric was registered but never observed,
+// so it read zero forever; without an assertion at the call site that regresses
+// silently.
+func TestCatalogWorkerReapOnce_RecordsTheTerminalOutcome(t *testing.T) {
+	// Process-global counter, and the sibling reap tests bump it, so start from
+	// a known zero rather than from whatever ran first.
+	metrics.StreamReclaimCyclesTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimCyclesTotal.Reset)
+
+	outcome := func(name string) float64 {
+		return testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", name))
+	}
+
+	w := &CatalogWorker{
+		autoClaimFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return nil, "0-0", nil
+		},
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("terminal"); got != 1 {
+		t.Errorf("terminal = %v, want 1", got)
+	}
+
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		return nil, "", errors.New("redis down")
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("error"); got != 1 {
+		t.Errorf("error = %v, want 1", got)
+	}
+
+	calls := 0
+	w.reapCursor = "0-0"
+	w.autoClaimFn = func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+		calls++
+		return nil, fmt.Sprintf("%d-0", calls), nil
+	}
+	w.reapOnce(context.Background())
+	if got := outcome("budget_exhausted"); got != 1 {
+		t.Errorf("budget_exhausted = %v, want 1", got)
+	}
+	// The catalog counter must not be attributed to the events stream.
+	if got := testutil.ToFloat64(metrics.StreamReclaimCyclesTotal.WithLabelValues("events", "", "terminal")); got != 0 {
+		t.Errorf("events/terminal = %v, want the catalog pass not to touch it", got)
+	}
+}
+
+// TestCatalogWorkerReapOnce_CountsReclaimedEntries pins the companion counter,
+// which reports how much the scan actually took over rather than that it ran.
+func TestCatalogWorkerReapOnce_CountsReclaimedEntries(t *testing.T) {
+	metrics.StreamReclaimedTotal.Reset()
+	t.Cleanup(metrics.StreamReclaimedTotal.Reset)
+
+	// Entries carry no payload field, so each is acked and dropped as malformed
+	// — this test is about the count, not about what the entries mean.
+	w := &CatalogWorker{
+		autoClaimFn: func(context.Context, *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return []redis.XMessage{{ID: "1-0"}, {ID: "2-0"}}, "0-0", nil
+		},
+		ackFn: func(context.Context, string, string, ...string) error { return nil },
+	}
+	w.reapOnce(context.Background())
+
+	if got := testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("catalog", "")); got != 2 {
+		t.Errorf("catalog reclaimed = %v, want 2", got)
+	}
+	if got := testutil.ToFloat64(metrics.StreamReclaimedTotal.WithLabelValues("events", "")); got != 0 {
+		t.Errorf("events reclaimed = %v, want the catalog pass not to touch it", got)
+	}
 }

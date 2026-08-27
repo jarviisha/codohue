@@ -172,8 +172,8 @@ func (r *Repository) CompleteReembedRun(ctx context.Context, id int64, processed
 //	"all"      — every embedded/failed/dead_letter row
 //	"embedded" — every embedded row
 //	"failed"   — every failed / dead_letter row
-func (r *Repository) SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion, onlyState string) ([]CatalogReembedTarget, error) {
-	rows, err := r.db.Query(ctx, reembedResetSQL(onlyState), namespace, targetStrategyVersion)
+func (r *Repository) SelectAndResetStaleCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion, onlyState string) ([]CatalogReembedTarget, error) {
+	rows, err := r.db.Query(ctx, reembedResetSQL(onlyState), namespace, targetStrategyID, targetStrategyVersion)
 	if err != nil {
 		return nil, fmt.Errorf("reset stale catalog items: %w", err)
 	}
@@ -187,7 +187,7 @@ func (r *Repository) SelectAndResetStaleCatalogItems(ctx context.Context, namesp
 // reaches the SQL text.
 func reembedResetSQL(onlyState string) string {
 	stateCond := "state IN ('embedded', 'failed', 'dead_letter')"
-	versionCond := " AND (strategy_version IS NULL OR strategy_version <> $2)"
+	versionCond := " AND (strategy_id IS NULL OR strategy_version IS NULL OR (strategy_id, strategy_version) <> ($2, $3))"
 	switch onlyState {
 	case ReembedOnlyStateAll:
 		versionCond = ""
@@ -236,7 +236,7 @@ func (r *Repository) StartReembedRun(
 		return 0, nil, fmt.Errorf("insert reembed run: %w", err)
 	}
 
-	rows, err := tx.Query(ctx, reembedResetSQL(onlyState), namespace, strategyVersion)
+	rows, err := tx.Query(ctx, reembedResetSQL(onlyState), namespace, strategyID, strategyVersion)
 	if err != nil {
 		return 0, nil, fmt.Errorf("reset stale catalog items: %w", err)
 	}
@@ -270,15 +270,15 @@ func scanReembedTargets(rows pgx.Rows) ([]CatalogReembedTarget, error) {
 // CountStaleCatalogItems reports how many catalog_items rows still need to
 // finish processing under the target strategy version. Used by the watcher
 // in cmd/embedder to detect re-embed completion.
-func (r *Repository) CountStaleCatalogItems(ctx context.Context, namespace, targetStrategyVersion string) (int, error) {
+func (r *Repository) CountStaleCatalogItems(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM catalog_items
 		WHERE namespace = $1
 		  AND state IN ('pending', 'in_flight', 'failed')
-		  AND (strategy_version IS NULL OR strategy_version <> $2)`,
-		namespace, targetStrategyVersion,
+		  AND (strategy_id IS NULL OR strategy_version IS NULL OR (strategy_id, strategy_version) <> ($2, $3))`,
+		namespace, targetStrategyID, targetStrategyVersion,
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count stale catalog items: %w", err)
@@ -345,15 +345,15 @@ func (r *Repository) CountCatalogItemStates(ctx context.Context, namespace strin
 // CountEmbeddedAtVersion reports how many catalog_items are in state='embedded'
 // at the target strategy_version. Used by the watcher to record progress on
 // the batch_run_logs row when it completes.
-func (r *Repository) CountEmbeddedAtVersion(ctx context.Context, namespace, targetStrategyVersion string) (int, error) {
+func (r *Repository) CountEmbeddedAtVersion(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error) {
 	var n int
 	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*)
 		FROM catalog_items
 		WHERE namespace = $1
 		  AND state = 'embedded'
-		  AND strategy_version = $2`,
-		namespace, targetStrategyVersion,
+		  AND (strategy_id, strategy_version) = ($2, $3)`,
+		namespace, targetStrategyID, targetStrategyVersion,
 	).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count embedded items at version: %w", err)

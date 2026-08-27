@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 type fakeRepo struct {
@@ -117,5 +119,112 @@ func TestDelete(t *testing.T) {
 	}
 	if len(repo.deleted) != 1 || repo.deleted[0] != "ns/o1" {
 		t.Errorf("deleted = %v", repo.deleted)
+	}
+}
+
+// --- lifecycle fencing ----------------------------------------------------
+
+type fakeLifecycleWriter struct {
+	generation int64
+	err        error
+	calls      int
+}
+
+func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	leasedCtx := nslifecycle.ContextWithLease(ctx, namespace, f.generation, nslifecycle.LockShared)
+	return fn(leasedCtx, &nslifecycle.NamespaceLifecycle{
+		Namespace:  namespace,
+		Generation: f.generation,
+		State:      nslifecycle.StateActive,
+	})
+}
+
+// Object metadata is namespace-owned state, so every mutation runs under a
+// lifecycle lease. Without it, a write racing a delete would resurrect a row
+// in a namespace the operator was told no longer exists.
+func TestObjectMutations_RunUnderLifecycleLease(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*Service) error
+	}{
+		{"Upsert", func(s *Service) error {
+			_, err := s.Upsert(context.Background(), "ns", "o1", &UpsertRequest{AuthorSubjectID: "u1"})
+			return err
+		}},
+		{"SetAuthor", func(s *Service) error {
+			return s.SetAuthor(context.Background(), "ns", "o1", "u1")
+		}},
+		{"Delete", func(s *Service) error {
+			return s.Delete(context.Background(), "ns", "o1")
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeRepo{}
+			svc := NewService(repo)
+			lifecycle := &fakeLifecycleWriter{generation: 3}
+			svc.SetLifecycleWriter(lifecycle)
+
+			if err := tc.mutate(svc); err != nil {
+				t.Fatalf("%s: %v", tc.name, err)
+			}
+			if lifecycle.calls != 1 {
+				t.Errorf("expected exactly 1 lease acquisition, got %d", lifecycle.calls)
+			}
+		})
+	}
+}
+
+// Reads are deliberately unfenced: a lease is a writer contract, and taking one
+// per Get would serialize read traffic behind delete/recreate.
+func TestObjectGet_TakesNoLease(t *testing.T) {
+	svc := NewService(&fakeRepo{obj: &Object{Namespace: "ns", ObjectID: "o1"}})
+	lifecycle := &fakeLifecycleWriter{generation: 3}
+	svc.SetLifecycleWriter(lifecycle)
+
+	if _, err := svc.Get(context.Background(), "ns", "o1"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Errorf("reads must not take a lease, got %d acquisitions", lifecycle.calls)
+	}
+}
+
+func TestObjectMutations_InactiveNamespaceWritesNothing(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo)
+	svc.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
+
+	if _, err := svc.Upsert(context.Background(), "ns", "o1", &UpsertRequest{AuthorSubjectID: "u1"}); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("Upsert: expected ErrNamespaceNotActive, got %v", err)
+	}
+	if err := svc.Delete(context.Background(), "ns", "o1"); !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
+		t.Fatalf("Delete: expected ErrNamespaceNotActive, got %v", err)
+	}
+	if len(repo.upsertArgs) != 0 || len(repo.deleted) != 0 {
+		t.Errorf("inactive namespace reached the repo: upserts=%v deletes=%v", repo.upsertArgs, repo.deleted)
+	}
+}
+
+// A caller that already holds the lease — catalog ingest writing attribution
+// through under its own lease — must not take a second one.
+func TestObjectMutations_ReuseHeldLease(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := NewService(repo)
+	lifecycle := &fakeLifecycleWriter{generation: 3}
+	svc.SetLifecycleWriter(lifecycle)
+
+	ctx := nslifecycle.ContextWithLease(context.Background(), "ns", 3, nslifecycle.LockShared)
+	if err := svc.SetAuthor(ctx, "ns", "o1", "u1"); err != nil {
+		t.Fatalf("SetAuthor: %v", err)
+	}
+	if lifecycle.calls != 0 {
+		t.Errorf("held lease must be reused, got %d acquisitions", lifecycle.calls)
+	}
+	if len(repo.upsertArgs) != 1 {
+		t.Errorf("write did not reach the repo: %v", repo.upsertArgs)
 	}
 }
