@@ -65,6 +65,41 @@ Apply migrations 024 and 025, then deploy. Every namespace is backfilled to
 generation 1 and keeps its existing physical names, so nothing moves on
 upgrade.
 
+### PostgreSQL connection budget — check before deploying
+
+This release doubles the connections each binary can open. Lifecycle leases are
+session advisory locks, so a lease lives on its connection for the whole fenced
+write; `NewPostgresLocker` gives them a **dedicated pool** so a lock holder can
+never be waiting for a work connection that only another lock holder could
+release. Sharing one pool deadlocks the data plane permanently once concurrent
+fenced writes reach the pool size — see the Phase 19 note in
+`specs/007-backend-audit-remediation/verification.md`.
+
+Neither pool sets `MaxConns`, so pgxpool's default of `max(4, NumCPU)` applies
+to both. Per host, the ceiling is:
+
+```text
+4 binaries x 2 pools x max(4, NumCPU) connections
+```
+
+On a 16-core host that is 128 — above PostgreSQL's default `max_connections`
+of 100. The lock pool runs at `MinConns=0`, so idle deployments sit well under
+the ceiling and the exhaustion only appears under concurrent load.
+
+Pick one before deploying:
+
+- Raise `max_connections` on the server to cover the ceiling above, or
+- Cap each binary with the `pool_max_conns` DSN parameter, which
+  `pgxpool.ParseConfig` honours and which applies to the lock pool too because
+  it is derived from the work pool's config (floored at 4):
+
+  ```text
+  DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable&pool_max_conns=8
+  ```
+
+A too-small cap costs latency, not correctness: writers queue for a lock
+session instead of deadlocking. The suite passes at `pool_max_conns=2`.
+
 ### Orphan preflight before migration 025
 
 Migration 025 adds the namespace foreign keys, and it **refuses to run** while
