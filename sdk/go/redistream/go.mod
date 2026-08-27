@@ -9,7 +9,7 @@ go 1.24.13
 replace github.com/jarviisha/codohue/pkg/codohuetypes => ../../../pkg/codohuetypes
 
 require (
-	github.com/jarviisha/codohue/pkg/codohuetypes v0.5.1
+	github.com/jarviisha/codohue/pkg/codohuetypes v0.6.0
 	github.com/redis/go-redis/v9 v9.18.0
 )
 
