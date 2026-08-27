@@ -54,7 +54,15 @@ func TestWriterLeaseOrderingPostLockRereadAndContext(t *testing.T) {
 	svc := NewService(store, locker)
 	err := svc.WithWriter(context.Background(), "tenant", func(ctx context.Context, lifecycle *NamespaceLifecycle) error {
 		*events = append(*events, "mutate")
-		return RequireLease(ctx, "tenant", lifecycle.Generation)
+		if err := RequireNamespaceLease(ctx, "tenant"); err != nil {
+			return err
+		}
+		// The lease must carry the generation the post-lock reread produced, or
+		// a fenced write could name a generation the lock does not cover.
+		if got, ok := LeaseGeneration(ctx, "tenant"); !ok || got != lifecycle.Generation {
+			t.Fatalf("lease generation = %d (ok=%v), want %d", got, ok, lifecycle.Generation)
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +99,15 @@ func TestNestedWriterLeaseDoesNotReacquire(t *testing.T) {
 	svc := NewService(store, locker)
 	err := svc.WithWriter(context.Background(), "tenant", func(ctx context.Context, lifecycle *NamespaceLifecycle) error {
 		return svc.WithWriter(ctx, "tenant", func(nested context.Context, nestedLifecycle *NamespaceLifecycle) error {
-			return RequireLease(nested, "tenant", nestedLifecycle.Generation)
+			if err := RequireNamespaceLease(nested, "tenant"); err != nil {
+				return err
+			}
+			// The inherited lease must still name the current generation —
+			// reusing the outer lock is only safe if it covers the same one.
+			if got, ok := LeaseGeneration(nested, "tenant"); !ok || got != nestedLifecycle.Generation {
+				t.Fatalf("nested lease generation = %d (ok=%v), want %d", got, ok, nestedLifecycle.Generation)
+			}
+			return nil
 		})
 	})
 	if err != nil {

@@ -173,18 +173,11 @@ type leaseValue struct {
 	Mode       LockMode
 }
 
-// RequireLease rejects mapping or mutation code that is reached without the
-// matching lifecycle generation lease.
-func RequireLease(ctx context.Context, namespace string, generation int64) error {
-	lease, ok := ctx.Value(leaseContextKey{}).(leaseValue)
-	if !ok || lease.Namespace != namespace || lease.Generation != generation {
-		return ErrLeaseRequired
-	}
-	return nil
-}
-
-// RequireNamespaceLease checks that the context carries any current
-// generation lease for namespace. Use RequireLease when generation is known.
+// RequireNamespaceLease rejects mapping or mutation code that is reached
+// without a current generation lease for namespace. Callers that also need the
+// generation read it with LeaseGeneration rather than passing an expected one:
+// the lease is the authority on which generation is current, so a caller-
+// supplied value could only ever disagree with it.
 func RequireNamespaceLease(ctx context.Context, namespace string) error {
 	lease, ok := ctx.Value(leaseContextKey{}).(leaseValue)
 	if !ok || lease.Namespace != namespace || lease.Generation < 1 {
