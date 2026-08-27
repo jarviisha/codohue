@@ -479,3 +479,11 @@ Track D: US4 honest failures, US5 keyset cursor, US6 observability
 - [X] T141 Cover `UpsertWithAttribution` — the content-and-author single-transaction contract that was at 0% — and the embed stream generation clamp, in `internal/catalog/repository_test.go` and `internal/catalog/service_test.go` per FR-021 (missing)
 - [X] T142 Move the `go` directive to 1.26.7 and bump `golang.org/x/net` / `golang.org/x/crypto`, so the toolchain CI installs from `go.mod` carries the standard-library fixes `make vuln` demands, in `go.mod`, `go.work`, `examples/loadgen/go.mod` and `examples/geminipump/go.mod` per FR-001 (contradicts)
 - [X] T143 Run the e2e job through `make test-e2e` instead of a duplicated `go test -timeout=120s`, so the suite timeout has one definition, in `.github/workflows/ci.yml` per FR-021 (partial)
+
+---
+
+## Phase 20: Convergence
+
+- [X] T144 Increment `StreamReclaimedTotal` where entries are actually reclaimed — or drop it, as T134 did for the other ownerless series — so `codohue_stream_reclaimed_total` is not permanently zero while its sibling `codohue_stream_reclaim_cycles_total` moves, in `internal/ingest/worker.go`, `internal/ingest/catalog_worker.go`, `internal/embedder/worker.go` and `internal/infra/metrics/metrics.go` per contracts/stream-processing.md required observability / plan Release 2 step 6 (partial) — the third reclaim site is `embedder/worker.go`, not `recovery_sweeper.go`, which republishes stranded rows rather than reclaiming a PEL
+- [X] T145 Document that each binary now opens a second PostgreSQL pool for lifecycle lock sessions — `NewPostgresLocker` sizes it from the work pool, so four binaries can need roughly 8x `MaxConns` against a default `max_connections` of 100 — and name the `pool_max_conns` DSN parameter operators tune, in the Release 3 section of `deploy/backend-audit-remediation.md` and `.env.example` per plan Release 3 / contracts/operations.md deployment order (missing)
+- [X] T146 [P] Remove `RequireLease`, which no production path calls because ID-map mutations assert through `RequireNamespaceLease`, or give it the call site it was written for, in `internal/core/nslifecycle/service.go` and `internal/core/nslifecycle/service_test.go` per Constitution I (unrequested)

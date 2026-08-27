@@ -129,6 +129,58 @@ convergence rounds in a row have found defects in tests written the round
 before, all of them invisible to compilation.** Running the suites once is
 worth more than another reasoning pass.
 
+## Phase 20 (convergence) gates
+
+Executed 2026-08-27 for T144-T146.
+
+| Command | Result |
+|---------|--------|
+| `make build` | **pass** — all four binaries |
+| `make lint` | **pass** — 0 issues, all four modules |
+| `make test-race` | **pass** — exit 0, zero `FAIL` / `DATA RACE` lines |
+| `make coverage-check-all` | **pass** — all 16 gates; total 64.2% → 68.0%, ingest 85.2% → 87.2% |
+| `make vuln` | **pass** — 0 reachable, re-verified before the change; no dependency touched since |
+| `make compose-check` | **pass** — re-verified before the change; no compose file touched since |
+| `make test-e2e` | **not run** — ports 6379/6334 held by an unrelated stack on this host |
+
+### The coverage gate reads differently without a database
+
+`internal/compute`, `internal/nsconfig` and `internal/core/idmap` **fail**
+`coverage-check-all` when `DATABASE_URL` is unset — 73.9/75, 73.0/80 and
+74.5/90. Their DB-backed tests skip, and the skipped statements still count in
+the denominator. CI sets `DATABASE_URL`, so this is not a CI failure; with a
+migrated database the same three read 77.7, 82.7 and 90.8.
+
+Worth knowing before diagnosing a red gate locally: the first read is a lie in
+the pessimistic direction. Every figure in the table above was taken against a
+throwaway `postgres:16-alpine` migrated to 027.
+
+### T144 — the counter had no owner
+
+`codohue_stream_reclaimed_total` was registered and never incremented, so it
+read zero in production while its sibling `codohue_stream_reclaim_cycles_total`
+moved. T134 fixed exactly this shape for three other series and missed this one.
+
+The task named `embedder/recovery_sweeper.go` as the third reclaim site. It is
+not one — the sweeper republishes stranded rows and never calls `XAUTOCLAIM`.
+The real third site is `embedder/worker.go:reapOnce`. Counted per page and
+summed, because a multi-page scan reclaims on every page.
+
+Cycles and entries answer different questions: a terminal cycle means the scan
+wrapped, which an empty PEL and a fully drained one both do. Only the entry
+count separates them.
+
+### T146 — verified by substitution, not deletion
+
+`RequireLease` was reachable only from its own two tests; production asserts
+through `RequireNamespaceLease`, and the strict variant could not be used at the
+ID-map call site anyway because that site does not know the generation.
+
+The two tests were re-pointed at `LeaseGeneration`, which **is** production-used,
+and now assert the generation value explicitly rather than passing it in for an
+equality check inside the helper. That is strictly more coverage than before:
+the previous form would have passed against a helper that ignored its argument.
+
 ## Phase 19 — the lifecycle lock pair deadlocked a small pool
 
 CI e2e stayed red after Phase 18. The goroutine dump showed all four writers in
