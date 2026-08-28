@@ -59,8 +59,8 @@ All four binaries are built from the same repo, each with a clearly scoped role.
 | Binary          | Port | Role |
 | --------------- | ---- | ---- |
 | [cmd/api](cmd/api)           | 2001 | HTTP data-plane (events, catalog + batch + reconciliation read, recommendations, rankings, trending, object metadata, BYOE) plus three goroutines: the `ingest` worker consuming `codohue:events`, the catalog worker consuming `codohue:catalog` (durable catalog transport, fed into `internal/catalog` via a `cmd/api` adapter), and the events-tail publisher fanning ingested events onto `codohue:events-tail:{ns}` |
-| [cmd/cron](cmd/cron)         | —    | Batch daemon driven by `CODOHUE_BATCH_INTERVAL_MINUTES` (default 5 min); each tick runs three phases per namespace. Also runs the retention prune job and publishes run lifecycle events to `codohue:batchrun-events` so `cmd/admin` can stream cron runs live |
-| [cmd/admin](cmd/admin)       | 2002 | Admin server: session-cookie **or** bearer (`CODOHUE_ADMIN_API_KEY`) auth, `/api/admin/v1/*`, SSE streams over an in-process event bus fed by three Redis pub/sub bridges (batch runs, catalog signals, events tail). Embeds the `web/admin` SPA (Vite + React 19 + Tailwind v4) via the `embedui` build tag |
+| [cmd/cron](cmd/cron)         | —    | Batch daemon driven by `CODOHUE_BATCH_INTERVAL_MINUTES` (default 5 min); each tick runs three phases per namespace. Also runs the retention prune and deleted-generation janitor, and publishes run lifecycle events to `codohue:batchrun-events` so `cmd/admin` can stream cron runs live |
+| [cmd/admin](cmd/admin)       | 2002 | Admin server: session-cookie **or** bearer (`CODOHUE_ADMIN_API_KEY`) auth, `/api/admin/v1/*`, SSE streams over an in-process event bus fed by three Redis pub/sub bridges (batch runs, catalog signals, events tail). Embeds the `web/admin` SPA via the `embedui` build tag. The same binary provides the non-HTTP `lifecycle disable-legacy-envelopes` and `idmap-repair audit\|quarantine\|apply\|verify\|resume` operator commands |
 | [cmd/embedder](cmd/embedder) | 2003 | Catalog worker: consumes `catalog:embed:{ns}` streams, embeds via `embedstrategy.Strategy`, upserts the dense vector. Also runs the re-embed completion watcher, the backlog sampler (writes `catalog_backlog_samples`), the recovery sweeper (re-publishes rows whose stream entry was lost), and the liveness heartbeat (`codohue:embedder:heartbeat`, TTL 90s) |
 
 ### 2.1 Process ↔ storage matrix
@@ -160,6 +160,10 @@ Schema evolution after `001_initial`:
 - **021** `objects` table; **moves** `author_subject_id` off `catalog_items` and drops that column, so attribution works under every `dense_source`
 - **022** re-keys `id_mappings` on `(namespace, entity_type, string_id)`; requires a full recompute per namespace after deploy
 - **023** makes `catalog_max_attempts` / `catalog_max_content_bytes` nullable so NULL means "use the env default"
+- **024** adds `namespace_lifecycles` and `system_lifecycle`: durable delete/reset states, monotonic namespace generations, and the legacy-envelope gate
+- **025** adds validated namespace foreign keys and the catalog keyset index backing `next_cursor`
+- **026** scopes numeric ID uniqueness to `(namespace, entity_type)` and adds the durable ID-mapping repair run/item manifests
+- **027** records rebuilt namespaces on ID-mapping repair runs so verification uses durable evidence
 
 ### 5.2 Redis
 
@@ -177,9 +181,14 @@ Schema evolution after `001_initial`:
 
 The cron liveness signal has no Redis key — the admin overview derives it from the most recent row in `batch_run_logs`.
 
+The table shows generation-1 names. Delete/recreate increments the namespace
+generation; generation 2+ uses `nslifecycle`-qualified Redis and Qdrant names
+(for example `trending:demo:g2` and `demo_g2_objects_dense`). Stream envelopes
+carry `namespace_generation`; stale-generation work is acknowledged and dropped.
+
 ### 5.3 Qdrant
 
-Each namespace has **four collections**:
+Each namespace generation has **four collections**:
 
 | Collection              | Vector kind | Distance     | Writer       | Purpose |
 | ----------------------- | ----------- | ------------ | ------------ | ------- |
@@ -333,13 +342,14 @@ Hardening in the request path:
 
 Every business capability has **exactly one canonical path**. Legacy duplicate paths have been removed → 404.
 
-**Infra/ops (no auth)**
+**Infra/ops**
 
-| Method | Path        | Description                                 |
-| ------ | ----------- | ------------------------------------------- |
-| GET    | `/ping`     | Liveness                                    |
-| GET    | `/healthz`  | postgres + redis + qdrant                   |
-| GET    | `/metrics`  | Prometheus                                  |
+| Method | Path                    | Authentication       | Description |
+| ------ | ----------------------- | -------------------- | ----------- |
+| GET    | `/ping`                 | none                 | Liveness |
+| GET    | `/healthz`              | none                 | Sanitized aggregate health without raw dependency errors |
+| GET    | `/healthz?details=true` | observability bearer | Per-component diagnostics; route absent when `CODOHUE_OBSERVABILITY_TOKEN` is unset |
+| GET    | `/metrics`              | observability bearer | Prometheus metrics; route absent when `CODOHUE_OBSERVABILITY_TOKEN` is unset |
 
 **Namespace-scoped (Bearer)**
 
@@ -348,7 +358,7 @@ Every business capability has **exactly one canonical path**. Legacy duplicate p
 | POST   | `/v1/namespaces/{ns}/events`                         | Ingest event (202 + `{"event_id":N}`; `namespace` in body is ignored). Also fans onto `codohue:events-tail:{ns}` |
 | POST   | `/v1/namespaces/{ns}/catalog`                        | Ingest raw content (202; only when `dense_source="catalog"`). Optional `author_subject_id` is written through to `objects` |
 | POST   | `/v1/namespaces/{ns}/catalog/batch`                  | Batch ingest, ≤100 items, validated independently with per-item results (202) |
-| GET    | `/v1/namespaces/{ns}/catalog/objects`                | Reconciliation read (`?changed_since=&limit=&offset=`): held object ids by `updated_at` ascending, so repair passes re-send only the gap |
+| GET    | `/v1/namespaces/{ns}/catalog/objects`                | Reconciliation read (`?changed_since=&limit=&cursor=`): opaque keyset cursor over `(updated_at,id)`; legacy offset remains for one compatibility window and cannot be combined with a cursor |
 | GET    | `/v1/namespaces/{ns}/subjects/{id}/recommendations`  | CF recommendations (`?limit=&offset=`) |
 | POST   | `/v1/namespaces/{ns}/rankings`                       | Score + rank up to 500 candidates with the hybrid blend + shared exclusions (200); per-item `scored` flag, `no_subject_vector` whole-response fallback, chunk-comparable scores (§8.2) |
 | GET    | `/v1/namespaces/{ns}/trending`                       | Trending (`?limit=&offset=`); `window_hours` in the response reports the namespace's configured window |
@@ -377,6 +387,7 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | POST   | `/api/admin/v1/namespaces/{ns}/api-key`                           | Rotate the namespace data-plane key (plaintext returned once) |
 | GET    | `/api/admin/v1/namespaces/{ns}/dashboard`                         | Per-namespace aggregate: config + last 12 runs + backlog + events + qdrant counts + trending TTL + author coverage |
 | POST   | `/api/admin/v1/reset`                                             | App-wide reset; body `{"confirm":"RESET"}` |
+| GET    | `/api/admin/v1/catalog/strategies`                                | Namespace-free embed strategy registry; `?dim=` filters by embedding dimension |
 | GET    | `/api/admin/v1/namespaces/{ns}/catalog`                           | Catalog config + strategies + backlog + lag + failures + throughput |
 | PUT    | `/api/admin/v1/namespaces/{ns}/catalog`                           | Enable/update/disable catalog (400 on dim mismatch; 503 unwired) |
 | POST   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                  | Trigger re-embed (202 + `Location`; 409 if one is running) |
@@ -418,6 +429,15 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
   }
 }
 ```
+
+Lifecycle and validation failures use stable codes across data-plane handlers:
+
+| Status | Code | Meaning |
+| ------ | ---- | ------- |
+| 404 | `namespace_not_found` | The namespace does not exist |
+| 409 | `namespace_not_active` | Delete/reset lifecycle work blocks the namespace |
+| 503 | `namespace_config_unavailable` | Lifecycle or configuration storage could not be read safely |
+| 400 | `invalid_object_created_at` | The supplied creation time is more than five minutes in the future |
 
 ### 10.4 Strict request decoding
 
@@ -474,8 +494,9 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 - **Rolling metrics** — `internal/admin/metricsroll` maintains in-process 1m/5m windows behind `/api/admin/v1/metrics/summary`.
 - **Backlog timeline** — `catalog_backlog_samples`, written by the embedder's sampler, backs `/catalog/backlog-history`.
 - **slog format** — `CODOHUE_LOG_FORMAT=text` (default) or `json` (the prod compose defaults to `json`).
-- **Healthcheck** — `GET /healthz` on `cmd/api` checks postgres + redis + qdrant; admin proxies it at `/api/admin/v1/health`.
+- **Healthcheck** — unauthenticated `GET /healthz` exposes sanitized aggregate status. A valid observability bearer can request `/healthz?details=true` for component diagnostics; admin proxies the sanitized endpoint at `/api/admin/v1/health`.
 - **Retention** — `internal/retention` prunes `batch_run_logs` and `catalog_backlog_samples`; setting either `*_RETENTION_DAYS` to 0 disables that prune.
+- **Stream retention** — producers never trim streams. A periodic exact `XTRIM MINID` pass derives the safe frontier from every consumer group and never trims pending work.
 
 ## 13. Key design decisions
 
@@ -487,7 +508,7 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 | Batch-independent normalization (`x/(x+k)` sparse, bounded dense) | Per-request min-max anchored scores to the batch, so chunked rankings calls could not be merged; a fixed map keeps scores comparable across requests. `k` is one global constant on purpose |
 | Rankings share Recommend's blend and eligibility | One helper, one exclusion path — the same namespace config cannot mean two different things depending on which endpoint is asked |
 | Every rankings candidate returns, with a `scored` flag | "No vector", "not indexed" and "zero overlap" were indistinguishable `score: 0`; the flag + `no_subject_vector` source let callers compute coverage and skip unknown subjects |
-| Client-facing catalog stream is not producer-trimmed | Durability is the point: content published during an outage must survive until consumed. The internal `catalog:embed:{ns}` stream keeps its 100k cap — it is re-derivable from Postgres, the client stream is not |
+| Streams are never producer-trimmed | Producers cannot know the slowest consumer-group frontier. Periodic exact retention trims only completed history below every group frontier, preserving pending work |
 | Admin bearer auth reuses the admin key, failed-only rate limit | The key already grants full control via login, so bearer widens no privilege — it removes the cookie handshake automation had to fake. Acceptable while there is one internal consumer |
 | One `dense_source` enum, not `dense_strategy` + `catalog_enabled` | Two independent fields could describe a contradictory state (two producers writing `{ns}_objects_dense`); one enum makes it unrepresentable and deletes the cross-field validation |
 | `byoe` / `disabled` skip phase 2; `catalog` does not | Phase 2 also fills `{ns}_subjects_dense`, which the embedder never writes — skipping it under `catalog` would leave subject vectors empty and silently degrade every request to sparse CF |
@@ -497,6 +518,7 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 | Authored exclusion as point IDs, not a payload filter | A payload filter would reach only the dense collection; cron writes the sparse points and knows nothing about authorship |
 | Namespace config writes are PATCH | The admin UI submits only edited fields; `INSERT … ON CONFLICT DO UPDATE` must name every column, which would reset the rest to Go zero values |
 | Two-tier auth, admin key valid on every namespace | Per-tenant keys isolate blast radius on leak; the admin key already grants full control via the admin plane, and the admin server must reach every namespace |
+| Namespace lifecycle generations fence every writer | Delete/recreate increments the generation; generation 2+ qualifies Redis and Qdrant physical names so stale work from an earlier incarnation cannot become visible |
 | Embed strategy registry as a seam | Forward-compat: an unwired build still boots and catalog endpoints return 503 instead of panicking |
 | No peer-domain imports | Enforced by test; any domain can be split into a microservice without untangling coupling |
 | Single `docs.go` per package | No package docs scattered across files; one canonical place for the description |
@@ -506,8 +528,8 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 
 ```text
 cmd/api                          HTTP data-plane + ingest/catalog workers + tail publisher (2001)
-cmd/cron                         Batch recompute daemon + retention prune
-cmd/admin                        Admin server + embedded SPA + pub/sub bridges (2002)
+cmd/cron                         Batch recompute + retention + lifecycle janitor
+cmd/admin                        Admin server + SPA + pub/sub bridges + operator CLIs (2002)
 cmd/embedder                     Catalog worker + sampler + sweeper + heartbeat (2003)
 
 internal/ingest                  HTTP + Redis Streams ingest (events + catalog), events tail
@@ -525,12 +547,13 @@ internal/config                  Env loader
 internal/core/embedstrategy      Strategy interface + registry
 internal/core/namespace          Shared namespace.Config
 internal/core/idmap              String ID → numeric Qdrant point ID
+internal/core/nslifecycle        Namespace state, generations, leases, physical names
 internal/core/httpapi            JSON helpers, DecodeStrict, middleware
 internal/core/batchrun           Shared batch-run logging types
 internal/architecture            Repository-wide import-rule tests
 internal/infra/{postgres,redis,qdrant,metrics}
 
-migrations/                      SQL migrations (001 … 023)
+migrations/                      SQL migrations (001 … 027)
 e2e/                             End-to-end tests (build tag `e2e`)
 specs/                           Feature specs and design docs
 pkg/codohuetypes                 Shared wire types module
@@ -544,7 +567,7 @@ docker/                          Auxiliary Dockerfiles
 
 - [README.md](README.md) — overview + quickstart.
 - [AGENTS.md](AGENTS.md) — contributor / agent conventions.
-- [CLAUDE.md](CLAUDE.md) — detailed instructions for Claude Code working in this repo, including the full environment-variable list.
+- [CLAUDE.md](CLAUDE.md) — thin Claude Code layer that imports the shared `AGENTS.md` instructions.
 - [sdk/go/README.md](sdk/go/README.md) — Go SDK + Redis Streams transport.
 - [specs/](specs/) — per-feature specs and design docs.
 - [internal/architecture/imports_test.go](internal/architecture/imports_test.go) — import rule enforcement.

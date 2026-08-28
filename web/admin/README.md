@@ -12,7 +12,8 @@ This directory is its own npm workspace and is *not* a Go package. Tooling and c
 | [BUILD_PLAN.md](BUILD_PLAN.md) | Phase outline, build order, route table, code organisation, risks. The product-level plan. |
 | [PHASE_2_TODO.md](PHASE_2_TODO.md) | Granular checklist for Phase 2 (page implementations). |
 | [PHASE_3_TODO.md](PHASE_3_TODO.md) | Granular checklist for Phase 3 (polish + release prep). |
-| Project [CLAUDE.md](../../CLAUDE.md) | Repo-wide conventions, ports, env vars, commit-message style. Read for Go-side context. |
+| Project [AGENTS.md](../../AGENTS.md) | Shared repository conventions, commands, testing, and commit style. |
+| Project [ARCHITECTURE.md](../../ARCHITECTURE.md) | Ports, storage, data flow, authentication, and REST API contracts. |
 
 ## Commands
 

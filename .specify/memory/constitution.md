@@ -1,15 +1,15 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: 1.0.0 → 2.0.0
+Version change: 2.0.0 → 2.0.1
 Modified principles:
-  - III. API Consistency → III. API and Operational Endpoint Consistency
-  - Architecture Constraints: exactly two binaries → exactly four approved binaries
-  - Quality Gates: build both binaries → build all four approved binaries
+  - III. API and Operational Endpoint Consistency — canonical REST API table
+    moved from CLAUDE.md to ARCHITECTURE.md
 Added sections: None
 Removed sections: None
 Templates requiring updates:
-  ✅ .specify/templates/plan-template.md — auth and four-binary gates aligned
+  ✅ .specify/templates/plan-template.md — documentation gate now targets
+    ARCHITECTURE.md
   ✅ .specify/templates/spec-template.md — verified; no structural change required
   ✅ .specify/templates/tasks-template.md — mandatory business-logic tests aligned
   ✅ .specify/templates/constitution-template.md — verified; remains project-neutral
@@ -17,9 +17,9 @@ Command guidance:
   ✅ .agents/skills/speckit-tasks/SKILL.md — mandatory business-logic tests aligned
   ✅ .specify/templates/commands/ — directory absent; no command templates to update
 Runtime guidance:
-  ✅ CLAUDE.md — four-binary and operational-auth guidance aligned
-  ✅ .github/copilot-instructions.md — four-binary guidance aligned
-  ✅ AGENTS.md and README.md — verified; four-binary architecture already aligned
+  ✅ AGENTS.md — canonical shared repository instructions
+  ✅ CLAUDE.md — imports AGENTS.md for Claude Code
+  ✅ ARCHITECTURE.md — canonical architecture and REST API reference
 Feature artifacts:
   ✅ specs/007-backend-audit-remediation/plan.md — obsolete conflicts removed
 Follow-up TODOs: None — all placeholders resolved.
@@ -83,7 +83,7 @@ accept namespace keys or the global admin key. Unauthenticated health responses
 MUST expose only sanitized aggregate status.
 
 No new endpoint MAY be added without a corresponding entry in the REST API
-table in `CLAUDE.md`. Endpoint behavior MUST be idempotent where specified.
+table in `ARCHITECTURE.md`. Endpoint behavior MUST be idempotent where specified.
 
 **Why**: Stable paths, error shapes, and explicit trust boundaries prevent
 silent client breakage and stop monitoring access from granting application
@@ -141,8 +141,8 @@ Every pull request MUST pass:
 - `make build` — all four approved binaries compile without error
 
 A PR that adds a new domain MUST include `docs.go`, at least one `_test.go`
-for business logic files, and an updated CLAUDE.md REST API table entry for
-any new endpoints.
+for business logic files, and an updated `ARCHITECTURE.md` REST API table entry
+for any new endpoints.
 
 Code review MUST verify:
 1. Import boundary compliance (no cross-domain imports)
@@ -162,11 +162,13 @@ require:
    - **MAJOR**: Removal or redefinition of a core principle.
    - **MINOR**: New principle or materially expanded guidance.
    - **PATCH**: Clarifications, wording, or non-semantic refinements.
-3. Updates to all dependent templates and `CLAUDE.md` as part of the same
-   change set.
+3. Updates to all dependent templates, `AGENTS.md`, and canonical project
+   documentation as part of the same change set.
 
 All PRs and code reviews MUST verify compliance with this constitution.
 Complexity violations require justification in the Complexity Tracking section
-of the relevant `plan.md`. Runtime development guidance lives in `CLAUDE.md`.
+of the relevant `plan.md`. Shared runtime development guidance lives in
+`AGENTS.md`; `CLAUDE.md` imports it for Claude Code. Architecture and REST API
+documentation lives in `ARCHITECTURE.md`.
 
-**Version**: 2.0.0 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-08-25
+**Version**: 2.0.1 | **Ratified**: 2026-04-28 | **Last Amended**: 2026-08-28

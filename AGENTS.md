@@ -1,6 +1,7 @@
 # Repository Guidelines
 
 ## Project Overview
+
 Codohue is a hybrid recommendation service for behavioral personalization. It ingests events from Redis Streams, stores raw events in PostgreSQL, computes sparse and dense vectors, and serves recommendations through an HTTP API backed by Qdrant.
 
 There are four binaries:
@@ -11,6 +12,7 @@ There are four binaries:
 - `cmd/embedder`: catalog auto-embedding worker (port `2003` for `/healthz` + `/metrics`); consumes raw catalog content from `catalog:embed:{ns}` Redis streams, embeds it via the configured strategy, and upserts dense vectors into `{ns}_objects_dense`.
 
 ## Project Structure & Module Organization
+
 The repository follows a strict Go service layout:
 
 - `cmd/api`, `cmd/cron`, `cmd/admin`, `cmd/embedder`: executable entrypoints.
@@ -27,16 +29,29 @@ The repository follows a strict Go service layout:
 - `internal/infra/{postgres,redis,qdrant,metrics}`: external clients and observability.
 - `migrations/`: SQL migrations as `NNN_name.up.sql` and `NNN_name.down.sql`.
 - `e2e/`: end-to-end tests with the `e2e` build tag.
-- `docs/`: architecture and client integration references.
+- `ARCHITECTURE.md`: canonical system architecture, storage, data-flow, and REST API reference.
+- `README.md`: quickstart, configuration overview, and common development workflows.
+- `deploy/`: rollout, recovery, and operator runbooks.
 
 Keep feature logic inside its domain package. The default package shape is `docs.go`, `types.go`, `repository.go`, `service.go`, `handler.go`, plus matching tests.
 
+## Documentation Ownership
+
+- `AGENTS.md` is the canonical source for repository instructions shared by Codex and Claude Code.
+- `CLAUDE.md` imports `AGENTS.md` and contains only Claude-specific guidance. Do not duplicate shared rules there.
+- `ARCHITECTURE.md` is the canonical architecture and REST API reference. Update it whenever an endpoint, migration, storage contract, process responsibility, or cross-domain flow changes.
+- `README.md`, `.env.example`, and the `Makefile` are authoritative for onboarding, configuration, and executable commands respectively.
+- Feature decisions and implementation artifacts belong under `specs/`; rollout and recovery procedures belong under `deploy/`.
+- Prefer links to the canonical source over copying long command, API, configuration, or architecture sections into agent instruction files.
+
 ## Architecture Rules
+
 - Domain packages may import `core`, `infra`, and `config`; they should not depend on each other directly.
 - Every package must have a `docs.go` file containing the package doc comment and package declaration only.
 - Use PostgreSQL for durable events/config, Redis for streams/cache/trending, and Qdrant for vector collections such as `{ns}_subjects`, `{ns}_objects`, `{ns}_subjects_dense`, and `{ns}_objects_dense`.
 
 ## Build, Test, and Development Commands
+
 Use the `Makefile` as the source of truth:
 
 - `make build`: build all binaries into `tmp/`.
@@ -53,6 +68,7 @@ Use the `Makefile` as the source of truth:
 - `make migrate-up`, `make migrate-down`, `make migrate-version`, `make migrate-create NAME=add_indexes`: manage schema changes.
 
 ## Coding Style & Naming Conventions
+
 - Target Go `1.26.1` as defined in `go.mod`.
 - Format code with standard Go formatting; lint with `golangci-lint run ./...`.
 - Keep package names lowercase and concise.
@@ -61,6 +77,7 @@ Use the `Makefile` as the source of truth:
 - Prefer explicit, domain-based naming such as `NamespaceConfig`, `GetPopularItems`, `CountInteractions`.
 
 ## Testing Guidelines
+
 - Every business-logic file such as `service.go`, `repository.go`, `job.go`, or `worker.go` should have a corresponding `_test.go`.
 - `handler_test.go` should cover request parsing, auth, and response contracts.
 - `types.go` and `docs.go` do not require dedicated tests.
@@ -69,13 +86,16 @@ Use the `Makefile` as the source of truth:
 - Run `make test-e2e` whenever you touch API behavior, migrations, Redis/Qdrant integration, or cron/compute flows.
 
 ## API, Data, and Config Notes
-- Namespace config is created via `PUT /v1/config/namespaces/{namespace}` using `CODOHUE_ADMIN_API_KEY`.
+
+- Namespace config is created via `PUT /api/admin/v1/namespaces/{namespace}` using an admin session or `CODOHUE_ADMIN_API_KEY`.
 - All non-admin routes use the namespace key returned once at namespace creation.
 - Recommendation sources include `collaborative_filtering`, `hybrid`, `hybrid_cold`, `fallback_popular`, and `hybrid_rank`.
-- Local development expects `.env` values such as `DATABASE_URL`, `REDIS_URL`, `QDRANT_HOST`, `QDRANT_PORT`, `CODOHUE_ADMIN_API_KEY`, and `BATCH_INTERVAL_MINUTES`.
+- Local development expects `.env` values such as `DATABASE_URL`, `REDIS_URL`, `QDRANT_HOST`, `QDRANT_PORT`, `CODOHUE_ADMIN_API_KEY`, and `CODOHUE_BATCH_INTERVAL_MINUTES`.
 - Do not commit secrets or plaintext namespace keys.
+- Client-facing JSON types in `pkg/codohuetypes` are the public wire contract. Any deliberate wire change must update its golden snapshots and the REST API table in `ARCHITECTURE.md`.
 
 ## Commit & Pull Request Guidelines
+
 Use Conventional Commits for all new commits:
 
 - Format: `type(scope): summary`
@@ -83,6 +103,7 @@ Use Conventional Commits for all new commits:
 - Prefer lowercase in `type`, `scope`, and summary except for proper nouns, API names, and versions.
 - Pick a single primary scope that best describes the changed area.
 - Keep commits focused so the message describes one logical change.
+- Describe repository behavior, not transient Spec Kit phase labels or task IDs such as `T012`.
 
 Recommended commit types:
 
