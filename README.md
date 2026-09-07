@@ -89,7 +89,7 @@ Codohue loads `.env` automatically when present. Required: `DATABASE_URL`, `CODO
 | `CODOHUE_EMBEDDER_HEALTH_PORT`      | `2003`                   | `cmd/embedder` |
 | `CODOHUE_EMBEDDER_REPLICA_NAME`     | hostname                 | `cmd/embedder` consumer name |
 | `CODOHUE_EMBEDDER_POLL_INTERVAL`    | `30s`                    | `cmd/embedder` rescan cadence |
-| `CODOHUE_OBSERVABILITY_TOKEN`       | unset                    | `cmd/api`, `cmd/embedder` — gates `/metrics` and `/healthz?details=true`. Unset means those routes do not exist (404) |
+| `CODOHUE_OBSERVABILITY_TOKEN`       | unset                    | `cmd/api`, `cmd/admin`, `cmd/embedder` — gates `/metrics` and API/embedder `/healthz?details=true`. Unset means those routes do not exist (404) |
 | `CODOHUE_STREAM_RETENTION_ENABLED`  | `false`                  | `cmd/api`, `cmd/embedder` — exact consumer-progress stream trimming |
 | `CODOHUE_STREAM_RETENTION_INTERVAL` | `1m`                     | how often a retention pass runs |
 
@@ -109,6 +109,7 @@ curl -H "Authorization: Bearer $CODOHUE_OBSERVABILITY_TOKEN" \
 ```
 
 The embedder exposes the same pair on `CODOHUE_EMBEDDER_HEALTH_PORT`.
+The admin process exposes its own protected metrics at `http://localhost:2002/metrics`.
 
 ### Namespace lifecycle generations
 

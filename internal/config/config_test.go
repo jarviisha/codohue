@@ -180,6 +180,22 @@ func TestLoadCron_RequiresDatabaseURL(t *testing.T) {
 	})
 }
 
+func TestLoadAdmin_ObservabilityToken(t *testing.T) {
+	withEnv(t, map[string]string{
+		"DATABASE_URL":                "postgres://db",
+		"CODOHUE_ADMIN_API_KEY":       "admin",
+		"CODOHUE_OBSERVABILITY_TOKEN": "admin-monitor",
+	}, func() {
+		cfg, err := LoadAdmin()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.ObservabilityToken != "admin-monitor" {
+			t.Fatalf("ObservabilityToken: got %q", cfg.ObservabilityToken)
+		}
+	})
+}
+
 func TestLoadCron_DoesNotRequireAdminAPIKey(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":          "postgres://db",

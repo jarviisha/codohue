@@ -6,8 +6,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/jarviisha/codohue/internal/admin"
+	"github.com/jarviisha/codohue/internal/auth"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -19,7 +21,7 @@ import (
 // the bearer path for automation (see RequireSessionOrBearer). allowDevOrigin enables
 // credentialed CORS for the Vite dev server when non-empty (dev mode); empty
 // in production where the SPA is embedded same-origin.
-func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, allowDevOrigin string) chi.Router {
+func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, allowDevOrigin, observabilityToken string) chi.Router {
 	r := chi.NewRouter()
 	r.Use(admin.CORSMiddleware(allowDevOrigin))
 	r.Use(middleware.Logger)
@@ -34,6 +36,7 @@ func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, 
 
 	// Auth (sessions as a resource)
 	r.Post("/api/v1/auth/sessions", h.CreateSession)
+	r.Handle("/metrics", auth.RequireObservability(observabilityToken)(promhttp.Handler()))
 
 	// Protected admin API routes
 	r.Group(func(r chi.Router) {

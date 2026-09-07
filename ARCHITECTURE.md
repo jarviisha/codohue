@@ -379,6 +379,7 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | GET    | `/api/admin/v1/ping/stream`                                       | **(SSE)** Smoke-test stream for the SSE pipeline; not a production endpoint |
 | GET    | `/api/admin/v1/overview`                                          | Fleet aggregate: health + cron/embedder heartbeat + alerts + per-namespace summary |
 | GET    | `/api/admin/v1/metrics/summary`                                   | Curated rolling-window metrics: ingest events/sec (1m/5m) per ns + cron batch lag |
+| GET    | `/metrics`                                                        | Prometheus metrics for the admin process; dedicated observability bearer, 404 when unset |
 | GET    | `/api/admin/v1/stream`                                            | **(SSE)** Global ops bus: `batch_run.*`, `catalog.dead_letter_grew`, `catalog.reembed_progress` |
 | GET    | `/api/admin/v1/namespaces`                                        | List configs |
 | GET    | `/api/admin/v1/namespaces/{ns}`                                   | Get config |
@@ -486,7 +487,7 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 
 ## 12. Observability
 
-- **Prometheus** — collectors in `internal/infra/metrics`, exposed at `GET /metrics` from both `cmd/api` (2001) and `cmd/embedder` (2003).
+- **Prometheus** — collectors in `internal/infra/metrics`, exposed at protected `GET /metrics` from `cmd/api` (2001), `cmd/admin` (2002), and `cmd/embedder` (2003).
 - **Batch run history** — `batch_run_logs` records every cron tick and admin re-embed; the `log_lines` JSONB column captures the run's slog output, surfaced through the admin API and streamed live over SSE.
 - **Liveness** — `cmd/embedder` writes `codohue:embedder:heartbeat` (TTL 90s); cron liveness is derived from the most recent `batch_run_logs` row. Both feed the admin overview's alert rules.
 - **Dense-downgrade alert** — the overview flags any namespace configured for hybrid (`alpha < 1`, dense on) whose `{ns}_subjects_dense` is empty: the config says hybrid while requests silently serve sparse-only (the standing state of `byoe` namespaces that never push subject vectors). The serving path logs the per-request warning.
