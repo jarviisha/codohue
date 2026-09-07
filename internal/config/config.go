@@ -221,11 +221,6 @@ type EmbedderConfig struct {
 	QdrantPort  int
 	LogFormat   string
 
-	// CatalogMaxContentBytes is the global default per-namespace cap on the
-	// size of catalog item content. Per-namespace overrides live in
-	// namespace_configs.catalog_max_content_bytes.
-	CatalogMaxContentBytes int
-
 	// EmbedMaxAttempts is the global default for the number of transient
 	// retries before an item is moved to dead_letter. Overridable per
 	// namespace via namespace_configs.catalog_max_attempts.
@@ -276,15 +271,6 @@ func LoadEmbedder() (*EmbedderConfig, error) {
 		return nil, fmt.Errorf("invalid QDRANT_PORT: %w", err)
 	}
 	cfg.QdrantPort = qdrantPort
-
-	maxBytes, err := strconv.Atoi(getEnv("CODOHUE_CATALOG_MAX_CONTENT_BYTES", "32768"))
-	if err != nil {
-		return nil, fmt.Errorf("invalid CODOHUE_CATALOG_MAX_CONTENT_BYTES: %w", err)
-	}
-	if maxBytes <= 0 {
-		return nil, fmt.Errorf("CODOHUE_CATALOG_MAX_CONTENT_BYTES must be positive, got %d", maxBytes)
-	}
-	cfg.CatalogMaxContentBytes = maxBytes
 
 	maxAttempts, err := strconv.Atoi(getEnv("CODOHUE_EMBED_MAX_ATTEMPTS", "5"))
 	if err != nil {
