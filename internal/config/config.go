@@ -166,6 +166,9 @@ type AdminConfig struct {
 	QdrantHost     string
 	QdrantPort     int
 	AllowDevOrigin string // CORS allow-origin for the Vite dev server; empty in prod (same-origin embed)
+	// ObservabilityToken protects the admin process's Prometheus endpoint.
+	// Empty leaves the route unavailable.
+	ObservabilityToken string
 
 	// SessionSecret pins the HMAC secret admin session tokens are signed
 	// with. Empty (the default) generates fresh material each boot, which
@@ -179,15 +182,16 @@ func LoadAdmin() (*AdminConfig, error) {
 	loadDotenv()
 
 	cfg := &AdminConfig{
-		DatabaseURL:    getEnv("DATABASE_URL", ""),
-		RedisURL:       getEnv("REDIS_URL", "redis://localhost:6379"),
-		AdminAPIKey:    getEnv("CODOHUE_ADMIN_API_KEY", ""),
-		APIURL:         getEnv("CODOHUE_API_URL", "http://localhost:2001"),
-		AdminPort:      getEnv("CODOHUE_ADMIN_PORT", "2002"),
-		LogFormat:      getEnv("CODOHUE_LOG_FORMAT", "text"),
-		QdrantHost:     getEnv("QDRANT_HOST", "localhost"),
-		AllowDevOrigin: getEnv("CODOHUE_ALLOW_DEV_ORIGIN", ""),
-		SessionSecret:  getEnv("CODOHUE_ADMIN_SESSION_SECRET", ""),
+		DatabaseURL:        getEnv("DATABASE_URL", ""),
+		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379"),
+		AdminAPIKey:        getEnv("CODOHUE_ADMIN_API_KEY", ""),
+		APIURL:             getEnv("CODOHUE_API_URL", "http://localhost:2001"),
+		AdminPort:          getEnv("CODOHUE_ADMIN_PORT", "2002"),
+		LogFormat:          getEnv("CODOHUE_LOG_FORMAT", "text"),
+		QdrantHost:         getEnv("QDRANT_HOST", "localhost"),
+		AllowDevOrigin:     getEnv("CODOHUE_ALLOW_DEV_ORIGIN", ""),
+		SessionSecret:      getEnv("CODOHUE_ADMIN_SESSION_SECRET", ""),
+		ObservabilityToken: getEnv("CODOHUE_OBSERVABILITY_TOKEN", ""),
 	}
 
 	if cfg.DatabaseURL == "" {

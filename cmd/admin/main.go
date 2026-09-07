@@ -33,6 +33,8 @@ import (
 	adminui "github.com/jarviisha/codohue/web/admin"
 )
 
+var registerMetricsFn = metrics.Register
+
 func main() {
 	if err := dispatchAdminCommand(os.Args[1:], run, runLifecycleCLI, runIdmapRepairCLI); err != nil {
 		log.Fatal(err)
@@ -60,6 +62,7 @@ func run() error {
 	}
 
 	initLogger(cfg.LogFormat)
+	registerMetricsFn()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -190,7 +193,7 @@ func run() error {
 	h := admin.NewHandler(svc, cfg.AdminAPIKey, sessions)
 	h.SetEventBus(bus)
 
-	r := newAdminRouter(h, sessions, cfg.AdminAPIKey, cfg.AllowDevOrigin)
+	r := newAdminRouter(h, sessions, cfg.AdminAPIKey, cfg.AllowDevOrigin, cfg.ObservabilityToken)
 
 	// Static file serving — React SPA embedded in the binary
 	distFS, err := fs.Sub(adminui.Files, "dist")

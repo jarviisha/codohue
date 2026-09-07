@@ -2,12 +2,40 @@ package main
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/jarviisha/codohue/internal/admin"
 )
+
+func TestNewAdminRouter_MetricsObservabilityContract(t *testing.T) {
+	cases := []struct {
+		name, configured, provided string
+		want                       int
+	}{
+		{name: "unconfigured", want: http.StatusNotFound},
+		{name: "missing token", configured: "monitor", want: http.StatusUnauthorized},
+		{name: "wrong token", configured: "monitor", provided: "wrong", want: http.StatusUnauthorized},
+		{name: "authorized", configured: "monitor", provided: "monitor", want: http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newAdminRouter(admin.NewHandler(nil, "admin-key", nil), nil, "admin-key", "", tc.configured)
+			req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", http.NoBody)
+			if tc.provided != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.provided)
+			}
+			rec := httptest.NewRecorder()
+			r.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				body, _ := io.ReadAll(rec.Body)
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.want, body)
+			}
+		})
+	}
+}
 
 // TestNewAdminRouter_RegistersCatalogRoutes is a smoke test asserting that
 // every catalog admin route from contracts/rest-api.md is wired by
@@ -17,7 +45,7 @@ import (
 // route is asserted with a 400 on missing body.
 func TestNewAdminRouter_RegistersCatalogRoutes(t *testing.T) {
 	apiKey := "test-key"
-	r := newAdminRouter(admin.NewHandler(nil, apiKey, nil), nil, apiKey, "")
+	r := newAdminRouter(admin.NewHandler(nil, apiKey, nil), nil, apiKey, "", "")
 
 	cases := []struct {
 		method string
@@ -58,7 +86,7 @@ func TestNewAdminRouter_AuthEndpointReachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session manager: %v", err)
 	}
-	r := newAdminRouter(admin.NewHandler(nil, apiKey, sessions), sessions, apiKey, "")
+	r := newAdminRouter(admin.NewHandler(nil, apiKey, sessions), sessions, apiKey, "", "")
 
 	// Empty body — handler returns 400 invalid_request, proving the route is wired.
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/sessions", http.NoBody)
@@ -76,7 +104,7 @@ func TestNewAdminRouter_AuthEndpointReachable(t *testing.T) {
 // parsed as the {id} URL parameter.
 func TestNewAdminRouter_BulkRedriveBeforeIDRoute(t *testing.T) {
 	apiKey := "test-key"
-	r := newAdminRouter(admin.NewHandler(nil, apiKey, nil), nil, apiKey, "")
+	r := newAdminRouter(admin.NewHandler(nil, apiKey, nil), nil, apiKey, "", "")
 
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
 		"/api/admin/v1/namespaces/ns/catalog/items/redrive-deadletter", http.NoBody)
