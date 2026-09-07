@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
+	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -86,8 +86,7 @@ func NewCatalogWorker(redisClient *redis.Client, service catalogIngestor, consum
 
 // Init creates the consumer group if it does not already exist.
 func (w *CatalogWorker) Init(ctx context.Context) error {
-	err := w.createGroupFn(ctx, codohuetypes.CatalogStreamName, catalogConsumerGroup, "0")
-	if err != nil && !isBusyGroupErr(err) {
+	if err := w.streamConsumer().Init(ctx); err != nil {
 		return fmt.Errorf("create catalog consumer group: %w", err)
 	}
 	return nil
@@ -97,109 +96,38 @@ func (w *CatalogWorker) Init(ctx context.Context) error {
 // reap/backoff mechanics as the event worker.
 func (w *CatalogWorker) Run(ctx context.Context) {
 	slog.Info("catalog ingest worker started", "stream", codohuetypes.CatalogStreamName, "consumer", w.consumer)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		w.reapPending(ctx)
-	}()
-	defer func() {
-		wg.Wait()
-		slog.Info("catalog ingest worker stopped")
-	}()
-
-	backoff := readErrBackoffMin
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		streams, err := w.readGroupFn(ctx, &redis.XReadGroupArgs{
-			Group:    catalogConsumerGroup,
-			Consumer: w.consumer,
-			Streams:  []string{codohuetypes.CatalogStreamName, ">"},
-			Count:    10,
-			Block:    5 * time.Second,
-		})
-		if errors.Is(err, redis.Nil) {
-			continue
-		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			if isNoGroupErr(err) {
-				if createErr := w.createGroupFn(ctx, codohuetypes.CatalogStreamName, catalogConsumerGroup, "0"); createErr != nil && !isBusyGroupErr(createErr) {
-					slog.Warn("catalog ingest recreate consumer group failed", "error", createErr)
-				}
-			}
-			slog.Warn("catalog ingest xreadgroup failed", "error", err)
-			if !sleepCtx(ctx, backoff) {
-				return
-			}
-			backoff = min(backoff*2, readErrBackoffMax)
-			continue
-		}
-		backoff = readErrBackoffMin
-
-		for _, stream := range streams {
-			for _, msg := range stream.Messages {
-				w.handleMessage(ctx, msg)
-			}
-		}
-	}
-}
-
-func (w *CatalogWorker) reapPending(ctx context.Context) {
-	ticker := time.NewTicker(reapInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		w.reapOnce(ctx)
-	}
+	defer slog.Info("catalog ingest worker stopped")
+	w.streamConsumer().Run(ctx)
 }
 
 func (w *CatalogWorker) reapOnce(ctx context.Context) {
-	if w.reapCursor == "" {
-		w.reapCursor = "0-0"
-	}
-	for page := 0; page < reapPageBudget; page++ {
-		start := w.reapCursor
-		msgs, next, err := w.autoClaimFn(ctx, &redis.XAutoClaimArgs{
-			Stream: codohuetypes.CatalogStreamName, Group: catalogConsumerGroup, Consumer: w.consumer,
-			MinIdle: minIdleReap, Start: start, Count: reapBatchSize,
-		})
-		if err != nil {
-			if isNoGroupErr(err) {
-				w.reapCursor = "0-0"
-			} else if ctx.Err() == nil {
-				slog.Warn("catalog ingest xautoclaim failed", "error", err)
-			}
-			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "error").Inc()
-			return
-		}
-		if len(msgs) > 0 {
-			metrics.StreamReclaimedTotal.WithLabelValues("catalog", "").Add(float64(len(msgs)))
-		}
-		for _, msg := range msgs {
-			w.handleMessage(ctx, msg)
-		}
-		w.reapCursor = next
-		if next == "0-0" || next == "" {
-			w.reapCursor = "0-0"
-			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "terminal").Inc()
-			return
-		}
-	}
-	metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", "budget_exhausted").Inc()
+	w.reapCursor = w.streamConsumer().ReapOnce(ctx, w.reapCursor)
+}
+
+func (w *CatalogWorker) streamConsumer() *infraredis.StreamConsumer {
+	return infraredis.NewStreamConsumer(infraredis.StreamConsumerConfig{
+		Stream: codohuetypes.CatalogStreamName, Group: catalogConsumerGroup, Consumer: w.consumer,
+		ReadCount: 10, ReadBlock: 5 * time.Second,
+		ReapInterval: reapInterval, MinIdleReap: minIdleReap,
+		ReapCount: reapBatchSize, ReapPageBudget: reapPageBudget,
+		ReadBackoffMin: readErrBackoffMin, ReadBackoffMax: readErrBackoffMax,
+	}, infraredis.StreamConsumerFuncs{
+		CreateGroup: w.createGroupFn,
+		ReadGroup:   w.readGroupFn,
+		AutoClaim:   w.autoClaimFn,
+	}, w.handleMessage, infraredis.StreamConsumerObserver{
+		ReadError: func(_ context.Context, err error) { slog.Warn("catalog ingest xreadgroup failed", "error", err) },
+		RecreateError: func(_ context.Context, err error) {
+			slog.Warn("catalog ingest recreate consumer group failed", "error", err)
+		},
+		ReclaimError: func(_ context.Context, err error) { slog.Warn("catalog ingest xautoclaim failed", "error", err) },
+		Reclaimed: func(count int) {
+			metrics.StreamReclaimedTotal.WithLabelValues("catalog", "").Add(float64(count))
+		},
+		ReclaimCompleted: func(outcome infraredis.ReclaimOutcome) {
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("catalog", "", string(outcome)).Inc()
+		},
+	})
 }
 
 // handleMessage decodes and ingests one stream entry. Permanent rejections

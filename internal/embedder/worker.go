@@ -2,10 +2,8 @@ package embedder
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +12,7 @@ import (
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
+	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 )
 
 // Default worker tunables. Operators can override via cmd/embedder env vars.
@@ -192,14 +191,10 @@ func (w *Worker) refreshNamespaces(ctx context.Context) error {
 		}
 		nsCtx, cancel := context.WithCancel(ctx)
 		w.cancels[key] = cancel
-		w.wg.Add(2)
+		w.wg.Add(1)
 		go func(ns, stream string) {
 			defer w.wg.Done()
 			w.consumePhysicalStream(nsCtx, ns, stream)
-		}(target.namespace, target.stream)
-		go func(ns, stream string) {
-			defer w.wg.Done()
-			w.reapStream(nsCtx, ns, stream)
 		}(target.namespace, target.stream)
 	}
 
@@ -242,76 +237,7 @@ func (w *Worker) consumePhysicalStream(ctx context.Context, ns, stream string) {
 	}
 
 	slog.InfoContext(ctx, "embedder consuming", slog.String("namespace", ns), slog.String("stream", stream))
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		streams, err := w.redis.XReadGroup(ctx, &redis.XReadGroupArgs{
-			Group:    group,
-			Consumer: w.cfg.ConsumerName,
-			Streams:  []string{stream, ">"},
-			Count:    int64(w.cfg.ReadBatchSize),
-			Block:    w.cfg.ReadBlockTime,
-		}).Result()
-
-		if errors.Is(err, redis.Nil) {
-			continue
-		}
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return
-			}
-			// NOGROUP means the stream or group vanished after this consumer
-			// started (namespace deleted + recreated, Redis restarted without
-			// persistence). Re-create instead of retrying into the same error
-			// until the process restarts.
-			if strings.Contains(err.Error(), "NOGROUP") {
-				if egErr := w.ensureGroup(ctx, stream, group); egErr != nil {
-					slog.WarnContext(ctx, "recreate consumer group failed",
-						slog.String("namespace", ns), slog.String("error", egErr.Error()))
-				}
-			}
-			slog.WarnContext(ctx, "xreadgroup failed", slog.String("namespace", ns), slog.String("error", err.Error()))
-			// Brief back-off so we don't hot-loop on persistent errors.
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(time.Second):
-			}
-			continue
-		}
-
-		for _, s := range streams {
-			for _, msg := range s.Messages {
-				w.handleMessage(ctx, ns, stream, group, msg)
-			}
-		}
-	}
-}
-
-// reapStream periodically reclaims entries idle in another consumer's PEL
-// and re-processes them. This is how a crashed replica's pending work
-// gets re-driven.
-func (w *Worker) reapStream(ctx context.Context, ns, stream string) {
-	// The cursor lives here, per goroutine — one per (namespace, generation)
-	// stream — so a recreated namespace scans its own PEL independently of the
-	// generation it replaced.
-	cursor := "0-0"
-	ticker := time.NewTicker(w.cfg.ReapInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		cursor = w.reapOnce(ctx, ns, stream, cursor)
-	}
+	w.streamConsumer(ns, stream).Run(ctx)
 }
 
 // reapOnce runs one bounded XAUTOCLAIM scan and returns the cursor the next
@@ -324,43 +250,45 @@ func (w *Worker) reapStream(ctx context.Context, ns, stream string) {
 // recreated, so any cursor into the old PEL is meaningless); an error retains
 // it, because a failed call says nothing about how far the scan had got.
 func (w *Worker) reapOnce(ctx context.Context, ns, stream, cursor string) string {
-	group := defaultConsumerGroup
-	if cursor == "" {
-		cursor = "0-0"
-	}
-	for page := 0; page < defaultReapPageBudget; page++ {
-		msgs, next, err := w.redis.XAutoClaim(ctx, &redis.XAutoClaimArgs{
-			Stream: stream, Group: group, Consumer: w.cfg.ConsumerName,
-			MinIdle: w.cfg.MinIdleReap, Start: cursor, Count: int64(w.cfg.ReapBatchSize),
-		}).Result()
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return cursor
-			}
-			if strings.Contains(err.Error(), "NOGROUP") {
-				metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "nogroup").Inc()
-				return "0-0"
-			}
+	return w.streamConsumer(ns, stream).ReapOnce(ctx, cursor)
+}
+
+func (w *Worker) streamConsumer(ns, stream string) *infraredis.StreamConsumer {
+	return infraredis.NewStreamConsumer(infraredis.StreamConsumerConfig{
+		Stream: stream, Group: defaultConsumerGroup, Consumer: w.cfg.ConsumerName,
+		ReadCount: int64(w.cfg.ReadBatchSize), ReadBlock: w.cfg.ReadBlockTime,
+		ReapInterval: w.cfg.ReapInterval, MinIdleReap: w.cfg.MinIdleReap,
+		ReapCount: int64(w.cfg.ReapBatchSize), ReapPageBudget: defaultReapPageBudget,
+		ReadBackoffMin: time.Second, ReadBackoffMax: time.Second,
+	}, infraredis.StreamConsumerFuncs{
+		CreateGroup: func(ctx context.Context, stream, group, start string) error {
+			return w.redis.XGroupCreateMkStream(ctx, stream, group, start).Err()
+		},
+		ReadGroup: func(ctx context.Context, args *redis.XReadGroupArgs) ([]redis.XStream, error) {
+			return w.redis.XReadGroup(ctx, args).Result()
+		},
+		AutoClaim: func(ctx context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			return w.redis.XAutoClaim(ctx, args).Result()
+		},
+	}, func(ctx context.Context, msg redis.XMessage) {
+		w.handleMessage(ctx, ns, stream, defaultConsumerGroup, msg)
+	}, infraredis.StreamConsumerObserver{
+		ReadError: func(ctx context.Context, err error) {
+			slog.WarnContext(ctx, "xreadgroup failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+		},
+		RecreateError: func(ctx context.Context, err error) {
+			slog.WarnContext(ctx, "recreate consumer group failed", slog.String("namespace", ns), slog.String("error", err.Error()))
+		},
+		ReclaimError: func(ctx context.Context, err error) {
 			slog.WarnContext(ctx, "xautoclaim failed", slog.String("namespace", ns), slog.String("error", err.Error()))
-			metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "error").Inc()
-			return cursor
-		}
-		if len(msgs) > 0 {
-			metrics.StreamReclaimedTotal.WithLabelValues("embed", ns).Add(float64(len(msgs)))
-		}
-		for _, msg := range msgs {
-			w.handleMessage(ctx, ns, stream, group, msg)
-		}
-		cursor = next
-		if next == "0-0" || next == "" {
-			metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "terminal").Inc()
-			return "0-0"
-		}
-	}
-	// The cursor survives the tick, so this is a paced scan rather than a
-	// stall — but it is the only signal that the PEL is deeper than one tick.
-	metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, "budget_exhausted").Inc()
-	return cursor
+		},
+		Reclaimed: func(count int) {
+			metrics.StreamReclaimedTotal.WithLabelValues("embed", ns).Add(float64(count))
+		},
+		ReclaimCompleted: func(outcome infraredis.ReclaimOutcome) {
+			metrics.StreamReclaimCyclesTotal.WithLabelValues("embed", ns, string(outcome)).Inc()
+		},
+	})
 }
 
 // handleMessage decodes a stream entry, dispatches it through the service,
@@ -426,7 +354,7 @@ func (w *Worker) ensureGroup(ctx context.Context, stream, group string) error {
 	if err == nil {
 		return nil
 	}
-	if strings.Contains(err.Error(), "BUSYGROUP") {
+	if infraredis.IsBusyGroupError(err) {
 		return nil
 	}
 	return fmt.Errorf("xgroup create %s/%s: %w", stream, group, err)

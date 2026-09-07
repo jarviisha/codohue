@@ -1,2 +1,2 @@
-// Package redis provides a go-redis client used for consuming events from Redis Streams.
+// Package redis provides Redis clients and shared stream-consumer mechanics.
 package redis
