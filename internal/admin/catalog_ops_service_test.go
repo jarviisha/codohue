@@ -390,6 +390,7 @@ func TestBulkRedriveDeadletter_Service_EmptyOK(t *testing.T) {
 
 func TestDeleteCatalogItem_Service_HappyPath(t *testing.T) {
 	repo := &fakeRepo{
+		namespace:               &NamespaceConfig{Namespace: "ns", Generation: 2},
 		getCatalogItem:          &CatalogItemDetail{CatalogItemSummary: CatalogItemSummary{ID: 7, ObjectID: "o7"}, Namespace: "ns"},
 		deleteCatalogItemFound:  true,
 		deleteCatalogItemObject: "o7",
@@ -407,8 +408,27 @@ func TestDeleteCatalogItem_Service_HappyPath(t *testing.T) {
 	if len(del.calls) != 1 {
 		t.Fatalf("expected 1 qdrant delete call, got %d", len(del.calls))
 	}
-	if del.calls[0].collection != "ns_objects_dense" || del.calls[0].id != 123 {
+	if del.calls[0].collection != "ns_g2_objects_dense" || del.calls[0].id != 123 {
 		t.Errorf("unexpected qdrant call: %+v", del.calls[0])
+	}
+}
+
+func TestGetCatalogItem_UsesCurrentGenerationCollection(t *testing.T) {
+	repo := &fakeRepo{
+		namespace:          &NamespaceConfig{Namespace: "ns", Generation: 4},
+		getCatalogItem:     &CatalogItemDetail{CatalogItemSummary: CatalogItemSummary{ID: 7, ObjectID: "o7"}, Namespace: "ns"},
+		numericObjectID:    123,
+		numericObjectFound: true,
+	}
+	reader := &fakeQdrantReader{}
+	svc, _, _ := withCatalogPlumbing(t, repo, nil)
+	svc.qdrantReader = reader
+
+	if _, err := svc.GetCatalogItem(context.Background(), "ns", 7); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(reader.calls) != 1 || reader.calls[0].CollectionName != "ns_g4_objects_dense" {
+		t.Fatalf("qdrant reads = %+v, want ns_g4_objects_dense", reader.calls)
 	}
 }
 
@@ -452,6 +472,25 @@ func TestDeleteCatalogItem_Service_QdrantFailureIsRetryable(t *testing.T) {
 	}
 	if repo.deleteCatalogItemCalled != 0 {
 		t.Fatal("postgres row must remain until qdrant cleanup succeeds")
+	}
+}
+
+func TestDeleteCatalogItem_ServiceUsesLeasedGeneration(t *testing.T) {
+	repo := &fakeRepo{
+		getCatalogItem:          &CatalogItemDetail{CatalogItemSummary: CatalogItemSummary{ID: 7, ObjectID: "o7"}, Namespace: "ns"},
+		deleteCatalogItemFound:  true,
+		deleteCatalogItemObject: "o7",
+		numericObjectID:         99,
+		numericObjectFound:      true,
+	}
+	svc, _, del := withCatalogPlumbing(t, repo, nil)
+	svc.SetLifecycleCoordinator(newFakeLifecycle("ns", 5))
+
+	if err := svc.DeleteCatalogItem(context.Background(), "ns", 7); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(del.calls) != 1 || del.calls[0].collection != "ns_g5_objects_dense" {
+		t.Fatalf("qdrant deletes = %+v, want ns_g5_objects_dense", del.calls)
 	}
 }
 

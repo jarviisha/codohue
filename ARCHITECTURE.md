@@ -185,6 +185,10 @@ The table shows generation-1 names. Delete/recreate increments the namespace
 generation; generation 2+ uses `nslifecycle`-qualified Redis and Qdrant names
 (for example `trending:demo:g2` and `demo_g2_objects_dense`). Stream envelopes
 carry `namespace_generation`; stale-generation work is acknowledged and dropped.
+Admin inspection, backlog, TTL, dense-dimension guards, vector previews, and
+catalog-point deletion resolve the same current generation before addressing
+Redis or Qdrant; the dashboard never falls back to generation-1 artifacts for
+an active recreated namespace.
 
 ### 5.3 Qdrant
 

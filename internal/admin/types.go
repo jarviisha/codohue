@@ -39,6 +39,7 @@ type NamespaceConfig struct {
 // NamespaceCatalogConfig is the per-namespace catalog auto-embedding state.
 type NamespaceCatalogConfig struct {
 	Namespace       string         `json:"namespace"`
+	Generation      int64          `json:"-"`
 	Enabled         bool           `json:"enabled"`
 	StrategyID      string         `json:"strategy_id,omitempty"`
 	StrategyVersion string         `json:"strategy_version,omitempty"`

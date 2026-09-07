@@ -223,7 +223,7 @@ func (s *Service) GetCatalogItem(ctx context.Context, namespace string, id int64
 }
 
 func (s *Service) attachCatalogVector(ctx context.Context, item *CatalogItemDetail) {
-	if s.qdrantClient == nil {
+	if s.qdrantReader == nil {
 		return
 	}
 	numericID, ok, err := s.repo.LookupNumericObjectID(ctx, item.Namespace, item.ObjectID)
@@ -238,8 +238,17 @@ func (s *Service) attachCatalogVector(ctx context.Context, item *CatalogItemDeta
 		return
 	}
 
-	collection := item.Namespace + "_objects_dense"
-	results, err := s.qdrantClient.Get(ctx, &qdrant.GetPoints{
+	generation, generationErr := s.namespaceGeneration(ctx, item.Namespace)
+	if generationErr != nil {
+		slog.WarnContext(ctx, "catalog item generation lookup failed",
+			slog.String("namespace", item.Namespace),
+			slog.String("object_id", item.ObjectID),
+			slog.String("error", generationErr.Error()),
+		)
+		return
+	}
+	collection := nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, item.Namespace, generation)
+	results, err := s.qdrantReader.Get(ctx, &qdrant.GetPoints{
 		CollectionName: collection,
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude("dense_interactions"),
@@ -356,6 +365,20 @@ func (s *Service) BulkRedriveDeadletter(ctx context.Context, namespace string) (
 // the catalog row. Keeping the durable row until external cleanup succeeds
 // makes a transient Qdrant failure retryable.
 func (s *Service) DeleteCatalogItem(ctx context.Context, namespace string, id int64) error {
+	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, current *nslifecycle.NamespaceLifecycle) error {
+			return s.deleteCatalogItemGeneration(leased, namespace, current.Generation, id)
+		})
+	}
+	generation, err := s.namespaceGeneration(ctx, namespace)
+	if err != nil {
+		return err
+	}
+	return s.deleteCatalogItemGeneration(ctx, namespace, generation, id)
+}
+
+func (s *Service) deleteCatalogItemGeneration(ctx context.Context, namespace string, generation, id int64) error {
+	generation = normalizeGeneration(generation)
 	item, err := s.repo.GetCatalogItem(ctx, namespace, id)
 	if err != nil {
 		return fmt.Errorf("get catalog item for delete: %w", err)
@@ -370,7 +393,8 @@ func (s *Service) DeleteCatalogItem(ctx context.Context, namespace string, id in
 			return fmt.Errorf("lookup numeric object id: %w", lookupErr)
 		}
 		if ok {
-			if deleteErr := s.qdrantDeleter.DeletePoint(ctx, namespace+"_objects_dense", numID); deleteErr != nil {
+			collection := nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, namespace, generation)
+			if deleteErr := s.qdrantDeleter.DeletePoint(ctx, collection, numID); deleteErr != nil {
 				return fmt.Errorf("delete qdrant point: %w", deleteErr)
 			}
 		}

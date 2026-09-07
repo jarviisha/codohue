@@ -9,6 +9,7 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/admin"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // catalogStateCounter is the Postgres-side dependency of the backlog adapter.
@@ -24,17 +25,36 @@ type catalogStateCounter interface {
 // is owned by the catalog/embedder feature, not the admin domain.
 type catalogBacklogAdapter struct {
 	counter catalogStateCounter
-	redis   *goredis.Client
+	redis   catalogBacklogRedis
 }
 
-func newCatalogBacklogAdapter(counter catalogStateCounter, redis *goredis.Client) *catalogBacklogAdapter {
+type catalogBacklogRedis interface {
+	XLen(ctx context.Context, stream string) *goredis.IntCmd
+	XInfoGroups(ctx context.Context, stream string) *goredis.XInfoGroupsCmd
+}
+
+func newCatalogBacklogAdapter(counter catalogStateCounter, redis catalogBacklogRedis) *catalogBacklogAdapter {
 	return &catalogBacklogAdapter{counter: counter, redis: redis}
+}
+
+// backlogRedisClient converts a possibly-nil client into a nil interface
+// value. Assigning a nil *goredis.Client straight into catalogBacklogRedis
+// yields a non-nil interface, which would slip past Read's optional-Redis
+// guard and dereference the nil client.
+func backlogRedisClient(client *goredis.Client) catalogBacklogRedis {
+	if client == nil {
+		return nil
+	}
+	return client
 }
 
 // Read returns the operational backlog snapshot for one namespace. Redis is
 // optional: when nil or unavailable the stream_len count stays at zero so
 // the admin panel still renders the Postgres-side state breakdown.
-func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string) (admin.CatalogBacklog, error) {
+func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string, generation int64) (admin.CatalogBacklog, error) {
+	if generation < 1 {
+		generation = 1
+	}
 	counts, err := a.counter.CountCatalogItemStates(ctx, namespace)
 	if err != nil {
 		return admin.CatalogBacklog{}, fmt.Errorf("count catalog item states: %w", err)
@@ -49,7 +69,7 @@ func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string) (adm
 	}
 
 	if a.redis != nil {
-		stream := "catalog:embed:" + namespace
+		stream := nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation)
 
 		n, err := a.redis.XLen(ctx, stream).Result()
 		switch {

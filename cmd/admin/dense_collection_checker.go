@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	qdrantpb "github.com/qdrant/go-client/qdrant"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // denseCollectionChecker backs nsconfig's embedding_dim change guard.
@@ -17,8 +19,12 @@ type denseCollectionChecker struct {
 
 // DenseCollectionsExist reports whether either dense collection exists for
 // the namespace.
-func (c *denseCollectionChecker) DenseCollectionsExist(ctx context.Context, namespace string) (bool, error) {
-	for _, name := range []string{namespace + "_objects_dense", namespace + "_subjects_dense"} {
+func (c *denseCollectionChecker) DenseCollectionsExist(ctx context.Context, namespace string, generation int64) (bool, error) {
+	if generation < 1 {
+		generation = 1
+	}
+	for _, kind := range []nslifecycle.PhysicalKind{nslifecycle.KindObjectsDense, nslifecycle.KindSubjectsDense} {
+		name := nslifecycle.MustPhysicalName(kind, namespace, generation)
 		exists, err := c.client.CollectionExists(ctx, name)
 		if err != nil {
 			return false, fmt.Errorf("collection exists %s: %w", name, err)

@@ -97,7 +97,7 @@ type nsCatalogConfigurator interface {
 // namespace by querying both Postgres (catalog_items state buckets) and
 // Redis (XLEN of catalog:embed:{ns}). Wired by an adapter in cmd/admin.
 type catalogBacklogReader interface {
-	Read(ctx context.Context, namespace string) (CatalogBacklog, error)
+	Read(ctx context.Context, namespace string, generation int64) (CatalogBacklog, error)
 }
 
 // eventRateReader exposes the admin-plane per-namespace ingest rate, fed by
@@ -159,6 +159,10 @@ type qdrantPointDeleter interface {
 	DeletePoint(ctx context.Context, collection string, numericID uint64) error
 }
 
+type qdrantPointReader interface {
+	Get(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
+}
+
 // Service implements admin business logic.
 type Service struct {
 	repo            adminRepo
@@ -174,6 +178,7 @@ type Service struct {
 	catalogPicker   catalogStrategyPicker
 	streamPublisher streamPublisher
 	qdrantDeleter   qdrantPointDeleter
+	qdrantReader    qdrantPointReader
 	eventRate       eventRateReader
 	lifecycle       lifecycleCoordinator
 	nowFn           func() time.Time
@@ -209,6 +214,7 @@ func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Clie
 	}
 	if qdrantClient != nil {
 		s.qdrantDeleter = newQdrantClientPointDeleter(qdrantClient)
+		s.qdrantReader = qdrantClient
 	}
 	s.collectionStatsFn = s.qdrantCollection
 	return s
@@ -361,7 +367,7 @@ func (s *Service) GetCatalogConfig(ctx context.Context, namespace string) (*Name
 	if s.catalogBacklog != nil {
 		// Backlog read failures are non-fatal; surface zero counts so the admin
 		// UI still renders, but log so a persistent failure stays visible.
-		if backlog, err := s.catalogBacklog.Read(ctx, namespace); err == nil {
+		if backlog, err := s.catalogBacklog.Read(ctx, namespace, cfg.Generation); err == nil {
 			resp.Backlog = backlog
 		} else {
 			slog.WarnContext(ctx, "catalog backlog read failed",
@@ -532,12 +538,43 @@ func (s *Service) GetSubjectRecommendations(ctx context.Context, namespace, subj
 
 // GetQdrant returns point counts for the four Qdrant collections of a namespace.
 func (s *Service) GetQdrant(ctx context.Context, namespace string) (*QdrantInspectResponse, error) {
+	generation, err := s.namespaceGeneration(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
+	return s.getQdrantGeneration(ctx, namespace, generation), nil
+}
+
+func (s *Service) getQdrantGeneration(ctx context.Context, namespace string, generation int64) *QdrantInspectResponse {
+	generation = normalizeGeneration(generation)
+	stats := s.collectionStatsFn
+	if stats == nil {
+		stats = s.qdrantCollection
+	}
 	return &QdrantInspectResponse{
-		Subjects:      s.qdrantCollection(ctx, namespace+"_subjects"),
-		Objects:       s.qdrantCollection(ctx, namespace+"_objects"),
-		SubjectsDense: s.qdrantCollection(ctx, namespace+"_subjects_dense"),
-		ObjectsDense:  s.qdrantCollection(ctx, namespace+"_objects_dense"),
-	}, nil
+		Subjects:      stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindSubjects, namespace, generation)),
+		Objects:       stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindObjects, namespace, generation)),
+		SubjectsDense: stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindSubjectsDense, namespace, generation)),
+		ObjectsDense:  stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, namespace, generation)),
+	}
+}
+
+func (s *Service) namespaceGeneration(ctx context.Context, namespace string) (int64, error) {
+	cfg, err := s.repo.GetNamespace(ctx, namespace)
+	if err != nil {
+		return 0, fmt.Errorf("get namespace generation: %w", err)
+	}
+	if cfg == nil || cfg.Generation < 1 {
+		return 1, nil
+	}
+	return cfg.Generation, nil
+}
+
+func normalizeGeneration(generation int64) int64 {
+	if generation < 1 {
+		return 1
+	}
+	return generation
 }
 
 func (s *Service) qdrantCollection(ctx context.Context, name string) QdrantCollection {
@@ -572,7 +609,7 @@ func (s *Service) recommendDebug(ctx context.Context, namespace, subjectID strin
 	debug.InteractionCount = stats.InteractionCount
 	debug.SeenItemsCount = len(stats.SeenItems)
 	if stats.NumericID != nil {
-		debug.SparseNNZ = s.sparseNNZ(ctx, namespace, *stats.NumericID)
+		debug.SparseNNZ = s.sparseNNZ(ctx, namespace, ns.Generation, *stats.NumericID)
 	}
 	return debug
 }
@@ -625,7 +662,11 @@ func (s *Service) GetSubjectProfile(ctx context.Context, namespace, subjectID st
 
 	nnz := -1
 	if stats.NumericID != nil {
-		nnz = s.sparseNNZ(ctx, namespace, *stats.NumericID)
+		generation := int64(1)
+		if ns != nil && ns.Generation > 0 {
+			generation = ns.Generation
+		}
+		nnz = s.sparseNNZ(ctx, namespace, generation, *stats.NumericID)
 	}
 
 	seenItems := stats.SeenItems
@@ -643,12 +684,12 @@ func (s *Service) GetSubjectProfile(ctx context.Context, namespace, subjectID st
 	}, nil
 }
 
-func (s *Service) sparseNNZ(ctx context.Context, namespace string, numericID uint64) int {
-	if s.qdrantClient == nil {
+func (s *Service) sparseNNZ(ctx context.Context, namespace string, generation int64, numericID uint64) int {
+	if s.qdrantReader == nil {
 		return -1
 	}
-	results, err := s.qdrantClient.Get(ctx, &qdrant.GetPoints{
-		CollectionName: namespace + "_subjects",
+	results, err := s.qdrantReader.Get(ctx, &qdrant.GetPoints{
+		CollectionName: nslifecycle.MustPhysicalName(nslifecycle.KindSubjects, namespace, normalizeGeneration(generation)),
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude("sparse_interactions"),
 	})
@@ -664,6 +705,10 @@ func (s *Service) sparseNNZ(ctx context.Context, namespace string, numericID uin
 
 // GetTrending proxies the trending request to cmd/api, then fetches the Redis TTL.
 func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offset, windowHours int) (*TrendingAdminResponse, error) {
+	generation, err := s.namespaceGeneration(ctx, namespace)
+	if err != nil {
+		return nil, err
+	}
 	params := fmt.Sprintf("?limit=%d&offset=%d", limit, offset)
 	if windowHours > 0 {
 		params += "&window_hours=" + strconv.Itoa(windowHours)
@@ -708,7 +753,8 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 	// time.Duration(-2)*time.Second gives int(d)==-2000000000 (nanoseconds), not -2.
 	ttl := -2
 	if s.redisClient != nil {
-		d, err := s.redisClient.TTL(ctx, "trending:"+namespace).Result()
+		key := nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation)
+		d, err := s.redisClient.TTL(ctx, key).Result()
 		if err == nil {
 			ttl = int(d.Seconds())
 		}

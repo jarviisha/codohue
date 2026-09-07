@@ -55,7 +55,7 @@ type Service struct {
 // collections already exist. Defined here (implemented at the wiring layer)
 // so nsconfig never grows a Qdrant dependency.
 type DenseCollectionChecker interface {
-	DenseCollectionsExist(ctx context.Context, namespace string) (bool, error)
+	DenseCollectionsExist(ctx context.Context, namespace string, generation int64) (bool, error)
 }
 
 // SetDenseCollectionChecker wires the embedding_dim change guard. Safe to
@@ -254,7 +254,7 @@ func (s *Service) guardEmbeddingDimChange(ctx context.Context, ns string, req *U
 	if current == nil || current.EmbeddingDim == *req.EmbeddingDim {
 		return nil // new namespace, or a no-op change
 	}
-	exists, err := s.denseCollections.DenseCollectionsExist(ctx, ns)
+	exists, err := s.denseCollections.DenseCollectionsExist(ctx, ns, current.Generation)
 	if err != nil {
 		return fmt.Errorf("check dense collections: %w", err)
 	}

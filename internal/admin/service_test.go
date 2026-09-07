@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
+	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
@@ -340,6 +341,15 @@ type fakeQdrantDeleter struct {
 		id         uint64
 	}
 	err error
+}
+
+type fakeQdrantReader struct {
+	calls []*qdrant.GetPoints
+}
+
+func (f *fakeQdrantReader) Get(_ context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	f.calls = append(f.calls, points)
+	return nil, nil
 }
 
 func (f *fakeQdrantDeleter) DeletePoint(_ context.Context, collection string, id uint64) error {
@@ -687,6 +697,43 @@ func TestGetSubjectProfile_NoQdrant(t *testing.T) {
 	}
 	if profile.SeenItemsDays != 30 {
 		t.Errorf("expected seen_items_days=30, got %d", profile.SeenItemsDays)
+	}
+}
+
+func TestGetSubjectProfile_UsesCurrentGenerationCollection(t *testing.T) {
+	numID := uint64(42)
+	repo := &fakeRepo{
+		namespace: &NamespaceConfig{Namespace: "ns1", Generation: 3, SeenItemsDays: 30},
+		subjectStats: &SubjectStats{
+			NumericID: &numID,
+		},
+	}
+	reader := &fakeQdrantReader{}
+	svc := newTestService(repo, "", "")
+	svc.qdrantReader = reader
+
+	if _, err := svc.GetSubjectProfile(context.Background(), "ns1", "user-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(reader.calls) != 1 || reader.calls[0].CollectionName != "ns1_g3_subjects" {
+		t.Fatalf("qdrant reads = %+v, want ns1_g3_subjects", reader.calls)
+	}
+}
+
+func TestGetQdrant_UsesCurrentGenerationCollections(t *testing.T) {
+	svc := newTestService(&fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1", Generation: 2}}, "", "")
+	var names []string
+	svc.collectionStatsFn = func(_ context.Context, name string) QdrantCollection {
+		names = append(names, name)
+		return QdrantCollection{}
+	}
+
+	if _, err := svc.GetQdrant(context.Background(), "ns1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"ns1_g2_subjects", "ns1_g2_objects", "ns1_g2_subjects_dense", "ns1_g2_objects_dense"}
+	if fmt.Sprint(names) != fmt.Sprint(want) {
+		t.Fatalf("collections = %v, want %v", names, want)
 	}
 }
 
