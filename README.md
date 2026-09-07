@@ -84,7 +84,7 @@ Codohue loads `.env` automatically when present. Required: `DATABASE_URL`, `CODO
 | `CODOHUE_API_URL`                   | `http://localhost:2001`  | `cmd/admin` (proxy `/healthz`, inject events) |
 | `CODOHUE_BATCH_INTERVAL_MINUTES`    | `5`                      | `cmd/cron` |
 | `CODOHUE_LOG_FORMAT`                | `text`                   | all (`text` or `json`) |
-| `CODOHUE_CATALOG_MAX_CONTENT_BYTES` | `32768`                  | `cmd/embedder` (override per-ns via admin API) |
+| `CODOHUE_CATALOG_MAX_CONTENT_BYTES` | `32768`                  | `cmd/api` catalog ingest default (override per namespace via admin API) |
 | `CODOHUE_EMBED_MAX_ATTEMPTS`        | `5`                      | `cmd/embedder` retries before dead-letter |
 | `CODOHUE_EMBEDDER_HEALTH_PORT`      | `2003`                   | `cmd/embedder` |
 | `CODOHUE_EMBEDDER_REPLICA_NAME`     | hostname                 | `cmd/embedder` consumer name |

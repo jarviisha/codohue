@@ -152,14 +152,13 @@ func TestRun_NewQdrantError(t *testing.T) {
 
 func validEmbedderConfig() *config.EmbedderConfig {
 	return &config.EmbedderConfig{
-		DatabaseURL:            "postgres://db",
-		RedisURL:               "redis://localhost:6379",
-		QdrantHost:             "localhost",
-		QdrantPort:             6334,
-		LogFormat:              "text",
-		CatalogMaxContentBytes: 32768,
-		EmbedMaxAttempts:       5,
-		HealthPort:             "0", // OS-assigned port for any test that does start the server
+		DatabaseURL:      "postgres://db",
+		RedisURL:         "redis://localhost:6379",
+		QdrantHost:       "localhost",
+		QdrantPort:       6334,
+		LogFormat:        "text",
+		EmbedMaxAttempts: 5,
+		HealthPort:       "0", // OS-assigned port for any test that does start the server
 	}
 }
 

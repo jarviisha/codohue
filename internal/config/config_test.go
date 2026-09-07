@@ -55,6 +55,18 @@ func TestLoadAPI_InvalidBatchInterval(t *testing.T) {
 	})
 }
 
+func TestLoadAPI_InvalidCatalogMaxContentBytes(t *testing.T) {
+	withEnv(t, map[string]string{
+		"DATABASE_URL":                      "postgres://db",
+		"CODOHUE_ADMIN_API_KEY":             "admin",
+		"CODOHUE_CATALOG_MAX_CONTENT_BYTES": "not-a-number",
+	}, func() {
+		if _, err := LoadAPI(); err == nil {
+			t.Fatal("expected API catalog content cap validation error")
+		}
+	})
+}
+
 func TestLoadAPI_UsesDefaults(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":                      "postgres://db",
@@ -273,7 +285,6 @@ func TestLoadEmbedder_UsesDefaults(t *testing.T) {
 		"QDRANT_HOST":                       "",
 		"QDRANT_PORT":                       "",
 		"CODOHUE_LOG_FORMAT":                "",
-		"CODOHUE_CATALOG_MAX_CONTENT_BYTES": "",
 		"CODOHUE_EMBED_MAX_ATTEMPTS":        "",
 		"CODOHUE_EMBEDDER_HEALTH_PORT":      "",
 		"CODOHUE_EMBEDDER_REPLICA_NAME":     "",
@@ -297,9 +308,6 @@ func TestLoadEmbedder_UsesDefaults(t *testing.T) {
 		}
 		if cfg.LogFormat != "text" {
 			t.Fatalf("LogFormat: got %q", cfg.LogFormat)
-		}
-		if cfg.CatalogMaxContentBytes != 32768 {
-			t.Fatalf("CatalogMaxContentBytes: got %d", cfg.CatalogMaxContentBytes)
 		}
 		if cfg.EmbedMaxAttempts != 5 {
 			t.Fatalf("EmbedMaxAttempts: got %d", cfg.EmbedMaxAttempts)
@@ -329,7 +337,6 @@ func TestLoadEmbedder_UsesEnvironmentOverrides(t *testing.T) {
 		"QDRANT_HOST":                       "qdrant.internal",
 		"QDRANT_PORT":                       "7000",
 		"CODOHUE_LOG_FORMAT":                "json",
-		"CODOHUE_CATALOG_MAX_CONTENT_BYTES": "65536",
 		"CODOHUE_EMBED_MAX_ATTEMPTS":        "10",
 		"CODOHUE_EMBEDDER_HEALTH_PORT":      "9003",
 		"CODOHUE_EMBEDDER_REPLICA_NAME":     "embedder-1",
@@ -344,9 +351,6 @@ func TestLoadEmbedder_UsesEnvironmentOverrides(t *testing.T) {
 		}
 		if cfg.DatabaseURL != "postgres://custom-db" {
 			t.Fatalf("DatabaseURL: got %q", cfg.DatabaseURL)
-		}
-		if cfg.CatalogMaxContentBytes != 65536 {
-			t.Fatalf("CatalogMaxContentBytes: got %d", cfg.CatalogMaxContentBytes)
 		}
 		if cfg.EmbedMaxAttempts != 10 {
 			t.Fatalf("EmbedMaxAttempts: got %d", cfg.EmbedMaxAttempts)
@@ -368,6 +372,17 @@ func TestLoadEmbedder_UsesEnvironmentOverrides(t *testing.T) {
 		}
 		if cfg.ObservabilityToken != "embed-monitor-secret" {
 			t.Fatalf("ObservabilityToken: got %q", cfg.ObservabilityToken)
+		}
+	})
+}
+
+func TestLoadEmbedder_IgnoresAPICatalogContentCap(t *testing.T) {
+	withEnv(t, map[string]string{
+		"DATABASE_URL":                      "postgres://db",
+		"CODOHUE_CATALOG_MAX_CONTENT_BYTES": "not-a-number",
+	}, func() {
+		if _, err := LoadEmbedder(); err != nil {
+			t.Fatalf("API-owned content cap must not block embedder startup: %v", err)
 		}
 	})
 }
@@ -411,24 +426,6 @@ func TestLoadEmbedder_InvalidQdrantPort(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
-}
-
-func TestLoadEmbedder_InvalidMaxContentBytes(t *testing.T) {
-	cases := []string{"not-a-number", "0", "-1"}
-	for _, v := range cases {
-		v := v
-		t.Run(v, func(t *testing.T) {
-			withEnv(t, map[string]string{
-				"DATABASE_URL":                      "postgres://db",
-				"CODOHUE_CATALOG_MAX_CONTENT_BYTES": v,
-			}, func() {
-				_, err := LoadEmbedder()
-				if err == nil {
-					t.Fatalf("expected error for value %q, got nil", v)
-				}
-			})
-		})
-	}
 }
 
 func TestLoadEmbedder_InvalidMaxAttempts(t *testing.T) {
