@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
@@ -53,7 +54,7 @@ func (s *Service) GetOverview(ctx context.Context) (*OverviewResponse, error) {
 		if row.Catalog.Enabled && s.catalogBacklog != nil {
 			// Best-effort: a failed read leaves zeros rather than sinking the
 			// whole fleet page, but it is logged so a persistent failure shows.
-			if backlog, blErr := s.catalogBacklog.Read(ctx, ns.Namespace); blErr == nil {
+			if backlog, blErr := s.catalogBacklog.Read(ctx, ns.Namespace, ns.Generation); blErr == nil {
 				row.Catalog.Pending = backlog.Pending
 				row.Catalog.DeadLetter = backlog.DeadLetter
 			} else {
@@ -110,10 +111,7 @@ func (s *Service) GetNamespaceDashboard(ctx context.Context, namespace string) (
 		return nil, fmt.Errorf("get event counts: %w", err)
 	}
 
-	qdrant, err := s.GetQdrant(ctx, namespace)
-	if err != nil {
-		return nil, fmt.Errorf("get qdrant: %w", err)
-	}
+	qdrant := s.getQdrantGeneration(ctx, namespace, cfg.Generation)
 
 	// Attribution coverage drives the exclude_authored hint on the config
 	// page. A failure here must not sink the whole dashboard — the operator
@@ -130,11 +128,11 @@ func (s *Service) GetNamespaceDashboard(ctx context.Context, namespace string) (
 		GeneratedAt:     now.UTC(),
 		Config:          *cfg,
 		LastRuns:        lastRuns,
-		Catalog:         s.namespaceBacklog(ctx, namespace),
+		Catalog:         s.namespaceBacklog(ctx, namespace, cfg.Generation),
 		Events24h:       eventCounts[namespace],
 		EventsPerMinNow: s.eventsPerMin(namespace),
 		Qdrant:          *qdrant,
-		TrendingTTLSec:  s.trendingTTLSec(ctx, namespace),
+		TrendingTTLSec:  s.trendingTTLSec(ctx, namespace, cfg.Generation),
 		AuthorCoverage:  AuthorCoverage{Attributed: attributed, Total: totalItems},
 	}, nil
 }
@@ -216,7 +214,12 @@ func (s *Service) denseDowngradeAlerts(ctx context.Context, namespaces []Namespa
 		if !hybridConfigured {
 			continue
 		}
-		stat := s.collectionStatsFn(ctx, ns.Namespace+"_subjects_dense")
+		generation := ns.Generation
+		if generation < 1 {
+			generation = 1
+		}
+		collection := nslifecycle.MustPhysicalName(nslifecycle.KindSubjectsDense, ns.Namespace, generation)
+		stat := s.collectionStatsFn(ctx, collection)
 		if stat.Exists && stat.PointsCount > 0 {
 			continue
 		}
@@ -296,11 +299,11 @@ func (s *Service) embedderHeartbeat(ctx context.Context) EmbedderHeartbeat {
 // namespaceBacklog reads the live catalog backlog for the dashboard. Failures
 // (or no reader wired) degrade to zero counts, logged so a persistent
 // failure stays visible.
-func (s *Service) namespaceBacklog(ctx context.Context, namespace string) CatalogBacklog {
+func (s *Service) namespaceBacklog(ctx context.Context, namespace string, generation int64) CatalogBacklog {
 	if s.catalogBacklog == nil {
 		return CatalogBacklog{}
 	}
-	backlog, err := s.catalogBacklog.Read(ctx, namespace)
+	backlog, err := s.catalogBacklog.Read(ctx, namespace, normalizeGeneration(generation))
 	if err != nil {
 		slog.WarnContext(ctx, "dashboard: catalog backlog read failed",
 			slog.String("namespace", namespace), slog.String("error", err.Error()))
@@ -311,11 +314,12 @@ func (s *Service) namespaceBacklog(ctx context.Context, namespace string) Catalo
 
 // trendingTTLSec probes the remaining TTL of the namespace's trending ZSET.
 // Redis TTL semantics carry through: -2 = key missing, -1 = no expiry.
-func (s *Service) trendingTTLSec(ctx context.Context, namespace string) int {
+func (s *Service) trendingTTLSec(ctx context.Context, namespace string, generation int64) int {
 	if s.redisClient == nil {
 		return -2
 	}
-	d, err := s.redisClient.TTL(ctx, "trending:"+namespace).Result()
+	key := nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, normalizeGeneration(generation))
+	d, err := s.redisClient.TTL(ctx, key).Result()
 	if err != nil {
 		return -2
 	}

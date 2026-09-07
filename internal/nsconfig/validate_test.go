@@ -69,25 +69,31 @@ func TestValidateUpsert_CatalogViaUpsertRejected(t *testing.T) {
 }
 
 type fakeDenseChecker struct {
-	exists bool
-	err    error
-	calls  int
+	exists     bool
+	err        error
+	calls      int
+	generation int64
 }
 
-func (f *fakeDenseChecker) DenseCollectionsExist(_ context.Context, _ string) (bool, error) {
+func (f *fakeDenseChecker) DenseCollectionsExist(_ context.Context, _ string, generation int64) (bool, error) {
 	f.calls++
+	f.generation = generation
 	return f.exists, f.err
 }
 
 func TestUpsert_EmbeddingDimChangeLockedWhileCollectionsExist(t *testing.T) {
-	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 64}}
+	repo := &fakeRepo{getCfg: &namespace.Config{Namespace: "ns", Generation: 3, EmbeddingDim: 64}}
 	svc := NewService(nil)
 	svc.repo = repo
-	svc.SetDenseCollectionChecker(&fakeDenseChecker{exists: true})
+	checker := &fakeDenseChecker{exists: true}
+	svc.SetDenseCollectionChecker(checker)
 
 	_, err := svc.Upsert(context.Background(), "ns", &UpsertRequest{EmbeddingDim: iptr(128)})
 	if !errors.Is(err, ErrEmbeddingDimLocked) {
 		t.Fatalf("expected ErrEmbeddingDimLocked, got %v — a changed dim fails every dense upsert forever", err)
+	}
+	if checker.generation != 3 {
+		t.Fatalf("dense collection generation = %d, want 3", checker.generation)
 	}
 }
 

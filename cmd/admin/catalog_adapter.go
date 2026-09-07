@@ -46,6 +46,7 @@ func (a *catalogConfigAdapter) GetCatalog(ctx context.Context, ns string) (*admi
 	}
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
+		Generation:      cfg.Generation,
 		Enabled:         cfg.DenseSource == codohuetypes.DenseSourceCatalog,
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,
@@ -99,6 +100,7 @@ func (a *catalogConfigAdapter) UpdateCatalog(ctx context.Context, ns string, req
 
 	return &admin.NamespaceCatalogConfig{
 		Namespace:       cfg.Namespace,
+		Generation:      cfg.Generation,
 		Enabled:         cfg.DenseSource == codohuetypes.DenseSourceCatalog,
 		StrategyID:      cfg.CatalogStrategyID,
 		StrategyVersion: cfg.CatalogStrategyVersion,

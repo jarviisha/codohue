@@ -180,8 +180,8 @@ func TestGetOverview_EmbedderHeartbeatNotFakedWhenUnknown(t *testing.T) {
 
 func TestDenseDowngradeAlerts(t *testing.T) {
 	counts := map[string]uint64{
-		"hybrid-empty_subjects_dense": 0,
-		"hybrid-ok_subjects_dense":    42,
+		"hybrid-empty_g2_subjects_dense": 0,
+		"hybrid-ok_subjects_dense":       42,
 	}
 	s := &Service{collectionStatsFn: func(_ context.Context, name string) QdrantCollection {
 		n, ok := counts[name]
@@ -189,11 +189,11 @@ func TestDenseDowngradeAlerts(t *testing.T) {
 	}}
 
 	namespaces := []NamespaceConfig{
-		{Namespace: "hybrid-empty", Alpha: 0.5, DenseSource: "byoe"},     // configured hybrid, no vectors → alert
-		{Namespace: "hybrid-ok", Alpha: 0.5, DenseSource: "catalog"},     // healthy → no alert
-		{Namespace: "sparse-only", Alpha: 1.0, DenseSource: "byoe"},      // alpha leaves no dense weight → no alert
-		{Namespace: "dense-off", Alpha: 0.5, DenseSource: "disabled"},    // dense off → no alert
-		{Namespace: "missing-coll", Alpha: 0.3, DenseSource: "item2vec"}, // collection absent entirely → alert
+		{Namespace: "hybrid-empty", Generation: 2, Alpha: 0.5, DenseSource: "byoe"}, // configured hybrid, no vectors → alert
+		{Namespace: "hybrid-ok", Alpha: 0.5, DenseSource: "catalog"},                // healthy → no alert
+		{Namespace: "sparse-only", Alpha: 1.0, DenseSource: "byoe"},                 // alpha leaves no dense weight → no alert
+		{Namespace: "dense-off", Alpha: 0.5, DenseSource: "disabled"},               // dense off → no alert
+		{Namespace: "missing-coll", Alpha: 0.3, DenseSource: "item2vec"},            // collection absent entirely → alert
 	}
 
 	alerts := s.denseDowngradeAlerts(context.Background(), namespaces)
