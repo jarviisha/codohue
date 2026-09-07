@@ -172,7 +172,7 @@ func run() error {
 	catalogAdapter := newCatalogConfigAdapter(nsConfigSvc, embedstrategy.DefaultRegistry())
 	svc.SetCatalogConfigurator(catalogAdapter)
 	svc.SetCatalogStrategyPicker(catalogAdapter)
-	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, redisClient))
+	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, backlogRedisClient(redisClient)))
 	svc.SetEventRateTracker(eventRate)
 
 	// Session tokens are signed with independent random material — never the

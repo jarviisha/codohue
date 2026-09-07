@@ -37,6 +37,17 @@ func newCatalogBacklogAdapter(counter catalogStateCounter, redis catalogBacklogR
 	return &catalogBacklogAdapter{counter: counter, redis: redis}
 }
 
+// backlogRedisClient converts a possibly-nil client into a nil interface
+// value. Assigning a nil *goredis.Client straight into catalogBacklogRedis
+// yields a non-nil interface, which would slip past Read's optional-Redis
+// guard and dereference the nil client.
+func backlogRedisClient(client *goredis.Client) catalogBacklogRedis {
+	if client == nil {
+		return nil
+	}
+	return client
+}
+
 // Read returns the operational backlog snapshot for one namespace. Redis is
 // optional: when nil or unavailable the stream_len count stays at zero so
 // the admin panel still renders the Postgres-side state breakdown.

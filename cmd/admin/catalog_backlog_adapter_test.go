@@ -66,6 +66,25 @@ func TestCatalogBacklogAdapter_ReadMapsCountsWithoutRedis(t *testing.T) {
 	}
 }
 
+// The production wiring passes a *goredis.Client that run() nils out when
+// Redis is unreachable. Passing an untyped nil literal, as the other cases
+// do, would not exercise that path.
+func TestCatalogBacklogAdapter_ReadWithUnavailableRedisClient(t *testing.T) {
+	var unavailable *goredis.Client
+	counter := &fakeStateCounter{counts: admin.CatalogItemStateCounts{Pending: 3, DeadLetter: 7}}
+	adapter := newCatalogBacklogAdapter(counter, backlogRedisClient(unavailable))
+
+	got, err := adapter.Read(context.Background(), "ns_a", 1)
+	if err != nil {
+		t.Fatalf("Read returned error: %v", err)
+	}
+
+	want := admin.CatalogBacklog{Pending: 3, DeadLetter: 7, StreamLen: 0}
+	if got != want {
+		t.Fatalf("backlog mismatch:\n got=%+v\nwant=%+v", got, want)
+	}
+}
+
 func TestCatalogBacklogAdapter_ReadPropagatesCounterError(t *testing.T) {
 	wantErr := errors.New("db is down")
 	adapter := newCatalogBacklogAdapter(&fakeStateCounter{err: wantErr}, nil)
