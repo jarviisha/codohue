@@ -519,8 +519,8 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 | Namespace config writes are PATCH | The admin UI submits only edited fields; `INSERT … ON CONFLICT DO UPDATE` must name every column, which would reset the rest to Go zero values |
 | Two-tier auth, admin key valid on every namespace | Per-tenant keys isolate blast radius on leak; the admin key already grants full control via the admin plane, and the admin server must reach every namespace |
 | Namespace lifecycle generations fence every writer | Delete/recreate increments the generation; generation 2+ qualifies Redis and Qdrant physical names so stale work from an earlier incarnation cannot become visible |
-| Embed strategy registry as a seam | Forward-compat: an unwired build still boots and catalog endpoints return 503 instead of panicking |
-| No peer-domain imports | Enforced by test; any domain can be split into a microservice without untangling coupling |
+| [Embed strategy registry as a seam](docs/adr/0001-retain-forward-compatible-boundary-adapters.md) | Forward-compat: an unwired build still boots and catalog endpoints return 503 instead of panicking |
+| [No peer-domain imports](docs/adr/0001-retain-forward-compatible-boundary-adapters.md) | Enforced by test; any domain can be split into a microservice without untangling coupling |
 | Single `docs.go` per package | No package docs scattered across files; one canonical place for the description |
 | Wire types pinned by golden snapshots | Any rename, retype, or json-tag change on the public contract fails a test instead of breaking clients silently |
 
