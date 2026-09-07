@@ -930,7 +930,7 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	for i, e := range entries {
 		items[i] = RecommendedItem{
 			ObjectID: e.ObjectID,
-			Score:    e.Score,
+			Score:    0,
 			Rank:     req.Offset + i + 1,
 		}
 	}

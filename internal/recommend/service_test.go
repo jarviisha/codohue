@@ -283,6 +283,11 @@ func TestDoRecommend_ColdStart_UsesTrendingCache(t *testing.T) {
 	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "trending-1" {
 		t.Errorf("items: got %v", resp.Items)
 	}
+	for _, item := range resp.Items {
+		if item.Score != 0 {
+			t.Errorf("fallback item %q score = %v, want 0", item.ObjectID, item.Score)
+		}
+	}
 }
 
 // ─── doRecommend: CF (count>=5) falls back to popular when no subject vector ─
