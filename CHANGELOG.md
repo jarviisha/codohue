@@ -209,6 +209,12 @@ Additive wire-contract and SDK changes. Server tag: `v0.8.0`.
   normalizes batch-independently, so ranking a candidate set in chunks yields
   the same relative ordering as one call over the union. `Rank` also applies
   the same eligibility filters as recommendations.
+- **`/recommendations` score *values* shift once.** `Rank` and
+  `/recommendations` now share one blend helper with the same
+  batch-independent normalization, so a recommendation's numeric `score`
+  differs from `v0.4.0` for identical data. This is a one-time shift: the
+  response contract and the ordering within a response are unchanged.
+  Re-baseline anything that thresholds on, stores, or diffs raw score values.
 - `sdk/go` and `sdk/go/redistream` require `pkg/codohuetypes v0.5.0`.
 
 ## v0.4.0 — 2026-07-23

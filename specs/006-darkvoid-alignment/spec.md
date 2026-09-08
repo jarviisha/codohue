@@ -2,9 +2,9 @@
 
 **Feature Branch**: `feat/recommend-darkvoid-alignment`
 **Created**: 2026-08-03
-**Status**: Implemented with deferred follow-ups
-**Deferred Follow-up**: T034 readiness endpoint in [tasks.md](tasks.md), pending consumer commitment
-**Pending Release Action**: T037 SDK release and tagging in [tasks.md](tasks.md)
+**Status**: Complete — released in `v0.8.0` (server) and `v0.5.0` (modules)
+**Deferred Requirement**: FR-019 readiness read is not built; tracked in
+[issue #39](https://github.com/jarviisha/codohue/issues/39), pending consumer commitment
 **Known Remediation**: [Spec 007](../007-backend-audit-remediation/spec.md)
 **Input**: User description: "Generate spec.md for the existing feature
 specs/006-darkvoid-alignment. Source material: the accepted design.md in that directory."
@@ -288,7 +288,8 @@ alert must clear.
 - **FR-019**: A data-plane readiness read MUST report, per namespace: indexed object
   count, requesting subject's vector presence (sparse and dense separately), last
   successful recompute time, and catalog backlog size. (Lowest priority; build when the
-  consumer commits to gating on it.)
+  consumer commits to gating on it.) **Not built** — deferred out of this spec to
+  [issue #39](https://github.com/jarviisha/codohue/issues/39).
 
 ### Key Entities
 

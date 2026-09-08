@@ -2,7 +2,9 @@
 
 **Feature Branch**: `fix/redis-backend-audit-remediation`
 **Created**: 2026-08-24
-**Status**: Tasks generated — ready for implementation
+**Status**: Implemented — released in `v0.6.0`
+**Outstanding**: `make test-e2e` and the T109 migration/operational rehearsal are
+unrecorded; see [verification.md](verification.md)
 **Input**: User description: "Plan remediation for all audited project findings, excluding web/admin."
 
 ## Clarifications

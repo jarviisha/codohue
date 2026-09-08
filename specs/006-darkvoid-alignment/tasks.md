@@ -239,10 +239,10 @@ overview shows the alert (SC-008); populate vectors → alert clears
 - [x] T033 [P] [US6] `PutObject` wrapper in sdk/go (`PUT /v1/namespaces/{ns}/objects/{id}`,
       `ObjectUpsertRequest`/`ObjectResponse` already exist in pkg/codohuetypes) in
       sdk/go/embedding.go + tests (FR-018).
-- [ ] T034 [US6] **Deferred — build only when DarkVoid commits to gating on it** (FR-019):
-      data-plane readiness read (indexed object count, subject sparse/dense vector
-      presence, last successful recompute, catalog backlog) — new endpoint + wire type +
-      golden case + SDK wrapper + CLAUDE.md row.
+- T034 [US6] **Moved out of this spec** (FR-019): the data-plane readiness read is not
+      built and no longer tracked here. It is deferred until a consumer commits to gating
+      on it — see [issue #39](https://github.com/jarviisha/codohue/issues/39). It will land
+      as its own spec, not by reopening 006.
 
 **Checkpoint**: No supported mode fails silently
 
@@ -258,9 +258,10 @@ overview shows the alert (SC-008); populate vectors → alert clears
       points against a real Qdrant; record results + cap decision in
       specs/006-darkvoid-alignment/benchmarks.md. Cap changes only from this data
       (FR-007).
-- [ ] T037 (awaiting release decision — tags/pushes are operator actions) Release: regenerate/verify goldens once, release notes calling out the one-time
-      score-value shift on `/recommendations`, coordinated module tags per the release
-      process (push v* tag alone — >3 tags at once suppresses CI).
+- [x] T037 Release: goldens regenerated, release notes calling out the one-time
+      score-value shift on `/recommendations`, coordinated module tags. Shipped
+      2026-08-03 as server `v0.8.0` with `pkg/codohuetypes`, `sdk/go` and
+      `sdk/go/redistream` at `v0.5.0`; see the `v0.5.0` section of CHANGELOG.md.
 - [x] T038 Full gate: `make lint`, `make coverage-check-all`, `make test-e2e` green across
       all modules.
 

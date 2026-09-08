@@ -150,6 +150,7 @@ In pull requests:
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
-at specs/007-backend-audit-remediation/plan.md
+shell commands, and other important information, read the plan of the spec
+you are working on under `specs/`. No spec is currently in flight; the most
+recent one is `specs/007-backend-audit-remediation/` (released in `v0.6.0`).
 <!-- SPECKIT END -->
