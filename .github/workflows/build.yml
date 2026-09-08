@@ -1,5 +1,7 @@
-# Builds images and deploys after CI: main pushes -> development, v* tags -> production.
-name: CD
+# Builds and publishes images after CI: main pushes -> development images,
+# v* tags -> release images. Deploying is a separate manual step — run the
+# Deploy workflow with the tag this run printed in its summary.
+name: Build images
 
 on:
   workflow_run:
@@ -26,8 +28,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    outputs:
-      image_tag: ${{ steps.meta.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -134,47 +134,20 @@ jobs:
           cache-to: type=gha,mode=max
           tags: ${{ steps.meta.outputs.migrate_tags }}
 
-  deploy:
-    needs: build-push
-    runs-on: ubuntu-latest
-    # main deploys to the development environment, v* tags to production. VPS_*
-    # secrets are environment-scoped; both environments may point at the same
-    # host, so each stack gets its own directory (compose derives the project
-    # name from the directory, keeping containers/volumes/networks separate).
-    # DEPLOY_DIR keeps its /opt/codohue-dev path on purpose — renaming it would
-    # start a fresh compose project with empty volumes; the dir is internal and
-    # decoupled from the environment name.
-    environment: ${{ github.event.workflow_run.head_branch == 'main' && 'development' || 'production' }}
-    env:
-      DEPLOY_DIR: ${{ github.event.workflow_run.head_branch == 'main' && '/opt/codohue-dev' || '/opt/codohue-prod' }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-
-      - name: Copy compose file and deploy script to VPS
-        uses: appleboy/scp-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          source: "docker-compose.prod.yml,deploy/deploy.sh"
-          target: ${{ env.DEPLOY_DIR }}/
-          overwrite: true
-
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          port: ${{ secrets.VPS_PORT || 22 }}
-          # First deploys pull five images before compose converges; the
-          # action's 10m default is too tight for that on a small instance.
-          command_timeout: 30m
-          script: |
-            set -euo pipefail
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            IMAGE_TAG="${{ needs.build-push.outputs.image_tag }}" bash ${{ env.DEPLOY_DIR }}/deploy/deploy.sh
-            docker logout ghcr.io
+      # Nothing deploys automatically, so surface the tag an operator needs to
+      # feed the Deploy workflow rather than making them reconstruct it.
+      - name: Summarize the published tag
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          {
+            echo "### Images published"
+            echo
+            echo "Tag: \`${VERSION}\`"
+            echo
+            echo "Deploy with the **Deploy** workflow, or:"
+            echo
+            echo '```'
+            echo "gh workflow run deploy.yml -f environment=development -f image_tag=${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
