@@ -148,6 +148,6 @@ jobs:
             echo "Deploy with the **Deploy** workflow, or:"
             echo
             echo '```'
-            echo "gh workflow run deploy.yml -f environment=development -f image_tag=${VERSION}"
+            echo "gh workflow run deploy.yml -f image_tag=${VERSION}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -1,45 +1,35 @@
-# Manual deploy. Images are published automatically by the Build images
-# workflow; putting them on a host is always an explicit operator action.
-# Pick any published tag, which also makes rollback a normal deploy.
+# Manual deploy to the development stack, the only environment this repository
+# deploys to. Images are published automatically by the Build images workflow;
+# putting them on a host is always an explicit operator action. Pick any
+# published tag, which also makes rollback a normal deploy.
 name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        description: Target environment
-        required: true
-        type: choice
-        options:
-          - development
-          - production
-        default: development
       image_tag:
         description: 'Published image tag, e.g. development-1a2b3c4 or v0.10.0'
         required: true
         type: string
 
-# One deploy per environment at a time. Queue rather than cancel: a cancelled
-# run leaves the stack mid-converge.
+# One deploy at a time. Queue rather than cancel: a cancelled run leaves the
+# stack mid-converge.
 concurrency:
-  group: deploy-${{ inputs.environment }}
+  group: deploy-development
   cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # VPS_* secrets are environment-scoped; both environments may point at the
-    # same host, so each stack gets its own directory (compose derives the
-    # project name from the directory, keeping containers/volumes/networks
-    # separate). DEPLOY_DIR keeps its /opt/codohue-dev path on purpose —
-    # renaming it would start a fresh compose project with empty volumes; the
-    # dir is internal and decoupled from the environment name.
-    environment: ${{ inputs.environment }}
+    # VPS_* secrets are scoped to the development environment. DEPLOY_DIR is
+    # the compose project root: compose derives the project name from the
+    # directory, so renaming it would start a fresh project with empty volumes.
+    environment: development
     permissions:
       contents: read
       packages: read
     env:
-      DEPLOY_DIR: ${{ inputs.environment == 'development' && '/opt/codohue-dev' || '/opt/codohue-prod' }}
+      DEPLOY_DIR: /opt/codohue-dev
     steps:
       # Checks out the ref this workflow was dispatched from (main by default).
       # The compose file and deploy script come from that ref; the image tag is
@@ -83,6 +73,5 @@ jobs:
           {
             echo "### Deploy ${{ job.status }}"
             echo
-            echo "Environment: \`${{ inputs.environment }}\`"
             echo "Image tag: \`${{ inputs.image_tag }}\`"
           } >> "$GITHUB_STEP_SUMMARY"
