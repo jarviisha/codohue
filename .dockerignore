@@ -35,7 +35,7 @@ web/admin/dist
 *.sqlite3
 
 Dockerfile
-docker-compose*.yml
+compose*.yaml
 README.md
 CLAUDE*.md
 ai-docs

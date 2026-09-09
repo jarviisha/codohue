@@ -1,0 +1,168 @@
+x-environment: &environment
+  DATABASE_URL: "postgres://codohue:secret@postgres:5432/codohue?sslmode=disable"
+  REDIS_URL: "redis://redis:6379"
+  QDRANT_HOST: "qdrant"
+  QDRANT_PORT: "6334"
+  CODOHUE_LOG_FORMAT: "${CODOHUE_LOG_FORMAT:-text}"
+
+x-app: &app
+  restart: unless-stopped
+  stop_grace_period: 40s
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+    qdrant:
+      condition: service_healthy
+
+services:
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
+    restart: "no"
+    environment:
+      - DATABASE_URL=postgres://codohue:secret@postgres:5432/codohue?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *app
+    build:
+      context: .
+      target: api
+    ports:
+      - "${CODOHUE_API_PORT:-2001}:${CODOHUE_API_PORT:-2001}"
+    environment:
+      <<: *environment
+      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-dev-secret-key}"
+      CODOHUE_BATCH_INTERVAL_MINUTES: "${CODOHUE_BATCH_INTERVAL_MINUTES:-5}"
+      CODOHUE_API_PORT: "${CODOHUE_API_PORT:-2001}"
+      CODOHUE_CATALOG_MAX_CONTENT_BYTES: "${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}"
+      CODOHUE_STREAM_RETENTION_ENABLED: "${CODOHUE_STREAM_RETENTION_ENABLED:-false}"
+      CODOHUE_STREAM_RETENTION_INTERVAL: "${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}"
+      CODOHUE_OBSERVABILITY_TOKEN: "${CODOHUE_OBSERVABILITY_TOKEN:-}"
+      CODOHUE_INGEST_REPLICA_NAME: "${CODOHUE_INGEST_REPLICA_NAME:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${CODOHUE_API_PORT:-2001}/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  cron:
+    <<: *app
+    build:
+      context: .
+      target: cron
+    environment:
+      <<: *environment
+      CODOHUE_BATCH_INTERVAL_MINUTES: "${CODOHUE_BATCH_INTERVAL_MINUTES:-5}"
+      CODOHUE_BATCH_RUN_RETENTION_DAYS: "${CODOHUE_BATCH_RUN_RETENTION_DAYS:-30}"
+      CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS: "${CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS:-7}"
+      CODOHUE_RETENTION_INTERVAL: "${CODOHUE_RETENTION_INTERVAL:-1h}"
+
+  embedder:
+    <<: *app
+    build:
+      context: .
+      target: embedder
+    ports:
+      - "127.0.0.1:${CODOHUE_EMBEDDER_HEALTH_PORT:-2003}:${CODOHUE_EMBEDDER_HEALTH_PORT:-2003}"
+    environment:
+      <<: *environment
+      CODOHUE_EMBED_MAX_ATTEMPTS: "${CODOHUE_EMBED_MAX_ATTEMPTS:-5}"
+      CODOHUE_EMBEDDER_HEALTH_PORT: "${CODOHUE_EMBEDDER_HEALTH_PORT:-2003}"
+      CODOHUE_EMBEDDER_REPLICA_NAME: "${CODOHUE_EMBEDDER_REPLICA_NAME:-}"
+      CODOHUE_EMBEDDER_POLL_INTERVAL: "${CODOHUE_EMBEDDER_POLL_INTERVAL:-30s}"
+      CODOHUE_STREAM_RETENTION_ENABLED: "${CODOHUE_STREAM_RETENTION_ENABLED:-false}"
+      CODOHUE_STREAM_RETENTION_INTERVAL: "${CODOHUE_STREAM_RETENTION_INTERVAL:-1m}"
+      CODOHUE_OBSERVABILITY_TOKEN: "${CODOHUE_OBSERVABILITY_TOKEN:-}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${CODOHUE_EMBEDDER_HEALTH_PORT:-2003}/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  admin:
+    <<: *app
+    build:
+      context: .
+      target: admin
+    ports:
+      - "${CODOHUE_ADMIN_PORT:-2002}:${CODOHUE_ADMIN_PORT:-2002}"
+    environment:
+      <<: *environment
+      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-dev-secret-key}"
+      CODOHUE_API_URL: "http://api:${CODOHUE_API_PORT:-2001}"
+      CODOHUE_ADMIN_PORT: "${CODOHUE_ADMIN_PORT:-2002}"
+      CODOHUE_ADMIN_SESSION_SECRET: "${CODOHUE_ADMIN_SESSION_SECRET:-}"
+      CODOHUE_OBSERVABILITY_TOKEN: "${CODOHUE_OBSERVABILITY_TOKEN:-}"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${CODOHUE_ADMIN_PORT:-2002}/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: codohue
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: codohue
+    ports:
+      - "127.0.0.1:${CODOHUE_POSTGRES_PUBLISHED_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U codohue -d codohue"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${CODOHUE_REDIS_PUBLISHED_PORT:-6379}:6379"
+    # Retention owns stream reclamation. Redis must reject writes under memory
+    # pressure instead of silently evicting stream or queue keys.
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    ports:
+      - "127.0.0.1:${CODOHUE_QDRANT_HTTP_PUBLISHED_PORT:-6333}:6333"   # HTTP
+      - "127.0.0.1:${CODOHUE_QDRANT_GRPC_PUBLISHED_PORT:-6334}:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+    healthcheck:
+      # The upstream image has bash, but neither curl nor wget.
+      test:
+        - CMD-SHELL
+        - >-
+          bash -ec 'exec 3<>/dev/tcp/127.0.0.1/6333;
+          printf "GET /readyz HTTP/1.0\r\nHost: localhost\r\n\r\n" >&3;
+          head -n 1 <&3 | grep -q " 200 "'
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:

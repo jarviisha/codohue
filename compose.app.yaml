@@ -1,0 +1,59 @@
+# Linux host networking: .env.app overrides .env for all four processes.
+# Provision the external database and apply migrations before starting apps.
+x-app: &app
+  restart: unless-stopped
+  stop_grace_period: 40s
+  network_mode: host
+  extra_hosts:
+    - "host.docker.internal:127.0.0.1"
+  env_file:
+    - path: .env
+      required: false
+    - path: .env.app
+      required: false
+
+services:
+  api:
+    <<: *app
+    build:
+      context: .
+      target: api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${CODOHUE_API_PORT:-2001}/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  cron:
+    <<: *app
+    build:
+      context: .
+      target: cron
+
+  embedder:
+    <<: *app
+    build:
+      context: .
+      target: embedder
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${CODOHUE_EMBEDDER_HEALTH_PORT:-2003}/healthz >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  admin:
+    <<: *app
+    build:
+      context: .
+      target: admin
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${CODOHUE_ADMIN_PORT:-2002}/ >/dev/null"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      api:
+        condition: service_healthy

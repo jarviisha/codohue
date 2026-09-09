@@ -65,6 +65,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate Docker configuration
+        run: make compose-check test-docker
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
