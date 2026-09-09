@@ -503,6 +503,19 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 - **Retention** — `internal/retention` prunes `batch_run_logs` and `catalog_backlog_samples`; setting either `*_RETENTION_DAYS` to 0 disables that prune.
 - **Stream retention** — producers never trim streams. A periodic exact `XTRIM MINID` pass derives the safe frontier from every consumer group and never trims pending work.
 
+### Docker process lifecycle
+
+The full-stack and published-image Compose layouts run migrations as a one-shot
+job before API, cron, and embedder startup; local Redis and Qdrant must also pass
+readiness checks. Admin starts after the API is healthy. PostgreSQL initializes
+the local database; operators provision external databases before migration.
+The app-only layout uses existing, already-migrated infrastructure.
+
+App images run as UID/GID `65532` and containers have a 40-second shutdown grace
+period, covering cron's 30-second drain. Deployment waits for API/embedder health,
+admin SPA liveness, local infrastructure readiness, and a running cron process.
+The [Docker runbook](deploy/docker.md) owns commands and upgrade procedures.
+
 ## 13. Key design decisions
 
 | Decision | Reason |
@@ -565,12 +578,13 @@ pkg/codohuetypes                 Shared wire types module
 sdk/go                           Public Go SDK (+ sdk/go/admin: bearer admin client)
 sdk/go/redistream                Redis Streams producer SDK (events + catalog)
 web/admin                        Vite + React 19 + Tailwind v4 SPA
-docker/                          Auxiliary Dockerfiles
+docker/                          Migration image and entrypoint
 ```
 
 ## 15. Related docs
 
 - [README.md](README.md) — overview + quickstart.
+- [deploy/docker.md](deploy/docker.md) — Compose layouts, startup, migration ownership, and upgrades.
 - [AGENTS.md](AGENTS.md) — contributor / agent conventions.
 - [CLAUDE.md](CLAUDE.md) — thin Claude Code layer that imports the shared `AGENTS.md` instructions.
 - [sdk/go/README.md](sdk/go/README.md) — Go SDK + Redis Streams transport.

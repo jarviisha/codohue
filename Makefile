@@ -26,13 +26,9 @@ GOVULNCHECK_VERSION := v1.7.0
 GO_CACHE_ENV := env GOCACHE=/tmp/go-build GOTMPDIR=/tmp
 LINT_ENV     := $(GO_CACHE_ENV) GOLANGCI_LINT_CACHE=/tmp/golangci-lint GOPROXY=off
 
-# DOCKER_BUILDKIT / COMPOSE_DOCKER_CLI_BUILD are no-ops on modern Docker (23+,
-# compose v2) where BuildKit is already the default. Setting them keeps older
-# host installs working with the Dockerfile's `# syntax=` directive and
-# `--mount=type=cache` instructions.
-COMPOSE          := DOCKER_BUILDKIT=1 COMPOSE_DOCKER_CLI_BUILD=1 docker compose
-COMPOSE_APP      := $(COMPOSE) -f docker-compose.app.yml
-COMPOSE_PROD     := $(COMPOSE) -f docker-compose.prod.yml
+COMPOSE          := docker compose
+COMPOSE_APP      := $(COMPOSE) -f compose.app.yaml
+COMPOSE_PROD     := $(COMPOSE) -f compose.prod.yaml
 # All infra profiles enabled so `config` validates the profile-gated services too.
 COMPOSE_PROD_ENV := CODOHUE_DATABASE_URL=postgres://example CODOHUE_ADMIN_API_KEY=dummy COMPOSE_PROFILES=local-db,local-redis,local-qdrant
 
@@ -62,7 +58,7 @@ MIN_EMBEDSTRATEGY  ?= 90
 	up-infra up-infra-build up-infra-d up-infra-build-d \
 	up-app up-app-build up-app-d up-app-build-d down down-v down-app \
 	logs logs-api logs-cron logs-admin logs-embedder logs-app \
-	compose-check compose-check-app compose-check-prod \
+	compose-check compose-check-app compose-check-prod test-docker \
 	lint fmt \
 	vuln \
 	test test-pkg test-verbose test-race \
@@ -227,6 +223,9 @@ compose-check-app:
 
 compose-check-prod:
 	$(COMPOSE_PROD_ENV) $(COMPOSE_PROD) config --quiet
+
+test-docker:
+	python3 scripts/test_docker.py
 
 # Lint and format
 

@@ -15,7 +15,7 @@
 # Logs: journalctl -u geminipump -f
 #
 # api (2001) and admin (2002) are published to the host by
-# docker-compose.prod.yml, so the bot reaches them over localhost without
+# compose.prod.yaml, so the bot reaches them over localhost without
 # joining the compose network.
 
 [Unit]

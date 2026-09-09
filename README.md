@@ -29,11 +29,11 @@ It ingests events and raw catalog content over HTTP and durable Redis Streams, p
 ## Requirements
 
 - Go `1.26.1` (server). SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) target Go `1.24.13`.
-- Docker + Docker Compose for local infra
+- Docker + Docker Compose 2.24+ for local infra
 - `golangci-lint` (for `make lint`, `make fmt`)
 - `air` (for `make dev`)
 - `migrate` (for host-side `make migrate-*`)
-- Node.js 20+ and `npm` (for `web/admin`)
+- Node.js 22.12+ and `npm` (for `web/admin`; Docker and CI use Node 22)
 
 ## Quickstart — full stack with Docker Compose
 
@@ -42,7 +42,7 @@ cp .env.example .env
 make up-d
 ```
 
-This starts postgres + redis + qdrant + migrations + the four app containers. Defaults in `.env.example` match what `docker-compose.yml` injects, so no edits are needed for a first run.
+This starts postgres + redis + qdrant + migrations + the four app containers. Defaults in `.env.example` match what `compose.yaml` injects, so no edits are needed for a first run.
 
 Verify:
 
@@ -55,9 +55,14 @@ Other compose layouts:
 
 | File | Purpose |
 | ---- | ------- |
-| [docker-compose.yml](docker-compose.yml)         | Dev — builds from source, infra included, auto-migrate |
-| [docker-compose.app.yml](docker-compose.app.yml) | App-only — builds from source, host networking to external infra |
-| [docker-compose.prod.yml](docker-compose.prod.yml) | Prod — prebuilt GHCR images; each infra service is optional: run it in-compose via `COMPOSE_PROFILES` (`local-db`, `local-redis`, `local-qdrant`) or point at an external one via `CODOHUE_DATABASE_URL` / `CODOHUE_REDIS_URL` / `CODOHUE_QDRANT_HOST` |
+| [compose.yaml](compose.yaml)         | Dev — builds from source, infra included, auto-migrate |
+| [compose.app.yaml](compose.app.yaml) | App-only — builds from source, host networking to external infra |
+| [compose.prod.yaml](compose.prod.yaml) | Prod — prebuilt GHCR images; each infra service is optional: run it in-compose via `COMPOSE_PROFILES` (`local-db`, `local-redis`, `local-qdrant`) or point at an external one via `CODOHUE_DATABASE_URL` / `CODOHUE_REDIS_URL` / `CODOHUE_QDRANT_HOST` |
+
+See [Docker deployment](deploy/docker.md) for app-only setup, external database
+requirements, deployment verification, and upgrades. Local infrastructure and
+embedder ports bind to loopback. Containers use Compose project names; keep the
+project directory/name unchanged when upgrading to reuse existing volumes.
 
 ## Quickstart — binaries against Docker infra
 
@@ -192,6 +197,7 @@ make up-d / up-infra / up-app-d
 make down / down-v / down-app
 make logs / logs-cron / logs-admin / logs-embedder
 make compose-check             # validate every compose file
+make test-docker               # configuration and deploy-script regressions
 
 # Quality
 make lint

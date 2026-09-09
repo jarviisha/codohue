@@ -108,7 +108,7 @@ ssh VPS 'systemctl daemon-reload && systemctl enable --now geminipump'
 ssh VPS 'journalctl -u geminipump -f'
 ```
 
-`docker-compose.prod.yml` publishes api (2001) and admin (2002) to the host, so
+`compose.prod.yaml` publishes api (2001) and admin (2002) to the host, so
 the unit points the bot at `127.0.0.1` — no compose network membership needed and
 no admin key crossing the public internet. Tune `-ns` / `-rate` / `-gen-every` /
 `-max-items` in the unit's `ExecStart`, then `systemctl restart geminipump`.
