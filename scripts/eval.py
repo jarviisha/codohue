@@ -28,7 +28,7 @@ touched). Config (action_weights, alpha, dense_source, ...) is inherited from
 the source namespace unless overridden by flags. This is the only number that
 reflects real-world quality; the synthetic mode validates the mechanism.
 
-This is a black-box harness over the live HTTP stack (like scripts/smoke.py):
+This is a black-box harness over the live HTTP stack (like e2e/):
 no internal imports, python3 stdlib only — no jq, curl, numpy, or pip installs.
 
 Usage:
