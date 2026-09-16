@@ -1,23 +1,21 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
-  Container,
   EmptyState,
-  Inline,
   Pagination,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useTrending } from '@/services/trending'
 import PageHeader from '@/components/shell/PageHeader'
 import MetaLine from '@/components/MetaLine'
@@ -56,42 +54,39 @@ export default function TrendingPage() {
   const cacheTTL = trending.data?.cache_ttl_sec ?? null
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack gap="050">
-            <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">Trending</h1>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={1}>
+            <Stack gap={4} direction="horizontal" align="center">
+              <h1 className="text-primary text-xl font-semibold">Trending</h1>
               {cacheTTL != null && <CacheTTLBadge ttl={cacheTTL} />}
-            </Inline>
-            <p className="text-foreground-subtle text-sm">
+            </Stack>
+            <p className="text-secondary text-sm">
               Redis ZSET surfaced for the cold-start recommendation path. Auto-refreshes every 30
               seconds.
             </p>
           </Stack>
-          <Inline align="center">
+          <Stack gap={4} direction="horizontal" align="center">
             {WINDOW_OPTIONS.map((w) => (
               <Button
                 key={w.value}
                 size="sm"
-                variant={windowHours === w.value ? 'solid' : 'ghost'}
-                tone="neutral"
+                variant="primary"
+                
                 onClick={() => {
                   setWindowHours(w.value)
                   setOffset(0)
-                }}
-              >
-                {w.label}
-              </Button>
+                }} label={w.label} />
             ))}
-          </Inline>
-        </Inline>
+          </Stack>
+        </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         {trending.isError && (
-          <Alert
-            variant="danger"
+          <Banner
+            status="error"
             title="Could not load trending data"
             description={trending.error?.message ?? 'unknown error'}
           />
@@ -109,8 +104,8 @@ export default function TrendingPage() {
             }
           />
         ) : (
-          <Stack>
-            <Inline align="center" justify="between" wrap>
+          <Stack gap={6}>
+            <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
               <MetaLine
                 size="xs"
                 className="tabular-nums"
@@ -124,48 +119,46 @@ export default function TrendingPage() {
                   `generated ${new Date(trending.data!.generated_at).toLocaleTimeString()}`,
                 ]}
               />
-            </Inline>
-            <TableContainer>
+            </Stack>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead align="right">Rank</TableHead>
-                    <TableHead>Object ID</TableHead>
-                    <TableHead align="right">Score</TableHead>
+                    <TableHeaderCell className="text-right" >Rank</TableHeaderCell>
+                    <TableHeaderCell>Object ID</TableHeaderCell>
+                    <TableHeaderCell className="text-right" >Score</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((it, i) => (
                     <TableRow key={`${it.object_id}-${i}`}>
-                      <TableCell align="right" className="tabular-nums">
+                      <TableCell  className="text-right tabular-nums">
                         {offset + i + 1}
                       </TableCell>
                       <TableCell>
-                        <code className="text-foreground text-xs">{it.object_id}</code>
+                        <code className="text-primary text-xs">{it.object_id}</code>
                       </TableCell>
-                      <TableCell align="right" className="tabular-nums">
+                      <TableCell  className="text-right tabular-nums">
                         {it.score.toFixed(6)}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </TableContainer>
             <Pagination
               page={Math.floor(offset / PAGE_SIZE) + 1}
-              pageCount={Math.max(1, Math.ceil(total / PAGE_SIZE))}
-              onPageChange={(page) => setOffset((page - 1) * PAGE_SIZE)}
+              totalPages={Math.max(1, Math.ceil(total / PAGE_SIZE))}
+              onChange={(page) => setOffset((page - 1) * PAGE_SIZE)}
             />
           </Stack>
         )}
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }
 
 function CacheTTLBadge({ ttl }: { ttl: number }) {
-  if (ttl === -2) return <Badge variant="warning">redis key missing</Badge>
-  if (ttl === -1) return <Badge variant="neutral">no TTL</Badge>
-  if (ttl < 60) return <Badge variant="warning">{`expires in ${ttl}s`}</Badge>
-  return <Badge variant="success">{`fresh ${Math.round(ttl / 60)}m left`}</Badge>
+  if (ttl === -2) return <Badge variant="warning" label="redis key missing" />
+  if (ttl === -1) return <Badge variant="neutral" label="no TTL" />
+  if (ttl < 60) return <Badge variant="warning" label={`expires in ${ttl}s`} />
+  return <Badge variant="success" label={`fresh ${Math.round(ttl / 60)}m left`} />
 }

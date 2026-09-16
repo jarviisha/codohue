@@ -4,17 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Codohue Admin</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap"
-      rel="stylesheet"
-    />
     <script>
-      // Inlined output of getThemeScript({ defaultTheme: 'system', storageKey: 'codohue-admin-theme' }).
-      // Runs synchronously before paint so the html class is set and there is
-      // no light → dark flash on reload. See web/admin/USAGE.md §Step 3.
-      (function(){try{var s=localStorage.getItem("codohue-admin-theme");var t=(s==="light"||s==="dark"||s==="system")?s:"system";var r=t==="system"?(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"):t;var c=document.documentElement.classList;c.remove("light","dark");c.add(r);}catch(e){}})();
+      // Astryx's <Theme> syncs data-theme onto <html>, but only after React
+      // mounts. Setting it here, synchronously before paint, avoids the
+      // light → dark flash on reload for an explicitly stored preference.
+      // "system" deliberately leaves the attribute off so the reset's
+      // `color-scheme: light dark` default applies.
+      // Storage key must match src/services/themeMode.ts.
+      (function(){try{var s=localStorage.getItem("codohue-admin-theme");if(s==="light"||s==="dark"){document.documentElement.setAttribute("data-theme",s);}}catch(e){}})();
     </script>
   </head>
   <body>

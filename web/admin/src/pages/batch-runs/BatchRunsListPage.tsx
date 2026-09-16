@@ -1,25 +1,22 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Card,
-  CardContent,
-  Container,
   EmptyState,
-  Inline,
   Pagination,
-  Select,
+  Selector,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useBatchRuns, useBatchRunStats, type BatchRunsFilter } from '@/services/batchRuns'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
@@ -62,74 +59,80 @@ export default function BatchRunsListPage() {
   }))
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">Batch runs</h1>
-          <p className="text-foreground-subtle text-sm">
+        <Stack gap={1}>
+          <h1 className="text-primary text-xl font-semibold">Batch runs</h1>
+          <p className="text-secondary text-sm">
             cron + manual + admin re-embed runs. Newest first; refreshes every 15 seconds.
           </p>
         </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         <StatsRow stats={list.data?.stats} />
 
         {stats.isLoading ? (
           <Skeleton className="h-40 w-full" />
         ) : seriesData.length === 0 ? (
-          <p className="text-foreground-subtle text-sm">No completed runs in the last 24h.</p>
+          <p className="text-secondary text-sm">No completed runs in the last 24h.</p>
         ) : (
           <TimeSeriesChart
             data={seriesData}
             series={[
-              { key: 'ok', label: 'OK', color: 'var(--davinci-semantic-color-success)' },
-              { key: 'failed', label: 'Failed', color: 'var(--davinci-semantic-color-danger)' },
-              { key: 'cancelled', label: 'Cancelled', color: 'var(--davinci-semantic-color-warning)' },
+              { key: 'ok', label: 'OK', color: 'var(--color-success)' },
+              { key: 'failed', label: 'Failed', color: 'var(--color-error)' },
+              { key: 'cancelled', label: 'Cancelled', color: 'var(--color-warning)' },
             ]}
             stacked
             height={180}
           />
         )}
 
-        <Stack>
-          <Inline align="center" justify="between" wrap>
-                <Inline align="center">
-                  <Select
+        <Stack gap={6}>
+          <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
+                <Stack gap={4} direction="horizontal" align="center">
+                  <Selector
                     size="sm"
+                    label="Status"
+                    isLabelHidden
                     value={statusFilter}
-                    onChange={(e) => {
-                      setStatusFilter(e.target.value as typeof statusFilter)
+                    onChange={(next) => {
+                      setStatusFilter(next as typeof statusFilter)
                       setPage(0)
                     }}
-                  >
-                    <option value="">all statuses</option>
-                    <option value="running">running</option>
-                    <option value="ok">ok</option>
-                    <option value="failed">failed</option>
-                  </Select>
-                  <Select
+                    options={[
+                      { value: '', label: 'all statuses' },
+                      { value: 'running', label: 'running' },
+                      { value: 'ok', label: 'ok' },
+                      { value: 'failed', label: 'failed' },
+                    ]}
+                  />
+                  <Selector
                     size="sm"
+                    label="Kind"
+                    isLabelHidden
                     value={kindFilter}
-                    onChange={(e) => {
-                      setKindFilter(e.target.value as typeof kindFilter)
+                    onChange={(next) => {
+                      setKindFilter(next as typeof kindFilter)
                       setPage(0)
                     }}
-                  >
-                    <option value="">all kinds</option>
-                    <option value="cf">cf</option>
-                    <option value="reembed">reembed</option>
-                  </Select>
-                </Inline>
+                    options={[
+                      { value: '', label: 'all kinds' },
+                      { value: 'cf', label: 'cf' },
+                      { value: 'reembed', label: 'reembed' },
+                    ]}
+                  />
+                </Stack>
                 {list.data && (
                   <MetaLine items={[`${list.data.total} matching`, `page ${page + 1}`]} />
                 )}
-              </Inline>
+              </Stack>
 
               {list.isLoading && <Skeleton className="h-48 w-full" />}
 
               {list.isError && (
-                <Alert variant="danger" title="Failed to load batch runs" description={list.error?.message ?? ''} />
+                <Banner status="error" title="Failed to load batch runs" description={list.error?.message ?? ''} />
               )}
 
               {list.isSuccess && list.data.items.length === 0 && (
@@ -140,27 +143,26 @@ export default function BatchRunsListPage() {
               )}
 
               {list.isSuccess && list.data.items.length > 0 && (
-                <TableContainer>
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead align="right">#</TableHead>
-                        {!ns && <TableHead>Namespace</TableHead>}
-                        <TableHead>Kind</TableHead>
-                        <TableHead>Trigger</TableHead>
-                        <TableHead>Started</TableHead>
-                        <TableHead align="right">Duration</TableHead>
-                        <TableHead>Phases</TableHead>
-                        <TableHead>Status</TableHead>
+                        <TableHeaderCell className="text-right" >#</TableHeaderCell>
+                        {!ns && <TableHeaderCell>Namespace</TableHeaderCell>}
+                        <TableHeaderCell>Kind</TableHeaderCell>
+                        <TableHeaderCell>Trigger</TableHeaderCell>
+                        <TableHeaderCell>Started</TableHeaderCell>
+                        <TableHeaderCell className="text-right" >Duration</TableHeaderCell>
+                        <TableHeaderCell>Phases</TableHeaderCell>
+                        <TableHeaderCell>Status</TableHeaderCell>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {list.data.items.map((r) => (
                         <TableRow key={r.id}>
-                          <TableCell align="right" className="tabular-nums">
+                          <TableCell  className="text-right tabular-nums">
                             <Link
                               to={ns ? `/ns/${encodeURIComponent(ns)}/batch-runs/${r.id}` : `/batch-runs/${r.id}`}
-                              className="text-foreground font-medium"
+                              className="text-primary font-medium"
                             >
                               {r.id}
                             </Link>
@@ -175,13 +177,13 @@ export default function BatchRunsListPage() {
                             </TableCell>
                           )}
                           <TableCell>
-                            <Badge variant={r.kind === 'reembed' ? 'discovery' : 'neutral'}>{r.kind}</Badge>
+                            <Badge variant={r.kind === 'reembed' ? 'purple' : 'neutral'} label={r.kind} />
                           </TableCell>
-                          <TableCell className="text-foreground-subtle text-sm">{r.trigger_source}</TableCell>
-                          <TableCell className="text-foreground-subtle text-sm">
+                          <TableCell className="text-secondary text-sm">{r.trigger_source}</TableCell>
+                          <TableCell className="text-secondary text-sm">
                             {new Date(r.started_at).toLocaleString()}
                           </TableCell>
-                          <TableCell align="right" className="tabular-nums">
+                          <TableCell  className="text-right tabular-nums">
                             {r.duration_ms != null ? `${(r.duration_ms / 1000).toFixed(1)}s` : '—'}
                           </TableCell>
                           <TableCell>
@@ -194,21 +196,20 @@ export default function BatchRunsListPage() {
                       ))}
                     </TableBody>
                   </Table>
-                </TableContainer>
               )}
 
           {list.data && list.data.total > PAGE_SIZE && (
-            <Inline justify="end">
+            <Stack align="center" gap={4} direction="horizontal" justify="end">
               <Pagination
                 page={page + 1}
-                pageCount={Math.max(1, Math.ceil(list.data.total / PAGE_SIZE))}
-                onPageChange={(p) => setPage(p - 1)}
+                totalPages={Math.max(1, Math.ceil(list.data.total / PAGE_SIZE))}
+                onChange={(p) => setPage(p - 1)}
               />
-            </Inline>
+            </Stack>
           )}
         </Stack>
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -217,24 +218,22 @@ function StatsRow({ stats }: { stats?: { total: number; running: number; ok: num
     { label: 'Total', value: stats?.total ?? 0, tone: 'neutral' as const },
     { label: 'Running', value: stats?.running ?? 0, tone: stats?.running ? ('warning' as const) : ('neutral' as const) },
     { label: 'OK', value: stats?.ok ?? 0, tone: 'success' as const },
-    { label: 'Failed', value: stats?.failed ?? 0, tone: stats?.failed ? ('danger' as const) : ('neutral' as const) },
+    { label: 'Failed', value: stats?.failed ?? 0, tone: stats?.failed ? ('error' as const) : ('neutral' as const) },
   ]
   return (
-    <Inline align="start" wrap>
+    <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
       {tiles.map((t) => (
         <Card key={t.label} className="flex-1 min-w-35">
-          <CardContent>
-            <Stack>
-              <span className="text-foreground-subtle text-xs uppercase tracking-wide">{t.label}</span>
-              <Inline align="center">
-                <span className="text-foreground text-xl font-semibold tabular-nums">{t.value}</span>
-                <Badge variant={t.tone}>{t.tone}</Badge>
-              </Inline>
+            <Stack gap={6}>
+              <span className="text-secondary text-xs uppercase tracking-wide">{t.label}</span>
+              <Stack gap={4} direction="horizontal" align="center">
+                <span className="text-primary text-xl font-semibold tabular-nums">{t.value}</span>
+                <Badge variant={t.tone} label={t.tone} />
+              </Stack>
             </Stack>
-          </CardContent>
         </Card>
       ))}
-    </Inline>
+    </Stack>
   )
 }
 
@@ -244,13 +243,13 @@ function RunStatusBadge({
   run: { completed_at: string | null; success: boolean; cancel_requested: boolean; error_message: string | null }
 }) {
   if (run.completed_at == null) {
-    return <Badge variant={run.cancel_requested ? 'warning' : 'primary'}>{run.cancel_requested ? 'cancelling' : 'running'}</Badge>
+    return <Badge variant={run.cancel_requested ? 'warning' : 'info'} label={run.cancel_requested ? 'cancelling' : 'running'} />
   }
   if (run.error_message === 'operator_cancelled') {
-    return <Badge variant="neutral">cancelled</Badge>
+    return <Badge variant="neutral" label="cancelled" />
   }
   if (run.success) {
-    return <Badge variant="success">ok</Badge>
+    return <Badge variant="success" label="ok" />
   }
-  return <Badge variant="danger">failed</Badge>
+  return <Badge variant="error" label="failed" />
 }

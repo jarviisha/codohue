@@ -1,15 +1,5 @@
-import {
-  Alert,
-  Badge,
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  Container,
-  Inline,
-  Skeleton,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { Badge, Banner, Card, Skeleton, Stack, Text } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useHealth, type ComponentStatus } from '@/services/health'
 import PageHeader from '@/components/shell/PageHeader'
 
@@ -19,14 +9,14 @@ const COMPONENTS: Array<{ key: 'postgres' | 'redis' | 'qdrant'; label: string; e
   { key: 'qdrant', label: 'Qdrant', explain: 'Sparse and dense vectors for recommend service.' },
 ]
 
-function statusVariant(s: ComponentStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+function statusVariant(s: ComponentStatus): 'success' | 'warning' | 'error' | 'neutral' {
   switch (s) {
     case 'ok':
       return 'success'
     case 'degraded':
       return 'warning'
     case 'error':
-      return 'danger'
+      return 'error'
     default:
       return 'neutral'
   }
@@ -37,59 +27,57 @@ export default function HealthPage() {
 
   if (health.isLoading) {
     return (
-      <Container size="md" className="py-6">
+      <PageContainer size="md">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
 
   if (health.isError) {
     return (
-      <Container size="md" className="py-6">
-        <Alert
-          variant="danger"
+      <PageContainer size="md">
+        <Banner
+          status="error"
           title="Could not reach /health"
           description={health.error?.message ?? 'unknown error'}
         />
-      </Container>
+      </PageContainer>
     )
   }
 
   const data = health.data!
 
   return (
-    <Container size="md" className="py-6">
+    <PageContainer size="md">
       <PageHeader>
-        <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">Service health</h1>
-          <Inline align="center">
-            <span className="text-foreground-subtle text-sm">overall</span>
-            <Badge variant={statusVariant(data.status)}>{data.status}</Badge>
-            <span className="text-foreground-subtle text-xs">refreshes every 30 seconds</span>
-          </Inline>
+        <Stack gap={1}>
+          <h1 className="text-primary text-xl font-semibold">Service health</h1>
+          <Stack gap={4} direction="horizontal" align="center">
+            <span className="text-secondary text-sm">overall</span>
+            <Badge variant={statusVariant(data.status)} label={data.status} />
+            <span className="text-secondary text-xs">refreshes every 30 seconds</span>
+          </Stack>
         </Stack>
       </PageHeader>
 
-      <Stack>
-        <Stack>
+      <Stack gap={6}>
+        <Stack gap={6}>
           {COMPONENTS.map((c) => {
             const s = data[c.key]
             return (
               <Card key={c.key}>
-                <CardHeader>
-                  <Inline align="center" justify="between">
-                    <CardTitle>{c.label}</CardTitle>
-                    <Badge variant={statusVariant(s)}>{s}</Badge>
-                  </Inline>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-foreground-subtle text-sm">{c.explain}</p>
-                </CardContent>
+                <Stack gap={1}>
+                  <Stack gap={4} direction="horizontal" align="center" justify="between">
+                    <Text weight="semibold">{c.label}</Text>
+                    <Badge variant={statusVariant(s)} label={s} />
+                  </Stack>
+                </Stack>
+                  <p className="text-secondary text-sm">{c.explain}</p>
               </Card>
             )
           })}
         </Stack>
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }

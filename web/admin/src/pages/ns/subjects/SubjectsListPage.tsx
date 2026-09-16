@@ -1,24 +1,22 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  Alert,
+  Banner,
   Button,
-  Container,
   EmptyState,
-  Inline,
   Pagination,
-  SearchInput,
-  Select,
+  Selector,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+  TextInput,
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useSubjectsList, type SubjectSort } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
 
@@ -63,11 +61,11 @@ export default function SubjectsListPage() {
   }
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">Subjects</h1>
-          <p className="text-foreground-subtle text-sm">
+        <Stack gap={1}>
+          <h1 className="text-primary text-xl font-semibold">Subjects</h1>
+          <p className="text-secondary text-sm">
             {subjects.data
               ? `${subjects.data.total.toLocaleString()} subjects with events. Click one to inspect its profile and recommendations.`
               : 'Subjects seen in this namespace, derived from the events table.'}
@@ -75,56 +73,52 @@ export default function SubjectsListPage() {
         </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         <form onSubmit={openTyped}>
-          <Inline align="center" wrap>
-            <SearchInput
+          <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
+            <TextInput
+              label="Search subjects"
+              isLabelHidden
+              value={search}
+              onChange={(next) => {
+                setSearch(next)
+                setPage(0)
+              }}
+              hasClear
               size="sm"
               placeholder="subject_id starts with…"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
-                setPage(0)
-              }}
-              onClear={() => {
-                setSearch('')
-                setPage(0)
-              }}
             />
             <Button
               type="submit"
               size="sm"
-              variant="outline"
-              tone="neutral"
-              disabled={search.trim() === ''}
-            >
-              Open exact id
-            </Button>
-            <Select
+              variant="secondary"
+              
+              isDisabled={search.trim() === ''} label="Open exact id" />
+            <Selector
               size="sm"
+              label="Sort"
+              isLabelHidden
               value={sort}
-              onChange={(e) => {
-                setSort(e.target.value as SubjectSort)
+              onChange={(next) => {
+                setSort(next as SubjectSort)
                 setPage(0)
               }}
-            >
-              {SORT_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  sort: {o.label}
-                </option>
-              ))}
-            </Select>
+              options={SORT_OPTIONS.map((o) => ({
+                value: o.value,
+                label: `sort: ${o.label}`,
+              }))}
+            />
             {subjects.data && (
-              <span className="text-foreground-subtle text-sm ml-auto">page {page + 1}</span>
+              <span className="text-secondary text-sm ml-auto">page {page + 1}</span>
             )}
-          </Inline>
+          </Stack>
         </form>
 
         {subjects.isLoading && <Skeleton className="h-48 w-full" />}
 
         {subjects.isError && (
-          <Alert
-            variant="danger"
+          <Banner
+            status="error"
             title="Failed to load subjects"
             description={subjects.error?.message ?? 'unknown error'}
           />
@@ -142,13 +136,12 @@ export default function SubjectsListPage() {
         )}
 
         {subjects.isSuccess && subjects.data.items.length > 0 && (
-          <TableContainer>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Subject ID</TableHead>
-                  <TableHead align="right">Interactions</TableHead>
-                  <TableHead>Last seen</TableHead>
+                  <TableHeaderCell>Subject ID</TableHeaderCell>
+                  <TableHeaderCell className="text-right" >Interactions</TableHeaderCell>
+                  <TableHeaderCell>Last seen</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -157,34 +150,33 @@ export default function SubjectsListPage() {
                     <TableCell>
                       <Link
                         to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(s.subject_id)}`}
-                        className="text-foreground font-medium"
+                        className="text-primary font-medium"
                       >
                         {s.subject_id}
                       </Link>
                     </TableCell>
-                    <TableCell align="right" className="tabular-nums">
+                    <TableCell  className="text-right tabular-nums">
                       {s.interaction_count.toLocaleString()}
                     </TableCell>
-                    <TableCell className="text-foreground-subtle text-sm">
+                    <TableCell className="text-secondary text-sm">
                       {new Date(s.last_seen).toLocaleString()}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </TableContainer>
         )}
 
         {subjects.data && subjects.data.total > PAGE_SIZE && (
-          <Inline justify="end">
+          <Stack align="center" gap={4} direction="horizontal" justify="end">
             <Pagination
               page={page + 1}
-              pageCount={Math.max(1, Math.ceil(subjects.data.total / PAGE_SIZE))}
-              onPageChange={(p) => setPage(p - 1)}
+              totalPages={Math.max(1, Math.ceil(subjects.data.total / PAGE_SIZE))}
+              onChange={(p) => setPage(p - 1)}
             />
-          </Inline>
+          </Stack>
         )}
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }

@@ -23,7 +23,7 @@ export default function MetaLine({
   if (visible.length === 0) return null
   return (
     <div
-      className={`text-foreground-subtle flex flex-wrap items-center gap-x-5 gap-y-1 ${
+      className={`text-secondary flex flex-wrap items-center gap-x-5 gap-y-1 ${
         size === 'xs' ? 'text-xs' : 'text-sm'
       } ${className}`.trim()}
     >

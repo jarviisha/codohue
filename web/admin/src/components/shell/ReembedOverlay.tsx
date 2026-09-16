@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Inline, Stack } from '@jarviisha/davinci-react-ui'
+import { Badge, Button, Stack } from '@astryxdesign/core'
 import { useServerStream } from '@/services/stream'
 import NamespaceTag from '@/components/NamespaceTag'
 
@@ -100,29 +100,26 @@ export default function ReembedOverlay() {
       role="status"
       className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 max-w-3xl"
     >
-      <div className="bg-surface-raised border border-default rounded shadow-lg px-4 py-3">
-        <Inline align="center" wrap>
-          <Inline align="center">
-            <Badge variant="primary">re-embed</Badge>
-            <span className="text-foreground text-sm">
+      <div className="bg-popover border border-border rounded shadow-lg px-4 py-3">
+        <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
+          <Stack gap={4} direction="horizontal" align="center">
+            <Badge variant="info" label="re-embed" />
+            <span className="text-primary text-sm">
               {runs.length} run{runs.length === 1 ? '' : 's'} in flight
             </span>
-          </Inline>
-          <Inline align="center" wrap>
+          </Stack>
+          <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
             {runs.map((r) => (
               <ProgressChip key={r.id} run={r} />
             ))}
-          </Inline>
+          </Stack>
           <Button
             size="sm"
             variant="ghost"
-            tone="neutral"
+            
             onClick={() => setActive({})}
-            aria-label="Dismiss overlay"
-          >
-            Hide
-          </Button>
-        </Inline>
+            aria-label="Dismiss overlay" label="Hide" />
+        </Stack>
       </div>
     </div>
   )
@@ -134,23 +131,23 @@ function ProgressChip({ run }: { run: RunningReembed }) {
   return (
     <Link
       to={`/batch-runs/${run.id}`}
-      className="block text-foreground no-underline hover:underline"
+      className="block text-primary no-underline hover:underline"
     >
-      <Stack>
-        <Inline align="center">
+      <Stack gap={6}>
+        <Stack gap={4} direction="horizontal" align="center">
           <span className="text-sm font-medium">
             #{run.id} <NamespaceTag name={run.namespace} />
           </span>
           {hasProgress && (
-            <span className="text-foreground-subtle text-xs tabular-nums">
+            <span className="text-secondary text-xs tabular-nums">
               {run.processed!.toLocaleString()} / {run.total!.toLocaleString()} ({pct}%)
             </span>
           )}
-        </Inline>
+        </Stack>
         {hasProgress && (
-          <div className="h-1 w-40 bg-surface-sunken rounded overflow-hidden">
+          <div className="h-1 w-40 bg-muted rounded overflow-hidden">
             <div
-              className="h-full bg-primary transition-all duration-300"
+              className="h-full bg-accent-bg transition-all duration-300"
               style={{ width: `${pct}%` }}
             />
           </div>

@@ -1,31 +1,25 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
   Card,
-  CardContent,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogTitle,
   EmptyState,
-  FormField,
-  Inline,
-  Input,
-  SearchInput,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+  TextInput,
+} from '@astryxdesign/core'
 import {
   eventsStreamPath,
   useEventsSummary,
@@ -38,7 +32,6 @@ import {
 import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
-import NamespaceTag from '@/components/NamespaceTag'
 
 const TAIL_CAP = 1000
 const FLASH_MS = 1500
@@ -106,54 +99,52 @@ export default function EventsPage() {
   return (
     <div className="px-6 py-6">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">Events</h1>
-            <p className="text-foreground-subtle text-sm">Live ingest tail, forward-only</p>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={1}>
+            <h1 className="text-primary text-xl font-semibold">Events</h1>
+            <p className="text-secondary text-sm">Live ingest tail, forward-only</p>
           </Stack>
-          <Button size="sm" onClick={() => setInjectOpen(true)}>
-            Inject test event
-          </Button>
-        </Inline>
+          <Button size="sm" onClick={() => setInjectOpen(true)} label="Inject test event" />
+        </Stack>
       </PageHeader>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
-        <Stack>
+        <Stack gap={6}>
           {lastInjectedId != null && (
-            <Alert
-              variant="success"
+            <Banner
+              status="success"
               title={`Injected event #${lastInjectedId}`}
               description="It flashes in the tail below as soon as ingest lands it."
             />
           )}
 
-          <Inline align="center" wrap>
+          <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
             <form onSubmit={applyAction} className="max-w-xs w-full">
-              <SearchInput
-                size="sm"
+              <TextInput
                 value={draftAction}
-                onChange={(e) => setDraftAction(e.target.value)}
-                onClear={clearAction}
+                onChange={(next) => (next === '' ? clearAction() : setDraftAction(next))}
+                hasClear
+                label="Filter tail by action"
+                isLabelHidden
+                size="sm"
                 placeholder="Filter by action — exact, case-sensitive"
-                aria-label="Filter tail by action"
               />
             </form>
             {action && (
-              <Badge variant="primary">
-                action = {action}
-              </Badge>
+              <Badge variant="info" label={`action = ${action}`} />
             )}
             <form onSubmit={applySubject} className="max-w-xs w-full ml-auto">
-              <SearchInput
-                size="sm"
+              <TextInput
                 value={draftSubject}
-                onChange={(e) => setDraftSubject(e.target.value)}
-                onClear={clearSubject}
+                onChange={(next) => (next === '' ? clearSubject() : setDraftSubject(next))}
+                hasClear
+                label="Filter tail by subject id"
+                isLabelHidden
+                size="sm"
                 placeholder="Filter by subject id — Enter"
-                aria-label="Filter tail by subject id"
               />
             </form>
-          </Inline>
+          </Stack>
 
           <LiveTail
             key={streamUrl}
@@ -166,7 +157,7 @@ export default function EventsPage() {
         <SummarySidebar namespace={ns} />
       </div>
 
-      <Dialog open={injectOpen} onOpenChange={setInjectOpen} size="md">
+      <Dialog isOpen={injectOpen} onOpenChange={setInjectOpen} width={560} purpose="form">
         {injectOpen && (
           <InjectEventForm
             namespace={ns}
@@ -251,24 +242,21 @@ function LiveTail({
   }
 
   return (
-    <Stack>
-      <Inline align="center" justify="between" wrap>
-        <Badge variant={connected ? 'success' : 'neutral'}>
-          {connected ? 'streaming' : 'offline'}
-        </Badge>
+    <Stack gap={6}>
+      <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
+        <Badge variant={connected ? 'success' : 'neutral'} label={connected ? 'streaming' : 'offline'} />
         <Button
           size="sm"
-          variant="outline"
-          tone="neutral"
+          variant="secondary"
+          
           onClick={() => (paused ? resume() : setPaused(true))}
-        >
-          {paused ? `Resume${pendingCount > 0 ? ` (${pendingCount})` : ''}` : 'Pause'}
-        </Button>
-      </Inline>
+          label={paused ? `Resume${pendingCount > 0 ? ` (${pendingCount})` : ''}` : 'Pause'}
+        />
+      </Stack>
 
       {droppedCount > 0 && (
-        <Alert
-          variant="warning"
+        <Banner
+          status="warning"
           title={`${droppedCount} event${droppedCount === 1 ? '' : 's'} dropped`}
           description="The browser fell behind the ingest rate. Filter by action or subject to thin the stream."
         />
@@ -283,9 +271,7 @@ function LiveTail({
               : 'This is a forward-only tail — rows appear as ingest lands them. Inject a test event to see it flow through.'
           }
           actions={
-            <Button size="sm" onClick={onInject}>
-              Inject test event
-            </Button>
+            <Button size="sm" onClick={onInject} label="Inject test event" />
           }
         />
       ) : (
@@ -305,15 +291,14 @@ function TailTable({
   flashIds: Set<number>
 }) {
   return (
-    <TableContainer>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Occurred</TableHead>
-            <TableHead>Subject</TableHead>
-            <TableHead>Object</TableHead>
-            <TableHead>Action</TableHead>
-            <TableHead align="right">Weight</TableHead>
+            <TableHeaderCell>Occurred</TableHeaderCell>
+            <TableHeaderCell>Subject</TableHeaderCell>
+            <TableHeaderCell>Object</TableHeaderCell>
+            <TableHeaderCell>Action</TableHeaderCell>
+            <TableHeaderCell className="text-right" >Weight</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -321,34 +306,33 @@ function TailTable({
             <TableRow
               key={e.id}
               className={
-                flashIds.has(e.id) ? 'bg-background-selected transition-colors' : 'transition-colors'
+                flashIds.has(e.id) ? 'bg-accent-muted transition-colors' : 'transition-colors'
               }
             >
-              <TableCell className="text-foreground-subtle text-xs tabular-nums">
+              <TableCell className="text-secondary text-xs tabular-nums">
                 {new Date(e.occurred_at).toLocaleTimeString()}
               </TableCell>
               <TableCell>
                 <Link
                   to={`/ns/${encodeURIComponent(namespace)}/subjects/${encodeURIComponent(e.subject_id)}`}
-                  className="text-foreground text-sm font-medium"
+                  className="text-primary text-sm font-medium"
                 >
                   <code>{e.subject_id}</code>
                 </Link>
               </TableCell>
               <TableCell>
-                <code className="text-foreground-subtle text-xs">{e.object_id}</code>
+                <code className="text-secondary text-xs">{e.object_id}</code>
               </TableCell>
               <TableCell>
-                <Badge variant="neutral">{e.action}</Badge>
+                <Badge variant="neutral" label={e.action} />
               </TableCell>
-              <TableCell align="right" className="tabular-nums">
+              <TableCell  className="text-right tabular-nums">
                 {e.weight.toFixed(2)}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-    </TableContainer>
   )
 }
 
@@ -357,41 +341,38 @@ function SummarySidebar({ namespace }: { namespace: string }) {
   const summary = useEventsSummary(namespace, window)
 
   return (
-    <Stack>
-      <Inline align="center">
+    <Stack gap={6}>
+      <Stack gap={4} direction="horizontal" align="center">
         {WINDOWS.map((w) => (
           <Button
             key={w}
             size="sm"
-            variant={window === w ? 'solid' : 'outline'}
-            tone="neutral"
-            onClick={() => setWindow(w)}
-          >
-            {w}
-          </Button>
+            variant="primary"
+            
+            onClick={() => setWindow(w)} label={w} />
         ))}
-      </Inline>
+      </Stack>
 
-      <Inline wrap>
+      <Stack align="center" gap={4} direction="horizontal" wrap="wrap">
         <SummaryTile
           label={`Events (${window})`}
           value={(summary.data?.total ?? 0).toLocaleString()}
         />
         <SummaryTile label="Rate / s" value={(summary.data?.rate_per_second ?? 0).toFixed(2)} />
-      </Inline>
+      </Stack>
 
       <ActionMix data={summary.data} />
 
-      <Stack>
-        <span className="text-foreground-subtle text-xs uppercase tracking-wide">Over time</span>
+      <Stack gap={6}>
+        <span className="text-secondary text-xs uppercase tracking-wide">Over time</span>
         {summary.data && summary.data.series.length > 0 ? (
           <TimeSeriesChart
             data={summary.data.series.map((b) => ({ ts: b.ts, count: b.count }))}
-            series={[{ key: 'count', label: 'Events', color: 'var(--davinci-semantic-color-success)' }]}
+            series={[{ key: 'count', label: 'Events', color: 'var(--color-success)' }]}
             height={140}
           />
         ) : (
-          <p className="text-foreground-subtle text-sm">No events in this window.</p>
+          <p className="text-secondary text-sm">No events in this window.</p>
         )}
       </Stack>
     </Stack>
@@ -401,12 +382,10 @@ function SummarySidebar({ namespace }: { namespace: string }) {
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
     <Card className="flex-1 min-w-30">
-      <CardContent>
-        <Stack>
-          <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
-          <span className="text-foreground text-xl font-semibold tabular-nums">{value}</span>
+        <Stack gap={6}>
+          <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
+          <span className="text-primary text-xl font-semibold tabular-nums">{value}</span>
         </Stack>
-      </CardContent>
     </Card>
   )
 }
@@ -417,20 +396,20 @@ function ActionMix({ data }: { data: EventsSummaryResponse | undefined }) {
   }
   const total = data.total || 1
   return (
-    <Stack>
-      <span className="text-foreground-subtle text-xs uppercase tracking-wide">Action mix</span>
-      <Stack>
+    <Stack gap={6}>
+      <span className="text-secondary text-xs uppercase tracking-wide">Action mix</span>
+      <Stack gap={6}>
         {data.by_action.map((a) => {
           const pct = Math.round((a.count / total) * 100)
           return (
-            <Stack key={a.action}>
-              <Inline align="center" justify="between">
-                <span className="text-foreground text-sm">{a.action}</span>
-                <span className="text-foreground-subtle text-xs tabular-nums">
+            <Stack gap={6} key={a.action}>
+              <Stack gap={4} direction="horizontal" align="center" justify="between">
+                <span className="text-primary text-sm">{a.action}</span>
+                <span className="text-secondary text-xs tabular-nums">
                   {a.count.toLocaleString()} ({pct}%)
                 </span>
-              </Inline>
-              <div className="h-1.5 w-full rounded-full bg-surface-sunken">
+              </Stack>
+              <div className="h-1.5 w-full rounded-full bg-muted">
                 <div className="h-1.5 rounded-full bg-success" style={{ width: `${pct}%` }} />
               </div>
             </Stack>
@@ -472,50 +451,54 @@ function InjectEventForm({
 
   return (
     <form onSubmit={onSubmit} className="contents">
-      <DialogHeader>
-        <DialogTitle>
-          Inject test event into <NamespaceTag name={namespace} />
-        </DialogTitle>
-        <DialogDescription>
-          Proxied through the admin event injection endpoint. Lands in the same events table the
-          ingest worker writes to, and flashes in the live tail as it arrives.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogContent>
-        <Stack>
-          {inject.error && (
-            <Alert variant="danger" title="Inject failed" description={inject.error.message} />
-          )}
-          <FormField label="Subject ID" required>
-            <Input
-              value={subjectId}
-              onChange={(e) => setSubjectId(e.target.value)}
-              placeholder="user-42"
-              autoFocus
-            />
-          </FormField>
-          <FormField label="Object ID" required>
-            <Input
-              value={objectId}
-              onChange={(e) => setObjectId(e.target.value)}
-              placeholder="item-100"
-            />
-          </FormField>
-          <FormField label="Action" helpText="Matches an entry in the namespace action_weights map.">
-            <Input value={action} onChange={(e) => setAction(e.target.value)} />
-          </FormField>
-        </Stack>
-      </DialogContent>
-      <DialogFooter>
-        <Inline justify="end">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!canSubmit}>
-            {inject.isPending ? 'Injecting…' : 'Inject'}
-          </Button>
-        </Inline>
-      </DialogFooter>
+      <Layout
+        header={
+          <DialogHeader
+            title={`Inject test event into ${namespace}`}
+            subtitle="Proxied through the admin event injection endpoint. Lands in the same events table the ingest worker writes to, and flashes in the live tail as it arrives."
+            onOpenChange={onClose}
+          />
+        }
+        content={
+          <LayoutContent>
+            <Stack gap={6}>
+              {inject.error && (
+                <Banner status="error" title="Inject failed" description={inject.error.message} />
+              )}
+              <TextInput
+                label="Subject ID"
+                value={subjectId}
+                onChange={setSubjectId}
+                placeholder="user-42"
+              />
+              <TextInput
+                label="Object ID"
+                value={objectId}
+                onChange={setObjectId}
+                placeholder="item-100"
+              />
+              <TextInput
+                label="Action"
+                description="Matches an entry in the namespace action_weights map."
+                value={action}
+                onChange={setAction}
+              />
+            </Stack>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter>
+            <Stack direction="horizontal" gap={2} align="center" hAlign="end">
+              <Button type="button" variant="ghost" onClick={onClose} label="Cancel" />
+              <Button
+                type="submit"
+                isDisabled={!canSubmit}
+                label={inject.isPending ? 'Injecting…' : 'Inject'}
+              />
+            </Stack>
+          </LayoutFooter>
+        }
+      />
     </form>
   )
 }

@@ -1,17 +1,6 @@
 import { useCallback, useEffect } from 'react'
 import { useBlocker, type BlockerFunction } from 'react-router-dom'
-import {
-  Alert,
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  Inline,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { AlertDialog } from '@astryxdesign/core'
 
 type Props = {
   /** When true, intra-app navigation prompts before leaving. */
@@ -63,40 +52,16 @@ export default function DirtyFormGuard({
   const isBlocked = blocker.state === 'blocked'
 
   return (
-    <Dialog
-      open={isBlocked}
+    <AlertDialog
+      isOpen={isBlocked}
       onOpenChange={(open) => {
         if (!open && blocker.state === 'blocked') blocker.reset()
       }}
-      size="sm"
-    >
-      {isBlocked && (
-        <>
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-          <DialogContent>
-            <Stack>
-              <Alert
-                variant="warning"
-                title="Heads up"
-                description="Save first if you want to keep the current draft."
-              />
-            </Stack>
-          </DialogContent>
-          <DialogFooter>
-            <Inline justify="end">
-              <Button variant="ghost" onClick={() => blocker.reset?.()}>
-                Stay on page
-              </Button>
-              <Button tone="danger" onClick={() => blocker.proceed?.()}>
-                Discard changes
-              </Button>
-            </Inline>
-          </DialogFooter>
-        </>
-      )}
-    </Dialog>
+      title={title}
+      description={description}
+      actionLabel="Discard changes"
+      cancelLabel="Stay on page"
+      onAction={() => blocker.proceed?.()}
+    />
   )
 }

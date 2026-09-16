@@ -16,7 +16,7 @@ export default function NamespaceTag({
 }) {
   return (
     <span
-      className={`text-primary font-bold bg-primary/10 rounded px-1.5 py-0.5 ${className}`.trim()}
+      className={`text-accent font-bold bg-accent-bg/10 rounded px-1.5 py-0.5 ${className}`.trim()}
     >
       {name}
     </span>

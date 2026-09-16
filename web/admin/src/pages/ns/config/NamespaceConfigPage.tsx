@@ -1,27 +1,25 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
-  Container,
-  FormField,
   IconButton,
-  Inline,
-  Input,
-  Select,
+  NumberInput,
+  Selector,
   Skeleton,
   Stack,
   Switch,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
+  TextInput,
   useToast,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useNamespaceDashboard,
   useUpsertNamespace,
@@ -65,7 +63,7 @@ const DENSE_DISTANCES = [
  */
 export default function NamespaceConfigPage() {
   const { ns } = useParams<{ ns: string }>()
-  const toast = useToast()
+  const showToast = useToast()
   const dashboard = useNamespaceDashboard(ns ?? null)
   const upsert = useUpsertNamespace()
 
@@ -73,21 +71,21 @@ export default function NamespaceConfigPage() {
 
   if (dashboard.isLoading) {
     return (
-      <Container size="md" className="py-6 px-6">
+      <PageContainer size="md">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
 
   if (dashboard.isError || !dashboard.data) {
     return (
-      <Container size="md" className="py-6 px-6">
-        <Alert
-          variant="danger"
+      <PageContainer size="md">
+        <Banner
+          status="error"
           title="Could not load namespace config"
           description={dashboard.error?.message ?? 'unknown error'}
         />
-      </Container>
+      </PageContainer>
     )
   }
 
@@ -102,9 +100,7 @@ export default function NamespaceConfigPage() {
           { namespace: ns, body },
           {
             onSuccess: () => {
-              toast.success('Configuration saved', {
-                description: `${ns} updated.`,
-              })
+              showToast({ body: `Configuration saved — ${ns} updated.` })
               onReset()
             },
           },
@@ -138,12 +134,8 @@ function ConfigForm({
   // Action weights kept as ordered entries so adds/removes don't reshuffle
   // existing rows on every keystroke. A freshly created namespace can come
   // back with action_weights = null, so coalesce before iterating.
-  const [weights, setWeights] = useState<Array<{ name: string; value: string }>>(
-    () =>
-      Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({
-        name,
-        value: String(value),
-      })),
+  const [weights, setWeights] = useState<Array<{ name: string; value: number }>>(() =>
+    Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({ name, value })),
   )
 
   // Once a namespace is in catalog mode the upsert cannot move it out — the
@@ -172,10 +164,7 @@ function ConfigForm({
     setStrategyId('')
     setStrategyVersion('')
     setWeights(
-      Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({
-        name,
-        value: String(value),
-      })),
+      Object.entries(initial.action_weights ?? {}).map(([name, value]) => ({ name, value })),
     )
   }
 
@@ -190,149 +179,110 @@ function ConfigForm({
   }
 
   return (
-    <Container size="lg" className="py-6 px-6">
+    <PageContainer size="lg">
       <DirtyFormGuard dirty={dirty && !saving} />
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack gap="050">
-            <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">Configuration</h1>
-              {dirty && <Badge variant="warning">unsaved</Badge>}
-            </Inline>
-            <p className="text-foreground-subtle text-sm">
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={1}>
+            <Stack gap={4} direction="horizontal" align="center">
+              <h1 className="text-primary text-xl font-semibold">Configuration</h1>
+              {dirty && <Badge variant="warning" label="unsaved" />}
+            </Stack>
+            <p className="text-secondary text-sm">
               Mirrors PUT /api/admin/v1/namespaces/{ns}. Only changed fields are sent.
             </p>
           </Stack>
-          <Inline align="center">
+          <Stack gap={4} direction="horizontal" align="center">
             <Button
               type="button"
               variant="ghost"
-              tone="neutral"
-              disabled={!dirty || saving}
-              onClick={reset}
-            >
-              Reset
-            </Button>
+              
+              isDisabled={!dirty || saving}
+              onClick={reset} label="Reset" />
             <Button
               type="submit"
               form={FORM_ID}
-              disabled={!dirty || saving || catalogIncomplete}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-          </Inline>
-        </Inline>
+              isDisabled={!dirty || saving || catalogIncomplete} label={saving ? 'Saving…' : 'Save'} />
+          </Stack>
+        </Stack>
       </PageHeader>
 
       <form id={FORM_ID} onSubmit={handleSubmit}>
-        <Stack>
-          {error && <Alert variant="danger" title="Save failed" description={error} />}
+        <Stack gap={6}>
+          {error && <Banner status="error" title="Save failed" description={error} />}
 
           <SectionCard
             title="Recommend behavior"
             description="Blend, decay, and seen-items rules applied at serve time."
           >
-            <FormField
+            <NumberInput
+              min={0}
+              max={1}
+              step={0.01}
+              value={draft.alpha}
+              onChange={(next) => setDraft({ ...draft, alpha: next })}
               label="Alpha (sparse weight)"
-              helpText="0 = dense only, 1 = sparse only. Hybrid only kicks in when alpha < 1 AND dense_source ≠ disabled."
-            >
-              <Input
-                type="number"
-                step="0.01"
-                min={0}
-                max={1}
-                value={draft.alpha}
-                onChange={(e) => setDraft({ ...draft, alpha: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
+              description="0 = dense only, 1 = sparse only. Hybrid only kicks in when alpha < 1 AND dense_source ≠ disabled."
+            />
+            <NumberInput
+              min={0.001}
+              step={0.001}
+              value={draft.lambda}
+              onChange={(next) => setDraft({ ...draft, lambda: next })}
               label="Lambda (time decay)"
-              helpText="Higher = older events count less. Applied during sparse vector build. Must be > 0."
-            >
-              <Input
-                type="number"
-                step="0.001"
-                min={0.001}
-                required
-                value={draft.lambda}
-                onChange={(e) => setDraft({ ...draft, lambda: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
+              description="Higher = older events count less. Applied during sparse vector build. Must be > 0."
+            />
+            <NumberInput
+              min={0}
+              step={0.001}
+              value={draft.gamma}
+              onChange={(next) => setDraft({ ...draft, gamma: next })}
               label="Gamma (object freshness)"
-              helpText="γ-based freshness rerank at serve time. 0 = disabled."
-            >
-              <Input
-                type="number"
-                step="0.001"
-                min={0}
-                value={draft.gamma}
-                onChange={(e) => setDraft({ ...draft, gamma: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
+              description="γ-based freshness rerank at serve time. 0 = disabled."
+            />
+            <NumberInput
+              min={1}
+              max={500}
+              value={draft.max_results}
+              onChange={(next) => setDraft({ ...draft, max_results: next })}
               label="Max results"
-              helpText="Maximum recommendations the API will return for a single subject."
-            >
-              <Input
-                type="number"
-                min={1}
-                max={500}
-                value={draft.max_results}
-                onChange={(e) => setDraft({ ...draft, max_results: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
+              description="Maximum recommendations the API will return for a single subject."
+            />
+            <NumberInput
+              min={1}
+              value={draft.seen_items_days}
+              onChange={(next) => setDraft({ ...draft, seen_items_days: next })}
               label="Seen items days"
-              helpText="Recency window for the seen-items filter — events older than this are not counted as 'already seen'."
-            >
-              <Input
-                type="number"
-                min={1}
-                value={draft.seen_items_days}
-                onChange={(e) => setDraft({ ...draft, seen_items_days: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
-              label="Exclude authored"
-              helpText={excludeAuthoredHelp(authorCoverage)}
-            >
-              <Switch
-                checked={draft.exclude_authored ?? false}
-                onChange={(e) => setDraft({ ...draft, exclude_authored: e.target.checked })}
-                label={draft.exclude_authored ? 'on' : 'off'}
-              />
-            </FormField>
+              description="Recency window for the seen-items filter — events older than this are not counted as 'already seen'."
+            />
+            <Switch
+              value={draft.exclude_authored ?? false}
+              onChange={(next) => setDraft({ ...draft, exclude_authored: next })}
+              label={draft.exclude_authored ? 'on' : 'off'}
+              description={excludeAuthoredHelp(authorCoverage)}
+            />
           </SectionCard>
 
           <SectionCard
             title="Dense vectors"
             description="Source + shape of dense embeddings used in the hybrid blend."
           >
-            <FormField
+            <Selector
               label="Dense source"
-              helpText={
+              description={
                 lockedInCatalog
                   ? 'This namespace is in catalog mode. Leaving catalog mode is owned by the catalog endpoint — use Disable on the Catalog tab; changing it here would be silently ignored.'
                   : 'Single producer of object dense vectors: disabled (sparse only), byoe (you push embeddings), item2vec / svd (cron retrains from events), or catalog (auto-embed ingested content — pick the strategy below).'
               }
-            >
-              <Select
-                value={draft.dense_source}
-                disabled={lockedInCatalog}
-                onChange={(e) => {
-                  setDraft({ ...draft, dense_source: e.target.value })
-                  setStrategyId('')
-                  setStrategyVersion('')
-                }}
-              >
-                {DENSE_SOURCES.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
+              value={draft.dense_source}
+              isDisabled={lockedInCatalog}
+              onChange={(next) => {
+                setDraft({ ...draft, dense_source: next })
+                setStrategyId('')
+                setStrategyVersion('')
+              }}
+              options={DENSE_SOURCES.map((s) => ({ value: s.value, label: s.label }))}
+            />
 
             {switchingToCatalog && (
               <CatalogStrategyFields
@@ -349,80 +299,55 @@ function ConfigForm({
                 onStrategyVersion={setStrategyVersion}
               />
             )}
-            <FormField
+            <NumberInput
+              min={8}
+              max={2048}
+              value={draft.embedding_dim}
+              onChange={(next) => {
+              setDraft({ ...draft, embedding_dim: next })
+              // Strategies are listed per dim, so a dim change can
+              // invalidate the current pick.
+              setStrategyId('')
+              setStrategyVersion('')
+              }}
               label="Embedding dim"
-              helpText="Width of dense vectors. Must match what your producer sends (BYOE) or what item2vec/svd is configured for."
-            >
-              <Input
-                type="number"
-                min={8}
-                max={2048}
-                value={draft.embedding_dim}
-                onChange={(e) => {
-                  setDraft({ ...draft, embedding_dim: Number(e.target.value) })
-                  // Strategies are listed per dim, so a dim change can
-                  // invalidate the current pick.
-                  setStrategyId('')
-                  setStrategyVersion('')
-                }}
-              />
-            </FormField>
-            <FormField
+              description="Width of dense vectors. Must match what your producer sends (BYOE) or what item2vec/svd is configured for."
+            />
+            <Selector
               label="Dense distance"
-              helpText="Similarity metric for the dense Qdrant collections. cosine for normalized embeddings, dot product when magnitude carries signal."
-            >
-              <Select
-                value={draft.dense_distance}
-                onChange={(e) => setDraft({ ...draft, dense_distance: e.target.value })}
-              >
-                {DENSE_DISTANCES.map((d) => (
-                  <option key={d.value} value={d.value}>
-                    {d.label}
-                  </option>
-                ))}
-              </Select>
-            </FormField>
+              description="Similarity metric for the dense Qdrant collections. cosine for normalized embeddings, dot product when magnitude carries signal."
+              value={draft.dense_distance}
+              onChange={(next) => setDraft({ ...draft, dense_distance: next })}
+              options={DENSE_DISTANCES.map((d) => ({ value: d.value, label: d.label }))}
+            />
           </SectionCard>
 
           <SectionCard
             title="Trending"
             description="Cold-start fallback path — Redis ZSET that drives /v1/trending and the hybrid for new subjects."
           >
-            <FormField
+            <NumberInput
+              min={1}
+              value={draft.trending_window}
+              onChange={(next) => setDraft({ ...draft, trending_window: next })}
               label="Trending window (hours)"
-              helpText="Events newer than this contribute to the trending score."
-            >
-              <Input
-                type="number"
-                min={1}
-                value={draft.trending_window}
-                onChange={(e) => setDraft({ ...draft, trending_window: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
+              description="Events newer than this contribute to the trending score."
+            />
+            <NumberInput
+              min={1}
+              value={draft.trending_ttl}
+              onChange={(next) => setDraft({ ...draft, trending_ttl: next })}
               label="Trending TTL (seconds)"
-              helpText="How long the Redis ZSET is cached before recomputation triggers."
-            >
-              <Input
-                type="number"
-                min={1}
-                value={draft.trending_ttl}
-                onChange={(e) => setDraft({ ...draft, trending_ttl: Number(e.target.value) })}
-              />
-            </FormField>
-            <FormField
+              description="How long the Redis ZSET is cached before recomputation triggers."
+            />
+            <NumberInput
+              min={0.001}
+              step={0.001}
+              value={draft.lambda_trending}
+              onChange={(next) => setDraft({ ...draft, lambda_trending: next })}
               label="Lambda trending"
-              helpText="Time decay applied while building the trending ZSET. Independent of the sparse lambda. Must be > 0."
-            >
-              <Input
-                type="number"
-                step="0.001"
-                min={0.001}
-                required
-                value={draft.lambda_trending}
-                onChange={(e) => setDraft({ ...draft, lambda_trending: Number(e.target.value) })}
-              />
-            </FormField>
+              description="Time decay applied while building the trending ZSET. Independent of the sparse lambda. Must be > 0."
+            />
           </SectionCard>
 
           <SectionCard
@@ -433,7 +358,7 @@ function ConfigForm({
           </SectionCard>
         </Stack>
       </form>
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -447,10 +372,10 @@ function SectionCard({
   children: React.ReactNode
 }) {
   return (
-    <Stack>
-      <Stack className="border-border border-b-2 pb-3">
-        <span className="text-foreground text-2xl font-semibold tracking-wide">{title}</span>
-        <p className="text-muted text-sm">{description}</p>
+    <Stack gap={6}>
+      <Stack gap={6} className="border-border border-b-2 pb-3">
+        <span className="text-primary text-2xl font-semibold tracking-wide">{title}</span>
+        <p className="text-secondary text-sm">{description}</p>
       </Stack>
       {children}
     </Stack>
@@ -461,77 +386,72 @@ function ActionWeightsEditor({
   weights,
   onChange,
 }: {
-  weights: Array<{ name: string; value: string }>
-  onChange: (next: Array<{ name: string; value: string }>) => void
+  weights: Array<{ name: string; value: number }>
+  onChange: (next: Array<{ name: string; value: number }>) => void
 }) {
-  const setRow = (idx: number, patch: Partial<{ name: string; value: string }>) => {
+  const setRow = (idx: number, patch: Partial<{ name: string; value: number }>) => {
     onChange(weights.map((w, i) => (i === idx ? { ...w, ...patch } : w)))
   }
   const removeRow = (idx: number) => onChange(weights.filter((_, i) => i !== idx))
-  const addRow = () => onChange([...weights, { name: '', value: '1.0' }])
+  const addRow = () => onChange([...weights, { name: '', value: 1 }])
 
   if (weights.length === 0) {
     return (
-      <Stack>
-        <p className="text-foreground-subtle text-sm">No actions configured.</p>
-        <Inline justify="end">
-          <Button type="button" size="sm" variant="outline" tone="neutral" onClick={addRow}>
-            Add action
-          </Button>
-        </Inline>
+      <Stack gap={6}>
+        <p className="text-secondary text-sm">No actions configured.</p>
+        <Stack align="center" gap={4} direction="horizontal" justify="end">
+          <Button type="button" size="sm" variant="secondary"  onClick={addRow} label="Add action" />
+        </Stack>
       </Stack>
     )
   }
 
   return (
-    <Stack>
-      <TableContainer>
+    <Stack gap={6}>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Action</TableHead>
-              <TableHead align="right">Weight</TableHead>
-              <TableHead align="right">Remove</TableHead>
+              <TableHeaderCell>Action</TableHeaderCell>
+              <TableHeaderCell className="text-right" >Weight</TableHeaderCell>
+              <TableHeaderCell className="text-right" >Remove</TableHeaderCell>
             </TableRow>
           </TableHeader>
           <TableBody>
             {weights.map((w, i) => (
               <TableRow key={i}>
                 <TableCell>
-                  <Input
+                  <TextInput
+                    label="Action name"
+                    isLabelHidden
                     value={w.name}
-                    onChange={(e) => setRow(i, { name: e.target.value })}
+                    onChange={(next) => setRow(i, { name: next })}
                     placeholder="e.g. click"
                   />
                 </TableCell>
-                <TableCell align="right">
-                  <Input
-                    type="number"
-                    step="0.01"
+                <TableCell className="text-right" >
+                  <NumberInput
+                    label="Weight"
+                    isLabelHidden
+                    step={0.01}
                     value={w.value}
-                    onChange={(e) => setRow(i, { value: e.target.value })}
+                    onChange={(next) => setRow(i, { value: next })}
                   />
                 </TableCell>
-                <TableCell align="right">
+                <TableCell className="text-right" >
                   <IconButton
-                    aria-label={`Remove action ${w.name || i}`}
-                    variant="ghost"
-                    tone="danger"
+                    label={`Remove action ${w.name || i}`}
+                    icon="×"
+                    variant="destructive"
                     onClick={() => removeRow(i)}
-                  >
-                    ×
-                  </IconButton>
+                  />
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
-      </TableContainer>
-      <Inline justify="end">
-        <Button type="button" size="sm" variant="outline" tone="neutral" onClick={addRow}>
-          Add action
-        </Button>
-      </Inline>
+      <Stack align="center" gap={4} direction="horizontal" justify="end">
+        <Button type="button" size="sm" variant="secondary"  onClick={addRow} label="Add action" />
+      </Stack>
     </Stack>
   )
 }
@@ -539,7 +459,7 @@ function ActionWeightsEditor({
 function diffConfig(
   initial: NamespaceConfig,
   draft: NamespaceConfig,
-  weights: Array<{ name: string; value: string }>,
+  weights: Array<{ name: string; value: number }>,
   catalog?: { id: string; version: string },
 ): { body: NamespaceUpsertRequest; dirty: boolean } {
   const body: NamespaceUpsertRequest = {}
@@ -580,9 +500,8 @@ function diffConfig(
   for (const w of weights) {
     const name = w.name.trim()
     if (!name) continue
-    const v = Number(w.value)
-    if (!Number.isFinite(v)) continue
-    nextMap[name] = v
+    if (!Number.isFinite(w.value)) continue
+    nextMap[name] = w.value
   }
   const initialWeights = initial.action_weights ?? {}
   const initialKeys = Object.keys(initialWeights)

@@ -1,20 +1,16 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
-  Alert,
+  Banner,
   Button,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogTitle,
-  FormField,
-  Inline,
-  Input,
-  Select,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
+  NumberInput,
+  Selector,
   Stack,
-} from '@jarviisha/davinci-react-ui'
-import NamespaceTag from '@/components/NamespaceTag'
+} from '@astryxdesign/core'
 import {
   useUpdateCatalogConfig,
   type CatalogStrategyDescriptor,
@@ -53,7 +49,7 @@ export default function CatalogConfigDialog({
   strategies,
 }: Props) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="lg">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} width={720} purpose="form">
       {open && (
         <ConfigForm
           namespace={namespace}
@@ -81,11 +77,9 @@ function ConfigForm({
 
   const [strategyId, setStrategyId] = useState(config.strategy_id)
   const [strategyVersion, setStrategyVersion] = useState(config.strategy_version)
-  const [maxAttempts, setMaxAttempts] = useState<string>(
-    config.max_attempts != null ? String(config.max_attempts) : '',
-  )
-  const [maxContentBytes, setMaxContentBytes] = useState<string>(
-    config.max_content_bytes != null ? String(config.max_content_bytes) : '',
+  const [maxAttempts, setMaxAttempts] = useState<number | null>(config.max_attempts ?? null)
+  const [maxContentBytes, setMaxContentBytes] = useState<number | null>(
+    config.max_content_bytes ?? null,
   )
 
   const strategyIds = useMemo(() => {
@@ -117,13 +111,11 @@ function ConfigForm({
       strategy_id: strategyId,
       strategy_version: strategyVersion,
     }
-    if (maxAttempts !== '') {
-      const n = Number(maxAttempts)
-      if (Number.isFinite(n) && n > 0) body.max_attempts = n
+    if (maxAttempts != null && Number.isFinite(maxAttempts) && maxAttempts > 0) {
+      body.max_attempts = maxAttempts
     }
-    if (maxContentBytes !== '') {
-      const n = Number(maxContentBytes)
-      if (Number.isFinite(n) && n > 0) body.max_content_bytes = n
+    if (maxContentBytes != null && Number.isFinite(maxContentBytes) && maxContentBytes > 0) {
+      body.max_content_bytes = maxContentBytes
     }
     update.mutate(body, {
       onSuccess: () => onClose(),
@@ -134,110 +126,91 @@ function ConfigForm({
 
   return (
     <form onSubmit={onSubmit} className="contents">
-      <DialogHeader>
-        <DialogTitle>
-          Catalog auto-embedding for <NamespaceTag name={namespace} />
-        </DialogTitle>
-        <DialogDescription>
-          Saving routes ingested content through the embedder worker with the selected strategy. Use
-          the Disable button on the catalog page to turn auto-embedding off.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogContent>
-        <Stack>
-          {update.error && (
-            <Alert
-              variant="danger"
-              title="Update failed"
-              description={update.error.message}
-            />
-          )}
+      <Layout
+        header={
+          <DialogHeader
+            title={`Catalog auto-embedding for ${namespace}`}
+            subtitle="Saving routes ingested content through the embedder worker with the selected strategy. Use the Disable button on the catalog page to turn auto-embedding off."
+            onOpenChange={onClose}
+          />
+        }
+        content={
+          <LayoutContent>
+            <Stack gap={6}>
+              {update.error && (
+                <Banner
+                  status="error"
+                  title="Update failed"
+                  description={update.error.message}
+                />
+              )}
 
-          <FormField
-            label="Strategy"
-            required
-            helpText="Identifies the embed strategy (model family). Choose the version below."
-          >
-            <Select
-              value={strategyId}
-              onChange={(e) => {
-                const next = e.target.value
-                setStrategyId(next)
-                const firstVersion = strategies.find((s) => s.id === next)?.version ?? ''
-                setStrategyVersion(firstVersion)
-              }}
-            >
-              <option value="">— select strategy —</option>
-              {strategyIds.map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+              <Selector
+                label="Strategy"
+                isRequired
+                description="Identifies the embed strategy (model family). Choose the version below."
+                placeholder="— select strategy —"
+                value={strategyId}
+                onChange={(next) => {
+                  setStrategyId(next)
+                  const firstVersion = strategies.find((s) => s.id === next)?.version ?? ''
+                  setStrategyVersion(firstVersion)
+                }}
+                options={strategyIds}
+              />
 
-          <FormField
-            label="Strategy version"
-            required
-            helpText={
-              selectedDescriptor
-                ? `dim ${selectedDescriptor.dim}${selectedDescriptor.description ? ` — ${selectedDescriptor.description}` : ''}`
-                : 'Pick a strategy first.'
-            }
-          >
-            <Select
-              value={strategyVersion}
-              onChange={(e) => setStrategyVersion(e.target.value)}
-              disabled={strategyId === ''}
-            >
-              <option value="">— select version —</option>
-              {versionsForStrategy.map((s) => (
-                <option key={s.version} value={s.version}>
-                  {s.version}
-                  {s.default ? ' (default)' : ''}
-                </option>
-              ))}
-            </Select>
-          </FormField>
+              <Selector
+                label="Strategy version"
+                isRequired
+                description={
+                  selectedDescriptor
+                    ? `dim ${selectedDescriptor.dim}${selectedDescriptor.description ? ` — ${selectedDescriptor.description}` : ''}`
+                    : 'Pick a strategy first.'
+                }
+                placeholder="— select version —"
+                value={strategyVersion}
+                onChange={setStrategyVersion}
+                isDisabled={strategyId === ''}
+                options={versionsForStrategy.map((s) => ({
+                  value: s.version,
+                  label: `${s.version}${s.default ? ' (default)' : ''}`,
+                }))}
+              />
 
-          <FormField
-            label="Max attempts"
-            helpText="Transient retries before the item moves to dead-letter. Leave blank to inherit the server default."
-          >
-            <Input
-              type="number"
-              min={1}
-              max={20}
-              value={maxAttempts}
-              onChange={(e) => setMaxAttempts(e.target.value)}
-              placeholder="default"
-            />
-          </FormField>
+              <NumberInput
+                min={1}
+                max={20}
+                value={maxAttempts}
+                onChange={(next) => setMaxAttempts(next)}
+                label="Max attempts"
+                description="Transient retries before the item moves to dead-letter. Leave blank to inherit the server default."
+                placeholder="default"
+              />
 
-          <FormField
-            label="Max content bytes"
-            helpText="Per-item content cap enforced at ingest. Leave blank to inherit CODOHUE_CATALOG_MAX_CONTENT_BYTES."
-          >
-            <Input
-              type="number"
-              min={1024}
-              value={maxContentBytes}
-              onChange={(e) => setMaxContentBytes(e.target.value)}
-              placeholder="default"
-            />
-          </FormField>
-        </Stack>
-      </DialogContent>
-      <DialogFooter>
-        <Inline justify="end">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!canSubmit || update.isPending}>
-            {update.isPending ? 'Saving…' : 'Save'}
-          </Button>
-        </Inline>
-      </DialogFooter>
+              <NumberInput
+                min={1024}
+                value={maxContentBytes}
+                onChange={(next) => setMaxContentBytes(next)}
+                label="Max content bytes"
+                description="Per-item content cap enforced at ingest. Leave blank to inherit CODOHUE_CATALOG_MAX_CONTENT_BYTES."
+                placeholder="default"
+              />
+            </Stack>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter>
+            <Stack direction="horizontal" gap={2} align="center" hAlign="end">
+              <Button type="button" variant="ghost" onClick={onClose} label="Cancel" />
+              <Button
+                type="submit"
+                isDisabled={!canSubmit || update.isPending}
+                label={update.isPending ? 'Saving…' : 'Save'}
+              />
+            </Stack>
+          </LayoutFooter>
+        }
+      />
     </form>
   )
 }

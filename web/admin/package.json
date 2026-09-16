@@ -8,13 +8,12 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test tests/urls.test.mjs"
+    "test": "node --test tests/urls.test.mjs",
+    "astryx": "astryx"
   },
   "dependencies": {
-    "@jarviisha/davinci-react-theme-provider": "0.2.0",
-    "@jarviisha/davinci-react-ui": "0.9.0",
-    "@jarviisha/davinci-tailwind-preset": "0.4.0",
-    "@jarviisha/davinci-tokens": "0.6.0",
+    "@astryxdesign/core": "^0.5.4",
+    "@astryxdesign/theme-neutral": "^0.5.4",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-query": "^5.100.5",
     "react": "^19.2.5",
@@ -36,5 +35,8 @@
     "typescript": "~6.0.2",
     "typescript-eslint": "^8.58.2",
     "vite": "^8.0.10"
+  },
+  "astryx": {
+    "theme": "neutral"
   }
 }

@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router-dom'
-import { Container, EmptyState, Inline, Stack } from '@jarviisha/davinci-react-ui'
+import { Button, EmptyState, Stack } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import PageHeader from '@/components/shell/PageHeader'
-import LinkButton from '@/components/LinkButton'
 
 /**
  * NotFoundPage catches URLs that match no route.
@@ -16,28 +16,24 @@ export default function NotFoundPage() {
   const location = useLocation()
 
   return (
-    <Container size="md" className="py-6 px-6">
+    <PageContainer size="md">
       <PageHeader>
-        <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">Not found</h1>
-          <p className="text-foreground-subtle text-sm">No route matches this URL.</p>
+        <Stack gap={1}>
+          <h1 className="text-primary text-xl font-semibold">Not found</h1>
+          <p className="text-secondary text-sm">No route matches this URL.</p>
         </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         <EmptyState
           title="404 — no such page"
           description={`Nothing is mounted at ${location.pathname}. The link may be stale, or the namespace it pointed at may have been deleted.`}
         />
-        <Inline justify="start">
-          <LinkButton to="/" variant="outline" tone="neutral" size="sm">
-            Back to fleet
-          </LinkButton>
-          <LinkButton to="/namespaces" variant="ghost" tone="neutral" size="sm">
-            Namespaces
-          </LinkButton>
-        </Inline>
+        <Stack align="center" gap={4} direction="horizontal" justify="start">
+          <Button href="/" variant="secondary"  size="sm" label="Back to fleet" />
+          <Button href="/namespaces" variant="ghost"  size="sm" label="Namespaces" />
+        </Stack>
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }

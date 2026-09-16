@@ -1,13 +1,6 @@
 import { useNavigate } from 'react-router-dom'
-import {
-  Alert,
-  Button,
-  Card,
-  CardContent,
-  Container,
-  Inline,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { Banner, Button, Card, Stack } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useClearDemoData,
   useSeedDemoData,
@@ -30,23 +23,22 @@ export default function DemoDataPage() {
   const clear = useClearDemoData()
 
   return (
-    <Container size="md" className="py-6">
+    <PageContainer size="md">
       <PageHeader>
-        <Stack gap="050">
-          <h1 className="text-foreground text-xl font-semibold">Demo data</h1>
-          <p className="text-foreground-subtle text-sm">
+        <Stack gap={1}>
+          <h1 className="text-primary text-xl font-semibold">Demo data</h1>
+          <p className="text-secondary text-sm">
             Seed or clear the bundled demo namespace — handy for kicking the tyres on a fresh
             install without wiring a real client.
           </p>
         </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         <DemoCard
           title="Seed demo dataset"
           description="Creates the bundled demo namespace plus sample events and catalog items. Idempotent — re-runs reset the dataset back to its baseline state."
           action="Seed"
-          tone="primary"
           loading={seed.isPending}
           error={seed.error}
           result={seed.data}
@@ -58,14 +50,13 @@ export default function DemoDataPage() {
           title="Clear demo dataset"
           description="Wipes the bundled demo namespace if present. Safe to run when the namespace doesn't exist."
           action="Clear"
-          tone="danger"
           loading={clear.isPending}
           error={clear.error}
           result={clear.data}
           onRun={() => clear.mutate()}
         />
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -73,7 +64,6 @@ function DemoCard({
   title,
   description,
   action,
-  tone,
   loading,
   error,
   result,
@@ -83,7 +73,6 @@ function DemoCard({
   title: string
   description: string
   action: string
-  tone: 'primary' | 'danger'
   loading: boolean
   error: Error | null
   result: DemoDatasetResponse | undefined
@@ -92,19 +81,23 @@ function DemoCard({
 }) {
   return (
     <Card>
-      <CardContent>
-        <Stack>
-          <span className="text-foreground-subtle text-xs uppercase tracking-wide">{title}</span>
-          <p className="text-foreground-subtle text-sm">{description}</p>
-          {error && <Alert variant="danger" title={`${title} failed`} description={error.message} />}
+        <Stack gap={6}>
+          <span className="text-secondary text-xs uppercase tracking-wide">{title}</span>
+          <p className="text-secondary text-sm">{description}</p>
+          {error && <Banner status="error" title={`${title} failed`} description={error.message} />}
           {result && (
-            <Alert
-              variant="success"
+            <Banner
+              status="success"
               title={`${title} complete`}
               description={describeDemoResult(result)}
-              actions={
+              endContent={
                 onOpen && (
-                  <Button size="sm" variant="ghost" onClick={() => onOpen(result.namespace)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    label={`Open ${result.namespace}`}
+                    onClick={() => onOpen(result.namespace)}
+                  >
                     Open <NamespaceTag name={result.namespace} />
                   </Button>
                 )
@@ -116,20 +109,21 @@ function DemoCard({
             // backend returns the plaintext exactly once. Printing it here is
             // the only way an operator gets to keep it — otherwise recovering
             // it costs a key rotation.
-            <Stack gap="050">
-              <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+            <Stack gap={1}>
+              <span className="text-secondary text-xs uppercase tracking-wide">
                 API key — shown once
               </span>
               <SecretValue value={result.api_key} label="demo namespace API key" />
             </Stack>
           )}
-          <Inline justify="end">
-            <Button tone={tone === 'danger' ? 'danger' : undefined} onClick={onRun} disabled={loading}>
-              {loading ? `${action.replace(/e$/, '')}ing…` : action}
-            </Button>
-          </Inline>
+          <Stack align="center" gap={4} direction="horizontal" justify="end">
+            <Button
+              label={loading ? `${action.replace(/e$/, '')}ing…` : action}
+              onClick={onRun}
+              isDisabled={loading}
+            />
+          </Stack>
         </Stack>
-      </CardContent>
     </Card>
   )
 }

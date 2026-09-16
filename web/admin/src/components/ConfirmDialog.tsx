@@ -1,15 +1,14 @@
 import {
-  Alert,
+  Banner,
   Button,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogTitle,
-  Inline,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+  HStack,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
+  VStack,
+} from '@astryxdesign/core'
 import type { ReactNode } from 'react'
 
 /**
@@ -23,6 +22,10 @@ import type { ReactNode } from 'react'
  *
  * The action stays owned by the caller — this component only decides *whether*
  * it runs, so the mutation's pending / error state renders where it belongs.
+ *
+ * Astryx ships AlertDialog for exactly this shape, but its description is a
+ * plain string and there is no slot for the failure Banner, so the dialog is
+ * composed by hand.
  */
 export default function ConfirmDialog({
   open,
@@ -44,28 +47,31 @@ export default function ConfirmDialog({
   error?: string
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="sm">
-      <DialogHeader>
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
-      {error && (
-        <DialogContent>
-          <Stack>
-            <Alert variant="danger" title="Action failed" description={error} />
-          </Stack>
-        </DialogContent>
-      )}
-      <DialogFooter>
-        <Inline justify="end">
-          <Button variant="ghost" tone="neutral" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button tone="danger" onClick={onConfirm} disabled={pending}>
-            {pending ? 'Working…' : confirmLabel}
-          </Button>
-        </Inline>
-      </DialogFooter>
+    <Dialog isOpen={open} onOpenChange={onOpenChange} width={420} purpose="required">
+      <Layout
+        header={<DialogHeader title={title} onOpenChange={onOpenChange} />}
+        content={
+          <LayoutContent>
+            <VStack gap={4}>
+              {description}
+              {error && <Banner status="error" title="Action failed" description={error} />}
+            </VStack>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter>
+            <HStack gap={2} hAlign="end">
+              <Button variant="ghost" label="Cancel" onClick={() => onOpenChange(false)} />
+              <Button
+                variant="destructive"
+                label={pending ? 'Working…' : confirmLabel}
+                onClick={onConfirm}
+                isDisabled={pending}
+              />
+            </HStack>
+          </LayoutFooter>
+        }
+      />
     </Dialog>
   )
 }

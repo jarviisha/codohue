@@ -70,3 +70,27 @@ test('SSE connections go through services/stream.ts (no raw EventSource in pages
     )
   }
 })
+
+// ---------------------------------------------------------------------------
+// The shell (TopNav switcher, SideNav, command palette) renders inside the
+// `path: '/'` layout route, above where `ns/:ns` is matched. React Router
+// builds each route element's context from `matches.slice(0, index + 1)`, so
+// useParams() there returns {} on every route — including /ns/foo. It fails
+// silently: the switcher just shows no namespace and the sidebar's Namespace
+// section never renders. useNamespaceParam() reads the pathname instead.
+// ---------------------------------------------------------------------------
+
+test('shell components read the namespace from the URL, not useParams', () => {
+  for (const rel of walk('src/components/shell')) {
+    // Comments stripped so useNamespaceParam's own doc comment, which names
+    // useParams to explain why it exists, doesn't trip its own rule.
+    const src = read(rel)
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/^[ \t]*\/\/.*$/gm, ' ')
+    assert.ok(
+      !/(?<![A-Za-z_])useParams\s*\(/.test(src),
+      `${rel} calls useParams() — the shell sits above the ns/:ns match, so it ` +
+        `always resolves to {}. Use useNamespaceParam() instead.`,
+    )
+  }
+})

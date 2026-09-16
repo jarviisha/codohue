@@ -1,21 +1,18 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Alert,
+  Banner,
   Button,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogTitle,
-  FormField,
-  Inline,
-  Input,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
   NumberInput,
-  Select,
+  Selector,
   Stack,
-} from '@jarviisha/davinci-react-ui'
+  TextInput,
+} from '@astryxdesign/core'
 import { lookupNamespace, useUpsertNamespace } from '@/services/namespaces'
 import { useCatalogStrategies } from '@/services/catalog'
 import CatalogStrategyFields from '@/components/CatalogStrategyFields'
@@ -47,10 +44,10 @@ export default function CreateNamespaceDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog
-      open={open}
+      isOpen={open}
       onOpenChange={handleOpenChange}
-      closeOnEscape={!keyOnScreen}
-      closeOnOverlayClick={!keyOnScreen}
+      width={560}
+      purpose={keyOnScreen ? 'required' : 'form'}
     >
       {/*
        * Mount the body only while open so every field, the surfaced API key,
@@ -145,104 +142,97 @@ function CreateNamespaceBody({
   return (
     <>
       {apiKeyShown ? (
-        <>
-          <DialogHeader>
-            <DialogTitle>Namespace created</DialogTitle>
-            <DialogDescription>
-              Copy the API key below — this is the only time it will be shown. Losing it means
-              rotating the key.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogContent>
-            <Stack>
-              <Alert
-                variant="success"
-                title={namespace}
-                description="API key (per-namespace data plane)"
-              />
-              <SecretValue value={apiKeyShown} label="namespace API key" />
-            </Stack>
-          </DialogContent>
-          <DialogFooter>
-            <Inline justify="end">
-              <Button variant="ghost" onClick={() => onOpenChange(false)}>
-                Close
-              </Button>
-              <Button onClick={() => navigate(`/ns/${encodeURIComponent(namespace)}`)}>
-                Open namespace
-              </Button>
-            </Inline>
-          </DialogFooter>
-        </>
+        <Layout
+          header={
+            <DialogHeader
+              title="Namespace created"
+              subtitle="Copy the API key below — this is the only time it will be shown. Losing it means rotating the key."
+            />
+          }
+          content={
+            <LayoutContent>
+              <Stack gap={6}>
+                <Banner
+                  status="success"
+                  title={namespace}
+                  description="API key (per-namespace data plane)"
+                />
+                <SecretValue value={apiKeyShown} label="namespace API key" />
+              </Stack>
+            </LayoutContent>
+          }
+          footer={
+            <LayoutFooter>
+              <Stack direction="horizontal" gap={2} align="center" hAlign="end">
+                <Button variant="ghost" onClick={() => onOpenChange(false)} label="Close" />
+                <Button
+                  onClick={() => navigate(`/ns/${encodeURIComponent(namespace)}`)}
+                  label="Open namespace"
+                />
+              </Stack>
+            </LayoutFooter>
+          }
+        />
       ) : (
         <form onSubmit={onSubmit} className="contents">
-          <DialogHeader>
-            <DialogTitle>New namespace</DialogTitle>
-            <DialogDescription>
-              A namespace isolates events, vectors, and trending data for one tenant.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogContent>
-            <Stack>
+          <Layout
+            header={
+              <DialogHeader
+                title="New namespace"
+                subtitle="A namespace isolates events, vectors, and trending data for one tenant."
+                onOpenChange={onOpenChange}
+              />
+            }
+            content={
+              <LayoutContent>
+                <Stack gap={6}>
               {preflightError && (
-                <Alert variant="danger" title="Cannot create" description={preflightError} />
+                <Banner status="error" title="Cannot create" description={preflightError} />
               )}
               {upsert.error && (
-                <Alert
-                  variant="danger"
+                <Banner
+                  status="error"
                   title="Could not create namespace"
                   description={upsert.error.message}
                 />
               )}
 
-              <FormField label="Namespace name" required>
-                <Input
-                  value={namespace}
-                  onChange={(e) => {
-                    setNamespace(e.target.value)
-                    setPreflightError(null)
-                  }}
-                  pattern="[a-z0-9_-]+"
-                  required
-                  autoFocus
-                  placeholder="e.g. prod"
-                />
-              </FormField>
+              <TextInput
+                label="Namespace name"
+                value={namespace}
+                onChange={(next) => {
+                  setNamespace(next)
+                  setPreflightError(null)
+                }}
+                placeholder="e.g. prod"
+              />
 
-              <FormField label="Dense source" required>
-                <Select
-                  value={denseSource}
-                  onChange={(e) => {
-                    setDenseSource(e.target.value)
-                    setStrategyId('')
-                    setStrategyVersion('')
-                  }}
-                >
-                  {DENSE_SOURCES.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </Select>
-              </FormField>
+              <Selector
+                label="Dense source"
+                isRequired
+                value={denseSource}
+                onChange={(next) => {
+                  setDenseSource(next)
+                  setStrategyId('')
+                  setStrategyVersion('')
+                }}
+                options={DENSE_SOURCES.map((s) => ({ value: s.value, label: s.label }))}
+              />
 
-              <FormField
+              <NumberInput
+                min={8}
+                max={2048}
+                value={embeddingDim}
+                onChange={(next) => {
+                setEmbeddingDim(next)
+                // Strategies are filtered by dim, so a dim change can
+                // invalidate the current pick.
+                setStrategyId('')
+                setStrategyVersion('')
+                }}
                 label="Embedding dim"
-                helpText="Vector width for dense collections. 64 is a sane default for item2vec; 768 / 1024 typical for BYOE."
-              >
-                <NumberInput
-                  value={embeddingDim}
-                  onChange={(e) => {
-                    setEmbeddingDim(Number(e.target.value))
-                    // Strategies are filtered by dim, so a dim change can
-                    // invalidate the current pick.
-                    setStrategyId('')
-                    setStrategyVersion('')
-                  }}
-                  min={8}
-                  max={2048}
-                />
-              </FormField>
+                description="Vector width for dense collections. 64 is a sane default for item2vec; 768 / 1024 typical for BYOE."
+              />
 
               {catalogMode && (
                 <CatalogStrategyFields
@@ -259,21 +249,27 @@ function CreateNamespaceBody({
                   onStrategyVersion={setStrategyVersion}
                 />
               )}
-            </Stack>
-          </DialogContent>
-          <DialogFooter>
-            <Inline justify="end">
-              <Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button
-                type="submit"
-                disabled={busy || namespace.length === 0 || catalogIncomplete}
-              >
-                {busy ? 'Creating…' : 'Create'}
-              </Button>
-            </Inline>
-          </DialogFooter>
+                </Stack>
+              </LayoutContent>
+            }
+            footer={
+              <LayoutFooter>
+                <Stack direction="horizontal" gap={2} align="center" hAlign="end">
+                  <Button
+                    variant="ghost"
+                    type="button"
+                    onClick={() => onOpenChange(false)}
+                    label="Cancel"
+                  />
+                  <Button
+                    type="submit"
+                    isDisabled={busy || namespace.length === 0 || catalogIncomplete}
+                    label={busy ? 'Creating…' : 'Create'}
+                  />
+                </Stack>
+              </LayoutFooter>
+            }
+          />
         </form>
       )}
     </>

@@ -1,18 +1,7 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import {
-  Alert,
-  Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  Container,
-  FormField,
-  Input,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { Banner, Button, Card, Stack, Text, TextInput } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useLogin, useSession } from '@/services/auth'
 
 export default function LoginPage() {
@@ -37,39 +26,31 @@ export default function LoginPage() {
   }
 
   return (
-    <Container size="sm" className="py-16">
+    <PageContainer size="sm" className="py-16">
       <Card>
-        <CardHeader>
-          <CardTitle>codohue admin</CardTitle>
-          <CardDescription>Sign in with the global admin API key.</CardDescription>
-        </CardHeader>
-        <CardContent>
+        <Stack gap={1}>
+          <Text weight="semibold">codohue admin</Text>
+          <Text type="supporting">Sign in with the global admin API key.</Text>
+        </Stack>
           <form onSubmit={onSubmit}>
-            <Stack>
+            <Stack gap={6}>
               {login.error && (
-                <Alert
-                  variant="danger"
+                <Banner
+                  status="error"
                   title="Sign-in failed"
                   description={login.error.message}
                 />
               )}
-              <FormField label="API key" required>
-                <Input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  autoFocus
-                  autoComplete="current-password"
-                  required
-                />
-              </FormField>
-              <Button type="submit" disabled={login.isPending || apiKey.length === 0}>
-                {login.isPending ? 'Signing in…' : 'Sign in'}
-              </Button>
+              <TextInput
+                label="API key"
+                value={apiKey}
+                onChange={setApiKey}
+                type="password"
+              />
+              <Button type="submit" isDisabled={login.isPending || apiKey.length === 0} label={login.isPending ? 'Signing in…' : 'Sign in'} />
             </Stack>
           </form>
-        </CardContent>
       </Card>
-    </Container>
+    </PageContainer>
   )
 }

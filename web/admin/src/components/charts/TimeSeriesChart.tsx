@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Card, CardContent } from '@jarviisha/davinci-react-ui'
+import { Card } from '@astryxdesign/core'
 import {
   Area,
   CartesianGrid,
@@ -46,7 +46,7 @@ const DEFAULT_TICK_FORMATTER = (raw: string) => {
 
 /**
  * TimeSeriesChart is a thin Recharts wrapper for the Fleet + namespace
- * dashboards. Series colors map to Davinci semantic tokens so theme switches
+ * dashboards. Series colors map to Astryx semantic tokens so theme switches
  * recolor the chart automatically. The component is intentionally minimal —
  * complex chart needs (brush, secondary y-axis) compose by reaching into
  * Recharts directly instead of bloating this wrapper.
@@ -65,20 +65,19 @@ export default function TimeSeriesChart({
 
   return (
     <Card>
-      <CardContent>
         <div style={{ width: '100%', height }}>
           <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={formatted} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-          <CartesianGrid stroke="var(--davinci-semantic-color-border-subtle)" strokeDasharray="3 3" />
+          <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
           <XAxis
             dataKey="_label"
-            stroke="var(--davinci-semantic-color-foreground-subtle)"
+            stroke="var(--color-text-secondary)"
             fontSize={11}
             tickLine={false}
             axisLine={false}
           />
           <YAxis
-            stroke="var(--davinci-semantic-color-foreground-subtle)"
+            stroke="var(--color-text-secondary)"
             fontSize={11}
             tickLine={false}
             axisLine={false}
@@ -87,15 +86,15 @@ export default function TimeSeriesChart({
           />
           <RechartsTooltip
             contentStyle={{
-              background: 'var(--davinci-semantic-color-surface-raised)',
-              border: '1px solid var(--davinci-semantic-color-border)',
+              background: 'var(--color-background-popover)',
+              border: '1px solid var(--color-border)',
               borderRadius: 4,
               fontSize: 12,
             }}
-            labelStyle={{ color: 'var(--davinci-semantic-color-foreground)' }}
+            labelStyle={{ color: 'var(--color-text-primary)' }}
           />
           <Legend
-            wrapperStyle={{ fontSize: 12, color: 'var(--davinci-semantic-color-foreground-subtle)' }}
+            wrapperStyle={{ fontSize: 12, color: 'var(--color-text-secondary)' }}
             iconType="circle"
           />
           {series.map((s) => (
@@ -114,7 +113,6 @@ export default function TimeSeriesChart({
           </ComposedChart>
         </ResponsiveContainer>
         </div>
-      </CardContent>
     </Card>
   )
 }

@@ -1,8 +1,12 @@
 import { lazy, Suspense, type ComponentType } from 'react'
 import { createBrowserRouter, Outlet, RouterProvider } from 'react-router-dom'
-import { Skeleton } from '@jarviisha/davinci-react-ui'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { LinkProvider, Skeleton, Theme } from '@astryxdesign/core'
+import { neutralTheme } from '@astryxdesign/theme-neutral/built'
 import AppShellLayout from '@/components/shell/AppShellLayout'
 import { AuthGuard } from '@/components/shell/AuthGuard'
+import RouterLink from '@/components/RouterLink'
+import { useThemeMode } from '@/services/themeMode'
 
 // Pages are split out of the main bundle so a cold visit only ships the
 // shell + the entered route. Login is bundled directly because every cold
@@ -32,7 +36,7 @@ const NotFoundPage = lazy(() => import('@/pages/not-found/NotFoundPage'))
 // render their own skeletons after the chunk loads.
 function withSuspense(Page: ComponentType) {
   return (
-    <Suspense fallback={<Skeleton className="h-48 w-full m-6" />}>
+    <Suspense fallback={<Skeleton height={192} className="m-6" />}>
       <Page />
     </Suspense>
   )
@@ -83,6 +87,32 @@ const router = createBrowserRouter([
   },
 ])
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Default retry off for 4xx — auth failures should bubble immediately.
+      // Real services override retry on a per-query basis when appropriate.
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
+  },
+})
+
+/**
+ * App owns the provider stack as well as the router: Theme needs the persisted
+ * colour mode, which only a hook can read, and LinkProvider hands every Astryx
+ * link (Button href, Breadcrumbs, SideNav) to React Router instead of letting
+ * it fall back to a full-page navigation.
+ */
 export default function App() {
-  return <RouterProvider router={router} />
+  const { mode } = useThemeMode()
+  return (
+    <Theme theme={neutralTheme} mode={mode}>
+      <LinkProvider component={RouterLink}>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+        </QueryClientProvider>
+      </LinkProvider>
+    </Theme>
+  )
 }
