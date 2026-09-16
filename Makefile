@@ -127,6 +127,7 @@ dev:
 	air
 
 dev-admin:
+	@[ -d web/admin/node_modules ] || $(MAKE) web-admin-deps
 	cd web/admin && npm run dev
 
 dev-embedder:
