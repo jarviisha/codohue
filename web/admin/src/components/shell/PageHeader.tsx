@@ -10,13 +10,13 @@ import { PageHeaderSlotContext } from './pageHeaderSlot'
  * Usage:
  *
  *   <PageHeader>
- *     <Inline justify="between" align="center" className="w-full">
- *       <Stack>
+ *     <Stack gap={4} direction="horizontal" justify="between" align="center" className="w-full">
+ *       <Stack gap={6}>
  *         <h1>Fleet</h1>
  *         <p>{summary}</p>
  *       </Stack>
- *       <Button>action</Button>
- *     </Inline>
+ *       <Button label="action" />
+ *     </Stack>
  *   </PageHeader>
  *
  * Renders nothing on the page tree — the children appear inside

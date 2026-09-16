@@ -1,37 +1,31 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
   Card,
-  CardContent,
-  Container,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogTitle,
-  FormField,
-  Inline,
-  Input,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+  TextInput,
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useNamespaceDashboard } from '@/services/namespaces'
 import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import MetaLine from '@/components/MetaLine'
-import NamespaceTag from '@/components/NamespaceTag'
 
 export default function NamespaceOverviewPage() {
   const { ns } = useParams<{ ns: string }>()
@@ -43,34 +37,34 @@ export default function NamespaceOverviewPage() {
 
   if (q.isLoading) {
     return (
-      <Container size="full" className="py-6 px-6">
+      <PageContainer size="full">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
 
   if (q.isError) {
     return (
-      <Container size="full" className="py-6 px-6">
-        <Alert
-          variant="danger"
+      <PageContainer size="full">
+        <Banner
+          status="error"
           title="Could not load namespace"
           description={q.error?.message ?? 'unknown error'}
         />
-      </Container>
+      </PageContainer>
     )
   }
 
   const data = q.data
   if (!data) {
     return (
-      <Container size="full" className="py-6 px-6">
-        <Alert
-          variant="warning"
+      <PageContainer size="full">
+        <Banner
+          status="warning"
           title="Empty namespace response"
           description="Backend returned no data for this namespace — verify the admin binary is on the latest commit."
         />
-      </Container>
+      </PageContainer>
     )
   }
 
@@ -85,14 +79,14 @@ export default function NamespaceOverviewPage() {
   const config = data.config
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack gap="050">
-            <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">Overview</h1>
-              {config?.dense_source === 'catalog' && <Badge variant="success">catalog</Badge>}
-            </Inline>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={1}>
+            <Stack gap={4} direction="horizontal" align="center">
+              <h1 className="text-primary text-xl font-semibold">Overview</h1>
+              {config?.dense_source === 'catalog' && <Badge variant="success" label="catalog" />}
+            </Stack>
             {config && (
               <MetaLine
                 items={[
@@ -104,37 +98,28 @@ export default function NamespaceOverviewPage() {
               />
             )}
           </Stack>
-          <Inline align="center">
+          <Stack gap={4} direction="horizontal" align="center">
             <Button
               size="sm"
-              variant="outline"
-              tone="neutral"
-              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/events`)}
-            >
-              Events →
-            </Button>
+              variant="secondary"
+              
+              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/events`)} label="Events →" />
             <Button
               size="sm"
-              variant="outline"
-              tone="neutral"
-              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/subjects`)}
-            >
-              Inspect subject →
-            </Button>
+              variant="secondary"
+              
+              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/subjects`)} label="Inspect subject →" />
             <Button
               size="sm"
-              variant="outline"
-              tone="neutral"
-              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/config`)}
-            >
-              Configure →
-            </Button>
-          </Inline>
-        </Inline>
+              variant="secondary"
+              
+              onClick={() => navigate(`/ns/${encodeURIComponent(data.namespace)}/config`)} label="Configure →" />
+          </Stack>
+        </Stack>
       </PageHeader>
 
-      <Stack>
-        <Inline align="start" wrap>
+      <Stack gap={6}>
+        <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
           <Tile label="Events (24h)" value={events24h.toLocaleString()} />
           <Tile label="Events / min" value={eventsPerMin.toFixed(1)} />
           <Tile label="Sparse subjects" value={subjectsCount.toLocaleString()} />
@@ -146,74 +131,68 @@ export default function NamespaceOverviewPage() {
               hint={`${catalog.dead_letter} DL`}
             />
           )}
-        </Inline>
+        </Stack>
 
-        <Stack>
-          <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Last batch runs</h2>
-            <p className="text-foreground-subtle text-xs">
+        <Stack gap={6}>
+          <Stack gap={6}>
+            <h2 className="text-primary text-sm font-semibold">Last batch runs</h2>
+            <p className="text-secondary text-xs">
               Twelve most recent runs across CF and re-embed kinds.
             </p>
           </Stack>
           {lastRuns.length === 0 ? (
-            <p className="text-foreground-subtle text-sm">No runs yet.</p>
+            <p className="text-secondary text-sm">No runs yet.</p>
           ) : (
-            <TableContainer>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Run</TableHead>
-                    <TableHead>Kind</TableHead>
-                    <TableHead>Started</TableHead>
-                    <TableHead>Phases</TableHead>
-                    <TableHead align="right">Duration</TableHead>
+                    <TableHeaderCell>Run</TableHeaderCell>
+                    <TableHeaderCell>Kind</TableHeaderCell>
+                    <TableHeaderCell>Started</TableHeaderCell>
+                    <TableHeaderCell>Phases</TableHeaderCell>
+                    <TableHeaderCell className="text-right" >Duration</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lastRuns.map((r) => (
                     <TableRow key={r.id}>
                       <TableCell>
-                        <Link to={`/ns/${encodeURIComponent(ns)}/batch-runs/${r.id}`} className="text-foreground font-medium">
+                        <Link to={`/ns/${encodeURIComponent(ns)}/batch-runs/${r.id}`} className="text-primary font-medium">
                           #{r.id}
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="neutral">{r.kind}</Badge>
+                        <Badge variant="neutral" label={r.kind} />
                       </TableCell>
-                      <TableCell className="text-foreground-subtle text-sm">
+                      <TableCell className="text-secondary text-sm">
                         {new Date(r.started_at).toLocaleString()}
                       </TableCell>
                       <TableCell>
                         <PhaseStrip phaseStatus={r.phase_status} />
                       </TableCell>
-                      <TableCell align="right" className="tabular-nums">
+                      <TableCell  className="text-right tabular-nums">
                         {r.duration_ms != null ? `${(r.duration_ms / 1000).toFixed(1)}s` : '—'}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </TableContainer>
           )}
         </Stack>
 
         <Card>
-          <CardContent>
-            <Inline align="center" justify="between" wrap>
-              <Stack>
-                <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+            <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
+              <Stack gap={6}>
+                <span className="text-secondary text-xs uppercase tracking-wide">
                   Danger zone
                 </span>
-                <p className="text-foreground-subtle text-sm">
+                <p className="text-secondary text-sm">
                   Wipe this namespace and every trace of its data across Postgres, Redis, and
                   Qdrant. Cannot be undone.
                 </p>
               </Stack>
-              <Button tone="danger" variant="outline" onClick={() => setDeleteOpen(true)}>
-                Delete namespace…
-              </Button>
-            </Inline>
-          </CardContent>
+              <Button  variant="destructive" onClick={() => setDeleteOpen(true)} label="Delete namespace…" />
+            </Stack>
         </Card>
       </Stack>
 
@@ -226,7 +205,7 @@ export default function NamespaceOverviewPage() {
           navigate('/namespaces')
         }}
       />
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -242,7 +221,7 @@ function DeleteNamespaceDialog({
   onSuccess: () => void
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="md">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} width={560} purpose="required">
       {open && (
         <DeleteNamespaceForm
           namespace={namespace}
@@ -275,47 +254,43 @@ function DeleteNamespaceForm({
 
   return (
     <form onSubmit={onSubmit} className="contents">
-      <DialogHeader>
-        <DialogTitle>
-          Delete namespace <NamespaceTag name={namespace} />
-        </DialogTitle>
-        <DialogDescription>
-          Drops every event, vector, catalog item, and trending entry for this namespace. Cannot be
-          undone — type the namespace name to confirm.
-        </DialogDescription>
-      </DialogHeader>
-      <DialogContent>
-        <Stack>
-          {del.error && (
-            <Alert variant="danger" title="Delete failed" description={del.error.message} />
-          )}
-          <FormField
-            label={`Type "${namespace}" to confirm`}
-            required
-          >
-            <Input
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              placeholder={namespace}
-              autoFocus
-            />
-          </FormField>
-        </Stack>
-      </DialogContent>
-      <DialogFooter>
-        <Inline justify="end">
-          <Button type="button" variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            tone="danger"
-            disabled={confirm !== namespace || del.isPending}
-          >
-            {del.isPending ? 'Deleting…' : 'Delete namespace'}
-          </Button>
-        </Inline>
-      </DialogFooter>
+      <Layout
+        header={
+          <DialogHeader
+            title={`Delete namespace ${namespace}`}
+            subtitle="Drops every event, vector, catalog item, and trending entry for this namespace. Cannot be undone — type the namespace name to confirm."
+            onOpenChange={onClose}
+          />
+        }
+        content={
+          <LayoutContent>
+            <Stack gap={6}>
+              {del.error && (
+                <Banner status="error" title="Delete failed" description={del.error.message} />
+              )}
+              <TextInput
+                label={`Type "${namespace}" to confirm`}
+                value={confirm}
+                onChange={setConfirm}
+                placeholder={namespace}
+              />
+            </Stack>
+          </LayoutContent>
+        }
+        footer={
+          <LayoutFooter>
+            <Stack direction="horizontal" gap={2} align="center" hAlign="end">
+              <Button type="button" variant="ghost" onClick={onClose} label="Cancel" />
+              <Button
+                variant="destructive"
+                type="submit"
+                isDisabled={confirm !== namespace || del.isPending}
+                label={del.isPending ? 'Deleting…' : 'Delete namespace'}
+              />
+            </Stack>
+          </LayoutFooter>
+        }
+      />
     </form>
   )
 }
@@ -323,15 +298,13 @@ function DeleteNamespaceForm({
 function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <Card className="flex-1 min-w-35">
-      <CardContent>
-        <Stack>
-          <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
-          <Inline align="center">
-            <span className="text-foreground text-xl font-semibold tabular-nums">{value}</span>
-            {hint && <span className="text-foreground-subtle text-xs">{hint}</span>}
-          </Inline>
+        <Stack gap={6}>
+          <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
+          <Stack gap={4} direction="horizontal" align="center">
+            <span className="text-primary text-xl font-semibold tabular-nums">{value}</span>
+            {hint && <span className="text-secondary text-xs">{hint}</span>}
+          </Stack>
         </Stack>
-      </CardContent>
     </Card>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Inline, SearchInput, Select, Stack } from '@jarviisha/davinci-react-ui'
+import { Badge, Selector, Stack, TextInput } from '@astryxdesign/core'
 import type { LogLine } from '@/services/batchRuns'
 
 type LogLineViewerProps = {
@@ -16,10 +16,10 @@ type LogLineViewerProps = {
 const LEVEL_FILTERS = ['all', 'info', 'warn', 'error'] as const
 type LevelFilter = (typeof LEVEL_FILTERS)[number]
 
-const LEVEL_BADGE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = {
+const LEVEL_BADGE: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
   info: 'neutral',
   warn: 'warning',
-  error: 'danger',
+  error: 'error',
 }
 
 export default function LogLineViewer({ lines, follow = true, height = 360 }: LogLineViewerProps) {
@@ -45,56 +45,59 @@ export default function LogLineViewer({ lines, follow = true, height = 360 }: Lo
   }, [filtered.length, follow, paused])
 
   return (
-    <Stack>
-      <Inline align="center" justify="between">
-        <Inline align="center">
-          <Select value={level} onChange={(e) => setLevel(e.target.value as LevelFilter)} size="sm">
-            {LEVEL_FILTERS.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </Select>
-          <SearchInput
+    <Stack gap={6}>
+      <Stack direction="horizontal" gap={4} align="center" justify="between">
+        <Stack direction="horizontal" gap={2} align="center">
+          <Selector
             size="sm"
+            label="Log level"
+            isLabelHidden
+            value={level}
+            onChange={(next) => setLevel(next as LevelFilter)}
+            options={[...LEVEL_FILTERS]}
+          />
+          <TextInput
+            size="sm"
+            label="Filter messages"
+            isLabelHidden
             placeholder="Filter messages"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onClear={() => setQuery('')}
+            onChange={setQuery}
+            hasClear
           />
-        </Inline>
-        <Inline align="center">
-          <span className="text-foreground-subtle text-xs">
+        </Stack>
+        <Stack direction="horizontal" gap={2} align="center">
+          <span className="text-secondary text-xs">
             {filtered.length} / {lines.length}
           </span>
           <button
             type="button"
             onClick={() => setPaused((p) => !p)}
-            className="text-foreground-subtle text-xs underline"
+            className="text-secondary text-xs underline"
           >
             {paused ? 'resume autoscroll' : 'pause autoscroll'}
           </button>
-        </Inline>
-      </Inline>
+        </Stack>
+      </Stack>
 
       <div
         ref={scrollerRef}
-        className="bg-surface-sunken border border-default rounded font-mono text-xs overflow-auto davinci-scrollbar"
+        className="bg-muted border border-border rounded font-mono text-xs overflow-auto"
         style={{ height }}
       >
         {filtered.length === 0 ? (
-          <p className="text-foreground-subtle p-3">No log lines match the current filter.</p>
+          <p className="text-secondary p-3">No log lines match the current filter.</p>
         ) : (
           <ol className="p-2 list-none m-0">
             {filtered.map((l, i) => (
               <li key={`${l.ts}-${i}`} className="flex gap-2 py-0.5 leading-5">
-                <span className="text-foreground-subtle shrink-0 w-24 tabular-nums">
+                <span className="text-secondary shrink-0 w-24 tabular-nums">
                   {tsShort(l.ts)}
                 </span>
                 <span className="shrink-0">
-                  <Badge variant={LEVEL_BADGE[l.level] ?? 'neutral'}>{l.level}</Badge>
+                  <Badge variant={LEVEL_BADGE[l.level] ?? 'neutral'} label={l.level} />
                 </span>
-                <span className="text-foreground whitespace-pre-wrap wrap-break-word">{l.msg}</span>
+                <span className="text-primary whitespace-pre-wrap wrap-break-word">{l.msg}</span>
               </li>
             ))}
           </ol>

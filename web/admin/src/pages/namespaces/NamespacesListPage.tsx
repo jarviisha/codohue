@@ -1,21 +1,19 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
-  Container,
   EmptyState,
-  Inline,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useNamespaces } from '@/services/namespaces'
 import PageHeader from '@/components/shell/PageHeader'
 import CreateNamespaceDialog from '@/pages/namespaces/CreateNamespaceDialog'
@@ -42,26 +40,26 @@ export default function NamespacesListPage() {
   }
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full">
-          <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">Namespaces</h1>
-            <p className="text-foreground-subtle text-sm">
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
+          <Stack gap={1}>
+            <h1 className="text-primary text-xl font-semibold">Namespaces</h1>
+            <p className="text-secondary text-sm">
               {q.data?.total ?? 0} configured. Click a row to open its overview.
             </p>
           </Stack>
-          <Button onClick={() => setCreateOpen(true)}>New namespace</Button>
-        </Inline>
+          <Button onClick={() => setCreateOpen(true)} label="New namespace" />
+        </Stack>
       </PageHeader>
 
       <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />
 
-      <Stack>
+      <Stack gap={6}>
         {q.isLoading && <Skeleton className="h-48 w-full" />}
 
         {q.isError && (
-          <Alert variant="danger" title="Failed to load namespaces" description={q.error?.message ?? ''} />
+          <Banner status="error" title="Failed to load namespaces" description={q.error?.message ?? ''} />
         )}
 
         {q.isSuccess && q.data.items.length === 0 && (
@@ -72,15 +70,14 @@ export default function NamespacesListPage() {
         )}
 
         {q.isSuccess && q.data.items.length > 0 && (
-          <TableContainer>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Namespace</TableHead>
-                  <TableHead>Dense source</TableHead>
-                  <TableHead align="right">Embedding dim</TableHead>
-                  <TableHead>Catalog</TableHead>
-                  <TableHead>Updated</TableHead>
+                  <TableHeaderCell>Namespace</TableHeaderCell>
+                  <TableHeaderCell>Dense source</TableHeaderCell>
+                  <TableHeaderCell className="text-right" >Embedding dim</TableHeaderCell>
+                  <TableHeaderCell>Catalog</TableHeaderCell>
+                  <TableHeaderCell>Updated</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -95,35 +92,34 @@ export default function NamespacesListPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="neutral">{ns.dense_source || '—'}</Badge>
+                      <Badge variant="neutral" label={ns.dense_source || '—'} />
                     </TableCell>
-                    <TableCell align="right" className="tabular-nums">
+                    <TableCell  className="text-right tabular-nums">
                       {ns.embedding_dim}
                     </TableCell>
                     <TableCell>
                       {ns.dense_source === 'catalog' ? (
-                        <Inline align="center">
-                          <Badge variant="success">on</Badge>
+                        <Stack gap={4} direction="horizontal" align="center">
+                          <Badge variant="success" label="on" />
                           {ns.catalog_strategy_id && (
-                            <span className="text-foreground-subtle text-xs">
+                            <span className="text-secondary text-xs">
                               {ns.catalog_strategy_id}@{ns.catalog_strategy_version}
                             </span>
                           )}
-                        </Inline>
+                        </Stack>
                       ) : (
-                        <Badge variant="neutral">off</Badge>
+                        <Badge variant="neutral" label="off" />
                       )}
                     </TableCell>
-                    <TableCell className="text-foreground-subtle text-sm">
+                    <TableCell className="text-secondary text-sm">
                       {new Date(ns.updated_at).toLocaleString()}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </TableContainer>
         )}
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }

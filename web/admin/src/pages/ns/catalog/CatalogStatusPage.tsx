@@ -1,30 +1,26 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
   Card,
-  CardContent,
-  Container,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
-  DialogTitle,
   EmptyState,
-  Inline,
+  Layout,
+  LayoutContent,
+  LayoutFooter,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useBulkRedriveDeadletter,
   useCatalogBacklogHistory,
@@ -39,8 +35,6 @@ import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import CatalogConfigDialog from './CatalogConfigDialog'
 import MetaLine from '@/components/MetaLine'
-import NamespaceTag from '@/components/NamespaceTag'
-import LinkButton from '@/components/LinkButton'
 
 const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
 type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
@@ -134,21 +128,21 @@ export default function CatalogStatusPage() {
 
   if (config.isLoading) {
     return (
-      <Container size="full" className="py-6 px-6">
+      <PageContainer size="full">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
 
   if (config.isError) {
     return (
-      <Container size="full" className="py-6 px-6">
-        <Alert
-          variant="danger"
+      <PageContainer size="full">
+        <Banner
+          status="error"
           title="Could not load catalog config"
           description={config.error?.message ?? 'unknown error'}
         />
-      </Container>
+      </PageContainer>
     )
   }
 
@@ -156,17 +150,15 @@ export default function CatalogStatusPage() {
 
   if (!data || !data.catalog.enabled) {
     return (
-      <Container size="full" className="py-6 px-6">
+      <PageContainer size="full">
         <PageHeader>
-          <Inline align="center" justify="between" className="w-full" wrap>
-            <Stack gap="050">
-              <h1 className="text-foreground text-xl font-semibold">Catalog</h1>
-              <p className="text-foreground-subtle text-sm">Auto-embedding is currently off.</p>
+          <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+            <Stack gap={1}>
+              <h1 className="text-primary text-xl font-semibold">Catalog</h1>
+              <p className="text-secondary text-sm">Auto-embedding is currently off.</p>
             </Stack>
-            <Button size="sm" onClick={() => setConfigDialogOpen(true)}>
-              Enable catalog
-            </Button>
-          </Inline>
+            <Button size="sm" onClick={() => setConfigDialogOpen(true)} label="Enable catalog" />
+          </Stack>
         </PageHeader>
         <EmptyState
           title="Catalog auto-embedding is off"
@@ -181,7 +173,7 @@ export default function CatalogStatusPage() {
             strategies={data.available_strategies}
           />
         )}
-      </Container>
+      </PageContainer>
     )
   }
 
@@ -199,89 +191,77 @@ export default function CatalogStatusPage() {
   const reembedRunning = reembedStatus?.status === 'running'
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack>
-            <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">Catalog</h1>
-              <Badge variant={streamConnected ? 'success' : 'neutral'}>
-                stream {streamConnected ? 'connected' : 'offline'}
-              </Badge>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={6}>
+            <Stack gap={4} direction="horizontal" align="center">
+              <h1 className="text-primary text-xl font-semibold">Catalog</h1>
+              <Badge variant={streamConnected ? 'success' : 'neutral'} label={`stream ${streamConnected ? 'connected' : 'offline'}`} />
               {streamEvents > 0 && (
-                <span className="text-foreground-subtle text-xs tabular-nums">
+                <span className="text-secondary text-xs tabular-nums">
                   {streamEvents} live event{streamEvents === 1 ? '' : 's'}
                 </span>
               )}
-            </Inline>
-            <p className="text-foreground-subtle text-sm">
+            </Stack>
+            <p className="text-secondary text-sm">
               strategy={data.catalog.strategy_id}@{data.catalog.strategy_version}
             </p>
           </Stack>
-          <Inline align="center">
+          <Stack gap={4} direction="horizontal" align="center">
             <Button
               size="sm"
-              variant="outline"
-              tone="neutral"
-              onClick={() => setConfigDialogOpen(true)}
-            >
-              Configure
-            </Button>
+              variant="secondary"
+              
+              onClick={() => setConfigDialogOpen(true)} label="Configure" />
             <Button
               size="sm"
-              variant="outline"
-              tone="danger"
-              onClick={() => setDisableDialogOpen(true)}
-            >
-              Disable
-            </Button>
+              variant="destructive"
+              
+              onClick={() => setDisableDialogOpen(true)} label="Disable" />
             {backlog.dead_letter > 0 && (
               <Button
                 size="sm"
-                variant="outline"
-                tone="danger"
+                variant="destructive"
+                
                 onClick={() => bulkRedrive.mutate()}
-                disabled={bulkRedrive.isPending}
-              >
-                {bulkRedrive.isPending
-                  ? 'Redriving…'
-                  : `Redrive ${backlog.dead_letter} dead-letter`}
-              </Button>
+                isDisabled={bulkRedrive.isPending}
+                label={
+                  bulkRedrive.isPending
+                    ? 'Redriving…'
+                    : `Redrive ${backlog.dead_letter} dead-letter`
+                }
+              />
             )}
             <Button
               size="sm"
               onClick={() => reembed.mutate()}
-              disabled={reembed.isPending || reembedRunning}
-            >
-              {reembedRunning
+              isDisabled={reembed.isPending || reembedRunning} label={reembedRunning
                 ? 'Re-embed running…'
                 : reembed.isPending
                   ? 'Starting…'
-                  : 'Trigger re-embed'}
-            </Button>
-          </Inline>
-        </Inline>
+                  : 'Trigger re-embed'} />
+          </Stack>
+        </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         {dlAlert && dlAlert.delta > 0 && (
-          <Alert
-            variant="danger"
+          <Banner
+            status="error"
             title={`Dead-letter grew by ${dlAlert.delta}`}
             description={`Namespace ${dlAlert.namespace} now has ${dlAlert.new_count} dead-letter items. Investigate or bulk-redrive once the root cause is fixed.`}
-            actions={
-              <Button size="sm" variant="ghost" onClick={() => setDlAlert(null)}>
-                Dismiss
-              </Button>
+            endContent={
+              <Button size="sm" variant="ghost" onClick={() => setDlAlert(null)} label="Dismiss" />
             }
           />
         )}
         {reembed.error && (
-          <Alert variant="danger" title="Re-embed failed" description={reembed.error.message} />
+          <Banner status="error" title="Re-embed failed" description={reembed.error.message} />
         )}
         {bulkRedrive.error && (
-          <Alert
-            variant="danger"
+          <Banner
+            status="error"
             title="Bulk redrive failed"
             description={bulkRedrive.error.message}
           />
@@ -291,22 +271,21 @@ export default function CatalogStatusPage() {
 
         {reembedStatus && (
           <Card>
-            <CardContent>
-              <Stack>
-                <Inline align="center" justify="between">
-                  <Inline align="center">
-                    <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+              <Stack gap={6}>
+                <Stack gap={4} direction="horizontal" align="center" justify="between">
+                  <Stack gap={4} direction="horizontal" align="center">
+                    <span className="text-secondary text-xs uppercase tracking-wide">
                       Last re-embed
                     </span>
                     <ReembedStatusBadge status={reembedStatus.status} />
-                  </Inline>
+                  </Stack>
                   <Link
                     to={`/ns/${encodeURIComponent(ns)}/batch-runs/${reembedStatus.batch_run_id}`}
-                    className="text-foreground text-sm font-medium"
+                    className="text-primary text-sm font-medium"
                   >
                     #{reembedStatus.batch_run_id} →
                   </Link>
-                </Inline>
+                </Stack>
                 <MetaLine
                   size="xs"
                   items={[
@@ -319,42 +298,38 @@ export default function CatalogStatusPage() {
                   ]}
                 />
                 {reembedStatus.error_message && (
-                  <span className="text-danger text-xs">{reembedStatus.error_message}</span>
+                  <span className="text-error text-xs">{reembedStatus.error_message}</span>
                 )}
                 {reembedRunning && progressByRun[reembedStatus.batch_run_id] && (
                   <ReembedProgressBar progress={progressByRun[reembedStatus.batch_run_id]} />
                 )}
               </Stack>
-            </CardContent>
           </Card>
         )}
 
-        <Stack>
-          <Inline align="center" justify="between">
-            <Stack>
-              <h2 className="text-foreground text-sm font-semibold">Backlog timeline</h2>
-              <p className="text-foreground-subtle text-xs">
+        <Stack gap={6}>
+          <Stack gap={4} direction="horizontal" align="center" justify="between">
+            <Stack gap={6}>
+              <h2 className="text-primary text-sm font-semibold">Backlog timeline</h2>
+              <p className="text-secondary text-xs">
                 Persisted samples — survives reload, sampled every 30 seconds.
               </p>
             </Stack>
-            <Inline>
+            <Stack align="center" gap={4} direction="horizontal">
               {HISTORY_WINDOWS.map((w) => (
                 <Button
                   key={w}
                   size="sm"
-                  variant={window === w ? 'solid' : 'ghost'}
-                  tone="neutral"
-                  onClick={() => setWindow(w)}
-                >
-                  {w}
-                </Button>
+                  variant="primary"
+                  
+                  onClick={() => setWindow(w)} label={w} />
               ))}
-            </Inline>
-          </Inline>
+            </Stack>
+          </Stack>
           {history.isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : history.data?.samples.length === 0 ? (
-            <p className="text-foreground-subtle text-sm">
+            <p className="text-secondary text-sm">
               No samples yet — the sampler writes every 30s.
             </p>
           ) : (
@@ -370,18 +345,18 @@ export default function CatalogStatusPage() {
                 {
                   key: 'pending',
                   label: 'Pending',
-                  color: 'var(--davinci-semantic-color-foreground-subtle)',
+                  color: 'var(--color-text-secondary)',
                 },
                 {
                   key: 'in_flight',
                   label: 'In flight',
-                  color: 'var(--davinci-color-blue-500)',
+                  color: 'var(--color-text-blue)',
                 },
-                { key: 'failed', label: 'Failed', color: 'var(--davinci-semantic-color-warning)' },
+                { key: 'failed', label: 'Failed', color: 'var(--color-warning)' },
                 {
                   key: 'dead_letter',
                   label: 'Dead-letter',
-                  color: 'var(--davinci-semantic-color-danger)',
+                  color: 'var(--color-error)',
                 },
               ]}
               stacked
@@ -390,54 +365,50 @@ export default function CatalogStatusPage() {
           )}
         </Stack>
 
-        <Stack>
-          <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Top failure reasons (24h)</h2>
-            <p className="text-foreground-subtle text-xs">
+        <Stack gap={6}>
+          <Stack gap={6}>
+            <h2 className="text-primary text-sm font-semibold">Top failure reasons (24h)</h2>
+            <p className="text-secondary text-xs">
               Buckets failed + dead-letter rows by last_error so the dominant cause surfaces first.
             </p>
           </Stack>
           {failures.isLoading ? (
             <Skeleton className="h-32 w-full" />
           ) : failures.data?.reasons.length === 0 ? (
-            <p className="text-foreground-subtle text-sm">No failed items in the last 24h.</p>
+            <p className="text-secondary text-sm">No failed items in the last 24h.</p>
           ) : (
-            <TableContainer>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Reason</TableHead>
-                    <TableHead align="right">Count</TableHead>
-                    <TableHead>Sample object</TableHead>
+                    <TableHeaderCell>Reason</TableHeaderCell>
+                    <TableHeaderCell className="text-right" >Count</TableHeaderCell>
+                    <TableHeaderCell>Sample object</TableHeaderCell>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {failures.data?.reasons.map((r, i) => (
                     <TableRow key={`${r.reason}-${i}`}>
-                      <TableCell className="text-foreground-subtle text-sm">{r.reason}</TableCell>
-                      <TableCell align="right" className="tabular-nums">
+                      <TableCell className="text-secondary text-sm">{r.reason}</TableCell>
+                      <TableCell  className="text-right tabular-nums">
                         {r.count.toLocaleString()}
                       </TableCell>
                       <TableCell>
                         {r.sample_object_id ? (
-                          <code className="text-foreground-subtle text-xs">{r.sample_object_id}</code>
+                          <code className="text-secondary text-xs">{r.sample_object_id}</code>
                         ) : (
-                          <span className="text-foreground-subtle text-xs">—</span>
+                          <span className="text-secondary text-xs">—</span>
                         )}
                       </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </TableContainer>
           )}
         </Stack>
 
-        <Inline justify="end">
-          <LinkButton to={`/ns/${encodeURIComponent(ns)}/catalog/items`} variant="outline" tone="neutral">
-            Browse items →
-          </LinkButton>
-        </Inline>
+        <Stack align="center" gap={4} direction="horizontal" justify="end">
+          <Button href={`/ns/${encodeURIComponent(ns)}/catalog/items`} variant="secondary" label="Browse items →" />
+        </Stack>
       </Stack>
 
       <CatalogConfigDialog
@@ -453,7 +424,7 @@ export default function CatalogStatusPage() {
         open={disableDialogOpen}
         onOpenChange={setDisableDialogOpen}
       />
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -476,35 +447,43 @@ function DisableCatalogDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="md">
+    <Dialog isOpen={open} onOpenChange={onOpenChange} width={560} purpose="required">
       {open && (
-        <>
-          <DialogHeader>
-            <DialogTitle>
-              Disable catalog for <NamespaceTag name={namespace} />
-            </DialogTitle>
-            <DialogDescription>
-              New content sent to POST /v1/namespaces/{namespace}/catalog will return 503 and no
-              auto-embedding runs. Existing vectors stay in Qdrant — re-enabling resumes embedding
-              with the same strategy.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogContent>
-            {update.error && (
-              <Alert variant="danger" title="Disable failed" description={update.error.message} />
-            )}
-          </DialogContent>
-          <DialogFooter>
-            <Inline justify="end">
-              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
-              </Button>
-              <Button type="button" tone="danger" onClick={onConfirm} disabled={update.isPending}>
-                {update.isPending ? 'Disabling…' : 'Disable catalog'}
-              </Button>
-            </Inline>
-          </DialogFooter>
-        </>
+        <Layout
+          header={
+            <DialogHeader
+              title={`Disable catalog for ${namespace}`}
+              subtitle={`New content sent to POST /v1/namespaces/${namespace}/catalog will return 503 and no auto-embedding runs. Existing vectors stay in Qdrant — re-enabling resumes embedding with the same strategy.`}
+              onOpenChange={onOpenChange}
+            />
+          }
+          content={
+            <LayoutContent>
+              {update.error && (
+                <Banner status="error" title="Disable failed" description={update.error.message} />
+              )}
+            </LayoutContent>
+          }
+          footer={
+            <LayoutFooter>
+              <Stack direction="horizontal" gap={2} align="center" hAlign="end">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onOpenChange(false)}
+                  label="Cancel"
+                />
+                <Button
+                  variant="destructive"
+                  type="button"
+                  onClick={onConfirm}
+                  isDisabled={update.isPending}
+                  label={update.isPending ? 'Disabling…' : 'Disable catalog'}
+                />
+              </Stack>
+            </LayoutFooter>
+          }
+        />
       )}
     </Dialog>
   )
@@ -514,18 +493,18 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
   const total = progress.total > 0 ? progress.total : 1
   const pct = Math.min(100, Math.round((progress.processed / total) * 100))
   return (
-    <Stack>
-      <Inline align="center" justify="between">
-        <span className="text-foreground-subtle text-xs tabular-nums">
+    <Stack gap={6}>
+      <Stack gap={4} direction="horizontal" align="center" justify="between">
+        <span className="text-secondary text-xs tabular-nums">
           {progress.processed.toLocaleString()} / {progress.total.toLocaleString()} ({pct}%)
         </span>
-        <span className="text-foreground-subtle text-xs">
+        <span className="text-secondary text-xs">
           updated {new Date(progress.at).toLocaleTimeString()}
         </span>
-      </Inline>
-      <div className="h-1 w-full bg-surface-sunken rounded overflow-hidden">
+      </Stack>
+      <div className="h-1 w-full bg-muted rounded overflow-hidden">
         <div
-          className="h-full bg-primary transition-all duration-300"
+          className="h-full bg-accent-bg transition-all duration-300"
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -534,7 +513,7 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
 }
 
 function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
-  const tiles: Array<{ label: string; value: number; tone: 'neutral' | 'warning' | 'danger'; hint?: string }> = [
+  const tiles: Array<{ label: string; value: number; tone: 'neutral' | 'warning' | 'error'; hint?: string }> = [
     { label: 'Pending', value: backlog.pending, tone: 'neutral' },
     { label: 'In flight', value: backlog.in_flight, tone: 'neutral' },
     {
@@ -545,7 +524,7 @@ function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
     {
       label: 'Dead-letter',
       value: backlog.dead_letter,
-      tone: backlog.dead_letter > 0 ? 'danger' : 'neutral',
+      tone: backlog.dead_letter > 0 ? 'error' : 'neutral',
     },
     { label: 'Embedded', value: backlog.embedded, tone: 'neutral' },
     { label: 'Stream length', value: backlog.stream_len, tone: 'neutral', hint: 'XLEN' },
@@ -557,34 +536,32 @@ function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
     },
   ]
   return (
-    <Inline align="start" wrap>
+    <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
       {tiles.map((t) => (
         <Card key={t.label} className="flex-1 min-w-35">
-          <CardContent>
-            <Stack>
-              <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+            <Stack gap={6}>
+              <span className="text-secondary text-xs uppercase tracking-wide">
                 {t.label}
               </span>
-              <Inline align="center">
-                <span className="text-foreground text-xl font-semibold tabular-nums">
+              <Stack gap={4} direction="horizontal" align="center">
+                <span className="text-primary text-xl font-semibold tabular-nums">
                   {t.value.toLocaleString()}
                 </span>
-                {t.tone !== 'neutral' && <Badge variant={t.tone}>!</Badge>}
+                {t.tone !== 'neutral' && <Badge variant={t.tone} label="!" />}
                 {t.hint && (
-                  <span className="text-foreground-subtle text-xs">{t.hint}</span>
+                  <span className="text-secondary text-xs">{t.hint}</span>
                 )}
-              </Inline>
+              </Stack>
             </Stack>
-          </CardContent>
         </Card>
       ))}
-    </Inline>
+    </Stack>
   )
 }
 
 function ReembedStatusBadge({ status }: { status: string }) {
-  if (status === 'running') return <Badge variant="primary">running</Badge>
-  if (status === 'success') return <Badge variant="success">ok</Badge>
-  if (status === 'failed') return <Badge variant="danger">failed</Badge>
-  return <Badge variant="neutral">{status}</Badge>
+  if (status === 'running') return <Badge variant="info" label="running" />
+  if (status === 'success') return <Badge variant="success" label="ok" />
+  if (status === 'failed') return <Badge variant="error" label="failed" />
+  return <Badge variant="neutral" label={status} />
 }

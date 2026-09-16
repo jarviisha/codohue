@@ -1,14 +1,7 @@
 import { useEffect, useMemo, useReducer } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import {
-  Alert,
-  Badge,
-  Button,
-  Container,
-  Inline,
-  Skeleton,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { Badge, Banner, Button, Skeleton, Stack } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useBatchRunDetail,
   useCancelBatchRun,
@@ -132,30 +125,30 @@ export default function BatchRunDetailPage() {
 
   if (detail.isLoading) {
     return (
-      <Container size="full" className="py-6 px-6">
+      <PageContainer size="full">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
   if (detail.isError) {
     return (
-      <Container size="full" className="py-6 px-6">
-        <Alert variant="danger" title="Failed to load run" description={detail.error?.message ?? ''} />
-      </Container>
+      <PageContainer size="full">
+        <Banner status="error" title="Failed to load run" description={detail.error?.message ?? ''} />
+      </PageContainer>
     )
   }
   const run = detail.data!
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack gap="050">
-            <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">Run #{run.id}</h1>
-              <Badge variant={run.kind === 'reembed' ? 'discovery' : 'neutral'}>{run.kind}</Badge>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={1}>
+            <Stack gap={4} direction="horizontal" align="center">
+              <h1 className="text-primary text-xl font-semibold">Run #{run.id}</h1>
+              <Badge variant={run.kind === 'reembed' ? 'purple' : 'neutral'} label={run.kind} />
               <RunStateBadge state={state} run={run} />
-            </Inline>
+            </Stack>
             <MetaLine
               items={[
                 <Link to={`/ns/${encodeURIComponent(run.namespace)}`}>
@@ -166,17 +159,14 @@ export default function BatchRunDetailPage() {
               ]}
             />
           </Stack>
-          <Inline align="center">
+          <Stack gap={4} direction="horizontal" align="center">
             {!state.completed && (
               <Button
-                tone="danger"
-                variant="outline"
+                
+                variant="destructive"
                 size="sm"
                 onClick={() => numericID != null && cancel.mutate(numericID)}
-                disabled={cancel.isPending}
-              >
-                {cancel.isPending ? 'Cancelling…' : 'Cancel'}
-              </Button>
+                isDisabled={cancel.isPending} label={cancel.isPending ? 'Cancelling…' : 'Cancel'} />
             )}
             {state.completed && run.kind === 'cf' && (
               <Button
@@ -195,35 +185,32 @@ export default function BatchRunDetailPage() {
                     },
                   })
                 }}
-                disabled={retry.isPending}
-              >
-                {retry.isPending ? 'Retrying…' : 'Retry'}
-              </Button>
+                isDisabled={retry.isPending} label={retry.isPending ? 'Retrying…' : 'Retry'} />
             )}
-          </Inline>
-        </Inline>
+          </Stack>
+        </Stack>
       </PageHeader>
 
-      <Stack>
-        {cancel.error && <Alert variant="danger" title="Cancel failed" description={cancel.error.message} />}
-        {retry.error && <Alert variant="danger" title="Retry failed" description={retry.error.message} />}
+      <Stack gap={6}>
+        {cancel.error && <Banner status="error" title="Cancel failed" description={cancel.error.message} />}
+        {retry.error && <Banner status="error" title="Retry failed" description={retry.error.message} />}
 
-        <Stack>
-          <Inline align="center" justify="between">
-            <h2 className="text-foreground text-sm font-semibold">Phases</h2>
+        <Stack gap={6}>
+          <Stack gap={4} direction="horizontal" align="center" justify="between">
+            <h2 className="text-primary text-sm font-semibold">Phases</h2>
             <PhaseStrip phaseStatus={state.phases.map((p) => phaseToStatus(p))} />
-          </Inline>
-          <Stack>
+          </Stack>
+          <Stack gap={6}>
             {state.phases.map((p) => (
               <PhaseRow key={p.n} phase={p} />
             ))}
           </Stack>
         </Stack>
 
-        <Stack>
-          <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Log</h2>
-            <p className="text-foreground-subtle text-xs">
+        <Stack gap={6}>
+          <Stack gap={6}>
+            <h2 className="text-primary text-sm font-semibold">Log</h2>
+            <p className="text-secondary text-xs">
               {state.completed
                 ? 'Final captured log lines.'
                 : 'Streaming live — new lines arrive as cron emits them.'}
@@ -232,7 +219,7 @@ export default function BatchRunDetailPage() {
           <LogLineViewer lines={state.log} follow={!state.completed} />
         </Stack>
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -245,49 +232,47 @@ function phaseToStatus(p: PhaseEntry): 'ok' | 'fail' | 'skipped' | null {
 
 function PhaseRow({ phase }: { phase: PhaseEntry }) {
   return (
-    <Inline align="center" justify="between">
-      <Inline align="center">
-        <span className="text-foreground-subtle text-xs uppercase tracking-wide w-16">
+    <Stack gap={4} direction="horizontal" align="center" justify="between">
+      <Stack gap={4} direction="horizontal" align="center">
+        <span className="text-secondary text-xs uppercase tracking-wide w-16">
           phase {phase.n}
         </span>
-        <span className="text-foreground font-medium">{phase.name}</span>
-        {phase.ok === true && <Badge variant="success">ok</Badge>}
-        {phase.ok === false && <Badge variant="danger">fail</Badge>}
-        {phase.ok === null && phase.skipped && <Badge variant="neutral">skipped</Badge>}
-      </Inline>
-      <Inline align="center">
+        <span className="text-primary font-medium">{phase.name}</span>
+        {phase.ok === true && <Badge variant="success" label="ok" />}
+        {phase.ok === false && <Badge variant="error" label="fail" />}
+        {phase.ok === null && phase.skipped && <Badge variant="neutral" label="skipped" />}
+      </Stack>
+      <Stack gap={4} direction="horizontal" align="center">
         {phase.subjects != null && (
-          <span className="text-foreground-subtle text-sm tabular-nums">
-            subjects: <span className="text-foreground">{phase.subjects.toLocaleString()}</span>
+          <span className="text-secondary text-sm tabular-nums">
+            subjects: <span className="text-primary">{phase.subjects.toLocaleString()}</span>
           </span>
         )}
         {phase.objects != null && (
-          <span className="text-foreground-subtle text-sm tabular-nums">
-            objects: <span className="text-foreground">{phase.objects.toLocaleString()}</span>
+          <span className="text-secondary text-sm tabular-nums">
+            objects: <span className="text-primary">{phase.objects.toLocaleString()}</span>
           </span>
         )}
         {phase.items != null && (
-          <span className="text-foreground-subtle text-sm tabular-nums">
-            items: <span className="text-foreground">{phase.items.toLocaleString()}</span>
+          <span className="text-secondary text-sm tabular-nums">
+            items: <span className="text-primary">{phase.items.toLocaleString()}</span>
           </span>
         )}
-        <span className="text-foreground-subtle text-sm tabular-nums">
+        <span className="text-secondary text-sm tabular-nums">
           {phase.duration_ms > 0 ? `${(phase.duration_ms / 1000).toFixed(1)}s` : '—'}
         </span>
-      </Inline>
-    </Inline>
+      </Stack>
+    </Stack>
   )
 }
 
 function RunStateBadge({ state, run }: { state: LocalState; run: BatchRunDetail }) {
   if (!state.completed) {
     return (
-      <Badge variant={run.cancel_requested ? 'warning' : 'primary'}>
-        {run.cancel_requested ? 'cancelling' : 'running'}
-      </Badge>
+      <Badge variant={run.cancel_requested ? 'warning' : 'info'} label={run.cancel_requested ? 'cancelling' : 'running'} />
     )
   }
-  if (state.cancelled) return <Badge variant="neutral">cancelled</Badge>
-  if (run.success) return <Badge variant="success">ok</Badge>
-  return <Badge variant="danger">failed</Badge>
+  if (state.cancelled) return <Badge variant="neutral" label="cancelled" />
+  if (run.success) return <Badge variant="success" label="ok" />
+  return <Badge variant="error" label="failed" />
 }

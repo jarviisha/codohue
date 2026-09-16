@@ -655,7 +655,7 @@ type TargetStrategy struct {
 
 // BatchRunSummary is the lightweight row returned in batch-run list endpoints.
 // PhaseStatus[i] ∈ "ok" | "fail" | "skipped" | nil (nil = phase not yet run /
-// run still in flight). UI renders it as three Badge tones (Davinci).
+// run still in flight). UI renders it as three Badge tones.
 type BatchRunSummary struct {
 	ID                int64      `json:"id"`
 	Namespace         string     `json:"namespace"`

@@ -1,24 +1,21 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
   Card,
-  CardContent,
-  Container,
-  Inline,
   Skeleton,
   Stack,
   Switch,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useSubjectProfile,
   useSubjectRecommendations,
@@ -27,7 +24,6 @@ import {
 } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
 import MetaLine from '@/components/MetaLine'
-import LinkButton from '@/components/LinkButton'
 
 /**
  * SubjectInspectorPage is the operator's "why did user X get rec Y?" answer.
@@ -52,45 +48,39 @@ export default function SubjectInspectorPage() {
   if (!ns || !id) return null
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full" wrap>
-          <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">Subject {id}</h1>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack gap={1}>
+            <h1 className="text-primary text-xl font-semibold">Subject {id}</h1>
           </Stack>
-          <Inline align="center">
+          <Stack gap={4} direction="horizontal" align="center">
             <Switch
-              checked={debug}
-              onChange={(e) => setDebug(e.target.checked)}
+              value={debug}
+              onChange={setDebug}
               label="Debug"
             />
-            <LinkButton
-              to={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
-              variant="outline"
-              tone="neutral"
-              size="sm"
-            >
-              View events →
-            </LinkButton>
+            <Button
+              href={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
+              variant="secondary"
+              
+              size="sm" label="View events →" />
             {/* Objects this subject authored — ownership metadata, unrelated to
                 the interactions above, which is why it links out rather than
                 folding into the profile card. */}
-            <LinkButton
-              to={`/ns/${encodeURIComponent(ns)}/catalog/items?author=${encodeURIComponent(id)}`}
-              variant="outline"
-              tone="neutral"
-              size="sm"
-            >
-              Authored objects →
-            </LinkButton>
-          </Inline>
-        </Inline>
+            <Button
+              href={`/ns/${encodeURIComponent(ns)}/catalog/items?author=${encodeURIComponent(id)}`}
+              variant="secondary"
+              
+              size="sm" label="Authored objects →" />
+          </Stack>
+        </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         {profile.data && (profile.data.sparse_vector_nnz < 0 || profile.data.interaction_count === 0) && (
-          <Alert
-            variant="warning"
+          <Banner
+            status="warning"
             title={
               profile.data.interaction_count === 0
                 ? 'No interactions recorded for this subject'
@@ -101,19 +91,14 @@ export default function SubjectInspectorPage() {
                 ? 'Recommendations will fall back to the trending path. Inject a test event or wait for ingest to land real activity.'
                 : 'The cron job has not run since this subject\'s first event. Recommendations will use the cold-start path until the next batch run completes.'
             }
-            actions={
-              <Inline>
-                <LinkButton
-                  to={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
+            endContent={
+              <Stack align="center" gap={4} direction="horizontal">
+                <Button
+                  href={`/ns/${encodeURIComponent(ns)}/events?subject_id=${encodeURIComponent(id)}`}
                   size="sm"
-                  variant="ghost"
-                >
-                  Open events
-                </LinkButton>
-                <LinkButton to={`/ns/${encodeURIComponent(ns)}/batch-runs`} size="sm" variant="ghost">
-                  Batch runs
-                </LinkButton>
-              </Inline>
+                  variant="ghost" label="Open events" />
+                <Button href={`/ns/${encodeURIComponent(ns)}/batch-runs`} size="sm" variant="ghost" label="Batch runs" />
+              </Stack>
             }
           />
         )}
@@ -127,10 +112,10 @@ export default function SubjectInspectorPage() {
           seenItemsDays={profile.data?.seen_items_days}
         />
 
-        <Stack>
-          <Inline align="center" justify="between">
-            <Stack>
-              <h2 className="text-foreground text-sm font-semibold">Recommendations</h2>
+        <Stack gap={6}>
+          <Stack gap={4} direction="horizontal" align="center" justify="between">
+            <Stack gap={6}>
+              <h2 className="text-primary text-sm font-semibold">Recommendations</h2>
               {recs.data ? (
                 <MetaLine
                   size="xs"
@@ -141,43 +126,40 @@ export default function SubjectInspectorPage() {
                   ]}
                 />
               ) : (
-                <p className="text-foreground-subtle text-xs">
+                <p className="text-secondary text-xs">
                   Live from /v1/subjects/:id/recommendations via the admin proxy.
                 </p>
               )}
             </Stack>
-            <Inline align="center">
+            <Stack gap={4} direction="horizontal" align="center">
               {[10, 20, 50, 100].map((n) => (
                 <Button
                   key={n}
                   size="sm"
-                  variant={limit === n ? 'solid' : 'ghost'}
-                  tone="neutral"
-                  onClick={() => setLimit(n)}
-                >
-                  {n}
-                </Button>
+                  variant="primary"
+                  
+                  onClick={() => setLimit(n)} label={String(n)} />
               ))}
-            </Inline>
-          </Inline>
+            </Stack>
+          </Stack>
 
           {recs.isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : recs.isError ? (
-            <Alert
-              variant="danger"
+            <Banner
+              status="error"
               title="Could not load recommendations"
               description={recs.error?.message ?? 'unknown error'}
             />
           ) : (
-            <Stack>
+            <Stack gap={6}>
               {debug && recs.data?.debug && <DebugSummary debug={recs.data.debug} />}
               <RecommendationsTable items={recs.data?.items ?? []} />
             </Stack>
           )}
         </Stack>
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -199,8 +181,8 @@ function SubjectProfileCard({
   if (loading) return <Skeleton className="h-32 w-full" />
   if (error) {
     return (
-      <Alert
-        variant="danger"
+      <Banner
+        status="error"
         title="Could not load profile"
         description={
           error instanceof Error ? error.message : 'unknown error'
@@ -229,51 +211,47 @@ function SubjectProfileCard({
   ]
 
   return (
-    <Stack>
-      <Inline align="start" wrap>
+    <Stack gap={6}>
+      <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
         {tiles.map((t) => (
           <Card key={t.label} className="flex-1 min-w-40">
-            <CardContent>
-              <Stack>
-                <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+              <Stack gap={6}>
+                <span className="text-secondary text-xs uppercase tracking-wide">
                   {t.label}
                 </span>
-                <Inline align="center">
-                  <span className="text-foreground text-xl font-semibold tabular-nums">
+                <Stack gap={4} direction="horizontal" align="center">
+                  <span className="text-primary text-xl font-semibold tabular-nums">
                     {t.value}
                   </span>
-                  {t.badge && <Badge variant={t.badge.variant}>{t.badge.label}</Badge>}
-                </Inline>
+                  {t.badge && <Badge variant={t.badge.variant} label={t.badge.label} />}
+                </Stack>
               </Stack>
-            </CardContent>
           </Card>
         ))}
-      </Inline>
+      </Stack>
 
       {seenItems.length > 0 && (
         <Card>
-          <CardContent>
-            <Stack>
-              <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+            <Stack gap={6}>
+              <span className="text-secondary text-xs uppercase tracking-wide">
                 Recent seen items
               </span>
-              <Inline wrap>
+              <Stack align="center" gap={4} direction="horizontal" wrap="wrap">
                 {seenItems.slice(0, 30).map((oid) => (
                   <code
                     key={oid}
-                    className="text-foreground-subtle text-xs bg-surface-sunken px-2 py-1 rounded"
+                    className="text-secondary text-xs bg-muted px-2 py-1 rounded"
                   >
                     {oid}
                   </code>
                 ))}
                 {seenItems.length > 30 && (
-                  <span className="text-foreground-subtle text-xs">
+                  <span className="text-secondary text-xs">
                     +{seenItems.length - 30} more
                   </span>
                 )}
-              </Inline>
+              </Stack>
             </Stack>
-          </CardContent>
         </Card>
       )}
     </Stack>
@@ -290,21 +268,19 @@ function DebugSummary({ debug }: { debug: RecommendDebug }) {
   ]
   return (
     <Card>
-      <CardContent>
-        <Stack>
-          <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+        <Stack gap={6}>
+          <span className="text-secondary text-xs uppercase tracking-wide">
             Debug score components
           </span>
-          <Inline wrap>
+          <Stack align="center" gap={4} direction="horizontal" wrap="wrap">
             {tiles.map((t) => (
-              <Stack key={t.label}>
-                <span className="text-foreground-subtle text-xs">{t.label}</span>
-                <span className="text-foreground text-sm font-medium tabular-nums">{t.value}</span>
+              <Stack gap={6} key={t.label}>
+                <span className="text-secondary text-xs">{t.label}</span>
+                <span className="text-primary text-sm font-medium tabular-nums">{t.value}</span>
               </Stack>
             ))}
-          </Inline>
+          </Stack>
         </Stack>
-      </CardContent>
     </Card>
   )
 }
@@ -312,35 +288,33 @@ function DebugSummary({ debug }: { debug: RecommendDebug }) {
 function RecommendationsTable({ items }: { items: RecommendDebugItem[] }) {
   if (items.length === 0) {
     return (
-      <p className="text-foreground-subtle text-sm">No recommendations for this subject.</p>
+      <p className="text-secondary text-sm">No recommendations for this subject.</p>
     )
   }
   return (
-    <TableContainer>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead align="right">Rank</TableHead>
-            <TableHead>Object ID</TableHead>
-            <TableHead align="right">Score</TableHead>
+            <TableHeaderCell className="text-right" >Rank</TableHeaderCell>
+            <TableHeaderCell>Object ID</TableHeaderCell>
+            <TableHeaderCell className="text-right" >Score</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
           {items.map((it) => (
             <TableRow key={`${it.rank}-${it.object_id}`}>
-              <TableCell align="right" className="tabular-nums">
+              <TableCell  className="text-right tabular-nums">
                 {it.rank}
               </TableCell>
               <TableCell>
-                <code className="text-foreground text-xs">{it.object_id}</code>
+                <code className="text-primary text-xs">{it.object_id}</code>
               </TableCell>
-              <TableCell align="right" className="tabular-nums">
+              <TableCell  className="text-right tabular-nums">
                 {it.score.toFixed(6)}
               </TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
-    </TableContainer>
   )
 }

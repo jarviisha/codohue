@@ -1,16 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import {
-  Alert,
-  Badge,
-  Button,
-  Card,
-  CardContent,
-  Container,
-  Inline,
-  Skeleton,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { Badge, Banner, Button, Card, Skeleton, Stack } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useCatalogItem,
   useDeleteCatalogItem,
@@ -19,14 +10,13 @@ import {
 import MetaLine from '@/components/MetaLine'
 import PageHeader from '@/components/shell/PageHeader'
 import ConfirmDialog from '@/components/ConfirmDialog'
-import LinkButton from '@/components/LinkButton'
 
-const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'primary'> = {
+const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'error' | 'info'> = {
   pending: 'neutral',
-  in_flight: 'primary',
+  in_flight: 'info',
   embedded: 'success',
   failed: 'warning',
-  dead_letter: 'danger',
+  dead_letter: 'error',
 }
 
 export default function CatalogItemDetailPage() {
@@ -42,49 +32,49 @@ export default function CatalogItemDetailPage() {
 
   if (q.isLoading) {
     return (
-      <Container size="full" className="py-6 px-6">
+      <PageContainer size="full">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
 
   if (q.isError) {
     return (
-      <Container size="full" className="py-6 px-6">
-        <Alert variant="danger" title="Failed to load item" description={q.error?.message ?? ''} />
-      </Container>
+      <PageContainer size="full">
+        <Banner status="error" title="Failed to load item" description={q.error?.message ?? ''} />
+      </PageContainer>
     )
   }
 
   const item = q.data
   if (!item) {
     return (
-      <Container size="full" className="py-6 px-6">
-        <Alert
-          variant="warning"
+      <PageContainer size="full">
+        <Banner
+          status="warning"
           title="Item not found"
           description="It may have been deleted or never existed."
         />
-      </Container>
+      </PageContainer>
     )
   }
 
   const canRedrive = item.state === 'failed' || item.state === 'dead_letter'
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full">
-          <Stack gap="050">
-            <Inline align="center">
-              <h1 className="text-foreground text-xl font-semibold">{item.object_id}</h1>
-              <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'}>{item.state}</Badge>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
+          <Stack gap={1}>
+            <Stack gap={4} direction="horizontal" align="center">
+              <h1 className="text-primary text-xl font-semibold">{item.object_id}</h1>
+              <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'} label={item.state} />
               {item.strategy_id && (
-                <span className="text-foreground-subtle text-xs">
+                <span className="text-secondary text-xs">
                   {item.strategy_id}@{item.strategy_version}
                 </span>
               )}
-            </Inline>
+            </Stack>
             <MetaLine
               items={[
                 `${item.attempt_count} attempt${item.attempt_count === 1 ? '' : 's'}`,
@@ -92,116 +82,101 @@ export default function CatalogItemDetailPage() {
               ]}
             />
             {item.author_subject_id && (
-              <Inline align="center">
-                <span className="text-foreground-subtle text-xs">authored by</span>
+              <Stack gap={4} direction="horizontal" align="center">
+                <span className="text-secondary text-xs">authored by</span>
                 <Link
                   to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(item.author_subject_id)}`}
-                  className="text-foreground text-xs"
+                  className="text-primary text-xs"
                 >
                   {item.author_subject_id}
                 </Link>
-              </Inline>
+              </Stack>
             )}
           </Stack>
-          <Inline>
+          <Stack align="center" gap={4} direction="horizontal">
             {canRedrive && (
               <Button
                 size="sm"
                 onClick={() => redrive.mutate(item.id)}
-                disabled={redrive.isPending}
-              >
-                {redrive.isPending ? 'Redriving…' : 'Redrive'}
-              </Button>
+                isDisabled={redrive.isPending} label={redrive.isPending ? 'Redriving…' : 'Redrive'} />
             )}
             <Button
               size="sm"
-              variant="outline"
-              tone="danger"
+              variant="destructive"
+              
               onClick={() => setConfirmOpen(true)}
-              disabled={remove.isPending}
-            >
-              {remove.isPending ? 'Deleting…' : 'Delete'}
-            </Button>
-          </Inline>
-        </Inline>
+              isDisabled={remove.isPending} label={remove.isPending ? 'Deleting…' : 'Delete'} />
+          </Stack>
+        </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         {redrive.error && (
-          <Alert variant="danger" title="Redrive failed" description={redrive.error.message} />
+          <Banner status="error" title="Redrive failed" description={redrive.error.message} />
         )}
         {remove.error && (
-          <Alert variant="danger" title="Delete failed" description={remove.error.message} />
+          <Banner status="error" title="Delete failed" description={remove.error.message} />
         )}
 
         {item.last_error && (
-          <Alert
-            variant={item.state === 'dead_letter' ? 'danger' : 'warning'}
+          <Banner
+            status={item.state === 'dead_letter' ? 'error' : 'warning'}
             title="Last error"
             description={item.last_error}
           />
         )}
 
-        <Stack>
-          <h2 className="text-foreground text-sm font-semibold">Content</h2>
+        <Stack gap={6}>
+          <h2 className="text-primary text-sm font-semibold">Content</h2>
           <Card>
-            <CardContent>
-              <pre className="text-foreground text-sm whitespace-pre-wrap wrap-break-word font-mono leading-5">
+              <pre className="text-primary text-sm whitespace-pre-wrap wrap-break-word font-mono leading-5">
                 {item.content}
               </pre>
-            </CardContent>
           </Card>
         </Stack>
 
         {item.metadata && Object.keys(item.metadata).length > 0 && (
-          <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Metadata</h2>
+          <Stack gap={6}>
+            <h2 className="text-primary text-sm font-semibold">Metadata</h2>
             <Card>
-              <CardContent>
-                <pre className="text-foreground-subtle text-xs whitespace-pre-wrap font-mono leading-5">
+                <pre className="text-secondary text-xs whitespace-pre-wrap font-mono leading-5">
                   {JSON.stringify(item.metadata, null, 2)}
                 </pre>
-              </CardContent>
             </Card>
           </Stack>
         )}
 
         {item.vector?.preview && (
-          <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Embedded vector</h2>
+          <Stack gap={6}>
+            <h2 className="text-primary text-sm font-semibold">Embedded vector</h2>
             <Card>
-              <CardContent>
-                <Stack>
-                  <Inline align="center">
+                <Stack gap={6}>
+                  <Stack gap={4} direction="horizontal" align="center">
                     <Tile label="Collection" value={item.vector.collection} />
                     <Tile label="Numeric id" value={item.vector.numeric_id.toLocaleString()} />
                     <Tile label="Dim" value={item.vector.dim.toString()} />
                     <Tile label="L2 norm" value={l2norm(item.vector.preview).toFixed(4)} />
-                  </Inline>
-                  <Stack>
-                    <span className="text-foreground-subtle text-xs uppercase tracking-wide">
+                  </Stack>
+                  <Stack gap={6}>
+                    <span className="text-secondary text-xs uppercase tracking-wide">
                       Preview (first {item.vector.preview.length} dims)
                     </span>
-                    <code className="text-foreground-subtle text-xs font-mono break-all leading-5">
+                    <code className="text-secondary text-xs font-mono break-all leading-5">
                       [{item.vector.preview.map((v) => v.toFixed(4)).join(', ')}]
                     </code>
                   </Stack>
                 </Stack>
-              </CardContent>
             </Card>
           </Stack>
         )}
 
-        <Inline justify="start">
-          <LinkButton
-            to={`/ns/${encodeURIComponent(ns)}/catalog/items`}
+        <Stack align="center" gap={4} direction="horizontal" justify="start">
+          <Button
+            href={`/ns/${encodeURIComponent(ns)}/catalog/items`}
             variant="ghost"
-            tone="neutral"
-            size="sm"
-          >
-            ← Back to items
-          </LinkButton>
-        </Inline>
+            
+            size="sm" label="← Back to items" />
+        </Stack>
       </Stack>
 
       <ConfirmDialog
@@ -221,15 +196,15 @@ export default function CatalogItemDetailPage() {
           })
         }
       />
-    </Container>
+    </PageContainer>
   )
 }
 
 function Tile({ label, value }: { label: string; value: string }) {
   return (
-    <Stack>
-      <span className="text-foreground-subtle text-xs uppercase tracking-wide">{label}</span>
-      <span className="text-foreground text-sm font-semibold tabular-nums">{value}</span>
+    <Stack gap={6}>
+      <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
+      <span className="text-primary text-sm font-semibold tabular-nums">{value}</span>
     </Stack>
   )
 }

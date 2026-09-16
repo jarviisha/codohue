@@ -1,25 +1,23 @@
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Button,
-  Container,
   EmptyState,
-  Inline,
   Pagination,
-  SearchInput,
-  Select,
+  Selector,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+  TextInput,
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import {
   useCatalogItems,
   useDeleteCatalogItem,
@@ -29,7 +27,6 @@ import {
 } from '@/services/catalog'
 import PageHeader from '@/components/shell/PageHeader'
 import ConfirmDialog from '@/components/ConfirmDialog'
-import LinkButton from '@/components/LinkButton'
 
 const PAGE_SIZE = 25
 const STATE_OPTIONS: Array<{ value: CatalogItemState | ''; label: string }> = [
@@ -41,12 +38,12 @@ const STATE_OPTIONS: Array<{ value: CatalogItemState | ''; label: string }> = [
   { value: 'dead_letter', label: 'dead-letter' },
 ]
 
-const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'danger' | 'primary'> = {
+const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'error' | 'info'> = {
   pending: 'neutral',
-  in_flight: 'primary',
+  in_flight: 'info',
   embedded: 'success',
   failed: 'warning',
-  dead_letter: 'danger',
+  dead_letter: 'error',
 }
 
 export default function CatalogItemsPage() {
@@ -85,87 +82,78 @@ export default function CatalogItemsPage() {
   if (!ns) return null
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full">
-          <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">Catalog items</h1>
-            <p className="text-foreground-subtle text-sm">
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
+          <Stack gap={1}>
+            <h1 className="text-primary text-xl font-semibold">Catalog items</h1>
+            <p className="text-secondary text-sm">
               {items.data?.total ?? 0} matching. Click a row to open detail.
             </p>
           </Stack>
-          <LinkButton
-            to={`/ns/${encodeURIComponent(ns)}/catalog`}
+          <Button
+            href={`/ns/${encodeURIComponent(ns)}/catalog`}
             variant="ghost"
-            tone="neutral"
-            size="sm"
-          >
-            ← Status
-          </LinkButton>
-        </Inline>
+            
+            size="sm" label="← Status" />
+        </Stack>
       </PageHeader>
 
-      <Stack>
-        <Inline align="center" wrap>
-          <Select
+      <Stack gap={6}>
+        <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
+          <Selector
             size="sm"
+            label="State"
+            isLabelHidden
             value={stateFilter}
-            onChange={(e) => {
-              setStateFilter(e.target.value as CatalogItemState | '')
+            onChange={(next) => {
+              setStateFilter(next as CatalogItemState | '')
               setPage(0)
             }}
-          >
-            {STATE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </Select>
-          <SearchInput
+            options={STATE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+          />
+          <TextInput
+            label="Search catalog items"
+            isLabelHidden
+            value={search}
+            onChange={(next) => {
+              setSearch(next)
+              setPage(0)
+            }}
+            hasClear
             size="sm"
             placeholder="object_id contains…"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value)
-              setPage(0)
-            }}
-            onClear={() => {
-              setSearch('')
-              setPage(0)
-            }}
           />
           {author && (
-            <Inline align="center">
-              <span className="text-foreground-subtle text-sm">author</span>
+            <Stack gap={4} direction="horizontal" align="center">
+              <span className="text-secondary text-sm">author</span>
               {/* The chip links out to the subject; filtering by author is the
                   in-table click, so each affordance sits where it's wanted. */}
               <Link
                 to={`/ns/${encodeURIComponent(ns)}/subjects/${encodeURIComponent(author)}`}
-                className="text-foreground text-xs"
+                className="text-primary text-xs"
               >
                 {author}
               </Link>
-              <Button size="sm" variant="ghost" tone="neutral" onClick={() => applyAuthor('')}>
-                Clear
-              </Button>
-            </Inline>
+              <Button size="sm" variant="ghost"  onClick={() => applyAuthor('')} label="Clear" />
+            </Stack>
           )}
           {items.data && (
-            <span className="text-foreground-subtle text-sm ml-auto">page {page + 1}</span>
+            <span className="text-secondary text-sm ml-auto">page {page + 1}</span>
           )}
-        </Inline>
+        </Stack>
 
         {redrive.error && (
-          <Alert variant="danger" title="Redrive failed" description={redrive.error.message} />
+          <Banner status="error" title="Redrive failed" description={redrive.error.message} />
         )}
         {remove.error && (
-          <Alert variant="danger" title="Delete failed" description={remove.error.message} />
+          <Banner status="error" title="Delete failed" description={remove.error.message} />
         )}
 
         {items.isLoading && <Skeleton className="h-48 w-full" />}
 
         {items.isError && (
-          <Alert variant="danger" title="Failed to load items" description={items.error?.message ?? ''} />
+          <Banner status="error" title="Failed to load items" description={items.error?.message ?? ''} />
         )}
 
         {items.isSuccess && items.data.items.length === 0 && (
@@ -176,17 +164,16 @@ export default function CatalogItemsPage() {
         )}
 
         {items.isSuccess && items.data.items.length > 0 && (
-          <TableContainer>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Object</TableHead>
-                  <TableHead>Author</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead align="right">Attempts</TableHead>
-                  <TableHead>Last error</TableHead>
-                  <TableHead>Updated</TableHead>
-                  <TableHead align="right">Actions</TableHead>
+                  <TableHeaderCell>Object</TableHeaderCell>
+                  <TableHeaderCell>Author</TableHeaderCell>
+                  <TableHeaderCell>State</TableHeaderCell>
+                  <TableHeaderCell className="text-right" >Attempts</TableHeaderCell>
+                  <TableHeaderCell>Last error</TableHeaderCell>
+                  <TableHeaderCell>Updated</TableHeaderCell>
+                  <TableHeaderCell className="text-right" >Actions</TableHeaderCell>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -204,17 +191,16 @@ export default function CatalogItemsPage() {
                 ))}
               </TableBody>
             </Table>
-          </TableContainer>
         )}
 
         {items.data && items.data.total > PAGE_SIZE && (
-          <Inline justify="end">
+          <Stack align="center" gap={4} direction="horizontal" justify="end">
             <Pagination
               page={page + 1}
-              pageCount={Math.max(1, Math.ceil(items.data.total / PAGE_SIZE))}
-              onPageChange={(p) => setPage(p - 1)}
+              totalPages={Math.max(1, Math.ceil(items.data.total / PAGE_SIZE))}
+              onChange={(p) => setPage(p - 1)}
             />
-          </Inline>
+          </Stack>
         )}
       </Stack>
 
@@ -239,7 +225,7 @@ export default function CatalogItemsPage() {
           })
         }}
       />
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -266,7 +252,7 @@ function ItemRow({
       <TableCell>
         <Link
           to={`/ns/${encodeURIComponent(ns)}/catalog/items/${item.id}`}
-          className="text-foreground font-medium"
+          className="text-primary font-medium"
         >
           {item.object_id}
         </Link>
@@ -276,42 +262,35 @@ function ItemRow({
           <Button
             size="sm"
             variant="ghost"
-            tone="neutral"
-            onClick={() => onFilterAuthor(item.author_subject_id!)}
-          >
-            {item.author_subject_id}
-          </Button>
+            
+            onClick={() => onFilterAuthor(item.author_subject_id!)} label={item.author_subject_id} />
         ) : (
-          <span className="text-foreground-subtle text-xs">—</span>
+          <span className="text-secondary text-xs">—</span>
         )}
       </TableCell>
       <TableCell>
-        <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'}>{item.state}</Badge>
+        <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'} label={item.state} />
       </TableCell>
-      <TableCell align="right" className="tabular-nums">
+      <TableCell  className="text-right tabular-nums">
         {item.attempt_count}
       </TableCell>
-      <TableCell className="text-foreground-subtle text-xs">
+      <TableCell className="text-secondary text-xs">
         {item.last_error ? (
           <span title={item.last_error}>{truncate(item.last_error, 60)}</span>
         ) : (
           '—'
         )}
       </TableCell>
-      <TableCell className="text-foreground-subtle text-sm">
+      <TableCell className="text-secondary text-sm">
         {new Date(item.updated_at).toLocaleString()}
       </TableCell>
-      <TableCell align="right">
-        <Inline justify="end">
+      <TableCell className="text-right" >
+        <Stack align="center" gap={4} direction="horizontal" justify="end">
           {canRedrive && (
-            <Button size="sm" variant="ghost" onClick={onRedrive} disabled={redriving}>
-              {redriving ? 'Redriving…' : 'Redrive'}
-            </Button>
+            <Button size="sm" variant="ghost" onClick={onRedrive} isDisabled={redriving} label={redriving ? 'Redriving…' : 'Redrive'} />
           )}
-          <Button size="sm" variant="ghost" tone="danger" onClick={onDelete} disabled={deleting}>
-            {deleting ? 'Deleting…' : 'Delete'}
-          </Button>
-        </Inline>
+          <Button size="sm" variant="ghost"  onClick={onDelete} isDisabled={deleting} label={deleting ? 'Deleting…' : 'Delete'} />
+        </Stack>
       </TableCell>
     </TableRow>
   )

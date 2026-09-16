@@ -1,26 +1,23 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import {
-  Dialog,
-  DialogContent,
-  Input,
-  Stack,
-} from '@jarviisha/davinci-react-ui'
+import { CommandPalette as AstryxCommandPalette, Stack, Text } from '@astryxdesign/core'
+import type { SearchableItem, SearchSource } from '@astryxdesign/core'
 import { useRecentNamespaces } from '@/services/recentNamespaces'
 
-type Command = {
-  /** Stable key used for React + selection memory. */
-  id: string
-  /** First line — the user-visible label. */
-  title: string
+/**
+ * A palette entry. `label` is what the operator reads and types against;
+ * everything else rides in auxiliaryData so Astryx's search can stay on the
+ * label + keywords it already understands.
+ */
+type Command = SearchableItem<{
   /** Second line — destination path or extra context. */
   subtitle?: string
-  /** Hidden search terms in addition to title. */
+  /** Hidden search terms in addition to the label. */
   keywords?: string
-  /** Group label that this command sits under. */
+  /** Group this command belongs to, shown alongside the subtitle. */
   group: string
   run: () => void
-}
+}>
 
 type Props = {
   open: boolean
@@ -33,35 +30,15 @@ type Props = {
  * deep-link jumps like `#123` to a batch run or `subject:user-42` to the
  * inspector) so keyboard-driven operators don't need the sidebar.
  *
- * The palette renders only while `open` is true so each opening starts with
- * a fresh query + selection — no useEffect-driven reset needed.
+ * Filtering, keyboard navigation and the empty state come from Astryx; this
+ * file only builds the command list and runs the picked entry. Deep links are
+ * why the search source is hand-written rather than `createStaticSource`:
+ * `#42` has to synthesise an entry from the query itself, not match one.
  */
 export default function CommandPalette({ open, onOpenChange }: Props) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange} size="md">
-      {open && <Palette onClose={() => onOpenChange(false)} />}
-    </Dialog>
-  )
-}
-
-function Palette({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate()
   const location = useLocation()
   const recents = useRecentNamespaces()
-  // Colocate query + selected in one state so editing the query also resets
-  // the highlighted row in the same update — avoids the React 19
-  // set-state-in-effect rule that a separate sync effect would trip.
-  const [{ query, selected }, setState] = useState<{ query: string; selected: number }>({
-    query: '',
-    selected: 0,
-  })
-  const setQuery = (q: string) => setState({ query: q, selected: 0 })
-  const setSelected = (next: number | ((cur: number) => number)) =>
-    setState((s) => ({
-      ...s,
-      selected: typeof next === 'function' ? next(s.selected) : next,
-    }))
-  const listRef = useRef<HTMLDivElement | null>(null)
 
   // Derive the current namespace from the URL so the palette can include
   // contextual subpages without an extra hook.
@@ -70,166 +47,101 @@ function Palette({ onClose }: { onClose: () => void }) {
     return m ? decodeURIComponent(m[1]) : null
   }, [location.pathname])
 
+  const onClose = () => onOpenChange(false)
+
   const commands = useMemo(
     () => buildCommands({ navigate, onClose, currentNs, recents }),
-    [navigate, onClose, currentNs, recents],
+    // onClose is recreated every render; onOpenChange is the stable input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [navigate, onOpenChange, currentNs, recents],
   )
 
-  // Deep-link parsers — typing `#42` jumps to batch-runs/42, `user-42` jumps
-  // to the subject inspector when a namespace is active. Synthetic entries
-  // appear at the head of the filtered list so Enter does the right thing.
-  const deepLinks = useMemo<Command[]>(() => {
-    const q = query.trim()
-    if (q === '') return []
-    const out: Command[] = []
-    const runId = q.match(/^#?(\d+)$/)
-    if (runId) {
-      const id = runId[1]
-      out.push({
-        id: `deeplink-run-${id}`,
-        title: `Open batch run #${id}`,
+  const searchSource = useMemo<SearchSource<Command>>(
+    () => ({
+      bootstrap: () => commands,
+      search: (query) => {
+        const q = query.trim()
+        const matches = commands.filter((c) => {
+          const aux = c.auxiliaryData!
+          const haystack =
+            `${c.label} ${aux.subtitle ?? ''} ${aux.keywords ?? ''} ${aux.group}`.toLowerCase()
+          return haystack.includes(q.toLowerCase())
+        })
+        return [...deepLinks(q, currentNs, navigate, onClose), ...matches]
+      },
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [commands, currentNs, navigate, onOpenChange],
+  )
+
+  return (
+    <AstryxCommandPalette<Command>
+      isOpen={open}
+      onOpenChange={onOpenChange}
+      searchSource={searchSource}
+      onValueChange={(id) => {
+        const hit = commands.find((c) => c.id === id)
+        if (hit) hit.auxiliaryData!.run()
+      }}
+      emptySearchText="No matches."
+      renderItem={(item) => (
+        <Stack gap={0.5}>
+          <Text weight="medium">{item.label}</Text>
+          <Text type="supporting" size="xsm">
+            {[item.auxiliaryData?.group, item.auxiliaryData?.subtitle]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </Stack>
+      )}
+    />
+  )
+}
+
+/**
+ * Deep-link parsers — typing `#42` jumps to batch-runs/42, `user-42` jumps to
+ * the subject inspector when a namespace is active. These are synthesised per
+ * query and lead the result list so Enter does the right thing.
+ */
+function deepLinks(
+  query: string,
+  currentNs: string | null,
+  navigate: (to: string) => void,
+  onClose: () => void,
+): Command[] {
+  if (query === '') return []
+  const out: Command[] = []
+  const runId = query.match(/^#?(\d+)$/)
+  if (runId) {
+    const id = runId[1]
+    out.push({
+      id: `deeplink-run-${id}`,
+      label: `Open batch run #${id}`,
+      auxiliaryData: {
         subtitle: `/batch-runs/${id}`,
         group: 'Jump to',
         run: () => {
           navigate(`/batch-runs/${id}`)
           onClose()
         },
-      })
-    }
-    if (currentNs && q.length >= 2 && !runId) {
-      out.push({
-        id: `deeplink-subject-${q}`,
-        title: `Open subject "${q}"`,
-        subtitle: `/ns/${currentNs}/subjects/${q}`,
+      },
+    })
+  }
+  if (currentNs && query.length >= 2 && !runId) {
+    out.push({
+      id: `deeplink-subject-${query}`,
+      label: `Open subject "${query}"`,
+      auxiliaryData: {
+        subtitle: `/ns/${currentNs}/subjects/${query}`,
         group: 'Jump to',
         run: () => {
-          navigate(`/ns/${encodeURIComponent(currentNs)}/subjects/${encodeURIComponent(q)}`)
+          navigate(`/ns/${encodeURIComponent(currentNs)}/subjects/${encodeURIComponent(query)}`)
           onClose()
         },
-      })
-    }
-    return out
-  }, [query, currentNs, navigate, onClose])
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const all = [...deepLinks, ...commands]
-    if (q === '') return all
-    return all.filter((c) => {
-      const haystack = `${c.title} ${c.subtitle ?? ''} ${c.keywords ?? ''} ${c.group}`.toLowerCase()
-      return haystack.includes(q)
+      },
     })
-  }, [commands, deepLinks, query])
-
-  // Clamp the selected index against the current filtered length so a
-  // shrinking list (user typed more chars) never points past the end. Derived
-  // in render instead of synced via an effect to satisfy React 19's
-  // set-state-in-effect rule.
-  const selectedClamped = filtered.length === 0 ? 0 : Math.min(selected, filtered.length - 1)
-
-  // Keep the highlighted row in view when the user arrows down the list.
-  useEffect(() => {
-    const el = listRef.current?.querySelector<HTMLElement>(
-      `[data-cmd-index="${selectedClamped}"]`,
-    )
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [selectedClamped])
-
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      setSelected(
-        filtered.length === 0 ? 0 : Math.min(selectedClamped + 1, filtered.length - 1),
-      )
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      setSelected(Math.max(selectedClamped - 1, 0))
-    } else if (e.key === 'Enter') {
-      e.preventDefault()
-      const cmd = filtered[selectedClamped]
-      if (cmd) cmd.run()
-    }
   }
-
-  // Group commands by their `group` field, preserving the order they appear
-  // in the filtered list so deep-link suggestions stay at the top.
-  const grouped = useMemo(() => {
-    const seen: string[] = []
-    const byGroup = new Map<string, Command[]>()
-    for (const c of filtered) {
-      if (!byGroup.has(c.group)) {
-        byGroup.set(c.group, [])
-        seen.push(c.group)
-      }
-      byGroup.get(c.group)!.push(c)
-    }
-    return seen.map((g) => ({ group: g, items: byGroup.get(g)! }))
-  }, [filtered])
-
-  return (
-    <DialogContent>
-      <Stack onKeyDown={onKeyDown}>
-        <Input
-          autoFocus
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Jump to… (try a page, namespace, or #run-id)"
-          aria-label="Command palette search"
-        />
-        <div
-          ref={listRef}
-          className="max-h-96 overflow-y-auto"
-          role="listbox"
-          aria-label="Commands"
-        >
-          {filtered.length === 0 ? (
-            <p className="text-foreground-subtle text-sm px-2 py-4 text-center">
-              No matches.
-            </p>
-          ) : (
-            <Stack>
-              {grouped.map(({ group, items }) => (
-                <Stack key={group}>
-                  <span className="text-foreground-subtle text-xs uppercase tracking-wide px-2">
-                    {group}
-                  </span>
-                  {items.map((cmd) => {
-                    const absoluteIndex = filtered.indexOf(cmd)
-                    const isSelected = absoluteIndex === selectedClamped
-                    return (
-                      <button
-                        key={cmd.id}
-                        type="button"
-                        role="option"
-                        aria-selected={isSelected}
-                        data-cmd-index={absoluteIndex}
-                        onClick={() => cmd.run()}
-                        onMouseEnter={() => setSelected(absoluteIndex)}
-                        className={[
-                          'text-left rounded px-2 py-2 transition-colors',
-                          'focus:outline-none',
-                          isSelected ? 'bg-surface-sunken' : 'hover:bg-surface-sunken',
-                        ].join(' ')}
-                      >
-                        <span className="text-foreground text-sm font-medium block">
-                          {cmd.title}
-                        </span>
-                        {cmd.subtitle && (
-                          <span className="text-foreground-subtle text-xs block">
-                            {cmd.subtitle}
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </Stack>
-              ))}
-            </Stack>
-          )}
-        </div>
-      </Stack>
-    </DialogContent>
-  )
+  return out
 }
 
 function buildCommands({
@@ -247,32 +159,40 @@ function buildCommands({
     navigate(path)
     onClose()
   }
+  const cmd = (
+    id: string,
+    label: string,
+    group: string,
+    subtitle: string,
+    run: () => void,
+    keywords?: string,
+  ): Command => ({ id, label, auxiliaryData: { group, subtitle, run, keywords } })
 
   const commands: Command[] = []
 
   // Global nav. Stable order — the operator's muscle memory should hold
   // regardless of which page they're on.
   commands.push(
-    { id: 'fleet', title: 'Fleet', subtitle: '/', group: 'Global', run: go('/'), keywords: 'overview home' },
-    { id: 'namespaces', title: 'Namespaces', subtitle: '/namespaces', group: 'Global', run: go('/namespaces') },
-    { id: 'namespaces-new', title: 'New namespace', subtitle: '/namespaces', group: 'Global', run: go('/namespaces?new=1'), keywords: 'create' },
-    { id: 'batch-runs', title: 'Batch runs', subtitle: '/batch-runs', group: 'Global', run: go('/batch-runs') },
-    { id: 'health', title: 'Health', subtitle: '/health', group: 'Global', run: go('/health') },
-    { id: 'demo-data', title: 'Demo data', subtitle: '/demo-data', group: 'Global', run: go('/demo-data'), keywords: 'seed sample bundled' },
-    { id: 'danger-zone', title: 'Danger zone', subtitle: '/danger-zone', group: 'Global', run: go('/danger-zone'), keywords: 'reset wipe' },
+    cmd('fleet', 'Fleet', 'Global', '/', go('/'), 'overview home'),
+    cmd('namespaces', 'Namespaces', 'Global', '/namespaces', go('/namespaces')),
+    cmd('namespaces-new', 'New namespace', 'Global', '/namespaces', go('/namespaces?new=1'), 'create'),
+    cmd('batch-runs', 'Batch runs', 'Global', '/batch-runs', go('/batch-runs')),
+    cmd('health', 'Health', 'Global', '/health', go('/health')),
+    cmd('demo-data', 'Demo data', 'Global', '/demo-data', go('/demo-data'), 'seed sample bundled'),
+    cmd('danger-zone', 'Danger zone', 'Global', '/danger-zone', go('/danger-zone'), 'reset wipe'),
   )
 
   // Namespace-scoped commands appear only when a namespace is active.
   if (currentNs) {
     const ns = encodeURIComponent(currentNs)
     commands.push(
-      { id: `ns-overview`, title: 'Overview', subtitle: `/ns/${currentNs}`, group: 'Namespace', run: go(`/ns/${ns}`) },
-      { id: `ns-batch-runs`, title: 'Batch runs', subtitle: `/ns/${currentNs}/batch-runs`, group: 'Namespace', run: go(`/ns/${ns}/batch-runs`) },
-      { id: `ns-catalog`, title: 'Catalog', subtitle: `/ns/${currentNs}/catalog`, group: 'Namespace', run: go(`/ns/${ns}/catalog`) },
-      { id: `ns-catalog-items`, title: 'Catalog items', subtitle: `/ns/${currentNs}/catalog/items`, group: 'Namespace', run: go(`/ns/${ns}/catalog/items`) },
-      { id: `ns-subjects`, title: 'Subjects', subtitle: `/ns/${currentNs}/subjects`, group: 'Namespace', run: go(`/ns/${ns}/subjects`), keywords: 'inspector recommend' },
-      { id: `ns-events`, title: 'Events', subtitle: `/ns/${currentNs}/events`, group: 'Namespace', run: go(`/ns/${ns}/events`), keywords: 'tail ingest' },
-      { id: `ns-trending`, title: 'Trending', subtitle: `/ns/${currentNs}/trending`, group: 'Namespace', run: go(`/ns/${ns}/trending`) },
+      cmd('ns-overview', 'Overview', 'Namespace', `/ns/${currentNs}`, go(`/ns/${ns}`)),
+      cmd('ns-batch-runs', 'Batch runs', 'Namespace', `/ns/${currentNs}/batch-runs`, go(`/ns/${ns}/batch-runs`)),
+      cmd('ns-catalog', 'Catalog', 'Namespace', `/ns/${currentNs}/catalog`, go(`/ns/${ns}/catalog`)),
+      cmd('ns-catalog-items', 'Catalog items', 'Namespace', `/ns/${currentNs}/catalog/items`, go(`/ns/${ns}/catalog/items`)),
+      cmd('ns-subjects', 'Subjects', 'Namespace', `/ns/${currentNs}/subjects`, go(`/ns/${ns}/subjects`), 'inspector recommend'),
+      cmd('ns-events', 'Events', 'Namespace', `/ns/${currentNs}/events`, go(`/ns/${ns}/events`), 'tail ingest'),
+      cmd('ns-trending', 'Trending', 'Namespace', `/ns/${currentNs}/trending`, go(`/ns/${ns}/trending`)),
     )
   }
 
@@ -280,13 +200,15 @@ function buildCommands({
   // sibling without leaving the keyboard.
   for (const ns of recents) {
     if (ns === currentNs) continue
-    commands.push({
-      id: `recent-${ns}`,
-      title: `$${ns}`,
-      subtitle: `Jump to /ns/${ns}`,
-      group: 'Recent namespaces',
-      run: go(`/ns/${encodeURIComponent(ns)}`),
-    })
+    commands.push(
+      cmd(
+        `recent-${ns}`,
+        `$${ns}`,
+        'Recent namespaces',
+        `Jump to /ns/${ns}`,
+        go(`/ns/${encodeURIComponent(ns)}`),
+      ),
+    )
   }
 
   return commands

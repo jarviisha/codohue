@@ -1,5 +1,6 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { Alert, Button, Container, Skeleton, Stack } from '@jarviisha/davinci-react-ui'
+import { Banner, Button, Skeleton, Stack } from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useSession } from '@/services/auth'
 import { isAuthError } from '@/services/http'
 import type { ReactNode } from 'react'
@@ -32,18 +33,16 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       return <Navigate to={`/login?next=${encodeURIComponent(target)}`} replace />
     }
     return (
-      <Container size="sm" className="py-6 px-6">
-        <Stack>
-          <Alert
-            variant="danger"
+      <PageContainer size="sm">
+        <Stack gap={6}>
+          <Banner
+            status="error"
             title="Could not reach the admin plane"
             description={`${session.error.message}. Your session is still valid — this is a connectivity or server error, not a sign-out.`}
           />
-          <Button onClick={() => session.refetch()} disabled={session.isFetching}>
-            {session.isFetching ? 'Retrying…' : 'Retry'}
-          </Button>
+          <Button onClick={() => session.refetch()} isDisabled={session.isFetching} label={session.isFetching ? 'Retrying…' : 'Retry'} />
         </Stack>
-      </Container>
+      </PageContainer>
     )
   }
   return <>{children}</>

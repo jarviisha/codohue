@@ -1,4 +1,4 @@
-import { Alert, FormField, Select } from '@jarviisha/davinci-react-ui'
+import { Banner, Selector } from '@astryxdesign/core'
 import type { CatalogStrategyDescriptor } from '@/services/catalog'
 
 /**
@@ -37,8 +37,8 @@ export default function CatalogStrategyFields({
 }) {
   if (error) {
     return (
-      <Alert
-        variant="danger"
+      <Banner
+        status="error"
         title="Could not load embed strategies"
         description={`${error}. Catalog mode needs a strategy, so pick another dense source or retry.`}
       />
@@ -46,8 +46,8 @@ export default function CatalogStrategyFields({
   }
   if (!loading && descriptors.length === 0) {
     return (
-      <Alert
-        variant="warning"
+      <Banner
+        status="warning"
         title="No strategy matches this embedding dim"
         description={`No registered embed strategy produces ${embeddingDim}-dimensional vectors. Change the embedding dim to match a registered strategy, or choose another dense source.`}
       />
@@ -63,43 +63,32 @@ export default function CatalogStrategyFields({
 
   return (
     <>
-      <FormField
+      <Selector
         label="Catalog strategy"
-        required
-        helpText="Which embed strategy turns ingested content into vectors. Only strategies matching the embedding dim above are listed."
-      >
-        <Select value={strategyId} onChange={(e) => onStrategyId(e.target.value)} disabled={loading}>
-          <option value="">{loading ? 'loading…' : '— select strategy —'}</option>
-          {ids.map((id) => (
-            <option key={id} value={id}>
-              {id}
-            </option>
-          ))}
-        </Select>
-      </FormField>
+        isRequired
+        description="Which embed strategy turns ingested content into vectors. Only strategies matching the embedding dim above are listed."
+        placeholder={loading ? 'loading…' : '— select strategy —'}
+        value={strategyId}
+        onChange={onStrategyId}
+        isDisabled={loading}
+        isLoading={loading}
+        options={ids}
+      />
 
-      <FormField
+      <Selector
         label="Strategy version"
-        required
-        helpText={
+        isRequired
+        description={
           selected
             ? `dim ${selected.dim}${selected.description ? ` — ${selected.description}` : ''}`
             : 'Pick a strategy first.'
         }
-      >
-        <Select
-          value={strategyVersion}
-          onChange={(e) => onStrategyVersion(e.target.value)}
-          disabled={strategyId === ''}
-        >
-          <option value="">— select version —</option>
-          {versions.map((v) => (
-            <option key={v.version} value={v.version}>
-              {v.version}
-            </option>
-          ))}
-        </Select>
-      </FormField>
+        placeholder="— select version —"
+        value={strategyVersion}
+        onChange={onStrategyVersion}
+        isDisabled={strategyId === ''}
+        options={versions.map((v) => v.version)}
+      />
     </>
   )
 }

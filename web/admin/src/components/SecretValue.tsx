@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Inline } from '@jarviisha/davinci-react-ui'
+import { Button, Stack } from '@astryxdesign/core'
 
 /**
  * SecretValue renders a credential the server hands out exactly once (a
@@ -27,17 +27,21 @@ export default function SecretValue({ value, label }: { value: string; label?: s
   }
 
   return (
-    <Inline align="center" justify="between" className="border-border w-full gap-2 border p-2">
-      <code className="text-foreground font-mono text-sm break-all">{value}</code>
+    <Stack
+      direction="horizontal"
+      gap={2}
+      align="center"
+      justify="between"
+      className="border-border w-full border p-2"
+    >
+      <code className="text-primary font-mono text-sm break-all">{value}</code>
       <Button
         size="sm"
-        variant="outline"
-        tone="neutral"
+        variant="secondary"
         onClick={copy}
-        aria-label={label ? `Copy ${label}` : 'Copy to clipboard'}
-      >
-        {state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
-      </Button>
-    </Inline>
+        label={state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed' : 'Copy'}
+        tooltip={label ? `Copy ${label}` : 'Copy to clipboard'}
+      />
+    </Stack>
   )
 }

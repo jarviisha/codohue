@@ -1,9 +1,9 @@
-import { Badge, Inline, Tooltip } from '@jarviisha/davinci-react-ui'
+import { Badge, Stack, Tooltip } from '@astryxdesign/core'
 import type { PhaseStatus } from '@/services/batchRuns'
 
 const PHASE_NAMES: Array<'sparse' | 'dense' | 'trending'> = ['sparse', 'dense', 'trending']
 
-type PhaseTone = 'success' | 'danger' | 'neutral'
+type PhaseTone = 'success' | 'error' | 'neutral'
 
 type PhaseStripProps = {
   /**
@@ -24,13 +24,13 @@ type PhaseStripProps = {
 
 const TONE_BY_STATUS: Record<Exclude<PhaseStatus, null>, { tone: PhaseTone; label: string }> = {
   ok: { tone: 'success', label: 'ok' },
-  fail: { tone: 'danger', label: 'fail' },
+  fail: { tone: 'error', label: 'fail' },
   skipped: { tone: 'neutral', label: 'skip' },
 }
 
 /**
  * PhaseStrip renders the three cron phases (sparse / dense / trending) as
- * three Davinci Badges side-by-side. Null status (phase did not run, e.g.
+ * three Badges side-by-side. Null status (phase did not run, e.g.
  * cancelled before reaching it) renders as a "—" placeholder so the strip
  * always shows exactly three slots and aligns across rows in a table.
  */
@@ -40,13 +40,13 @@ export default function PhaseStrip({ phaseStatus, skippedReasons }: PhaseStripPr
   const phases: PhaseStatus[] = Array.isArray(phaseStatus) ? phaseStatus : []
 
   return (
-    <Inline align="center">
+    <Stack direction="horizontal" gap={2} align="center">
       {PHASE_NAMES.map((name, idx) => {
         const status = phases[idx] ?? null
         if (status == null) {
           return (
             <Tooltip key={name} content={`${name}: not run`}>
-              <Badge variant="neutral">—</Badge>
+              <Badge variant="neutral" label="—" />
             </Tooltip>
           )
         }
@@ -60,10 +60,10 @@ export default function PhaseStrip({ phaseStatus, skippedReasons }: PhaseStripPr
             : `${name}: ${cfg.label}`
         return (
           <Tooltip key={name} content={tip}>
-            <Badge variant={cfg.tone}>{cfg.label}</Badge>
+            <Badge variant={cfg.tone} label={cfg.label} />
           </Tooltip>
         )
       })}
-    </Inline>
+    </Stack>
   )
 }

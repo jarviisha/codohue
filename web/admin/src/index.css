@@ -1,32 +1,20 @@
 /*
- * Davinci CSS-first wiring. Order matters — see web/admin/DESIGN.md §Token
- * system and USAGE.md §Step 1. Primitive vars first, semantic alias layers
- * (light/dark) second, Tailwind third, Davinci theme preset fourth, Davinci
- * component styles last so the cascade resolves cleanly.
+ * Astryx + Tailwind wiring. Layer order is declared first and every sheet is
+ * assigned a layer deliberately — unlayered styles and later layers both beat
+ * `astryx-base` regardless of specificity, which is the usual way an adoption
+ * breaks silently. See `npx @astryxdesign/cli docs migration` §Cascade Layer
+ * Safety.
+ *
+ * App utility classes stay in `utilities` so they still win over component
+ * styles, and `tailwind-theme.css` rebinds Tailwind's theme variables onto
+ * Astryx tokens so `text-secondary` / `bg-surface` follow the active theme.
  */
-@import "@jarviisha/davinci-tokens/css/variables.css";
-@import "@jarviisha/davinci-tokens/css/light.css";
-@import "@jarviisha/davinci-tokens/css/dark.css";
-@import "tailwindcss";
-@import "@jarviisha/davinci-tailwind-preset/theme.css";
-@import "@jarviisha/davinci-react-ui/styles.css";
+@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
 
-/*
- * Radius override: collapse every component down to the `sm` radius step.
- * Remap the semantic roles (covers button, input, card, dialog, nav, badge)
- * plus the few component tokens that reference primitives directly
- * (toast, scrollbar). Must come after the imports above to win the cascade.
- */
-:root {
-  --davinci-semantic-radius-control: var(--davinci-radius-sm);
-  --davinci-semantic-radius-card: var(--davinci-radius-sm);
-  --davinci-semantic-radius-panel: var(--davinci-radius-sm);
-  --davinci-component-scrollbar-radius: var(--davinci-radius-sm);
-
-  /*
-   * Sans font override: Plus Jakarta Sans (loaded in index.html) replaces the
-   * preset's default Inter. The preset aliases `--font-sans` to this token, so
-   * every `font-sans` utility and the base body font pick it up.
-   */
-  --davinci-font-family-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
-}
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+@import "@astryxdesign/core/tailwind-theme.css";
+@import "tailwindcss/utilities.css" layer(utilities);

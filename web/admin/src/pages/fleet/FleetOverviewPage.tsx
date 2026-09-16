@@ -1,22 +1,19 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Alert,
   Badge,
+  Banner,
   Card,
-  CardContent,
-  Container,
-  Inline,
   Skeleton,
   Stack,
   Table,
   TableBody,
   TableCell,
-  TableContainer,
-  TableHead,
   TableHeader,
+  TableHeaderCell,
   TableRow,
-} from '@jarviisha/davinci-react-ui'
+} from '@astryxdesign/core'
+import PageContainer from '@/components/PageContainer'
 import { useOverview, type NamespaceOverview, type NamespaceStatus } from '@/services/overview'
 import { useBatchRunStats } from '@/services/batchRuns'
 import { useMetricsSummary, sumRates } from '@/services/metrics'
@@ -27,10 +24,10 @@ import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 
-const STATUS_BADGE: Record<NamespaceStatus, { variant: 'success' | 'warning' | 'danger' | 'neutral'; label: string }> = {
+const STATUS_BADGE: Record<NamespaceStatus, { variant: 'success' | 'warning' | 'error' | 'neutral'; label: string }> = {
   active: { variant: 'success', label: 'active' },
   idle: { variant: 'neutral', label: 'idle' },
-  degraded: { variant: 'danger', label: 'degraded' },
+  degraded: { variant: 'error', label: 'degraded' },
   cold: { variant: 'neutral', label: 'cold' },
 }
 
@@ -68,21 +65,21 @@ export default function FleetOverviewPage() {
 
   if (overview.isLoading) {
     return (
-      <Container size="lg" className="py-6">
+      <PageContainer size="lg">
         <Skeleton className="h-48 w-full" />
-      </Container>
+      </PageContainer>
     )
   }
 
   if (overview.isError) {
     return (
-      <Container size="lg" className="py-6">
-        <Alert
-          variant="danger"
+      <PageContainer size="lg">
+        <Banner
+          status="error"
           title="Could not load fleet overview"
           description={overview.error?.message ?? 'unknown error'}
         />
-      </Container>
+      </PageContainer>
     )
   }
 
@@ -95,40 +92,36 @@ export default function FleetOverviewPage() {
   }))
 
   return (
-    <Container size="full" className="py-6 px-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Inline align="center" justify="between" className="w-full">
-          <Stack gap="050">
-            <h1 className="text-foreground text-xl font-semibold">Fleet</h1>
+        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
+          <Stack gap={1}>
+            <h1 className="text-primary text-xl font-semibold">Fleet</h1>
             <MetaLine
               items={[
                 `${data.namespaces.length} namespace${data.namespaces.length === 1 ? '' : 's'}`,
-                <Badge variant={streamConnected ? 'success' : 'neutral'}>
-                  stream {streamConnected ? 'connected' : 'offline'}
-                </Badge>,
+                <Badge variant={streamConnected ? 'success' : 'neutral'} label={`stream ${streamConnected ? 'connected' : 'offline'}`} />,
               ]}
             />
           </Stack>
           {recentRunEvents.length > 0 && (
-            <Inline align="center">
-              <span className="text-foreground-subtle text-xs">recent:</span>
+            <Stack gap={4} direction="horizontal" align="center">
+              <span className="text-secondary text-xs">recent:</span>
               {recentRunEvents.map((e, i) => (
-                <Badge key={`${e}-${i}`} variant="neutral">
-                  {e}
-                </Badge>
+                <Badge key={`${e}-${i}`} variant="neutral" label={e} />
               ))}
-            </Inline>
+            </Stack>
           )}
-        </Inline>
+        </Stack>
       </PageHeader>
 
-      <Stack>
+      <Stack gap={6}>
         {data.alerts.length > 0 && (
-          <Stack>
+          <Stack gap={6}>
             {data.alerts.map((a, i) => (
-              <Alert
+              <Banner
                 key={`${a.kind}-${a.namespace ?? 'global'}-${i}`}
-                variant={a.level === 'error' ? 'danger' : 'warning'}
+                status={a.level === 'error' ? 'error' : 'warning'}
                 title={a.kind.replace(/_/g, ' ')}
                 description={`${a.namespace ? `${a.namespace}: ` : ''}${a.message}`}
               />
@@ -138,24 +131,24 @@ export default function FleetOverviewPage() {
 
         <SummaryRow data={data} />
 
-        <Stack>
-          <Stack>
-            <h2 className="text-foreground text-sm font-semibold">Batch runs (last 24h)</h2>
-            <p className="text-foreground-subtle text-xs">
+        <Stack gap={6}>
+          <Stack gap={6}>
+            <h2 className="text-primary text-sm font-semibold">Batch runs (last 24h)</h2>
+            <p className="text-secondary text-xs">
               OK, failed, and cancelled cron + manual runs aggregated per hour.
             </p>
           </Stack>
           {stats.isLoading ? (
             <Skeleton className="h-48 w-full" />
           ) : seriesData.length === 0 ? (
-            <p className="text-foreground-subtle text-sm">No completed runs in the last 24h.</p>
+            <p className="text-secondary text-sm">No completed runs in the last 24h.</p>
           ) : (
             <TimeSeriesChart
               data={seriesData}
               series={[
-                { key: 'ok', label: 'OK', color: 'var(--davinci-semantic-color-success)' },
-                { key: 'failed', label: 'Failed', color: 'var(--davinci-semantic-color-danger)' },
-                { key: 'cancelled', label: 'Cancelled', color: 'var(--davinci-semantic-color-warning)' },
+                { key: 'ok', label: 'OK', color: 'var(--color-success)' },
+                { key: 'failed', label: 'Failed', color: 'var(--color-error)' },
+                { key: 'cancelled', label: 'Cancelled', color: 'var(--color-warning)' },
               ]}
               stacked
               height={220}
@@ -163,12 +156,12 @@ export default function FleetOverviewPage() {
           )}
         </Stack>
 
-        <Stack>
-          <h2 className="text-foreground text-sm font-semibold">Namespaces</h2>
+        <Stack gap={6}>
+          <h2 className="text-primary text-sm font-semibold">Namespaces</h2>
           <NamespacesTable namespaces={data.namespaces} />
         </Stack>
       </Stack>
-    </Container>
+    </PageContainer>
   )
 }
 
@@ -182,7 +175,7 @@ function SummaryRow({ data }: { data: ReturnType<typeof useOverview>['data'] }) 
     {
       label: 'Health',
       value: data.health.status,
-      tone: data.health.status === 'ok' ? 'success' : 'danger',
+      tone: data.health.status === 'ok' ? 'success' : 'error',
     },
     {
       label: 'Ingest events/s',
@@ -209,39 +202,36 @@ function SummaryRow({ data }: { data: ReturnType<typeof useOverview>['data'] }) 
   ] as const
 
   return (
-    <Inline align="start" wrap>
+    <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
       {tiles.map((t) => (
         <Card key={t.label} className="flex-1 min-w-35">
-          <CardContent>
-            <Stack>
-              <span className="text-foreground-subtle text-xs uppercase tracking-wide">{t.label}</span>
-              <Inline align="center">
-                <span className="text-foreground text-xl font-semibold tabular-nums">{t.value}</span>
-                <Badge variant={t.tone}>{t.tone}</Badge>
-              </Inline>
+            <Stack gap={6}>
+              <span className="text-secondary text-xs uppercase tracking-wide">{t.label}</span>
+              <Stack gap={4} direction="horizontal" align="center">
+                <span className="text-primary text-xl font-semibold tabular-nums">{t.value}</span>
+                <Badge variant={t.tone} label={t.tone} />
+              </Stack>
             </Stack>
-          </CardContent>
         </Card>
       ))}
-    </Inline>
+    </Stack>
   )
 }
 
 function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
   if (namespaces.length === 0) {
-    return <p className="text-foreground-subtle text-sm">No namespaces yet.</p>
+    return <p className="text-secondary text-sm">No namespaces yet.</p>
   }
   return (
-    <TableContainer>
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Namespace</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Last run</TableHead>
-            <TableHead>Phases</TableHead>
-            <TableHead align="right">Events 24h</TableHead>
-            <TableHead align="right">Catalog</TableHead>
+            <TableHeaderCell>Namespace</TableHeaderCell>
+            <TableHeaderCell>Status</TableHeaderCell>
+            <TableHeaderCell>Last run</TableHeaderCell>
+            <TableHeaderCell>Phases</TableHeaderCell>
+            <TableHeaderCell className="text-right" >Events 24h</TableHeaderCell>
+            <TableHeaderCell className="text-right" >Catalog</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -255,42 +245,40 @@ function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={status.variant}>{status.label}</Badge>
+                  <Badge variant={status.variant} label={status.label} />
                 </TableCell>
                 <TableCell>
                   {ns.last_run ? (
                     <Link
                       to={`/batch-runs/${ns.last_run.id}`}
-                      className="text-foreground-subtle text-sm"
+                      className="text-secondary text-sm"
                     >
                       {new Date(ns.last_run.started_at).toLocaleString()}
                     </Link>
                   ) : (
-                    <span className="text-foreground-subtle text-sm">—</span>
+                    <span className="text-secondary text-sm">—</span>
                   )}
                 </TableCell>
                 <TableCell>
                   {ns.last_run ? (
                     <PhaseStrip phaseStatus={ns.last_run.phase_status} />
                   ) : (
-                    <span className="text-foreground-subtle text-sm">—</span>
+                    <span className="text-secondary text-sm">—</span>
                   )}
                 </TableCell>
-                <TableCell align="right" className="tabular-nums">
+                <TableCell  className="text-right tabular-nums">
                   {ns.events_24h.toLocaleString()}
                 </TableCell>
-                <TableCell align="right">
+                <TableCell className="text-right" >
                   {ns.catalog.enabled ? (
-                    <Inline align="center" justify="end">
-                      <Badge variant={ns.catalog.dead_letter > 0 ? 'danger' : 'neutral'}>
-                        {ns.catalog.pending} pending
-                      </Badge>
+                    <Stack gap={4} direction="horizontal" align="center" justify="end">
+                      <Badge variant={ns.catalog.dead_letter > 0 ? 'error' : 'neutral'} label={<>{ns.catalog.pending} pending</>} />
                       {ns.catalog.dead_letter > 0 && (
-                        <Badge variant="danger">{ns.catalog.dead_letter} DL</Badge>
+                        <Badge variant="error" label={<>{ns.catalog.dead_letter} DL</>} />
                       )}
-                    </Inline>
+                    </Stack>
                   ) : (
-                    <span className="text-foreground-subtle text-sm">off</span>
+                    <span className="text-secondary text-sm">off</span>
                   )}
                 </TableCell>
               </TableRow>
@@ -298,6 +286,5 @@ function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
           })}
         </TableBody>
       </Table>
-    </TableContainer>
   )
 }
