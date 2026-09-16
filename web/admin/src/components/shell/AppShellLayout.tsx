@@ -18,6 +18,7 @@ import { recordRecentNamespace } from '@/services/recentNamespaces'
 import SidebarNav from '@/components/shell/SidebarNav'
 import NamespaceSwitcher from '@/components/shell/NamespaceSwitcher'
 import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
+import useNamespaceParam from '@/components/shell/useNamespaceParam'
 import ReembedOverlay from '@/components/shell/ReembedOverlay'
 import RouteErrorBoundary from '@/components/shell/ErrorBoundary'
 import NamespaceTag from '@/components/NamespaceTag'
@@ -54,6 +55,7 @@ export default function AppShellLayout() {
   // when the slot mounts (avoids first-paint flash of empty header).
   const [pageHeaderSlot, setPageHeaderSlot] = useState<HTMLDivElement | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const ns = useNamespaceParam()
 
   // Cmd+K (Mac) / Ctrl+K (everywhere else) opens the command palette from any
   // focused element. useHotkeys already skips events originating in inputs,
@@ -75,11 +77,8 @@ export default function AppShellLayout() {
   // dropdown surface frequently-visited namespaces without forcing operators
   // back through the full /namespaces list.
   useEffect(() => {
-    const match = location.pathname.match(/^\/ns\/([^/]+)/)
-    if (match) {
-      recordRecentNamespace(decodeURIComponent(match[1]))
-    }
-  }, [location.pathname])
+    if (ns) recordRecentNamespace(ns)
+  }, [ns])
 
   if (session.isLoading) {
     return <Skeleton height="100vh" />
@@ -184,9 +183,9 @@ function ThemeMenu() {
 
 /**
  * RouteBreadcrumbs derives the breadcrumb trail from the URL — Fleet is the
- * home anchor, then each path segment becomes a crumb. The namespace switcher
- * lives in the sidebar (not the breadcrumb), so the namespace segment renders
- * as a plain link back to the namespace overview.
+ * home anchor, then each path segment becomes a crumb. Switching namespace is
+ * the TopNav's job, so the namespace segment here is just a link back to that
+ * namespace's overview.
  *
  *   - `/ns/{name}` collapses to a single crumb labelled `{name}` linking to
  *     `/ns/{name}` (skips the literal "ns" segment).

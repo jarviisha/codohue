@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Selector } from '@astryxdesign/core'
 import { useNamespaces } from '@/services/namespaces'
 import { useRecentNamespaces } from '@/services/recentNamespaces'
+import useNamespaceParam from '@/components/shell/useNamespaceParam'
 
 /**
  * NamespaceSwitcher is the shell's context switcher: namespace is the tenant
@@ -14,7 +15,7 @@ import { useRecentNamespaces } from '@/services/recentNamespaces'
  * namespace, which meant the only way in was the /namespaces list.
  */
 export default function NamespaceSwitcher() {
-  const { ns: currentNs } = useParams<{ ns?: string }>()
+  const currentNs = useNamespaceParam()
   const location = useLocation()
   const navigate = useNavigate()
   const nsList = useNamespaces()

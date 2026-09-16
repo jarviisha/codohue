@@ -1,5 +1,6 @@
-import { useLocation, useNavigate, useParams } from 'react-router-dom'
-import { SideNav, SideNavItem, SideNavSection } from '@astryxdesign/core'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { SideNav, SideNavItem, SideNavSection, useAppShellMobile } from '@astryxdesign/core'
+import useNamespaceParam from '@/components/shell/useNamespaceParam'
 
 type NavEntry = {
   label: string
@@ -54,17 +55,20 @@ function isActive(pathname: string, entry: NavEntry): boolean {
  * replacing keeps every destination one click away and keeps item positions
  * stable as you drill in.
  *
- * `onNavigate` fires after any entry navigates. AppShell uses it to dismiss
- * the mobile drawer.
+ * On narrow viewports AppShell renders this inside its mobile drawer. AppShell
+ * knows nothing about the router, so it cannot close that drawer when a route
+ * changes — tapping an entry would navigate and leave the drawer covering the
+ * page. Hence the explicit closeMobileNav() after each navigation.
  */
-export default function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
-  const { ns } = useParams<{ ns?: string }>()
+export default function SidebarNav() {
+  const ns = useNamespaceParam()
   const location = useLocation()
   const navigate = useNavigate()
+  const { closeMobileNav } = useAppShellMobile()
 
   const go = (to: string) => {
     navigate(to)
-    onNavigate?.()
+    closeMobileNav()
   }
 
   const renderEntry = (entry: NavEntry) => (

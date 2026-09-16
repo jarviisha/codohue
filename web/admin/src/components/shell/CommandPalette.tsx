@@ -1,8 +1,9 @@
 import { useMemo } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { CommandPalette as AstryxCommandPalette, Stack, Text } from '@astryxdesign/core'
 import type { SearchableItem, SearchSource } from '@astryxdesign/core'
 import { useRecentNamespaces } from '@/services/recentNamespaces'
+import useNamespaceParam from '@/components/shell/useNamespaceParam'
 
 /**
  * A palette entry. `label` is what the operator reads and types against;
@@ -37,15 +38,9 @@ type Props = {
  */
 export default function CommandPalette({ open, onOpenChange }: Props) {
   const navigate = useNavigate()
-  const location = useLocation()
   const recents = useRecentNamespaces()
-
-  // Derive the current namespace from the URL so the palette can include
-  // contextual subpages without an extra hook.
-  const currentNs = useMemo(() => {
-    const m = location.pathname.match(/^\/ns\/([^/]+)/)
-    return m ? decodeURIComponent(m[1]) : null
-  }, [location.pathname])
+  // The current namespace decides which contextual subpages the palette offers.
+  const currentNs = useNamespaceParam()
 
   const onClose = () => onOpenChange(false)
 

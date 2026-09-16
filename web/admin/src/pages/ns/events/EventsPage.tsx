@@ -306,7 +306,7 @@ function TailTable({
             <TableRow
               key={e.id}
               className={
-                flashIds.has(e.id) ? 'bg-background-selected transition-colors' : 'transition-colors'
+                flashIds.has(e.id) ? 'bg-accent-muted transition-colors' : 'transition-colors'
               }
             >
               <TableCell className="text-secondary text-xs tabular-nums">
