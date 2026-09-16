@@ -94,6 +94,27 @@ services:
       api:
         condition: service_healthy
 
+  # Development data source: live Bluesky firehose → codohue:events +
+  # codohue:catalog. Off unless "bskyfeed" is in COMPOSE_PROFILES; see
+  # .env.example. Not part of a release — its image is GHCR-only.
+  bskyfeed:
+    <<: *app
+    image: ghcr.io/jarviisha/codohue/bskyfeed:${IMAGE_TAG:-latest}
+    profiles: ["bskyfeed"]
+    environment:
+      <<: *environment
+      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:?set CODOHUE_ADMIN_API_KEY to the admin API key}"
+      CODOHUE_ADMIN_URL: "http://admin:2002"
+      CODOHUE_BSKY_NAMESPACE: "${CODOHUE_BSKY_NAMESPACE:-bluesky}"
+      CODOHUE_BSKY_SAMPLE_PERCENT: "${CODOHUE_BSKY_SAMPLE_PERCENT:-100}"
+      CODOHUE_BSKY_EMBEDDING_DIM: "${CODOHUE_BSKY_EMBEDDING_DIM:-256}"
+      CODOHUE_BSKY_BOOTSTRAP: "${CODOHUE_BSKY_BOOTSTRAP:-true}"
+      CODOHUE_BSKY_JETSTREAM_URL: "${CODOHUE_BSKY_JETSTREAM_URL:-}"
+    # Bootstrap provisions the namespace through the admin plane.
+    depends_on:
+      admin:
+        condition: service_healthy
+
   migrate:
     image: ghcr.io/jarviisha/codohue/migrate:${IMAGE_TAG:-latest}
     restart: "no"
