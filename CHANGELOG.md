@@ -1,7 +1,9 @@
 # Changelog
 
 Notable changes to the public wire contract (`pkg/codohuetypes`) and the Go SDK
-(`sdk/go`). Both modules are versioned together; tag them at the same version.
+(`sdk/go`, `sdk/go/redistream`). All three modules are versioned together; tag
+them at the same version. A server release that changes no wire type or public
+Go API ships without a new entry here — it reuses the wire version above it.
 
 The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
 
@@ -11,7 +13,7 @@ Nothing yet.
 
 ## v0.6.0 — 2026-08-27
 
-Backend audit remediation. Server tag: `v0.10.0`.
+Backend audit remediation. Server tags: `v0.10.0`, `v0.11.0`.
 
 No wire type or public Go API was removed, renamed, or retyped — every module
 change is additive. The breaking items below are all **server behaviour**: each
