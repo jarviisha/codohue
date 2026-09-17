@@ -23,6 +23,7 @@ import (
 	"github.com/jarviisha/codohue/internal/auth"
 	"github.com/jarviisha/codohue/internal/catalog"
 	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/access"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
@@ -190,12 +191,12 @@ func run() error {
 	r.Handle("/metrics", auth.RequireObservability(cfg.ObservabilityToken)(promhttp.Handler()))
 
 	// All client-facing routes live under /v1/namespaces/{ns}/* and authenticate
-	// via per-namespace bcrypt-hashed keys (with fallback to the global
-	// CODOHUE_ADMIN_API_KEY when no namespace key is provisioned).
+	// via namespace keys or explicitly scoped service tokens. The legacy
+	// global key is populated only during an explicit compatibility period.
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireNamespace(cfg.AdminAPIKey, keyHashFn, func(r *http.Request) string {
 			return chi.URLParam(r, "ns")
-		}))
+		}, access.NewStore(db).ServiceToken))
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
 		r.Post("/v1/namespaces/{ns}/catalog", catalogHandler.Ingest)
 		r.Post("/v1/namespaces/{ns}/catalog/batch", catalogHandler.BatchIngest)

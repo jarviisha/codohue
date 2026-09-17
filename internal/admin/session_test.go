@@ -26,10 +26,8 @@ func TestSessionManager_IssueAndValidate(t *testing.T) {
 	}
 }
 
-func TestSessionManager_RejectsForeignSecret(t *testing.T) {
-	// A token signed under one secret must not validate under another — this
-	// is what makes a leaked token useless as an offline oracle for the API
-	// key: the signing material is independent random bytes.
+func TestSessionManager_IsolatedStores(t *testing.T) {
+	// Independent in-memory adapters do not share opaque tokens.
 	a, _ := NewSessionManager([]byte("secret-a"))
 	b, _ := NewSessionManager([]byte("secret-b"))
 
@@ -38,7 +36,7 @@ func TestSessionManager_RejectsForeignSecret(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 	if b.Validate(token) {
-		t.Fatal("token signed under a different secret must be rejected")
+		t.Fatal("token from an isolated store must be rejected")
 	}
 }
 
@@ -81,13 +79,13 @@ func TestSessionManager_ExpiredTokenRejected(t *testing.T) {
 	}
 }
 
-func TestSessionManager_TamperedClaimsRejected(t *testing.T) {
+func TestSessionManager_TamperedTokenRejected(t *testing.T) {
 	sm, _ := NewSessionManager(nil)
 	token, _, err := sm.Issue()
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	// Flip one byte of the claims segment; the signature must catch it.
+	// Changing any token byte must invalidate its digest.
 	tampered := []byte(token)
 	mid := len(tampered) / 2
 	tampered[mid] ^= 0x01

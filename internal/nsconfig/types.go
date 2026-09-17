@@ -13,11 +13,13 @@ import (
 // one-field edit silently reset every other column to its Go zero value.
 // On create, nil fields fall through to the column defaults in the schema.
 type UpsertRequest struct {
-	ActionWeights map[string]float64 `json:"action_weights,omitempty"`
-	Lambda        *float64           `json:"lambda,omitempty"`
-	Gamma         *float64           `json:"gamma,omitempty"`
-	MaxResults    *int               `json:"max_results,omitempty"`
-	SeenItemsDays *int               `json:"seen_items_days,omitempty"`
+	// ProvisionAPIKey is an immutable, caller-supplied application credential for initial provisioning.
+	ProvisionAPIKey string             `json:"provision_api_key,omitempty"`
+	ActionWeights   map[string]float64 `json:"action_weights,omitempty"`
+	Lambda          *float64           `json:"lambda,omitempty"`
+	Gamma           *float64           `json:"gamma,omitempty"`
+	MaxResults      *int               `json:"max_results,omitempty"`
+	SeenItemsDays   *int               `json:"seen_items_days,omitempty"`
 
 	// ExcludeAuthored drops the subject's own authored objects from their
 	// recommendations. Defaults to false — see migration 020.

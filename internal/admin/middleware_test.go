@@ -67,15 +67,14 @@ func TestRequireSessionOrBearer_FailedAttemptsThrottled(t *testing.T) {
 		t.Fatalf("exhausted budget must 429, got %d", lastCode)
 	}
 
-	// The correct key from the same IP is never throttled — the budget only
-	// meters failures.
+	// A matching candidate cannot bypass the exhausted budget.
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", http.NoBody)
-	req.RemoteAddr = "10.9.9.9:1234"
+	req.RemoteAddr = "10.1.2.3:1234"
 	req.Header.Set("Authorization", "Bearer secret-key")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("correct key must pass, got %d", rec.Code)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("correct key must remain throttled, got %d", rec.Code)
 	}
 }
 

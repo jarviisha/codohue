@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jarviisha/codohue/internal/core/access"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/joho/godotenv"
 	goredis "github.com/redis/go-redis/v9"
@@ -44,7 +45,11 @@ func TestMain(m *testing.M) {
 	// Load .env from project root. The e2e package runs with e2e/ as working dir.
 	_ = godotenv.Load("../.env")
 
-	adminKey = envOrDefault("CODOHUE_ADMIN_API_KEY", "dev-secret-key")
+	var tokenErr error
+	adminKey, tokenErr = access.RandomToken()
+	if tokenErr != nil {
+		fatalf("generate test service token: %v", tokenErr)
+	}
 	dbURL := envOrDefault("DATABASE_URL", "postgres://codohue:secret@localhost:5432/codohue?sslmode=disable")
 	redisURL := envOrDefault("REDIS_URL", "redis://localhost:6379")
 	qdrantHost := envOrDefault("QDRANT_HOST", "localhost")
@@ -56,6 +61,12 @@ func TestMain(m *testing.M) {
 		fatalf("connect postgres: %v\nIs postgres running? Run: make up-infra", err)
 	}
 	defer testDB.Close()
+	if _, err = testDB.Exec(context.Background(), `DELETE FROM admin_service_tokens WHERE name='e2e_harness'`); err != nil {
+		fatalf("clean test token: %v", err)
+	}
+	if err = access.NewStore(testDB).ProvisionToken(context.Background(), "test-harness", "e2e_harness", adminKey, []string{"admin:read", "admin:write", "data:read", "data:write"}, []string{"*"}); err != nil {
+		fatalf("provision test service token: %v", err)
+	}
 
 	redisOpts, err := goredis.ParseURL(redisURL)
 	if err != nil {
@@ -83,7 +94,8 @@ func TestMain(m *testing.M) {
 		"REDIS_URL="+redisURL,
 		"QDRANT_HOST="+qdrantHost,
 		"QDRANT_PORT="+qdrantPort,
-		"CODOHUE_ADMIN_API_KEY="+adminKey,
+		"CODOHUE_ADMIN_API_KEY=",
+		"CODOHUE_LEGACY_ADMIN_AUTH=false",
 		"CODOHUE_API_PORT="+testPort,
 		"CODOHUE_LOG_FORMAT=text",
 		"CODOHUE_BATCH_INTERVAL_MINUTES=60",
@@ -107,6 +119,7 @@ func TestMain(m *testing.M) {
 	}
 
 	code := m.Run()
+	_, _ = testDB.Exec(context.Background(), `DELETE FROM admin_service_tokens WHERE name='e2e_harness'`)
 	stopAdminServer()
 	cleanupNamespaceData(testNS)
 

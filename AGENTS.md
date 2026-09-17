@@ -87,10 +87,10 @@ Use the `Makefile` as the source of truth:
 
 ## API, Data, and Config Notes
 
-- Namespace config is created via `PUT /api/admin/v1/namespaces/{namespace}` using an admin session or `CODOHUE_ADMIN_API_KEY`.
-- All non-admin routes use the namespace key returned once at namespace creation.
+- Namespace config is created via `PUT /api/admin/v1/namespaces/{namespace}` using an operator session or a service token with explicit administrative permissions.
+- Data routes use namespace keys or explicitly scoped data service tokens; see `deploy/operator-auth.md` for provisioning and migration.
 - Recommendation sources include `collaborative_filtering`, `hybrid`, `hybrid_cold`, `fallback_popular`, and `hybrid_rank`.
-- Local development expects `.env` values such as `DATABASE_URL`, `REDIS_URL`, `QDRANT_HOST`, `QDRANT_PORT`, `CODOHUE_ADMIN_API_KEY`, and `CODOHUE_BATCH_INTERVAL_MINUTES`.
+- Local development expects `.env` values such as `DATABASE_URL`, `REDIS_URL`, `QDRANT_HOST`, `QDRANT_PORT`, and `CODOHUE_BATCH_INTERVAL_MINUTES`.
 - Do not commit secrets or plaintext namespace keys.
 - Client-facing JSON types in `pkg/codohuetypes` are the public wire contract. Any deliberate wire change must update its golden snapshots and the REST API table in `ARCHITECTURE.md`.
 

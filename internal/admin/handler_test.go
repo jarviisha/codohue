@@ -1839,9 +1839,8 @@ func TestRotateNamespaceAPIKey_NotFound(t *testing.T) {
 	}
 }
 
-// The rate limit must never throttle a legitimate operator: only failed
-// attempts consume the budget, so any number of correct logins succeed.
-func TestCreateSession_SuccessfulLoginsNotThrottled(t *testing.T) {
+// Every attempt consumes the budget before credential verification.
+func TestCreateSession_AllAttemptsThrottled(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
 	for i := 0; i < loginBurst*3; i++ {
 		rec := httptest.NewRecorder()
@@ -1849,13 +1848,17 @@ func TestCreateSession_SuccessfulLoginsNotThrottled(t *testing.T) {
 			bytes.NewBufferString(`{"api_key":"test-secret"}`))
 		r.RemoteAddr = "192.0.2.9:1234"
 		h.CreateSession(rec, r)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("login %d with the correct key must succeed, got %d", i, rec.Code)
+		want := http.StatusCreated
+		if i >= loginBurst {
+			want = http.StatusTooManyRequests
+		}
+		if rec.Code != want {
+			t.Fatalf("login %d: got %d want %d", i, rec.Code, want)
 		}
 	}
 }
 
-func TestCreateSession_CorrectCredentialBypassesExhaustedSharedIPBucket(t *testing.T) {
+func TestCreateSession_CorrectCredentialCannotBypassExhaustedBudget(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
 	ip := "192.0.2.10"
 	for range loginBurst {
@@ -1868,7 +1871,7 @@ func TestCreateSession_CorrectCredentialBypassesExhaustedSharedIPBucket(t *testi
 	r.RemoteAddr = ip + ":1234"
 	h.CreateSession(rec, r)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("correct credential must bypass failed-attempt bucket, got %d", rec.Code)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("correct credential must remain throttled, got %d", rec.Code)
 	}
 }

@@ -171,10 +171,14 @@ func loadConfig() (config, error) {
 	cfg := config{
 		redisURL:     envOr("REDIS_URL", "redis://localhost:6379"),
 		adminURL:     envOr("CODOHUE_ADMIN_URL", "http://localhost:2002"),
-		adminKey:     envOr("CODOHUE_ADMIN_API_KEY", "dev-secret-key"),
+		adminKey:     envOr("CODOHUE_ADMIN_API_KEY", ""),
 		namespace:    envOr("CODOHUE_BSKY_NAMESPACE", "bluesky"),
 		jetstreamURL: envOr("CODOHUE_BSKY_JETSTREAM_URL", defaultJetstreamURL),
-		bootstrap:    envOr("CODOHUE_BSKY_BOOTSTRAP", "true") != "false",
+		bootstrap:    envOr("CODOHUE_BSKY_BOOTSTRAP", "false") != "false",
+	}
+
+	if cfg.bootstrap && cfg.adminKey == "" {
+		return cfg, fmt.Errorf("bootstrap requires an explicitly issued administrative service token")
 	}
 
 	var err error

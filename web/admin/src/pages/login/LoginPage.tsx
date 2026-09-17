@@ -5,7 +5,8 @@ import PageContainer from '@/components/PageContainer'
 import { useLogin, useSession } from '@/services/auth'
 
 export default function LoginPage() {
-  const [apiKey, setApiKey] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [searchParams] = useSearchParams()
   const next = searchParams.get('next') ?? '/'
   const navigate = useNavigate()
@@ -20,7 +21,7 @@ export default function LoginPage() {
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
-    login.mutate(apiKey, {
+    login.mutate({ username, password }, {
       onSuccess: () => navigate(next, { replace: true }),
     })
   }
@@ -30,7 +31,7 @@ export default function LoginPage() {
       <Card>
         <Stack gap={1}>
           <Text weight="semibold">codohue admin</Text>
-          <Text type="supporting">Sign in with the global admin API key.</Text>
+          <Text type="supporting">Sign in with your operator account.</Text>
         </Stack>
           <form onSubmit={onSubmit}>
             <Stack gap={6}>
@@ -42,12 +43,17 @@ export default function LoginPage() {
                 />
               )}
               <TextInput
-                label="API key"
-                value={apiKey}
-                onChange={setApiKey}
+                label="Username"
+                value={username}
+                onChange={setUsername}
+              />
+              <TextInput
+                label="Password"
+                value={password}
+                onChange={setPassword}
                 type="password"
               />
-              <Button type="submit" isDisabled={login.isPending || apiKey.length === 0} label={login.isPending ? 'Signing in…' : 'Sign in'} />
+              <Button type="submit" isDisabled={login.isPending || !username || !password} label={login.isPending ? 'Signing in…' : 'Sign in'} />
             </Stack>
           </form>
       </Card>

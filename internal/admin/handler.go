@@ -11,8 +11,12 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
+	"github.com/jarviisha/codohue/internal/core/access"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
+
+// ErrProvisionConflict indicates an immutable namespace provisioning mismatch.
+var ErrProvisionConflict = errors.New("namespace provisioning conflict")
 
 // logHandlerError records the cause behind a failed request. Client-facing
 // bodies stay deliberately generic, so without this the error never leaves the
@@ -74,11 +78,14 @@ type adminSvc interface {
 
 // Handler handles HTTP requests for the admin API.
 type Handler struct {
-	svc          adminSvc
-	apiKey       string
-	sessions     *SessionManager
-	loginLimiter *loginRateLimiter
-	bus          *eventbus.Bus // optional; SSE handlers return 503 when nil
+	identity             IdentityStore
+	identityOptions      IdentityOptions
+	sessionCheckInterval time.Duration
+	svc                  adminSvc
+	apiKey               string
+	sessions             *SessionManager
+	loginLimiter         *loginRateLimiter
+	bus                  *eventbus.Bus // optional; SSE handlers return 503 when nil
 }
 
 // NewHandler creates a new Handler. sessions may be nil in tests that never
@@ -92,31 +99,29 @@ func NewHandler(svc adminSvc, apiKey string, sessions *SessionManager) *Handler 
 // this once at startup. When unset, SSE endpoints return 503.
 func (h *Handler) SetEventBus(b *eventbus.Bus) { h.bus = b }
 
-// CreateSession handles POST /api/v1/auth/sessions — validates the admin API
-// key and issues a session cookie. Returns 201 Created with body
-// CreateSessionResponse on success, 401 on bad credentials, 429 when the
-// caller's IP has burned through its login budget.
+// CreateSession starts an account-bound production session through IdentityStore.
+// Isolated handlers without an identity store retain the legacy test adapter.
 func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
+	if h.identity != nil {
+		h.createOperatorSession(w, r)
+		return
+	}
 	if h.sessions == nil {
 		httpapi.WriteError(w, http.StatusServiceUnavailable, "sessions_unavailable", "session manager is not wired")
 		return
 	}
-	// Correct credentials bypass the failed-attempt bucket. This matters when
-	// several operators share a reverse-proxy IP: guesses from one client must
-	// not lock a legitimate operator out of the admin plane.
 	ip := clientIP(r)
+	if !h.loginLimiter.Allow(ip) {
+		httpapi.WriteError(w, 429, "rate_limited", "too many login attempts")
+		return
+	}
 
 	var req CreateSessionRequest
 	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
-	if !constantTimeEqual(req.APIKey, h.apiKey) {
-		if h.loginLimiter.Blocked(ip) {
-			httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many login attempts, retry later")
-			return
-		}
-		h.loginLimiter.RecordFailure(ip)
+	if h.apiKey == "" || !constantTimeEqual(req.APIKey, h.apiKey) {
 		httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid api key")
 		return
 	}
@@ -146,6 +151,18 @@ func (h *Handler) CreateSession(w http.ResponseWriter, r *http.Request) {
 // Revocation matters: without it a captured cookie kept working for the full
 // TTL after "logout".
 func (h *Handler) DeleteCurrentSession(w http.ResponseWriter, r *http.Request) {
+	if h.identity != nil {
+		if cookie, err := r.Cookie(sessionCookieName); err == nil {
+			if err = h.identity.RevokeSession(r.Context(), cookie.Value); err != nil {
+				identityError(w, err)
+				return
+			}
+		}
+		http.SetCookie(w, &http.Cookie{Name: sessionCookieName, Path: "/api", HttpOnly: true, Secure: h.secureCookie(r), SameSite: http.SameSiteStrictMode, MaxAge: -1})
+		w.WriteHeader(204)
+		return
+	}
+
 	if cookie, err := r.Cookie(sessionCookieName); err == nil && h.sessions != nil {
 		h.sessions.Revoke(cookie.Value)
 	}
@@ -220,9 +237,16 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := access.CurrentActor(r.Context())
+	if actor.Role == "service" && !actor.Allows("admin:write", ns) && req.ProvisionAPIKey == "" {
+		httpapi.WriteError(w, 403, "forbidden", "provisioning requires provision_api_key")
+		return
+	}
 	result, statusCode, err := h.svc.UpsertNamespace(r.Context(), ns, &req)
 	if err != nil {
 		switch {
+		case errors.Is(err, ErrProvisionConflict):
+			httpapi.WriteError(w, 409, "provision_conflict", err.Error())
 		case errors.Is(err, ErrNamespaceConfigInvalid):
 			httpapi.WriteError(w, statusCode, "invalid_config", err.Error())
 		case errors.Is(err, ErrCatalogSourceViaUpsert):

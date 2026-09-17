@@ -39,16 +39,17 @@ It ingests events and raw catalog content over HTTP and durable Redis Streams, p
 
 ```bash
 cp .env.example .env
+# Generate and protect the three secret files first; see deploy/operator-auth.md.
 make up-d
 ```
 
-This starts postgres + redis + qdrant + migrations + the four app containers. Defaults in `.env.example` match what `compose.yaml` injects, so no edits are needed for a first run.
+This starts PostgreSQL, Redis, Qdrant, migrations, a trusted provisioning init service and the four app containers. Follow [operator setup](deploy/operator-auth.md#fresh-compose-installation) to generate the owner, proxy and application secret files once before starting.
 
 Verify:
 
 ```bash
 curl http://localhost:2001/healthz
-open  http://localhost:2002       # admin SPA login (uses CODOHUE_ADMIN_API_KEY)
+open  http://localhost:2002       # admin SPA login (individual owner account)
 ```
 
 Other compose layouts:
@@ -78,7 +79,7 @@ make dev-all         # api (air) + admin + web/admin Vite together
 
 ## Configuration
 
-Codohue loads `.env` automatically when present. Required: `DATABASE_URL`, `CODOHUE_ADMIN_API_KEY`.
+Codohue loads `.env` automatically when present. Required: `DATABASE_URL` (or `DATABASE_URL_FILE`). Human accounts and scoped service tokens replace the shared admin key; see [setup, secret files and migration](deploy/operator-auth.md).
 
 | Variable                            | Default                  | Used by |
 | ----------------------------------- | ------------------------ | ------- |
@@ -148,10 +149,12 @@ The admin plane is the only place namespaces are configured. Login via the SPA, 
 # 1. Create session cookie
 curl -c cookies.txt -X POST http://localhost:2002/api/v1/auth/sessions \
   -H "Content-Type: application/json" \
-  -d '{"api_key":"dev-secret-key"}'
+  -H "X-Codohue-CSRF: 1" \
+  -d '{"username":"owner","password":"<your-owner-password>"}'
 
 # 2. Upsert namespace
 curl -b cookies.txt -X PUT http://localhost:2002/api/admin/v1/namespaces/demo \
+  -H "X-Codohue-CSRF: 1" \
   -H "Content-Type: application/json" \
   -d '{
     "action_weights": {"VIEW": 1, "LIKE": 5, "SHARE": 10},
@@ -163,7 +166,7 @@ curl -b cookies.txt -X PUT http://localhost:2002/api/admin/v1/namespaces/demo \
   }'
 ```
 
-The response returns a **plaintext namespace API key once** — only the bcrypt hash is stored. Data-plane calls send it as `Authorization: Bearer <key>`. The global admin key is accepted as fallback only when a namespace has no provisioned key.
+The response returns a **plaintext namespace API key once** — only the bcrypt hash is stored. Data-plane calls send it as `Authorization: Bearer <key>`. The shared global key has no default data-plane bypass. For repeatable Compose setup, supply a pre-generated `provision_api_key` or use `admin access provision`; matching retries preserve credentials/configuration and conflicts return 409.
 
 ## Sending events
 

@@ -17,6 +17,25 @@ x-app: &app
       condition: service_healthy
 
 services:
+  provision:
+    build:
+      context: .
+      target: admin
+    restart: "no"
+    entrypoint: ["/bin/sh", "/provision/provision.sh"]
+    environment:
+      <<: *environment
+      CODOHUE_BOOTSTRAP_USERNAME: "${CODOHUE_BOOTSTRAP_USERNAME:-owner}"
+      CODOHUE_APPLICATION_NAMESPACE: "${CODOHUE_APPLICATION_NAMESPACE:-app}"
+      CODOHUE_PROVISION_APPLICATION: "${CODOHUE_PROVISION_APPLICATION:-true}"
+    secrets: [owner_password, admin_proxy_token, application_token]
+    volumes:
+      - ./deploy/provision.sh:/provision/provision.sh:ro
+      - ${CODOHUE_NAMESPACE_CONFIG_PATH:-./deploy/examples/namespace.json}:/provision/namespace.json:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   migrate:
     build:
       context: .
@@ -37,7 +56,8 @@ services:
       - "${CODOHUE_API_PORT:-2001}:${CODOHUE_API_PORT:-2001}"
     environment:
       <<: *environment
-      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-dev-secret-key}"
+      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-}"
+      CODOHUE_LEGACY_ADMIN_AUTH: "${CODOHUE_LEGACY_ADMIN_AUTH:-false}"
       CODOHUE_BATCH_INTERVAL_MINUTES: "${CODOHUE_BATCH_INTERVAL_MINUTES:-5}"
       CODOHUE_API_PORT: "${CODOHUE_API_PORT:-2001}"
       CODOHUE_CATALOG_MAX_CONTENT_BYTES: "${CODOHUE_CATALOG_MAX_CONTENT_BYTES:-32768}"
@@ -93,15 +113,21 @@ services:
       context: .
       target: admin
     ports:
-      - "${CODOHUE_ADMIN_PORT:-2002}:${CODOHUE_ADMIN_PORT:-2002}"
+      - "127.0.0.1:${CODOHUE_ADMIN_PORT:-2002}:${CODOHUE_ADMIN_PORT:-2002}"
     environment:
       <<: *environment
-      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-dev-secret-key}"
+      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-}"
+      CODOHUE_LEGACY_ADMIN_AUTH: "${CODOHUE_LEGACY_ADMIN_AUTH:-false}"
       CODOHUE_API_URL: "http://api:${CODOHUE_API_PORT:-2001}"
       CODOHUE_ADMIN_PORT: "${CODOHUE_ADMIN_PORT:-2002}"
-      CODOHUE_ADMIN_SESSION_SECRET: "${CODOHUE_ADMIN_SESSION_SECRET:-}"
+      CODOHUE_ADMIN_PROXY_TOKEN_FILE: /run/secrets/admin_proxy_token
+      CODOHUE_ADMIN_COOKIE_SECURE: "${CODOHUE_ADMIN_COOKIE_SECURE:-false}"
+      CODOHUE_TRUSTED_PROXIES: "${CODOHUE_TRUSTED_PROXIES:-}"
       CODOHUE_OBSERVABILITY_TOKEN: "${CODOHUE_OBSERVABILITY_TOKEN:-}"
+    secrets: [admin_proxy_token]
     depends_on:
+      provision:
+        condition: service_completed_successfully
       api:
         condition: service_healthy
     healthcheck:
@@ -120,13 +146,13 @@ services:
       context: .
       target: bskyfeed
     environment:
-      <<: *environment
-      CODOHUE_ADMIN_API_KEY: "${CODOHUE_ADMIN_API_KEY:-dev-secret-key}"
+      REDIS_URL: "redis://redis:6379"
+      CODOHUE_ADMIN_API_KEY: "${CODOHUE_BSKY_PROVISION_TOKEN:-}"
       CODOHUE_ADMIN_URL: "http://admin:${CODOHUE_ADMIN_PORT:-2002}"
       CODOHUE_BSKY_NAMESPACE: "${CODOHUE_BSKY_NAMESPACE:-bluesky}"
       CODOHUE_BSKY_SAMPLE_PERCENT: "${CODOHUE_BSKY_SAMPLE_PERCENT:-100}"
       CODOHUE_BSKY_EMBEDDING_DIM: "${CODOHUE_BSKY_EMBEDDING_DIM:-256}"
-      CODOHUE_BSKY_BOOTSTRAP: "${CODOHUE_BSKY_BOOTSTRAP:-true}"
+      CODOHUE_BSKY_BOOTSTRAP: "${CODOHUE_BSKY_BOOTSTRAP:-false}"
       CODOHUE_BSKY_JETSTREAM_URL: "${CODOHUE_BSKY_JETSTREAM_URL:-}"
     # Bootstrap provisions the namespace through the admin plane, so admin must
     # be serving before the feeder starts.
@@ -189,3 +215,11 @@ volumes:
   postgres_data:
   redis_data:
   qdrant_data:
+
+secrets:
+  owner_password:
+    file: ${CODOHUE_OWNER_PASSWORD_PATH:-./.secrets/owner_password}
+  admin_proxy_token:
+    file: ${CODOHUE_PROXY_TOKEN_PATH:-./.secrets/admin_proxy_token}
+  application_token:
+    file: ${CODOHUE_APPLICATION_TOKEN_PATH:-./.secrets/application_token}

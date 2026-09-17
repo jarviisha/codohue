@@ -60,7 +60,7 @@ All four binaries are built from the same repo, each with a clearly scoped role.
 | --------------- | ---- | ---- |
 | [cmd/api](cmd/api)           | 2001 | HTTP data-plane (events, catalog + batch + reconciliation read, recommendations, rankings, trending, object metadata, BYOE) plus three goroutines: the `ingest` worker consuming `codohue:events`, the catalog worker consuming `codohue:catalog` (durable catalog transport, fed into `internal/catalog` via a `cmd/api` adapter), and the events-tail publisher fanning ingested events onto `codohue:events-tail:{ns}` |
 | [cmd/cron](cmd/cron)         | —    | Batch daemon driven by `CODOHUE_BATCH_INTERVAL_MINUTES` (default 5 min); each tick runs three phases per namespace. Also runs the retention prune and deleted-generation janitor, and publishes run lifecycle events to `codohue:batchrun-events` so `cmd/admin` can stream cron runs live |
-| [cmd/admin](cmd/admin)       | 2002 | Admin server: session-cookie **or** bearer (`CODOHUE_ADMIN_API_KEY`) auth, `/api/admin/v1/*`, SSE streams over an in-process event bus fed by three Redis pub/sub bridges (batch runs, catalog signals, events tail). Embeds the `web/admin` SPA via the `embedui` build tag. The same binary provides the non-HTTP `lifecycle disable-legacy-envelopes` and `idmap-repair audit\|quarantine\|apply\|verify\|resume` operator commands |
+| [cmd/admin](cmd/admin)       | 2002 | Admin server: individual operator sessions **or** scoped service-token auth, `/api/admin/v1/*`, SSE streams over an in-process event bus fed by three Redis pub/sub bridges (batch runs, catalog signals, events tail). Embeds the `web/admin` SPA via the `embedui` build tag. The same binary provides the non-HTTP `lifecycle disable-legacy-envelopes` and `idmap-repair audit\|quarantine\|apply\|verify\|resume` operator commands |
 | [cmd/embedder](cmd/embedder) | 2003 | Catalog worker: consumes `catalog:embed:{ns}` streams, embeds via `embedstrategy.Strategy`, upserts the dense vector. Also runs the re-embed completion watcher, the backlog sampler (writes `catalog_backlog_samples`), the recovery sweeper (re-publishes rows whose stream entry was lost), and the liveness heartbeat (`codohue:embedder:heartbeat`, TTL 90s) |
 
 ### 2.1 Process ↔ storage matrix
@@ -99,7 +99,7 @@ Each feature domain lives at `internal/<domain>/` with a consistent file set: `h
 | [internal/catalog](internal/catalog)           | Data-plane HTTP content ingest; persists `catalog_items`, publishes `catalog:embed:{ns}` |
 | [internal/embedder](internal/embedder)         | Per-item pipeline (load → embed → upsert → mark embedded), re-embed watcher, backlog sampler, recovery sweeper, heartbeat |
 | [internal/retention](internal/retention)       | Periodic prune of `batch_run_logs` + `catalog_backlog_samples`; runs inside `cmd/cron` |
-| [internal/auth](internal/auth)                 | Bearer-token validation: admin key + per-namespace bcrypt key, with a negative cache |
+| [internal/auth](internal/auth)                 | Bearer-token validation: namespace bcrypt keys and explicitly scoped service tokens, with a negative cache |
 | [internal/config](internal/config)             | Env-var loader |
 | [internal/core/embedstrategy](internal/core/embedstrategy) | Forward-compat seam: `Strategy` interface + registry (both `catalog` and `embedder` depend on the seam, never on each other) |
 | [internal/core/namespace](internal/core/namespace)         | Shared `namespace.Config` contract |
@@ -323,22 +323,20 @@ Responses are cached in Redis for 5 minutes per `(namespace, subject_id, limit, 
 
 ## 9. Authentication
 
-A **two-tier** model.
+Human, service, consumer and bootstrap credentials have distinct capabilities.
 
-| Plane            | Auth                                                                              | Token storage |
-| ---------------- | --------------------------------------------------------------------------------- | ------------- |
-| Admin (`cmd/admin`) | Session cookie `codohue_admin_session` (login = `POST /api/v1/auth/sessions` with `CODOHUE_ADMIN_API_KEY`) **or** `Authorization: Bearer <CODOHUE_ADMIN_API_KEY>` directly on `/api/admin/v1/*` — the automation path (`sdk/go/admin`), no cookie dance. A bearer header, when present, is authoritative and the cookie is ignored | Sessions: HMAC-signed JWT carrying a random `jti`; logout revokes the `jti` server-side until its natural expiry. Bearer: the static key itself |
-| Data (`cmd/api`) | `Authorization: Bearer <namespace-key>` — bcrypt-hashed in `namespace_configs.api_key_hash` | Plaintext returned **once**, on creation or rotation |
+| Credential | Authorization | Storage |
+| --- | --- | --- |
+| Human operator | Owner: accounts, tokens and all operations. Admin: namespace operations, no account/token management or instance reset | bcrypt passwords in `admin_accounts`; version-bound opaque session digests in `admin_sessions` |
+| Administrative service token | Explicit `admin:read`, `admin:write` or `namespace:provision` permissions and namespaces; no human login, account/token management or reset | SHA-256 random token digest in `admin_service_tokens`, with durable revocation |
+| Consumer | Namespace key permits that namespace's data operations; data service tokens explicitly select `data:read` / `data:write` and namespaces | bcrypt in `namespace_configs.api_key_hash`, or service token digest |
+| Bootstrap/recovery | Local CLI with DB authority; bootstrap creates only the initial owner, recovery is explicit | No persistent bootstrap authentication bypass |
 
-`CODOHUE_ADMIN_API_KEY` is accepted for **every** namespace on the data plane, via a DB-free constant-time compare checked before the hash lookup. The admin server needs to reach all namespaces through it, and it already grants full control via the admin-plane login — restricting its data-plane reach bought little while breaking the admin panel. Namespace **configuration mutation** still lives only on the admin plane.
+Production uses shared PostgreSQL state through `internal/core/access`. Login reserves one of five attempts per minute per client IP before bcrypt. `admin_login_buckets` survives restarts/replicas. Sessions expire in eight hours; logout removes the digest, and account disable/password reset invalidates the account version and deletes all its sessions. Open session- or service-token-authenticated SSE streams recheck credential validity every 15 seconds. The previous JWT/session signing secret is retired. Cookies are HttpOnly and SameSite=Strict; mutations require `X-Codohue-CSRF: 1` plus matching Origin when supplied. Secure cookies and trusted proxy CIDRs are configurable; untrusted forwarding headers have no authority.
 
-Hardening in the request path:
+Migration **028_operator_accounts** adds `admin_accounts`, `admin_sessions`, `admin_service_tokens`, `admin_login_buckets`, `admin_audit` and `namespace_provisions`. Audit records identify authorized mutation attempts and transactional identity changes without recording credentials. Expired sessions/login buckets are pruned hourly. Namespace provisioning atomically persists config, the supplied key hash and an immutable desired-state digest; matching retries preserve existing configuration and conflicting keys/specifications fail with 409.
 
-- All plain-string credential compares are constant-time.
-- The public admin login endpoint **and** the admin bearer path are per-IP rate-limited on **failed** attempts only; a correct key is never throttled. An empty configured admin key disables the bearer path entirely rather than matching empty tokens.
-- Repeated bad data-plane tokens hit a 30s negative cache keyed on `(token, namespace)` — only definitive rejections are cached, never infra blips — so a brute-force loop does not cost a bcrypt compare per attempt.
-- The session signing secret comes from `CODOHUE_ADMIN_SESSION_SECRET`, or fresh random material each boot (a restart then logs everyone out).
-- A namespace key is rotated via `POST /api/admin/v1/namespaces/{ns}/api-key`; the old key stops working immediately.
+The admin data proxy uses its own issued `data:read,data:write` service token. `CODOHUE_ADMIN_API_KEY` is accepted only with explicit `CODOHUE_LEGACY_ADMIN_AUTH=true` during migration outside production; that transitional mode still grants universal data access, but cannot create console sessions or manage identities. Production rejects this mode. See [operator authentication deployment and recovery](deploy/operator-auth.md) for permissions, `_FILE` secrets and upgrade steps. OIDC/SSO and MFA are deferred.
 
 ## 10. HTTP API
 
@@ -377,8 +375,13 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 
 | Method | Path                                                              | Description |
 | ------ | ----------------------------------------------------------------- | ----------- |
-| POST   | `/api/v1/auth/sessions`                                           | Validate admin key, set cookie (201 + `expires_at`) |
-| DELETE | `/api/v1/auth/sessions/current`                                   | Clear cookie (204) |
+| POST   | `/api/v1/auth/sessions`                                           | Validate `{username,password}`, set opaque cookie (201 + `expires_at`, `actor`) |
+| DELETE | `/api/v1/auth/sessions/current`                                   | Revoke shared session and clear cookie (204) |
+| GET | `/api/v1/auth/sessions/current` | Current operator `{name,role}` |
+| GET | `/api/admin/v1/accounts` | Owner: list `{username,role,disabled}` accounts |
+| PUT | `/api/admin/v1/accounts/{username}` | Owner: create/update `{password?,role,disabled}`; invalidate account sessions (204; last-owner conflict 409) |
+| PUT | `/api/admin/v1/service-tokens/{name}` | Owner: immutable `{token,permissions,namespaces}` provisioning (204; conflict 409) |
+| DELETE | `/api/admin/v1/service-tokens/{name}` | Owner: revoke service token (204) |
 | GET    | `/api/admin/v1/health`                                            | Proxy `/healthz` from `cmd/api` |
 | GET    | `/api/admin/v1/ping/stream`                                       | **(SSE)** Smoke-test stream for the SSE pipeline; not a production endpoint |
 | GET    | `/api/admin/v1/overview`                                          | Fleet aggregate: health + cron/embedder heartbeat + alerts + per-namespace summary |
@@ -387,7 +390,7 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | GET    | `/api/admin/v1/stream`                                            | **(SSE)** Global ops bus: `batch_run.*`, `catalog.dead_letter_grew`, `catalog.reembed_progress` |
 | GET    | `/api/admin/v1/namespaces`                                        | List configs |
 | GET    | `/api/admin/v1/namespaces/{ns}`                                   | Get config |
-| PUT    | `/api/admin/v1/namespaces/{ns}`                                   | Create/update (200/201). **PATCH semantics** — an omitted field leaves that column untouched. `dense_source="catalog"` is accepted when `catalog_strategy_id`/`_version` accompany it (same dim validation as the catalog endpoint — one-request core-mode provisioning); without them → 422 naming the missing fields |
+| PUT    | `/api/admin/v1/namespaces/{ns}`                                   | Create/update (200/201); optional `provision_api_key` enables immutable retry-safe initial provisioning (409 on conflict). **PATCH semantics** — an omitted field leaves that column untouched. `dense_source="catalog"` is accepted when `catalog_strategy_id`/`_version` accompany it (same dim validation as the catalog endpoint — one-request core-mode provisioning); without them → 422 naming the missing fields |
 | DELETE | `/api/admin/v1/namespaces/{ns}`                                   | Wipe namespace + all its data (200 summary; 404 when missing) |
 | POST   | `/api/admin/v1/namespaces/{ns}/api-key`                           | Rotate the namespace data-plane key (plaintext returned once) |
 | GET    | `/api/admin/v1/namespaces/{ns}/dashboard`                         | Per-namespace aggregate: config + last 12 runs + backlog + events + qdrant counts + trending TTL + author coverage |
@@ -527,7 +530,7 @@ The [Docker runbook](deploy/docker.md) owns commands and upgrade procedures.
 | Rankings share Recommend's blend and eligibility | One helper, one exclusion path — the same namespace config cannot mean two different things depending on which endpoint is asked |
 | Every rankings candidate returns, with a `scored` flag | "No vector", "not indexed" and "zero overlap" were indistinguishable `score: 0`; the flag + `no_subject_vector` source let callers compute coverage and skip unknown subjects |
 | Streams are never producer-trimmed | Producers cannot know the slowest consumer-group frontier. Periodic exact retention trims only completed history below every group frontier, preserving pending work |
-| Admin bearer auth reuses the admin key, failed-only rate limit | The key already grants full control via login, so bearer widens no privilege — it removes the cookie handshake automation had to fake. Acceptable while there is one internal consumer |
+| Human accounts and scoped service tokens | Individual attribution and durable revocation; login is throttled before credential verification |
 | One `dense_source` enum, not `dense_strategy` + `catalog_enabled` | Two independent fields could describe a contradictory state (two producers writing `{ns}_objects_dense`); one enum makes it unrepresentable and deletes the cross-field validation |
 | `byoe` / `disabled` skip phase 2; `catalog` does not | Phase 2 also fills `{ns}_subjects_dense`, which the embedder never writes — skipping it under `catalog` would leave subject vectors empty and silently degrade every request to sparse CF |
 | `dense_source="catalog"` ⇒ BYOE object PUT returns 409 | One source of truth for the object vector avoids ping-pong overwrites |
@@ -535,7 +538,7 @@ The [Docker runbook](deploy/docker.md) owns commands and upgrade procedures.
 | Author lives in `objects`, not `catalog_items` | `catalog_items` only exists under `dense_source="catalog"`; attribution had no home under the other sources. Moved, not copied — two stores for one fact drift apart |
 | Authored exclusion as point IDs, not a payload filter | A payload filter would reach only the dense collection; cron writes the sparse points and knows nothing about authorship |
 | Namespace config writes are PATCH | The admin UI submits only edited fields; `INSERT … ON CONFLICT DO UPDATE` must name every column, which would reset the rest to Go zero values |
-| Two-tier auth, admin key valid on every namespace | Per-tenant keys isolate blast radius on leak; the admin key already grants full control via the admin plane, and the admin server must reach every namespace |
+| Independent consumer and administration capabilities | Cross-namespace access requires explicit scopes; admin proxy calls use a separately issued data token |
 | Namespace lifecycle generations fence every writer | Delete/recreate increments the generation; generation 2+ qualifies Redis and Qdrant physical names so stale work from an earlier incarnation cannot become visible |
 | [Embed strategy registry as a seam](docs/adr/0001-retain-forward-compatible-boundary-adapters.md) | Forward-compat: an unwired build still boots and catalog endpoints return 503 instead of panicking |
 | [No peer-domain imports](docs/adr/0001-retain-forward-compatible-boundary-adapters.md) | Enforced by test; any domain can be split into a microservice without untangling coupling |

@@ -56,6 +56,11 @@ func TestGoldenWireContract(t *testing.T) {
 			Namespace: "feed", NamespaceGeneration: 3, SubjectID: "subj-1", ObjectID: "obj-1", Action: codohuetypes.ActionLike,
 			OccurredAt: ts, ObjectCreatedAt: &objCreated,
 		}},
+		{"operator_session_request", codohuetypes.OperatorSessionRequest{Username: "alice", Password: "example-password"}},
+		{"operator_session_response", codohuetypes.OperatorSessionResponse{ExpiresAt: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC), Actor: codohuetypes.OperatorIdentity{Name: "alice", Role: "owner"}}},
+		{"operator_account_request", codohuetypes.OperatorAccountRequest{Role: "admin", Disabled: true}},
+		{"operator_account", codohuetypes.OperatorAccount{Username: "alice", Role: "admin", Disabled: true}},
+		{"service_token_request", codohuetypes.ServiceTokenRequest{Token: "example-token", Permissions: []string{"data:read"}, Namespaces: []string{"shop"}}},
 		{"object_upsert_request", codohuetypes.ObjectUpsertRequest{AuthorSubjectID: "subj-1"}},
 		{"object_response", codohuetypes.ObjectResponse{
 			Namespace: "feed", ObjectID: "obj-1", AuthorSubjectID: "subj-1",

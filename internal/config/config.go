@@ -59,16 +59,16 @@ type AppConfig struct {
 }
 
 // LoadAPI reads and validates configuration for the API binary.
-// It requires both DATABASE_URL and CODOHUE_ADMIN_API_KEY to be set.
+// It requires DATABASE_URL; legacy global-key authentication is explicitly opt-in.
 func LoadAPI() (*AppConfig, error) {
 	cfg, err := loadBase()
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.AdminAPIKey = getEnv("CODOHUE_ADMIN_API_KEY", "")
-	if cfg.AdminAPIKey == "" {
-		return nil, fmt.Errorf("CODOHUE_ADMIN_API_KEY is required")
+	cfg.AdminAPIKey, err = legacyAdminKey()
+	if err != nil {
+		return nil, err
 	}
 
 	cfg.APIPort = getEnv("CODOHUE_API_PORT", "2001")
@@ -102,6 +102,9 @@ func LoadCron() (*AppConfig, error) {
 // loadBase loads the config fields shared by all binaries and validates them.
 func loadBase() (*AppConfig, error) {
 	loadDotenv()
+	if err := validateSecretFiles(); err != nil {
+		return nil, err
+	}
 
 	cfg := &AppConfig{
 		DatabaseURL: getEnv("DATABASE_URL", ""),
@@ -161,6 +164,7 @@ type AdminConfig struct {
 	RedisURL       string
 	AdminAPIKey    string
 	APIURL         string // internal URL of cmd/api for proxying
+	AdminHost      string
 	AdminPort      string // HTTP listen port (default: "2002")
 	LogFormat      string // "json" | "text" (default: "text")
 	QdrantHost     string
@@ -170,35 +174,52 @@ type AdminConfig struct {
 	// Empty leaves the route unavailable.
 	ObservabilityToken string
 
-	// SessionSecret pins the HMAC secret admin session tokens are signed
-	// with. Empty (the default) generates fresh material each boot, which
-	// logs everyone out on restart — set it when running multiple admin
-	// replicas or when restart-survivable sessions matter.
-	SessionSecret string
+	ProxyToken        string
+	BootstrapUsername string
+	BootstrapPassword string
+	SecureCookies     bool
+	TrustedProxies    string
 }
 
 // LoadAdmin reads and validates configuration for the admin binary.
 func LoadAdmin() (*AdminConfig, error) {
 	loadDotenv()
+	if err := validateSecretFiles(); err != nil {
+		return nil, err
+	}
 
 	cfg := &AdminConfig{
 		DatabaseURL:        getEnv("DATABASE_URL", ""),
 		RedisURL:           getEnv("REDIS_URL", "redis://localhost:6379"),
-		AdminAPIKey:        getEnv("CODOHUE_ADMIN_API_KEY", ""),
+		AdminAPIKey:        "",
 		APIURL:             getEnv("CODOHUE_API_URL", "http://localhost:2001"),
 		AdminPort:          getEnv("CODOHUE_ADMIN_PORT", "2002"),
+		AdminHost:          getEnv("CODOHUE_ADMIN_HOST", ""),
 		LogFormat:          getEnv("CODOHUE_LOG_FORMAT", "text"),
 		QdrantHost:         getEnv("QDRANT_HOST", "localhost"),
 		AllowDevOrigin:     getEnv("CODOHUE_ALLOW_DEV_ORIGIN", ""),
-		SessionSecret:      getEnv("CODOHUE_ADMIN_SESSION_SECRET", ""),
+		ProxyToken:         getEnv("CODOHUE_ADMIN_PROXY_TOKEN", ""),
+		BootstrapUsername:  getEnv("CODOHUE_BOOTSTRAP_USERNAME", ""),
+		BootstrapPassword:  getEnv("CODOHUE_BOOTSTRAP_PASSWORD", ""),
+		SecureCookies:      getEnv("CODOHUE_ADMIN_COOKIE_SECURE", "false") == "true",
+		TrustedProxies:     getEnv("CODOHUE_TRUSTED_PROXIES", ""),
 		ObservabilityToken: getEnv("CODOHUE_OBSERVABILITY_TOKEN", ""),
 	}
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")
 	}
-	if cfg.AdminAPIKey == "" {
-		return nil, fmt.Errorf("CODOHUE_ADMIN_API_KEY is required")
+	var err error
+	cfg.AdminAPIKey, err = legacyAdminKey()
+	if err != nil {
+		return nil, err
+	}
+	cfg.SecureCookies, err = strconv.ParseBool(getEnv("CODOHUE_ADMIN_COOKIE_SECURE", "false"))
+	if err != nil {
+		return nil, fmt.Errorf("invalid CODOHUE_ADMIN_COOKIE_SECURE: %w", err)
+	}
+	if (cfg.BootstrapUsername == "") != (cfg.BootstrapPassword == "") {
+		return nil, fmt.Errorf("bootstrap username and password must be configured together")
 	}
 
 	qdrantPort, err := strconv.Atoi(getEnv("QDRANT_PORT", "6334"))
@@ -211,6 +232,11 @@ func LoadAdmin() (*AdminConfig, error) {
 }
 
 func getEnv(key, fallback string) string {
+	if os.Getenv(key+"_FILE") != "" {
+		if v, err := LoadSecret(key); err == nil {
+			return v
+		}
+	}
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
@@ -256,6 +282,9 @@ type EmbedderConfig struct {
 // background worker that does not expose authenticated endpoints).
 func LoadEmbedder() (*EmbedderConfig, error) {
 	loadDotenv()
+	if err := validateSecretFiles(); err != nil {
+		return nil, err
+	}
 
 	cfg := &EmbedderConfig{
 		DatabaseURL: getEnv("DATABASE_URL", ""),

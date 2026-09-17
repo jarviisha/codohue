@@ -1,6 +1,7 @@
 package nsconfig
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -49,6 +50,13 @@ var denseDistances = map[string]bool{
 // validateUpsert range-checks every supplied field. nil fields are PATCH
 // no-ops and always pass.
 func validateUpsert(req *UpsertRequest) error {
+	if req != nil && req.ProvisionAPIKey != "" {
+		raw, err := hex.DecodeString(req.ProvisionAPIKey)
+		if err != nil || len(raw) != 32 {
+			return fmt.Errorf("%w: provision_api_key must be 64 hex characters encoding 32 random bytes", ErrInvalidConfig)
+		}
+	}
+
 	if req == nil {
 		return nil
 	}

@@ -102,6 +102,7 @@ export default function AppShellLayout() {
             <Stack direction="horizontal" gap={2} align="center">
               <ThemeMenu />
               <AccountMenu
+                username={session.data?.actor.name ?? "Operator"}
                 onSignOut={() =>
                   logout.mutate(undefined, {
                     onSuccess: () => navigate('/login', { replace: true }),
@@ -230,9 +231,11 @@ function RouteBreadcrumbs({ pathname }: { pathname: string }) {
 }
 
 function AccountMenu({
+  username,
   onSignOut,
   signingOut,
 }: {
+  username: string
   onSignOut: () => void
   signingOut: boolean
 }) {
@@ -247,7 +250,7 @@ function AccountMenu({
         isDisabled: signingOut,
       }}
       items={[
-        { label: 'admin', isDisabled: true },
+        { label: username, isDisabled: true },
         { type: 'divider' },
         { label: signingOut ? 'Signing out…' : 'Sign out', onClick: onSignOut },
       ]}

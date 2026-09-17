@@ -17,10 +17,9 @@ import (
 // extracted from main.run() so cmd/admin/main_test.go can assert that all
 // expected paths are registered without spinning up the full binary.
 //
-// sessions backs the session-cookie middleware; adminKey additionally opens
-// the bearer path for automation (see RequireSessionOrBearer). allowDevOrigin enables
-// credentialed CORS for the Vite dev server when non-empty (dev mode); empty
-// in production where the SPA is embedded same-origin.
+// Production identity comes from h.SetIdentity; sessions is an isolated test
+// adapter and adminKey is an explicitly enabled legacy migration credential.
+// allowDevOrigin enables credentialed CORS for a trusted development origin.
 func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, allowDevOrigin, observabilityToken string) chi.Router {
 	r := chi.NewRouter()
 	r.Use(admin.CORSMiddleware(allowDevOrigin))
@@ -40,7 +39,12 @@ func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, 
 
 	// Protected admin API routes
 	r.Group(func(r chi.Router) {
-		r.Use(admin.RequireSessionOrBearer(sessions, adminKey))
+		r.Use(h.RequireIdentity(sessions, adminKey))
+		r.Get("/api/v1/auth/sessions/current", h.GetCurrentSession)
+		r.Get("/api/admin/v1/accounts", h.ListAccounts)
+		r.Put("/api/admin/v1/accounts/{username}", h.PutAccount)
+		r.Put("/api/admin/v1/service-tokens/{name}", h.PutServiceToken)
+		r.Delete("/api/admin/v1/service-tokens/{name}", h.DeleteServiceToken)
 		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
 
 		r.Get("/api/admin/v1/health", h.GetHealth)

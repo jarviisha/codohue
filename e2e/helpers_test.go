@@ -45,6 +45,7 @@ func doRequest(t testing.TB, method, url, token string, body any) *http.Response
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Codohue-CSRF", "1")
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
