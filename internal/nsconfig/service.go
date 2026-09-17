@@ -126,7 +126,13 @@ func (s *Service) upsertActive(ctx context.Context, ns string, req *UpsertReques
 		// the one on disk: the body can change embedding_dim and select a
 		// strategy in the same call. Validating first is what makes the write
 		// atomic — a rejected request must not have created the namespace.
-		if err := s.validateCatalogStrategy(ctx, ns, catalogReq, req.EmbeddingDim); err != nil {
+		requestedDim := req.EmbeddingDim
+		if req.ProvisionAPIKey != "" && requestedDim == nil {
+			// Immutable provisioning always describes initial creation. A retry
+			// must validate against that default, not a later operator edit.
+			requestedDim = ptr(schemaEmbeddingDim)
+		}
+		if err := s.validateCatalogStrategy(ctx, ns, catalogReq, requestedDim); err != nil {
 			return nil, err
 		}
 	}
@@ -245,6 +251,11 @@ func (s *Service) validateCatalogStrategy(ctx context.Context, ns string, req *U
 // tests) the guard is skipped — creation-time defaults are unaffected.
 func (s *Service) guardEmbeddingDimChange(ctx context.Context, ns string, req *UpsertRequest) error {
 	if req == nil || req.EmbeddingDim == nil || s.denseCollections == nil {
+		return nil
+	}
+	if req.ProvisionAPIKey != "" {
+		// The repository only creates a new namespace or verifies an immutable
+		// retry. It never applies this dimension to an existing namespace.
 		return nil
 	}
 	current, err := s.repo.Get(ctx, ns)
