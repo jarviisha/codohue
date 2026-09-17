@@ -7,8 +7,10 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -106,6 +108,34 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 		return nil, fmt.Errorf("%w: object_id is required", ErrInvalidRequest)
 	}
 
+	// PostgreSQL stores neither NUL nor invalid UTF-8, in TEXT (SQLSTATE
+	// 22021) or in JSONB (22P05). All four fields below ride one transaction
+	// — object_id, content, metadata on catalog_items, author_subject_id on
+	// objects — so any one of them can fail it, and to the stream worker that
+	// failure is indistinguishable from a transient one: it leaves the entry
+	// pending and redelivers it forever, pinning the stream against XTRIM.
+	//
+	// Identifiers are rejected, payload is sanitized. Stripping an identifier
+	// would silently merge two distinct keys — object_id is half of
+	// UNIQUE (namespace, object_id) on catalog_items and of the objects
+	// primary key, so "a\x00b" and "ab" would clobber each other's content
+	// and embedding — and it would not even buy what sanitizing is for,
+	// because the caller never gets its own key back from ListObjects and so
+	// re-sends the item forever anyway. Payload has no such identity: a NUL
+	// in post text is junk, and dropping the whole item over one byte is
+	// worse than storing the rest.
+	if !isStorable(req.ObjectID) {
+		return nil, fmt.Errorf("%w: object_id contains bytes that cannot be stored", ErrInvalidRequest)
+	}
+	if !isStorable(req.AuthorSubjectID) {
+		return nil, fmt.Errorf("%w: author_subject_id contains bytes that cannot be stored", ErrInvalidRequest)
+	}
+	// Mutating req is confined to this ingest: every caller passes a request
+	// it owns (the HTTP handler decodes its own, IngestBatch copies the item,
+	// the cmd/api stream adapter builds a fresh one).
+	req.Content = sanitizeStorable(req.Content)
+	req.Metadata = sanitizeStorableMetadata(req.Metadata)
+
 	trimmed := strings.TrimSpace(req.Content)
 	if trimmed == "" {
 		return nil, ErrEmptyContent
@@ -166,6 +196,15 @@ func (s *Service) ingestActive(ctx context.Context, ns string, req *IngestReques
 
 	res, err := s.repo.UpsertWithAttribution(ctx, ns, req.ObjectID, req.Content, hash, req.Metadata, writeAuthor)
 	if err != nil {
+		// Scoped to this write, deliberately. A data exception here means the
+		// row is unstorable as sent, so redelivery would hand PostgreSQL the
+		// identical bytes for the identical error — permanent. The same
+		// SQLSTATE from a config read or a lease probe means a defect in that
+		// query, not bad content, and must stay transient so the entry is
+		// retried rather than silently acked off the stream.
+		if isDataException(err) {
+			return nil, fmt.Errorf("%w: %v", ErrUnstorable, err)
+		}
 		return nil, fmt.Errorf("persist catalog item: %w", err)
 	}
 
@@ -196,6 +235,76 @@ func (s *Service) ingestActive(ctx context.Context, ns string, req *IngestReques
 	}
 
 	return res.Item, nil
+}
+
+// pgDataExceptionClass is the SQLSTATE class for "data exception": the value
+// itself cannot be stored, as opposed to the operation having failed.
+// Matched as a prefix because the class spans many codes (22021 invalid
+// byte sequence, 22P05 untranslatable character, 22001 string too long).
+// SQLSTATE is always five characters, so the prefix cannot cross classes.
+const pgDataExceptionClass = "22"
+
+// isDataException reports whether err is a PostgreSQL data exception.
+// Callers must scope it to a specific write: the same class raised by an
+// unrelated query is a defect in that query, not unstorable content.
+func isDataException(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, pgDataExceptionClass)
+}
+
+// isStorable reports whether s survives a PostgreSQL UTF8 column intact.
+// Used for identifiers, where silently rewriting the value would merge two
+// distinct keys; payload goes through sanitizeStorable instead.
+func isStorable(s string) bool {
+	return !strings.ContainsRune(s, 0) && utf8.ValidString(s)
+}
+
+// sanitizeStorable removes what a PostgreSQL UTF8 column refuses to hold:
+// NUL, which is a valid UTF-8 rune that TEXT still rejects with SQLSTATE
+// 22021, and invalid UTF-8 byte sequences. Both strings.ReplaceAll and
+// strings.ToValidUTF8 return the input untouched when there is nothing to
+// strip, so clean content costs no allocation.
+func sanitizeStorable(s string) string {
+	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "")
+}
+
+// sanitizeStorableMetadata sanitizes every string in the metadata tree, keys
+// included. It must run on the map rather than on the marshalled bytes:
+// json.Marshal encodes a NUL as a six-character backslash-u escape sequence,
+// which JSONB rejects with SQLSTATE 22P05 but which holds no NUL byte for a
+// post-marshal strip to find. A nil map stays nil, so the repository keeps
+// deciding what an absent metadata object serializes to.
+func sanitizeStorableMetadata(m map[string]any) map[string]any {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]any, len(m))
+	for k, v := range m {
+		out[sanitizeStorable(k)] = sanitizeStorableValue(v)
+	}
+	return out
+}
+
+// sanitizeStorableValue walks one metadata value. Only the shapes
+// encoding/json produces are handled, because both entry points decode
+// metadata from JSON: the HTTP handler from the request body, the stream
+// adapter from the Redis entry. Any other type is returned as is and, if it
+// still fails the INSERT, is caught by the data-exception classification in
+// cmd/api/catalog_stream_adapter.go.
+func sanitizeStorableValue(v any) any {
+	switch t := v.(type) {
+	case string:
+		return sanitizeStorable(t)
+	case map[string]any:
+		return sanitizeStorableMetadata(t)
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = sanitizeStorableValue(val)
+		}
+		return out
+	}
+	return v
 }
 
 // IngestBatch runs the single-item ingest for every entry of a batch and
@@ -243,7 +352,7 @@ func itemErrorCode(err error) string {
 		return "empty_content"
 	case errors.Is(err, ErrContentTooLarge):
 		return "content_too_large"
-	case errors.Is(err, ErrInvalidRequest):
+	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrUnstorable):
 		return "invalid_request"
 	default:
 		return "internal_error"

@@ -119,4 +119,12 @@ var (
 	// ErrNamespaceNotFound fires when no namespace_configs row exists for
 	// the URL-supplied namespace (handler maps to 404, same body as above).
 	ErrNamespaceNotFound = errors.New("catalog: namespace not found")
+
+	// ErrUnstorable fires when the persist itself fails with a PostgreSQL
+	// data exception — the value cannot be stored as sent, so a retry gets
+	// the identical error. Permanent, but unlike the checks above it is only
+	// knowable at write time: Ingest sanitizes or rejects the cases we model,
+	// and this covers the ones we do not. It shares ErrInvalidRequest's 400
+	// and "invalid_request" code so the public error vocabulary is unchanged.
+	ErrUnstorable = errors.New("catalog: value cannot be stored as sent")
 )

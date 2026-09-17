@@ -253,6 +253,15 @@ POST /v1/namespaces/{ns}/catalog (+/batch)      XADD codohue:catalog
 
 An optional `author_subject_id` on the ingest body is **not** stored on `catalog_items`; it is written through to the `objects` table via an interface injected in `cmd/api`, so `internal/catalog` never imports the peer domain. Omitting it on a re-ingest means "unspecified" and leaves existing attribution alone.
 
+PostgreSQL stores neither NUL nor invalid UTF-8, in `TEXT` (SQLSTATE 22021) or `JSONB` (22P05), and all four ingest fields ride one transaction — `object_id`, `content`, `metadata` on `catalog_items`, `author_subject_id` on `objects`. Ingest therefore **rejects identifiers and sanitizes payload**:
+
+| Field | Unstorable bytes | Why |
+| --- | --- | --- |
+| `object_id`, `author_subject_id` | rejected, `invalid_request` | stripping would merge two distinct keys: `object_id` is half of `UNIQUE (namespace, object_id)` and of the `objects` primary key. It would also not help — the caller never gets its own key back from `ListObjects`, so it re-sends forever regardless |
+| `content`, `metadata` | stripped | no identity to preserve; dropping a whole item over one junk byte is worse than storing the rest |
+
+Stripping happens before the size cap and the hash, so measured, hashed, and stored bytes are identical and a re-ingest of the same dirty input stays an idempotent no-op upsert. Content that is nothing but unstorable bytes becomes `empty_content`. Anything unstorable that Ingest does not model surfaces as `ErrUnstorable` when the write itself fails — see §7.2.
+
 ### 7.2 Retry, dead-letter, recovery
 
 - Transient errors retry up to `catalog_max_attempts` (namespace override, else `CODOHUE_EMBED_MAX_ATTEMPTS`, default 5) before moving to dead-letter.
@@ -498,7 +507,7 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 - **Batch run history** — `batch_run_logs` records every cron tick and admin re-embed; the `log_lines` JSONB column captures the run's slog output, surfaced through the admin API and streamed live over SSE.
 - **Liveness** — `cmd/embedder` writes `codohue:embedder:heartbeat` (TTL 90s); cron liveness is derived from the most recent `batch_run_logs` row. Both feed the admin overview's alert rules.
 - **Dense-downgrade alert** — the overview flags any namespace configured for hybrid (`alpha < 1`, dense on) whose `{ns}_subjects_dense` is empty: the config says hybrid while requests silently serve sparse-only (the standing state of `byoe` namespaces that never push subject vectors). The serving path logs the per-request warning.
-- **Catalog stream rejects** — stream-delivered catalog items that are permanently rejected before any `catalog_items` row exists are counted in `codohue_catalog_stream_rejects_total` (by namespace + reason) and warned in the log; rejections that do reach a row surface through the item's failure state instead.
+- **Catalog stream rejects** — stream-delivered catalog items that are permanently rejected before any `catalog_items` row exists are counted in `codohue_catalog_stream_rejects_total` (by namespace + reason) and warned in the log; rejections that do reach a row surface through the item's failure state instead. Permanent means validation failure, or `catalog.ErrUnstorable` — raised when the persist itself fails with a PostgreSQL SQLSTATE class `22` (data exception), since redelivery would hand the database identical bytes for an identical error. Such entries are acked off rather than left pending, where the oldest one would pin the stream against `XTRIM`. The classification is scoped to the write: the same SQLSTATE from a config read or a lease probe is a defect in that query, not unstorable content, and stays transient.
 - **Rolling metrics** — `internal/admin/metricsroll` maintains in-process 1m/5m windows behind `/api/admin/v1/metrics/summary`.
 - **Backlog timeline** — `catalog_backlog_samples`, written by the embedder's sampler, backs `/catalog/backlog-history`.
 - **slog format** — `CODOHUE_LOG_FORMAT=text` (default) or `json` (the prod compose defaults to `json`).

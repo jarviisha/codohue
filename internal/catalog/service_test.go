@@ -1,13 +1,16 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -17,12 +20,14 @@ import (
 
 // fakeRepo records calls and returns canned values.
 type fakeRepo struct {
-	res      *UpsertResult
-	err      error
-	called   int
-	lastNS   string
-	lastObj  string
-	lastHash []byte
+	res         *UpsertResult
+	err         error
+	called      int
+	lastNS      string
+	lastObj     string
+	lastContent string
+	lastHash    []byte
+	lastMeta    map[string]any
 
 	listRows   []ObjectRow
 	listTotal  int
@@ -35,11 +40,13 @@ type fakeRepo struct {
 	rolledBack      bool
 }
 
-func (f *fakeRepo) Upsert(_ context.Context, ns, obj, _ string, hash []byte, _ map[string]any) (*UpsertResult, error) {
+func (f *fakeRepo) Upsert(_ context.Context, ns, obj, content string, hash []byte, meta map[string]any) (*UpsertResult, error) {
 	f.called++
 	f.lastNS = ns
 	f.lastObj = obj
+	f.lastContent = content
 	f.lastHash = hash
+	f.lastMeta = meta
 	return f.res, f.err
 }
 
@@ -162,6 +169,192 @@ func TestServiceIngest_RejectsEmptyContent(t *testing.T) {
 		if !errors.Is(err, ErrEmptyContent) {
 			t.Errorf("content=%q: expected ErrEmptyContent, got %v", c, err)
 		}
+	}
+}
+
+// PostgreSQL text stores neither NUL nor invalid UTF-8. Before this was
+// stripped, the INSERT failed with SQLSTATE 22021, which the catalog stream
+// worker cannot distinguish from a transient failure — so it left the entry
+// pending and redelivered it forever, pinning the stream against XTRIM.
+func TestServiceIngest_StripsBytesPostgresCannotStore(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "he\x00llo\xffworld",
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if want := "helloworld"; repo.lastContent != want {
+		t.Errorf("stored content = %q, want %q", repo.lastContent, want)
+	}
+	// The hash must cover what was actually stored, so re-ingesting the same
+	// dirty content stays an idempotent no-op upsert.
+	if want := ContentHash("helloworld"); !bytes.Equal(repo.lastHash, want) {
+		t.Errorf("hash = %x, want hash of sanitized content %x", repo.lastHash, want)
+	}
+}
+
+// Content that is nothing but unstorable bytes collapses to empty and takes
+// the existing empty-content rejection, which the stream worker acks off
+// instead of redelivering.
+func TestServiceIngest_ContentOfOnlyUnstorableBytesIsEmpty(t *testing.T) {
+	svc := newSvc(&fakeRepo{}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "\x00\xff"})
+	if !errors.Is(err, ErrEmptyContent) {
+		t.Fatalf("expected ErrEmptyContent, got %v", err)
+	}
+}
+
+// object_id is half of UNIQUE (namespace, object_id) on catalog_items and of
+// the objects primary key. Stripping it would merge two distinct keys into one
+// row, so an unstorable identifier is rejected instead — permanently, so the
+// stream worker acks it off rather than redelivering it forever.
+func TestServiceIngest_RejectsUnstorableObjectID(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+	for _, id := range []string{"at://did\x00:plc/post", "at://did\xff/post"} {
+		_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: id, Content: "hello"})
+		if !errors.Is(err, ErrInvalidRequest) {
+			t.Errorf("object_id=%q: expected ErrInvalidRequest, got %v", id, err)
+		}
+	}
+	if repo.called != 0 {
+		t.Errorf("rejected object_id must not reach the repository, got %d calls", repo.called)
+	}
+}
+
+// Two object_ids differing only in bytes PostgreSQL cannot store must not
+// collapse onto one row — that would clobber one item's content and embedding
+// with the other's.
+func TestServiceIngest_UnstorableObjectIDDoesNotAliasACleanOne(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "ab", Content: "clean"}); err != nil {
+		t.Fatalf("clean ingest: %v", err)
+	}
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "a\x00b", Content: "dirty"}); err == nil {
+		t.Fatal("dirty object_id must not be accepted")
+	}
+	if repo.lastObj != "ab" || repo.lastContent != "clean" {
+		t.Errorf("clean row was overwritten: object_id=%q content=%q", repo.lastObj, repo.lastContent)
+	}
+}
+
+// metadata is jsonb. json.Marshal encodes a NUL as a six-character
+// backslash-u escape sequence, which jsonb rejects with SQLSTATE 22P05 --
+// so the map has to be cleaned before it is marshalled, not after. Keys,
+// nested maps, and slice elements all reach the same column.
+func TestServiceIngest_StripsUnstorableBytesFromMetadata(t *testing.T) {
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1",
+		Content:  "hello",
+		Metadata: map[string]any{
+			"so\x00urce": "blue\x00sky",
+			"langs":      []any{"e\x00n", "vi"},
+			"nested":     map[string]any{"k": "v\xffal"},
+			"count":      float64(3),
+		},
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+
+	want := map[string]any{
+		"source": "bluesky",
+		"langs":  []any{"en", "vi"},
+		"nested": map[string]any{"k": "val"},
+		"count":  float64(3),
+	}
+	if !reflect.DeepEqual(repo.lastMeta, want) {
+		t.Errorf("stored metadata = %#v, want %#v", repo.lastMeta, want)
+	}
+}
+
+// author_subject_id is TEXT on the objects table, written through inside the
+// catalog row's own transaction. It identifies a subject, so like object_id it
+// is rejected rather than stripped: quietly rewriting it would attribute the
+// content to a different author than the one the caller named.
+func TestServiceIngest_RejectsUnstorableAuthorSubjectID(t *testing.T) {
+	writer := &fakeAuthorWriter{}
+	svc := newSvc(&fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+	svc.SetAuthorWriter(writer)
+
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: "hello", AuthorSubjectID: "did:plc:a\x00b",
+	})
+	if !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest, got %v", err)
+	}
+	if len(writer.calls) != 0 {
+		t.Errorf("rejected author must not be written through, got %v", writer.calls)
+	}
+}
+
+// A data exception from the persist means the row is unstorable as sent, so it
+// becomes permanent and the stream worker acks it off. This is the backstop for
+// unstorable values Ingest does not model; the sanitize covers the ones it does.
+func TestServiceIngest_DataExceptionOnPersistIsUnstorable(t *testing.T) {
+	for _, code := range []string{"22021", "22P05", "22001"} {
+		repo := &fakeRepo{err: &pgconn.PgError{Code: code, Message: "data exception"}}
+		svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+		_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"})
+		if !errors.Is(err, ErrUnstorable) {
+			t.Errorf("SQLSTATE %s on persist: expected ErrUnstorable, got %v", code, err)
+		}
+	}
+}
+
+// Every other SQLSTATE from the persist stays transient — a connection loss or
+// a serialization conflict is exactly what redelivery exists for, and acking
+// those off would silently drop good content.
+func TestServiceIngest_NonDataExceptionOnPersistStaysTransient(t *testing.T) {
+	for _, code := range []string{"08006", "40001", "23505", "53200"} {
+		repo := &fakeRepo{err: &pgconn.PgError{Code: code, Message: "not a data exception"}}
+		svc := newSvc(repo, &fakeNSConfig{cfg: enabledCfg()}, &fakeXAdder{})
+
+		_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"})
+		if err == nil || errors.Is(err, ErrUnstorable) {
+			t.Errorf("SQLSTATE %s on persist: expected transient, got %v", code, err)
+		}
+	}
+}
+
+// The classification is scoped to the persist on purpose. The same SQLSTATE
+// raised by the namespace-config read is a defect in that query, not unstorable
+// content, so it must stay transient — otherwise one bad config query would ack
+// every item on the stream off as permanently rejected.
+func TestServiceIngest_DataExceptionOnConfigReadStaysTransient(t *testing.T) {
+	svc := newSvc(&fakeRepo{}, &fakeNSConfig{err: &pgconn.PgError{Code: "22021"}}, &fakeXAdder{})
+
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hello"})
+	if err == nil || errors.Is(err, ErrUnstorable) {
+		t.Fatalf("config-read data exception must stay transient, got %v", err)
+	}
+}
+
+// The size cap must measure what is actually stored, not what arrived —
+// otherwise content that is only oversized because of junk bytes is rejected
+// for a length it will never have on disk.
+func TestServiceIngest_SizeCapMeasuresSanitizedContent(t *testing.T) {
+	cfg := enabledCfg()
+	cfg.CatalogMaxContentBytes = 10
+	repo := &fakeRepo{res: &UpsertResult{Item: &Item{ID: 1}}}
+	svc := newSvc(repo, &fakeNSConfig{cfg: cfg}, &fakeXAdder{})
+
+	// 13 bytes on the wire, 8 once the NULs are gone.
+	if _, err := svc.Ingest(context.Background(), "ns", &IngestRequest{
+		ObjectID: "o1", Content: strings.Repeat("x", 8) + strings.Repeat("\x00", 5),
+	}); err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if want := strings.Repeat("x", 8); repo.lastContent != want {
+		t.Errorf("stored content = %q, want %q", repo.lastContent, want)
 	}
 }
 

@@ -14,9 +14,11 @@ import (
 // catalog.Service. It lives here because the import rule forbids
 // internal/ingest from importing the peer catalog domain — same pattern as
 // cmd/admin/nsconfig_adapter.go. Its one real job beyond field mapping is
-// error classification: catalog validation errors become
-// ingest.ErrCatalogItemRejected (permanent → acked off the stream), anything
-// else stays transient (left pending for redelivery).
+// error classification: the catalog domain's permanent failures — validation,
+// plus a persist that PostgreSQL rejected as unstorable — become
+// ingest.ErrCatalogItemRejected (acked off the stream), anything else stays
+// transient (left pending for redelivery). Deciding which is which stays in
+// catalog, so the vocabulary lives in one package.
 type catalogStreamAdapter struct {
 	svc *catalog.Service
 }
@@ -35,7 +37,8 @@ func (a *catalogStreamAdapter) IngestStreamItem(ctx context.Context, item *codoh
 		errors.Is(err, catalog.ErrEmptyContent),
 		errors.Is(err, catalog.ErrContentTooLarge),
 		errors.Is(err, catalog.ErrNamespaceNotFound),
-		errors.Is(err, catalog.ErrNamespaceNotEnabled):
+		errors.Is(err, catalog.ErrNamespaceNotEnabled),
+		errors.Is(err, catalog.ErrUnstorable):
 		return fmt.Errorf("%w: %v", ingest.ErrCatalogItemRejected, err)
 	default:
 		// Includes "row persisted but embed-stream publish failed": leaving

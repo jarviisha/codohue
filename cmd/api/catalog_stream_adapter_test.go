@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jarviisha/codohue/internal/catalog"
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -70,5 +73,40 @@ func TestCatalogStreamAdapter_InfraFailureStaysTransient(t *testing.T) {
 	})
 	if err == nil || errors.Is(err, ingest.ErrCatalogItemRejected) {
 		t.Fatalf("config lookup failure must stay transient, got %v", err)
+	}
+}
+
+// catalog classifies an unstorable persist as catalog.ErrUnstorable, and the
+// adapter must treat it as permanent: redelivery hands PostgreSQL the identical
+// bytes for the identical error, so leaving the entry pending pins the stream
+// against XTRIM forever.
+func TestCatalogStreamAdapter_UnstorableIsRejected(t *testing.T) {
+	a := &catalogStreamAdapter{svc: catalog.NewService(nil, &adapterFakeNsCfg{
+		err: fmt.Errorf("%w: %v", catalog.ErrUnstorable, &pgconn.PgError{Code: "22021"}),
+	}, nil)}
+
+	err := a.IngestStreamItem(context.Background(), &codohuetypes.CatalogStreamItem{
+		Namespace: "ns", ObjectID: "o1", Content: "hello",
+	})
+	if !errors.Is(err, ingest.ErrCatalogItemRejected) {
+		t.Fatalf("unstorable row must classify as rejected, got %v", err)
+	}
+}
+
+// A raw PostgreSQL error that catalog did NOT classify must stay transient,
+// whatever its SQLSTATE. Only the persist itself can prove content unstorable;
+// the same code from a config read or a lease probe is a defect in that query,
+// and acking those off would silently drop good content off the stream.
+func TestCatalogStreamAdapter_UnclassifiedPostgresErrorStaysTransient(t *testing.T) {
+	for _, code := range []string{"22021", "22P05", "08006", "40001"} {
+		a := &catalogStreamAdapter{svc: catalog.NewService(nil,
+			&adapterFakeNsCfg{err: &pgconn.PgError{Code: code, Message: "raw"}}, nil)}
+
+		err := a.IngestStreamItem(context.Background(), &codohuetypes.CatalogStreamItem{
+			Namespace: "ns", ObjectID: "o1", Content: "hello",
+		})
+		if err == nil || errors.Is(err, ingest.ErrCatalogItemRejected) {
+			t.Errorf("unclassified SQLSTATE %s must stay transient, got %v", code, err)
+		}
 	}
 }

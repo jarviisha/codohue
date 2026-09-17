@@ -19,12 +19,14 @@ import (
 const catalogConsumerGroup = "codohue-catalog-ingest"
 
 // ErrCatalogItemRejected marks a stream-delivered catalog item as permanently
-// unprocessable: it failed the same validation the HTTP ingest path applies
-// (empty content, over the size cap, namespace missing or not in catalog
-// mode). The worker acks such entries off the stream and records the
-// rejection; any other error is treated as transient and left pending for
-// redelivery. The cmd/api adapter wraps catalog-domain validation errors with
-// this sentinel because the import rule keeps this package blind to them.
+// unprocessable: either it failed the same validation the HTTP ingest path
+// applies (empty content, over the size cap, unstorable object_id, namespace
+// missing or not in catalog mode), or PostgreSQL refused the row itself as
+// unstorable, which redelivery cannot change. The worker acks such entries
+// off the stream and records the rejection; any other error is treated as
+// transient and left pending for redelivery. The cmd/api adapter wraps the
+// catalog domain's permanent errors with this sentinel because the import
+// rule keeps this package blind to them.
 var ErrCatalogItemRejected = errors.New("ingest: catalog item rejected")
 
 // catalogIngestor is the seam to the catalog domain. Satisfied by an adapter

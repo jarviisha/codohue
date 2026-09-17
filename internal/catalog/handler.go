@@ -154,7 +154,10 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, ns string, 
 		return
 	}
 	switch {
-	case errors.Is(err, ErrInvalidRequest):
+	// ErrUnstorable joins ErrInvalidRequest rather than taking a code of its
+	// own: both mean the caller sent a value the store will not accept, and
+	// reusing the code keeps the public error vocabulary unchanged.
+	case errors.Is(err, ErrInvalidRequest), errors.Is(err, ErrUnstorable):
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", err.Error())
 	case errors.Is(err, ErrEmptyContent):
 		httpapi.WriteError(w, http.StatusUnprocessableEntity, "empty_content", err.Error())
