@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -21,6 +22,9 @@ func TestValidateUpsert_RangeChecks(t *testing.T) {
 	}{
 		{"nil request", nil, true},
 		{"empty request", &UpsertRequest{}, true},
+		{"valid provisioning key", &UpsertRequest{ProvisionAPIKey: strings.Repeat("ab", 32)}, true},
+		{"short provisioning key", &UpsertRequest{ProvisionAPIKey: "abcd"}, false},
+		{"nonhex provisioning key", &UpsertRequest{ProvisionAPIKey: strings.Repeat("zz", 32)}, false},
 		{"valid full", &UpsertRequest{
 			ActionWeights: map[string]float64{"click": 1, "like": 3},
 			Lambda:        fptr(0.05), Gamma: fptr(0), Alpha: fptr(0.7),
