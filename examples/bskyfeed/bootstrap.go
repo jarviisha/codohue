@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/http/cookiejar"
 	"time"
 )
 
@@ -27,13 +26,7 @@ var bootstrapActionWeights = map[string]float64{
 // upsert has PATCH semantics, so re-running it on every container restart is
 // safe and leaves any operator edits to unrelated fields alone.
 func bootstrap(ctx context.Context, cfg config) error {
-	admin, err := newAdminClient(cfg.adminURL, cfg.adminKey)
-	if err != nil {
-		return err
-	}
-	if err := admin.login(ctx); err != nil {
-		return err
-	}
+	admin := newAdminClient(cfg.adminURL, cfg.adminKey)
 	if err := admin.upsertNamespace(ctx, cfg.namespace, cfg.embeddingDim); err != nil {
 		return err
 	}
@@ -42,30 +35,22 @@ func bootstrap(ctx context.Context, cfg config) error {
 	return nil
 }
 
-// adminClient talks to cmd/admin over the session-cookie API. It exists only
-// to provision the namespace — all data-plane traffic goes to Redis instead.
+// adminClient talks to cmd/admin with a service token. It exists only to
+// provision the namespace — all data-plane traffic goes to Redis instead.
+// Bearer credentials never create a console session, so there is no login
+// step and no cookie to carry.
 type adminClient struct {
 	baseURL string
-	apiKey  string
+	token   string
 	http    *http.Client
 }
 
-func newAdminClient(baseURL, apiKey string) (*adminClient, error) {
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return nil, err
-	}
+func newAdminClient(baseURL, token string) *adminClient {
 	return &adminClient{
 		baseURL: baseURL,
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: 15 * time.Second, Jar: jar},
-	}, nil
-}
-
-// login creates a session; the cookie jar carries it on later requests.
-func (a *adminClient) login(ctx context.Context) error {
-	return a.do(ctx, http.MethodPost, "/api/v1/auth/sessions",
-		map[string]string{"api_key": a.apiKey}, http.StatusCreated)
+		token:   token,
+		http:    &http.Client{Timeout: 15 * time.Second},
+	}
 }
 
 // upsertNamespace creates or updates the namespace with catalog auto-embedding
@@ -126,6 +111,7 @@ func (a *adminClient) do(ctx context.Context, method, path string, in any, okSta
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("Authorization", "Bearer "+a.token)
 	resp, err := a.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("%s %s: %w", method, path, err)
