@@ -135,6 +135,11 @@ func TestServiceTokenIsolationAndRevocation(t *testing.T) {
 	resp = doRequest(t, "POST", baseURL+"/v1/namespaces/"+testNS+"/events", token, map[string]any{})
 	assertStatus(t, resp, 403)
 	resp.Body.Close()
+	for _, method := range []string{"PUT", "DELETE"} {
+		resp = doRequest(t, method, baseURL+"/v1/namespaces/"+testNS+"/objects/rankings", token, nil)
+		assertStatus(t, resp, 403)
+		resp.Body.Close()
+	}
 	ensureAdminServer(t)
 	resp = doRequest(t, "GET", adminBaseURL+"/api/admin/v1/health", token, nil)
 	assertStatus(t, resp, 403)

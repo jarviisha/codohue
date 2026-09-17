@@ -149,7 +149,8 @@ func RequireNamespace(adminKey string, getHash KeyHashFn, extractNamespace func(
 				actor, err := serviceTokens[0](r.Context(), token)
 				if err == nil {
 					permission := "data:read"
-					if r.Method != "GET" && r.Method != "HEAD" && !strings.HasSuffix(r.URL.Path, "/rankings") {
+					isRankingRead := r.Method == http.MethodPost && r.URL.Path == "/v1/namespaces/"+namespace+"/rankings"
+					if r.Method != http.MethodGet && r.Method != http.MethodHead && !isRankingRead {
 						permission = "data:write"
 					}
 					if actor.Allows(permission, namespace) {

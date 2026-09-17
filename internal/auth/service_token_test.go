@@ -17,7 +17,9 @@ func TestRequireNamespaceServicePermissions(t *testing.T) {
 	}{
 		{"read", "GET", "/recommendations", "data:read", "shop", 204},
 		{"head", "HEAD", "/recommendations", "data:read", "shop", 204},
-		{"ranking reads", "POST", "/rankings", "data:read", "shop", 204},
+		{"ranking reads", "POST", "/v1/namespaces/shop/rankings", "data:read", "shop", 204},
+		{"object named rankings cannot be deleted", "DELETE", "/v1/namespaces/shop/objects/rankings", "data:read", "shop", 403},
+		{"object named rankings cannot be updated", "PUT", "/v1/namespaces/shop/objects/rankings", "data:read", "shop", 403},
 		{"write", "POST", "/events", "data:write", "shop", 204},
 		{"wildcard namespace", "GET", "/recommendations", "data:read", "*", 204},
 		{"read cannot write", "POST", "/events", "data:read", "shop", 403},
