@@ -1,0 +1,9 @@
+{
+  "token": "example-token",
+  "permissions": [
+    "data:read"
+  ],
+  "namespaces": [
+    "shop"
+  ]
+}

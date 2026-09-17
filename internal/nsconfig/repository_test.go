@@ -2,10 +2,13 @@ package nsconfig
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func openTestDB(t *testing.T) *pgxpool.Pool {
@@ -28,6 +31,70 @@ func cleanupNS(t *testing.T, db *pgxpool.Pool, ns string) {
 		db.Exec(context.Background(), //nolint:errcheck // test cleanup, failure is not critical
 			`DELETE FROM namespace_configs WHERE namespace = $1`, ns)
 	})
+}
+
+func TestRepositoryProvisionRetriesAndConflicts(t *testing.T) {
+	db := openTestDB(t)
+	const ns = "nsconfig_test_provision"
+	cleanupNS(t, db, ns)
+	ctx := context.Background()
+	repo := NewRepository(db)
+	req := &UpsertRequest{ProvisionAPIKey: strings.Repeat("ab", 32), Lambda: ptr(0.5)}
+	initial, err := repo.UpsertWithCatalog(ctx, ns, req, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(initial.APIKeyHash), []byte(req.ProvisionAPIKey)); err != nil {
+		t.Fatalf("provisioned key does not authenticate: %v", err)
+	}
+	if _, err := repo.Upsert(ctx, ns, &UpsertRequest{Lambda: ptr(0.8)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.UpsertWithCatalog(ctx, ns, req, nil)
+	if err != nil {
+		t.Fatalf("identical retry: %v", err)
+	}
+	if got.Lambda != 0.8 || got.APIKeyHash != initial.APIKeyHash {
+		t.Fatal("provision retry overwrote an operator edit or rotated the key")
+	}
+	for _, conflicting := range []*UpsertRequest{
+		{ProvisionAPIKey: strings.Repeat("cd", 32), Lambda: ptr(0.5)},
+		{ProvisionAPIKey: req.ProvisionAPIKey, Lambda: ptr(0.6)},
+	} {
+		if _, err := repo.UpsertWithCatalog(ctx, ns, conflicting, nil); !errors.Is(err, ErrProvisionConflict) {
+			t.Fatalf("conflicting provision: got %v, want ErrProvisionConflict", err)
+		}
+	}
+	got, err = repo.Get(ctx, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lambda != 0.8 || got.APIKeyHash != initial.APIKeyHash {
+		t.Fatal("conflicting provision changed persisted configuration")
+	}
+}
+
+func TestRepositoryProvisionCannotAdoptExistingNamespace(t *testing.T) {
+	db := openTestDB(t)
+	const ns = "nsconfig_test_provision_existing"
+	cleanupNS(t, db, ns)
+	ctx := context.Background()
+	repo := NewRepository(db)
+	if _, err := repo.Upsert(ctx, ns, &UpsertRequest{Lambda: ptr(0.7)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertWithCatalog(ctx, ns, &UpsertRequest{
+		ProvisionAPIKey: strings.Repeat("ab", 32), Lambda: ptr(0.5),
+	}, nil); !errors.Is(err, ErrProvisionConflict) {
+		t.Fatalf("existing namespace: got %v, want ErrProvisionConflict", err)
+	}
+	got, err := repo.Get(ctx, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lambda != 0.7 || got.APIKeyHash != "" {
+		t.Fatal("provisioning modified an existing namespace")
+	}
 }
 
 func TestRepositoryUpsert_Create(t *testing.T) {

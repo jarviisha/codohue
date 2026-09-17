@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/core/access"
 )
 
 // newJSONRequest builds an HTTP request with an optional JSON-encoded body.
@@ -38,6 +40,7 @@ func newJSONRequest(t testing.TB, method, url string, body any) *http.Request {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	req.Header.Set("X-Codohue-CSRF", "1")
 	return req
 }
 
@@ -72,6 +75,10 @@ func ensureAdminServer(t testing.TB) {
 	t.Helper()
 
 	adminOnce.Do(func() {
+		if err := access.NewStore(testDB).SetAccount(context.Background(), "test-harness", "e2e_owner", "e2e-owner-password", "owner", false, true); err != nil {
+			adminStartup = err
+			return
+		}
 		logFile, err := os.CreateTemp("", "e2e-admin-*.log")
 		if err != nil {
 			adminStartup = err
@@ -85,7 +92,9 @@ func ensureAdminServer(t testing.TB) {
 			"REDIS_URL="+envOrDefault("REDIS_URL", "redis://localhost:6379"),
 			"QDRANT_HOST="+envOrDefault("QDRANT_HOST", "localhost"),
 			"QDRANT_PORT="+envOrDefault("QDRANT_PORT", "6334"),
-			"CODOHUE_ADMIN_API_KEY="+adminKey,
+			"CODOHUE_ADMIN_API_KEY=",
+			"CODOHUE_LEGACY_ADMIN_AUTH=false",
+			"CODOHUE_ADMIN_PROXY_TOKEN="+adminKey,
 			"CODOHUE_ADMIN_PORT="+adminPort,
 			"CODOHUE_API_URL="+baseURL,
 			"CODOHUE_LOG_FORMAT=text",
@@ -158,9 +167,12 @@ func waitForHTTPResponse(url string, timeout time.Duration) error {
 func adminLogin(t testing.TB) *http.Cookie {
 	t.Helper()
 	ensureAdminServer(t)
+	if _, err := testDB.Exec(context.Background(), "DELETE FROM admin_login_buckets"); err != nil {
+		t.Fatal(err)
+	}
 
 	resp := doRequest(t, http.MethodPost, adminBaseURL+"/api/v1/auth/sessions", "", map[string]any{
-		"api_key": adminKey,
+		"username": "e2e_owner", "password": "e2e-owner-password",
 	})
 	defer resp.Body.Close()
 	assertStatus(t, resp, http.StatusCreated)
@@ -195,7 +207,7 @@ func TestAdmin_SessionLifecycleGuardsProtectedRoutes(t *testing.T) {
 
 	// Wrong key is rejected.
 	wrong := doRequest(t, http.MethodPost, adminBaseURL+"/api/v1/auth/sessions", "", map[string]any{
-		"api_key": "definitely-not-the-key",
+		"username": "e2e_owner", "password": "definitely-not-the-password",
 	})
 	assertStatus(t, wrong, http.StatusUnauthorized)
 	wrong.Body.Close()

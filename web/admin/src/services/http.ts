@@ -27,6 +27,7 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      'X-Codohue-CSRF': '1',
       ...init?.headers,
     },
   })

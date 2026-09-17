@@ -34,7 +34,7 @@ In the Compose stack, enable the profile in `.env`:
 COMPOSE_PROFILES=bskyfeed
 ```
 
-then `make up-d`. Outside Compose, with the stack already running:
+Provision the `bluesky` catalog namespace first using the [trusted operator provisioning path](../../deploy/operator-auth.md), then run `make up-d`. The feeder is a trusted Redis producer, not an isolated HTTP consumer. It receives no PostgreSQL credentials. Outside Compose, with the stack already running:
 
 ```bash
 make run-bskyfeed
@@ -49,16 +49,18 @@ Environment only — there are no flags.
 | `CODOHUE_BSKY_NAMESPACE` | `bluesky` | Namespace to feed |
 | `CODOHUE_BSKY_SAMPLE_PERCENT` | `100` | Share of actors to keep, 1–100 |
 | `CODOHUE_BSKY_EMBEDDING_DIM` | `256` | Dense dimension; one of 64/128/256/512 |
-| `CODOHUE_BSKY_BOOTSTRAP` | `true` | Provision the namespace on startup |
+| `CODOHUE_BSKY_BOOTSTRAP` | `false` | Provision the namespace on startup |
 | `CODOHUE_BSKY_JETSTREAM_URL` | public Jetstream instance | Override the endpoint |
-| `REDIS_URL`, `CODOHUE_ADMIN_URL`, `CODOHUE_ADMIN_API_KEY` | shared | Reused from the main app config |
+| `REDIS_URL` | `redis://localhost:6379` | Trusted stream producer connection |
+| `CODOHUE_ADMIN_URL` | `http://localhost:2002` | Optional bootstrap endpoint |
+| `CODOHUE_ADMIN_API_KEY` | empty | Explicit namespace-scoped service token for optional bootstrap; Compose reads `CODOHUE_BSKY_PROVISION_TOKEN` |
 
 `CODOHUE_BSKY_SAMPLE_PERCENT` samples **by actor**, not by record: it keeps a
 deterministic subset of DIDs and every record those DIDs produce. Sampling
 records instead would thin every actor's history and collapse the
 co-occurrence signal, which is exactly what CF depends on.
 
-With `CODOHUE_BSKY_BOOTSTRAP=true` the feeder upserts the namespace with
+With `CODOHUE_BSKY_BOOTSTRAP=true` and a service token granting `admin:read,admin:write` for this namespace, the feeder upserts the namespace with
 `dense_source=catalog` and the `internal-hashing-ngrams@v1` strategy. The
 upsert has PATCH semantics, so restarts are safe.
 

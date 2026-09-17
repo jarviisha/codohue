@@ -32,7 +32,7 @@ Apply migrations to the same database before starting the apps.
 Keep `compose.prod.yaml`, `deploy/deploy.sh`, and a private `.env` together
 on the host. Configure the production section of `.env.example`:
 
-- Set `CODOHUE_ADMIN_API_KEY` and an `IMAGE_TAG` matching the published release.
+- Follow [operator provisioning](operator-auth.md) to create secret files; set `IMAGE_TAG` to a release containing migration 028. Production rejects the legacy admin key mode.
 - For each local infrastructure service, enable its profile: `local-db`,
   `local-redis`, or `local-qdrant`. Set `CODOHUE_POSTGRES_PASSWORD` for local DB.
 - For each external service, omit its profile and set its `CODOHUE_*` connection

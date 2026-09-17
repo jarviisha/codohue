@@ -30,6 +30,7 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 	// to the SQL, where COALESCE leaves the column alone. Dereferencing here
 	// is what used to turn an unsent field into a zero value and wipe it.
 	nsReq := &nsconfig.UpsertRequest{
+		ProvisionAPIKey: req.ProvisionAPIKey,
 		ActionWeights:   req.ActionWeights,
 		Lambda:          req.Lambda,
 		Gamma:           req.Gamma,
@@ -86,6 +87,8 @@ func (a *nsConfigAdapter) RotateAPIKey(ctx context.Context, namespace string) (*
 func mapNsConfigError(err error) error {
 	var dimErr *nsconfig.DimensionMismatchError
 	switch {
+	case errors.Is(err, nsconfig.ErrProvisionConflict):
+		return fmt.Errorf("%w: %s", admin.ErrProvisionConflict, err.Error())
 	case errors.Is(err, nsconfig.ErrCatalogViaUpsert):
 		return fmt.Errorf("%w: %s", admin.ErrCatalogSourceViaUpsert, err.Error())
 	case errors.Is(err, nsconfig.ErrEmbeddingDimLocked):

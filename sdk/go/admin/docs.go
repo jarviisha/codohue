@@ -1,7 +1,7 @@
 // Package admin is a bearer-authenticated client for Codohue's admin plane
 // (cmd/admin, port 2002). It exists so provisioning is a supported call
 // instead of a hand-rolled session-cookie dance in every consumer: the admin
-// server accepts `Authorization: Bearer <CODOHUE_ADMIN_API_KEY>` on
+// server accepts `Authorization: Bearer <service-token>` on
 // /api/admin/v1/* directly.
 //
 // The paved road is ProvisionCatalogNamespace — one request that creates or

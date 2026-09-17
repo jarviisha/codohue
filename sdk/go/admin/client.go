@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// Client talks to the Codohue admin server with the global admin key as a
+// Client talks to the Codohue admin server with the administrative service token as a
 // bearer token. It never handles session cookies.
 type Client struct {
 	baseURL  string
@@ -56,6 +56,9 @@ func New(baseURL, adminKey string, opts ...Option) (*Client, error) {
 // Zero-value strategy fields default to the built-in hashing+ngrams strategy
 // with the params the server expects for the given dimension.
 type ProvisionCatalogRequest struct {
+	// ProvisionAPIKey enables immutable, retry-safe provisioning with a pre-generated namespace key.
+	ProvisionAPIKey string
+
 	// EmbeddingDim must match a dimension the chosen strategy supports
 	// (built-in strategy: 64, 128, 256 or 512).
 	EmbeddingDim int
@@ -114,6 +117,9 @@ func (c *Client) ProvisionCatalogNamespace(ctx context.Context, ns string, req P
 		"catalog_strategy_id":      strategyID,
 		"catalog_strategy_version": strategyVersion,
 		"catalog_strategy_params":  params,
+	}
+	if req.ProvisionAPIKey != "" {
+		body["provision_api_key"] = req.ProvisionAPIKey
 	}
 	if req.ActionWeights != nil {
 		body["action_weights"] = req.ActionWeights

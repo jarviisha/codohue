@@ -45,6 +45,8 @@ services:
 
   admin:
     <<: *app
+    environment:
+      CODOHUE_ADMIN_HOST: "${CODOHUE_ADMIN_HOST:-127.0.0.1}"
     build:
       context: .
       target: admin

@@ -17,6 +17,7 @@ import (
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/compute"
 	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/access"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
@@ -36,6 +37,12 @@ import (
 var registerMetricsFn = metrics.Register
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "access" {
+		if err := runAccessCLI(os.Args[2:]); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := dispatchAdminCommand(os.Args[1:], run, runLifecycleCLI, runIdmapRepairCLI); err != nil {
 		log.Fatal(err)
 	}
@@ -166,7 +173,11 @@ func run() error {
 
 	repo := admin.NewRepository(db)
 	nsAdapter := &nsConfigAdapter{svc: nsConfigSvc}
-	svc := admin.NewService(repo, cfg.APIURL, cfg.AdminAPIKey, redisClient, qdrantClient, job, nsAdapter)
+	proxyToken := cfg.ProxyToken
+	if proxyToken == "" {
+		proxyToken = cfg.AdminAPIKey
+	}
+	svc := admin.NewService(repo, cfg.APIURL, proxyToken, redisClient, qdrantClient, job, nsAdapter)
 	svc.SetLifecycleCoordinator(&lifecycleCoordinatorAdapter{service: lifecycleSvc, repo: lifecycleRepo})
 
 	// Catalog auto-embedding admin endpoints (US2). The adapter bridges
@@ -178,19 +189,34 @@ func run() error {
 	svc.SetCatalogBacklogReader(newCatalogBacklogAdapter(repo, backlogRedisClient(redisClient)))
 	svc.SetEventRateTracker(eventRate)
 
-	// Session tokens are signed with independent random material — never the
-	// API key. No pinned secret means a fresh one per boot: every restart
-	// logs all operators out, which multi-replica deployments avoid by
-	// setting CODOHUE_ADMIN_SESSION_SECRET.
-	sessions, err := admin.NewSessionManager([]byte(cfg.SessionSecret))
+	identities := access.NewStore(db)
+	if cfg.BootstrapUsername != "" {
+		if err := identities.Bootstrap(ctx, cfg.BootstrapUsername, cfg.BootstrapPassword); err != nil {
+			return fmt.Errorf("bootstrap owner: %w", err)
+		}
+	}
+	proxies, err := admin.ParseTrustedProxies(cfg.TrustedProxies)
 	if err != nil {
-		return fmt.Errorf("init session manager: %w", err)
+		return fmt.Errorf("trusted proxies: %w", err)
 	}
-	if cfg.SessionSecret == "" {
-		slog.Info("admin session secret generated for this boot; restarts invalidate sessions (set CODOHUE_ADMIN_SESSION_SECRET to pin)")
-	}
+	var sessions *admin.SessionManager
+	h := admin.NewHandler(svc, "", sessions)
+	h.SetIdentity(identities, admin.IdentityOptions{SecureCookies: cfg.SecureCookies, TrustedProxies: proxies, AllowedOrigin: cfg.AllowDevOrigin})
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := identities.Prune(ctx); err != nil {
+					slog.Error("prune expired security state", "error", err)
+				}
+			}
+		}
+	}()
 
-	h := admin.NewHandler(svc, cfg.AdminAPIKey, sessions)
 	h.SetEventBus(bus)
 
 	r := newAdminRouter(h, sessions, cfg.AdminAPIKey, cfg.AllowDevOrigin, cfg.ObservabilityToken)
@@ -207,7 +233,7 @@ func run() error {
 	})
 
 	srv := &http.Server{
-		Addr:    ":" + cfg.AdminPort,
+		Addr:    net.JoinHostPort(cfg.AdminHost, cfg.AdminPort),
 		Handler: r,
 		// ReadTimeout is fine for SSE — the handshake completes well within
 		// it and SSE is one-way (server → client) after that. WriteTimeout
@@ -226,7 +252,7 @@ func run() error {
 	}
 
 	go func() {
-		slog.Info("admin dashboard listening", "addr", ":"+cfg.AdminPort)
+		slog.Info("admin dashboard listening", "addr", net.JoinHostPort(cfg.AdminHost, cfg.AdminPort))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("admin server error", "error", err)
 		}

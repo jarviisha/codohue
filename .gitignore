@@ -64,3 +64,6 @@ reports/
 /admin
 /embedder
 examples/loadgen/loadgen
+
+# Local Docker secret files
+.secrets/

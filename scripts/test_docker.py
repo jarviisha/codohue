@@ -32,6 +32,21 @@ class DockerConfigTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)["services"]
 
+    def test_operator_provisioning_defaults(self):
+        for filename in ("compose.yaml", "compose.prod.yaml"):
+            services = self.compose(filename, CODOHUE_DATABASE_URL="postgres://example")
+            admin = services["admin"]
+            self.assertEqual(admin["ports"][0]["host_ip"], "127.0.0.1")
+            self.assertEqual(admin["depends_on"]["provision"]["condition"], "service_completed_successfully")
+            self.assertEqual(admin["environment"]["CODOHUE_ADMIN_PROXY_TOKEN_FILE"], "/run/secrets/admin_proxy_token")
+            self.assertEqual([secret["source"] for secret in admin["secrets"]], ["admin_proxy_token"])
+            self.assertNotIn("dev-secret-key", json.dumps(services))
+            self.assertEqual(services["provision"]["restart"], "no")
+            self.assertEqual(services["provision"]["environment"]["CODOHUE_PROVISION_APPLICATION"], "true")
+            if filename == "compose.prod.yaml":
+                self.assertEqual(admin["environment"]["CODOHUE_ENV"], "production")
+                self.assertNotIn("CODOHUE_ADMIN_API_KEY", admin["environment"])
+
     def test_app_env_overrides_reach_workers(self):
         (self.root / ".env").write_text(
             "CODOHUE_OBSERVABILITY_TOKEN=base\nCODOHUE_STREAM_RETENTION_ENABLED=false\n"

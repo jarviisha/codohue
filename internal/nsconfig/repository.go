@@ -2,14 +2,22 @@ package nsconfig
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
 )
+
+// ErrProvisionConflict rejects differing provisioning credentials or initial configuration.
+var ErrProvisionConflict = errors.New("namespace provisioning conflicts with existing credentials or desired configuration")
 
 type rowScanner interface {
 	Scan(dest ...any) error
@@ -65,10 +73,61 @@ const schemaEmbeddingDim = 64
 func (r *Repository) UpsertWithCatalog(ctx context.Context, ns string, req *UpsertRequest, catalogReq *UpdateCatalogRequest) (*namespace.Config, error) {
 	var cfg *namespace.Config
 	err := r.withinTx(ctx, func(tx *Repository) error {
+		if r.db != nil {
+			if err := tx.execFn(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,5757))`, ns); err != nil {
+				return err
+			}
+		}
+		var desiredHash string
+		if req.ProvisionAPIKey != "" {
+			clean := *req
+			clean.ProvisionAPIKey = ""
+			payload, err := json.Marshal(struct {
+				Base    UpsertRequest
+				Catalog *UpdateCatalogRequest
+			}{clean, catalogReq})
+			if err != nil {
+				return fmt.Errorf("marshal provisioning configuration: %w", err)
+			}
+			digest := sha256.Sum256(payload)
+			desiredHash = hex.EncodeToString(digest[:])
+			existing, err := tx.Get(ctx, ns)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				var stored string
+				err = tx.queryRowFn(ctx, `SELECT desired_hash FROM namespace_provisions WHERE namespace=$1`, ns).Scan(&stored)
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrProvisionConflict
+				}
+				if err != nil {
+					return err
+				}
+				if stored != desiredHash || bcrypt.CompareHashAndPassword([]byte(existing.APIKeyHash), []byte(req.ProvisionAPIKey)) != nil {
+					return ErrProvisionConflict
+				}
+				cfg = existing
+				return nil
+			}
+		}
 		var upsertErr error
 		cfg, upsertErr = tx.Upsert(ctx, ns, req)
 		if upsertErr != nil {
 			return upsertErr
+		}
+		if req.ProvisionAPIKey != "" {
+			hash, err := bcrypt.GenerateFromPassword([]byte(req.ProvisionAPIKey), bcryptCost)
+			if err != nil {
+				return fmt.Errorf("hash provisioning key: %w", err)
+			}
+			if _, err = tx.SetAPIKeyHash(ctx, ns, string(hash)); err != nil {
+				return err
+			}
+			cfg.APIKeyHash = string(hash)
+			if err := tx.execFn(ctx, `INSERT INTO namespace_provisions(namespace,desired_hash) VALUES($1,$2)`, ns, desiredHash); err != nil {
+				return err
+			}
 		}
 		if catalogReq == nil {
 			return nil

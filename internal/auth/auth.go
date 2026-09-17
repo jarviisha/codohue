@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jarviisha/codohue/internal/core/access"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -38,17 +39,9 @@ func ConstantTimeEqual(a, b string) bool {
 	return subtle.ConstantTimeCompare(ha[:], hb[:]) == 1
 }
 
-// ValidateNamespaceKey returns true if the token is authorized for the given namespace.
-//
-//   - The global admin key is accepted for EVERY namespace. It is the
-//     credential the admin server proxies data-plane reads with, and it
-//     already grants full control through the admin-plane login, so
-//     restricting its data-plane reach bought little while breaking the admin
-//     panel's proxied recommendations/trending for any provisioned namespace.
-//   - Otherwise, when the namespace has a provisioned key, that key is
-//     accepted; when it has none, only the admin key is.
-//   - When the hash lookup fails, the request is denied: authorization that
-//     cannot be established is not granted.
+// ValidateNamespaceKey checks a namespace's bcrypt credential. adminKey must
+// be empty except during an explicitly enabled legacy migration period, when
+// it retains universal namespace access. Lookup failures always deny access.
 func ValidateNamespaceKey(ctx context.Context, token, adminKey string, getHash KeyHashFn, namespace string) bool {
 	valid, _ := validateNamespaceKey(ctx, token, adminKey, getHash, namespace)
 	return valid
@@ -64,8 +57,7 @@ func validateNamespaceKey(ctx context.Context, token, adminKey string, getHash K
 		return false, true
 	}
 
-	// Admin key first: a constant-time compare that never touches the DB, so
-	// the admin server's proxy calls stay cheap and work for every namespace.
+	// Compatibility only: production configuration leaves adminKey empty.
 	if adminKey != "" && ConstantTimeEqual(token, adminKey) {
 		return true, true
 	}
@@ -136,10 +128,11 @@ func (c *negativeCache) put(token, namespace string) {
 	c.entries[negKey(token, namespace)] = now.Add(negativeCacheTTL)
 }
 
-// RequireNamespace returns middleware that validates a namespace-scoped API key.
-// extractNamespace is called to obtain the namespace from the incoming request
-// (e.g. from a URL path parameter or query string).
-func RequireNamespace(adminKey string, getHash KeyHashFn, extractNamespace func(*http.Request) string) func(http.Handler) http.Handler {
+// ServiceTokenLookup resolves an explicitly issued service credential.
+type ServiceTokenLookup func(context.Context, string) (access.Actor, error)
+
+// RequireNamespace validates namespace keys or explicitly scoped service credentials.
+func RequireNamespace(adminKey string, getHash KeyHashFn, extractNamespace func(*http.Request) string, serviceTokens ...ServiceTokenLookup) func(http.Handler) http.Handler {
 	neg := newNegativeCache()
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -152,6 +145,22 @@ func RequireNamespace(adminKey string, getHash KeyHashFn, extractNamespace func(
 				return
 			}
 
+			if len(serviceTokens) > 0 && token != "" {
+				actor, err := serviceTokens[0](r.Context(), token)
+				if err == nil {
+					permission := "data:read"
+					isRankingRead := r.Method == http.MethodPost && r.URL.Path == "/v1/namespaces/"+namespace+"/rankings"
+					if r.Method != http.MethodGet && r.Method != http.MethodHead && !isRankingRead {
+						permission = "data:write"
+					}
+					if actor.Allows(permission, namespace) {
+						next.ServeHTTP(w, r)
+						return
+					}
+					httpapi.WriteError(w, 403, "forbidden", "credential lacks permission")
+					return
+				}
+			}
 			if neg.hit(token, namespace) {
 				httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid or missing bearer token")
 				return

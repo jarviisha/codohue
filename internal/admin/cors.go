@@ -23,7 +23,7 @@ func CORSMiddleware(origin string) func(http.Handler) http.Handler {
 				h.Add("Vary", "Origin")
 				if r.Method == http.MethodOptions {
 					h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-					h.Set("Access-Control-Allow-Headers", "Content-Type, Cookie, Last-Event-ID")
+					h.Set("Access-Control-Allow-Headers", "Content-Type, X-Codohue-CSRF, Cookie, Last-Event-ID")
 					h.Set("Access-Control-Max-Age", "600")
 					w.WriteHeader(http.StatusNoContent)
 					return

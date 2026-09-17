@@ -1,0 +1,5 @@
+{
+  "action_weights": {"view": 1, "like": 3, "purchase": 5},
+  "embedding_dim": 64,
+  "dense_source": "disabled"
+}

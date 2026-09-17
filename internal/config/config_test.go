@@ -17,7 +17,7 @@ func TestLoadAPI_RequiresDatabaseURL(t *testing.T) {
 	})
 }
 
-func TestLoadAPI_RequiresAdminAPIKey(t *testing.T) {
+func TestLoadAPI_RequiresKeyInLegacyMode(t *testing.T) {
 	withEnv(t, map[string]string{
 		"DATABASE_URL":          "postgres://db",
 		"CODOHUE_ADMIN_API_KEY": "",
@@ -278,6 +278,8 @@ func TestGetEnv_Fallback(t *testing.T) {
 }
 
 func withEnv(t *testing.T, values map[string]string, fn func()) {
+	t.Setenv("CODOHUE_LEGACY_ADMIN_AUTH", "true")
+	t.Setenv("CODOHUE_ENV", "")
 	t.Helper()
 	for key, value := range values {
 		t.Setenv(key, value)

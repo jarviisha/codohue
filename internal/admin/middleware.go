@@ -25,17 +25,9 @@ func RequireSession(sessions *SessionManager) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireSessionOrBearer authenticates either the browser session cookie or
-// `Authorization: Bearer <admin key>` — the path automation uses so it does
-// not have to impersonate a browser (exchange the key for a cookie first).
-//
-// A bearer header, when present, is authoritative: it is validated and the
-// cookie is ignored, so a stale cookie next to a valid key (or vice versa)
-// behaves deterministically. Failed bearer attempts consume the same
-// failed-only per-IP budget the login endpoint uses — a correct key is never
-// throttled, and this route would otherwise be un-throttled brute-force
-// surface. An empty configured key disables the bearer path entirely rather
-// than matching empty tokens.
+// RequireSessionOrBearer is the isolated-handler authentication adapter.
+// Production uses Handler.RequireIdentity and the shared identity store.
+// Attempts are reserved before checking a legacy key, including matching guesses.
 func RequireSessionOrBearer(sessions *SessionManager, adminKey string) func(http.Handler) http.Handler {
 	limiter := newLoginRateLimiter()
 	return func(next http.Handler) http.Handler {
@@ -47,12 +39,11 @@ func RequireSessionOrBearer(sessions *SessionManager, adminKey string) func(http
 					return
 				}
 				ip := clientIP(r)
+				if !limiter.Allow(ip) {
+					httpapi.WriteError(w, 429, "rate_limited", "too many attempts")
+					return
+				}
 				if adminKey == "" || !constantTimeEqual(token, adminKey) {
-					if limiter.Blocked(ip) {
-						httpapi.WriteError(w, http.StatusTooManyRequests, "rate_limited", "too many failed attempts; retry later")
-						return
-					}
-					limiter.RecordFailure(ip)
 					httpapi.WriteError(w, http.StatusUnauthorized, "unauthorized", "invalid bearer token")
 					return
 				}

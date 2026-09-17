@@ -350,7 +350,8 @@ type TrendingAdminEntry struct {
 	CacheTTLSec int     `json:"cache_ttl_sec"` // -1 = no expiry, -2 = key missing
 }
 
-// CreateSessionRequest is the payload for POST /api/v1/auth/sessions.
+// CreateSessionRequest is the isolated legacy-handler input. Production uses
+// codohuetypes.OperatorSessionRequest.
 type CreateSessionRequest struct {
 	APIKey string `json:"api_key"`
 }
@@ -362,6 +363,8 @@ type CreateSessionResponse struct {
 
 // NamespaceUpsertRequest is the payload for PUT /api/admin/v1/namespaces/{ns}.
 type NamespaceUpsertRequest struct {
+	// ProvisionAPIKey is an immutable, caller-supplied application credential for initial provisioning.
+	ProvisionAPIKey string             `json:"provision_api_key,omitempty"`
 	ActionWeights   map[string]float64 `json:"action_weights"`
 	Lambda          *float64           `json:"lambda"`
 	Gamma           *float64           `json:"gamma"`
