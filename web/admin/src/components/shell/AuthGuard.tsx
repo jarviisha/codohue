@@ -33,7 +33,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       return <Navigate to={`/login?next=${encodeURIComponent(target)}`} replace />
     }
     return (
-      <PageContainer size="sm">
+      <PageContainer size="sm" padding={6}>
         <Stack gap={6}>
           <Banner
             status="error"

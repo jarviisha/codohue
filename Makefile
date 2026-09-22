@@ -46,7 +46,7 @@ MIN_EMBEDSTRATEGY  ?= 90
 
 .PHONY: \
 	build build-api build-cron build-admin build-admin-embed build-embedder \
-	web-admin-deps web-admin-lint web-admin-test web-admin-build \
+	web-admin-deps web-admin-lint web-admin-test web-admin-test-browser web-admin-build \
 	run run-cron run-admin run-embedder run-loadgen run-bskyfeed dev dev-admin dev-embedder dev-all \
 	up up-all up-build up-d up-build-d \
 	up-infra up-infra-build up-infra-d up-infra-build-d \
@@ -99,6 +99,9 @@ web-admin-lint:
 
 web-admin-test:
 	cd web/admin && npm test
+
+web-admin-test-browser: web-admin-build
+	cd web/admin && npm run test:browser
 
 web-admin-build:
 	cd web/admin && npm run build

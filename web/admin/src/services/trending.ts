@@ -28,8 +28,7 @@ export type TrendingAdminResponse = {
 // ---------------------------------------------------------------------------
 
 const trendingKeys = {
-  list: (ns: string, filter: Record<string, unknown>) =>
-    ['ns', ns, 'trending', filter] as const,
+  list: (ns: string, filter: Record<string, unknown>) => ['ns', ns, 'trending', filter] as const,
 }
 
 // ---------------------------------------------------------------------------
@@ -39,14 +38,12 @@ const trendingKeys = {
 export type TrendingFilter = {
   limit?: number
   offset?: number
-  windowHours?: number
 }
 
 function trendingQueryString(f: TrendingFilter): string {
   const p = new URLSearchParams()
   if (f.limit != null) p.set('limit', String(f.limit))
   if (f.offset != null) p.set('offset', String(f.offset))
-  if (f.windowHours != null) p.set('window_hours', String(f.windowHours))
   const q = p.toString()
   return q ? `?${q}` : ''
 }
