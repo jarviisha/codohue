@@ -3,6 +3,7 @@ const API_BASE = import.meta.env.VITE_ADMIN_API_BASE_URL ?? ''
 export class ApiError extends Error {
   status: number
   code: string
+  details?: { fields?: Record<string, string>; current?: unknown }
 
   constructor(status: number, code: string, message: string) {
     super(message)
@@ -40,14 +41,25 @@ export async function apiFetch<T = unknown>(path: string, init?: RequestInit): P
   if (!res.ok) {
     let code = 'http_error'
     let message = res.statusText || `HTTP ${res.status}`
+    let details: ApiError['details']
     try {
-      const body = (await res.json()) as { error?: { code?: string; message?: string } }
+      const body = (await res.json()) as {
+        error?: {
+          code?: string
+          message?: string
+          fields?: Record<string, string>
+          current?: unknown
+        }
+      }
+      details = body.error
       if (body?.error?.code) code = body.error.code
       if (body?.error?.message) message = body.error.message
     } catch {
       // body was not JSON; keep defaults
     }
-    throw new ApiError(res.status, code, message)
+    const error = new ApiError(res.status, code, message)
+    error.details = details
+    throw error
   }
 
   if (res.status === 204) {

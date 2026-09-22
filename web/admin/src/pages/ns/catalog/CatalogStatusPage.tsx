@@ -5,12 +5,7 @@ import {
   Banner,
   Button,
   Card,
-  Dialog,
-  DialogHeader,
   EmptyState,
-  Layout,
-  LayoutContent,
-  LayoutFooter,
   Skeleton,
   Stack,
   Table,
@@ -27,13 +22,11 @@ import {
   useCatalogConfig,
   useCatalogFailuresSummary,
   useTriggerReEmbed,
-  useUpdateCatalogConfig,
   type CatalogBacklog,
 } from '@/services/catalog'
 import { useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
-import CatalogConfigDialog from './CatalogConfigDialog'
 import MetaLine from '@/components/MetaLine'
 
 const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
@@ -50,8 +43,6 @@ export default function CatalogStatusPage() {
   const { ns } = useParams<{ ns: string }>()
   const [window, setWindow] = useState<HistoryWindow>('1h')
   const [streamEvents, setStreamEvents] = useState(0)
-  const [configDialogOpen, setConfigDialogOpen] = useState(false)
-  const [disableDialogOpen, setDisableDialogOpen] = useState(false)
 
   const config = useCatalogConfig(ns ?? null)
   const history = useCatalogBacklogHistory(ns ?? null, window)
@@ -64,7 +55,11 @@ export default function CatalogStatusPage() {
   // /catalog poll interval (15s). embedded + consumer_lag aren't carried on
   // the SSE event; they come from the polled config response.
   const [liveBacklog, setLiveBacklog] = useState<CatalogBacklog | null>(null)
-  const [dlAlert, setDlAlert] = useState<{ namespace: string; new_count: number; delta: number } | null>(null)
+  const [dlAlert, setDlAlert] = useState<{
+    namespace: string
+    new_count: number
+    delta: number
+  } | null>(null)
   // Per-batch reembed_progress samples. Keyed by batch_run_id so multiple
   // concurrent runs each get their own tick — the watcher emits one event
   // per open run per 5s.
@@ -152,27 +147,29 @@ export default function CatalogStatusPage() {
     return (
       <PageContainer size="full">
         <PageHeader>
-          <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+          <Stack
+            gap={4}
+            direction="horizontal"
+            align="center"
+            justify="between"
+            className="w-full"
+            wrap="wrap"
+          >
             <Stack gap={1}>
               <h1 className="text-primary text-xl font-semibold">Catalog</h1>
               <p className="text-secondary text-sm">Auto-embedding is currently off.</p>
             </Stack>
-            <Button size="sm" onClick={() => setConfigDialogOpen(true)} label="Enable catalog" />
+            <Button
+              size="sm"
+              href={`/ns/${encodeURIComponent(ns)}/config?tab=embeddings`}
+              label="Enable catalog"
+            />
           </Stack>
         </PageHeader>
         <EmptyState
           title="Catalog auto-embedding is off"
           description="Enable it in the namespace config to start ingesting raw content for embedding."
         />
-        {data && (
-          <CatalogConfigDialog
-            namespace={ns}
-            open={configDialogOpen}
-            onOpenChange={setConfigDialogOpen}
-            config={data.catalog}
-            strategies={data.available_strategies}
-          />
-        )}
       </PageContainer>
     )
   }
@@ -193,11 +190,21 @@ export default function CatalogStatusPage() {
   return (
     <PageContainer size="full">
       <PageHeader>
-        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+        <Stack
+          gap={4}
+          direction="horizontal"
+          align="center"
+          justify="between"
+          className="w-full"
+          wrap="wrap"
+        >
           <Stack gap={6}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Catalog</h1>
-              <Badge variant={streamConnected ? 'success' : 'neutral'} label={`stream ${streamConnected ? 'connected' : 'offline'}`} />
+              <Badge
+                variant={streamConnected ? 'success' : 'neutral'}
+                label={`stream ${streamConnected ? 'connected' : 'offline'}`}
+              />
               {streamEvents > 0 && (
                 <span className="text-secondary text-xs tabular-nums">
                   {streamEvents} live event{streamEvents === 1 ? '' : 's'}
@@ -212,18 +219,14 @@ export default function CatalogStatusPage() {
             <Button
               size="sm"
               variant="secondary"
-              
-              onClick={() => setConfigDialogOpen(true)} label="Configure" />
-            <Button
-              size="sm"
-              variant="destructive"
-              
-              onClick={() => setDisableDialogOpen(true)} label="Disable" />
+              href={`/ns/${encodeURIComponent(ns)}/config?tab=embeddings`}
+              label="Catalog settings"
+            />
+
             {backlog.dead_letter > 0 && (
               <Button
                 size="sm"
                 variant="destructive"
-                
                 onClick={() => bulkRedrive.mutate()}
                 isDisabled={bulkRedrive.isPending}
                 label={
@@ -236,11 +239,15 @@ export default function CatalogStatusPage() {
             <Button
               size="sm"
               onClick={() => reembed.mutate()}
-              isDisabled={reembed.isPending || reembedRunning} label={reembedRunning
-                ? 'Re-embed running…'
-                : reembed.isPending
-                  ? 'Starting…'
-                  : 'Trigger re-embed'} />
+              isDisabled={reembed.isPending || reembedRunning}
+              label={
+                reembedRunning
+                  ? 'Re-embed running…'
+                  : reembed.isPending
+                    ? 'Starting…'
+                    : 'Trigger re-embed'
+              }
+            />
           </Stack>
         </Stack>
       </PageHeader>
@@ -271,39 +278,39 @@ export default function CatalogStatusPage() {
 
         {reembedStatus && (
           <Card>
-              <Stack gap={6}>
-                <Stack gap={4} direction="horizontal" align="center" justify="between">
-                  <Stack gap={4} direction="horizontal" align="center">
-                    <span className="text-secondary text-xs uppercase tracking-wide">
-                      Last re-embed
-                    </span>
-                    <ReembedStatusBadge status={reembedStatus.status} />
-                  </Stack>
-                  <Link
-                    to={`/ns/${encodeURIComponent(ns)}/batch-runs/${reembedStatus.batch_run_id}`}
-                    className="text-primary text-sm font-medium"
-                  >
-                    #{reembedStatus.batch_run_id} →
-                  </Link>
+            <Stack gap={6}>
+              <Stack gap={4} direction="horizontal" align="center" justify="between">
+                <Stack gap={4} direction="horizontal" align="center">
+                  <span className="text-secondary text-xs uppercase tracking-wide">
+                    Last re-embed
+                  </span>
+                  <ReembedStatusBadge status={reembedStatus.status} />
                 </Stack>
-                <MetaLine
-                  size="xs"
-                  items={[
-                    `strategy=${reembedStatus.strategy_id}@${reembedStatus.strategy_version}`,
-                    `started ${new Date(reembedStatus.started_at).toLocaleString()}`,
-                    reembedStatus.duration_ms != null &&
-                      `${(reembedStatus.duration_ms / 1000).toFixed(1)}s`,
-                    reembedStatus.processed != null &&
-                      `processed ${reembedStatus.processed.toLocaleString()}`,
-                  ]}
-                />
-                {reembedStatus.error_message && (
-                  <span className="text-error text-xs">{reembedStatus.error_message}</span>
-                )}
-                {reembedRunning && progressByRun[reembedStatus.batch_run_id] && (
-                  <ReembedProgressBar progress={progressByRun[reembedStatus.batch_run_id]} />
-                )}
+                <Link
+                  to={`/ns/${encodeURIComponent(ns)}/batch-runs/${reembedStatus.batch_run_id}`}
+                  className="text-primary text-sm font-medium"
+                >
+                  #{reembedStatus.batch_run_id} →
+                </Link>
               </Stack>
+              <MetaLine
+                size="xs"
+                items={[
+                  `strategy=${reembedStatus.strategy_id}@${reembedStatus.strategy_version}`,
+                  `started ${new Date(reembedStatus.started_at).toLocaleString()}`,
+                  reembedStatus.duration_ms != null &&
+                    `${(reembedStatus.duration_ms / 1000).toFixed(1)}s`,
+                  reembedStatus.processed != null &&
+                    `processed ${reembedStatus.processed.toLocaleString()}`,
+                ]}
+              />
+              {reembedStatus.error_message && (
+                <span className="text-error text-xs">{reembedStatus.error_message}</span>
+              )}
+              {reembedRunning && progressByRun[reembedStatus.batch_run_id] && (
+                <ReembedProgressBar progress={progressByRun[reembedStatus.batch_run_id]} />
+              )}
+            </Stack>
           </Card>
         )}
 
@@ -321,17 +328,16 @@ export default function CatalogStatusPage() {
                   key={w}
                   size="sm"
                   variant="primary"
-                  
-                  onClick={() => setWindow(w)} label={w} />
+                  onClick={() => setWindow(w)}
+                  label={w}
+                />
               ))}
             </Stack>
           </Stack>
           {history.isLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : history.data?.samples.length === 0 ? (
-            <p className="text-secondary text-sm">
-              No samples yet — the sampler writes every 30s.
-            </p>
+            <p className="text-secondary text-sm">No samples yet — the sampler writes every 30s.</p>
           ) : (
             <TimeSeriesChart
               data={(history.data?.samples ?? []).map((s) => ({
@@ -377,115 +383,44 @@ export default function CatalogStatusPage() {
           ) : failures.data?.reasons.length === 0 ? (
             <p className="text-secondary text-sm">No failed items in the last 24h.</p>
           ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHeaderCell>Reason</TableHeaderCell>
-                    <TableHeaderCell className="text-right" >Count</TableHeaderCell>
-                    <TableHeaderCell>Sample object</TableHeaderCell>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Reason</TableHeaderCell>
+                  <TableHeaderCell className="text-right">Count</TableHeaderCell>
+                  <TableHeaderCell>Sample object</TableHeaderCell>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {failures.data?.reasons.map((r, i) => (
+                  <TableRow key={`${r.reason}-${i}`}>
+                    <TableCell className="text-secondary text-sm">{r.reason}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {r.count.toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      {r.sample_object_id ? (
+                        <code className="text-secondary text-xs">{r.sample_object_id}</code>
+                      ) : (
+                        <span className="text-secondary text-xs">—</span>
+                      )}
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {failures.data?.reasons.map((r, i) => (
-                    <TableRow key={`${r.reason}-${i}`}>
-                      <TableCell className="text-secondary text-sm">{r.reason}</TableCell>
-                      <TableCell  className="text-right tabular-nums">
-                        {r.count.toLocaleString()}
-                      </TableCell>
-                      <TableCell>
-                        {r.sample_object_id ? (
-                          <code className="text-secondary text-xs">{r.sample_object_id}</code>
-                        ) : (
-                          <span className="text-secondary text-xs">—</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </Stack>
 
         <Stack align="center" gap={4} direction="horizontal" justify="end">
-          <Button href={`/ns/${encodeURIComponent(ns)}/catalog/items`} variant="secondary" label="Browse items →" />
+          <Button
+            href={`/ns/${encodeURIComponent(ns)}/catalog/items`}
+            variant="secondary"
+            label="Browse items →"
+          />
         </Stack>
       </Stack>
-
-      <CatalogConfigDialog
-        namespace={ns}
-        open={configDialogOpen}
-        onOpenChange={setConfigDialogOpen}
-        config={data.catalog}
-        strategies={data.available_strategies}
-      />
-
-      <DisableCatalogDialog
-        namespace={ns}
-        open={disableDialogOpen}
-        onOpenChange={setDisableDialogOpen}
-      />
     </PageContainer>
-  )
-}
-
-function DisableCatalogDialog({
-  namespace,
-  open,
-  onOpenChange,
-}: {
-  namespace: string
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}) {
-  const update = useUpdateCatalogConfig(namespace)
-
-  const onConfirm = () => {
-    update.mutate(
-      { enabled: false },
-      { onSuccess: () => onOpenChange(false) },
-    )
-  }
-
-  return (
-    <Dialog isOpen={open} onOpenChange={onOpenChange} width={560} purpose="required">
-      {open && (
-        <Layout
-          header={
-            <DialogHeader
-              title={`Disable catalog for ${namespace}`}
-              subtitle={`New content sent to POST /v1/namespaces/${namespace}/catalog will return 503 and no auto-embedding runs. Existing vectors stay in Qdrant — re-enabling resumes embedding with the same strategy.`}
-              onOpenChange={onOpenChange}
-            />
-          }
-          content={
-            <LayoutContent>
-              {update.error && (
-                <Banner status="error" title="Disable failed" description={update.error.message} />
-              )}
-            </LayoutContent>
-          }
-          footer={
-            <LayoutFooter>
-              <Stack direction="horizontal" gap={2} align="center" hAlign="end">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() => onOpenChange(false)}
-                  label="Cancel"
-                />
-                <Button
-                  variant="destructive"
-                  type="button"
-                  onClick={onConfirm}
-                  isDisabled={update.isPending}
-                  label={update.isPending ? 'Disabling…' : 'Disable catalog'}
-                />
-              </Stack>
-            </LayoutFooter>
-          }
-        />
-      )}
-    </Dialog>
   )
 }
 
@@ -513,7 +448,12 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
 }
 
 function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
-  const tiles: Array<{ label: string; value: number; tone: 'neutral' | 'warning' | 'error'; hint?: string }> = [
+  const tiles: Array<{
+    label: string
+    value: number
+    tone: 'neutral' | 'warning' | 'error'
+    hint?: string
+  }> = [
     { label: 'Pending', value: backlog.pending, tone: 'neutral' },
     { label: 'In flight', value: backlog.in_flight, tone: 'neutral' },
     {
@@ -539,20 +479,16 @@ function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
     <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
       {tiles.map((t) => (
         <Card key={t.label} className="flex-1 min-w-35">
-            <Stack gap={6}>
-              <span className="text-secondary text-xs uppercase tracking-wide">
-                {t.label}
+          <Stack gap={6}>
+            <span className="text-secondary text-xs uppercase tracking-wide">{t.label}</span>
+            <Stack gap={4} direction="horizontal" align="center">
+              <span className="text-primary text-xl font-semibold tabular-nums">
+                {t.value.toLocaleString()}
               </span>
-              <Stack gap={4} direction="horizontal" align="center">
-                <span className="text-primary text-xl font-semibold tabular-nums">
-                  {t.value.toLocaleString()}
-                </span>
-                {t.tone !== 'neutral' && <Badge variant={t.tone} label="!" />}
-                {t.hint && (
-                  <span className="text-secondary text-xs">{t.hint}</span>
-                )}
-              </Stack>
+              {t.tone !== 'neutral' && <Badge variant={t.tone} label="!" />}
+              {t.hint && <span className="text-secondary text-xs">{t.hint}</span>}
             </Stack>
+          </Stack>
         </Card>
       ))}
     </Stack>

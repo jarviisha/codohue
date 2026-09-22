@@ -1,9 +1,4 @@
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseQueryOptions,
-} from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from '@tanstack/react-query'
 import { apiFetch } from './http'
 
 // ---------------------------------------------------------------------------
@@ -153,8 +148,7 @@ const catalogKeys = {
   backlogHistory: (ns: string, window: string) =>
     ['catalog', ns, 'backlog-history', window] as const,
   failures: (ns: string, window: string) => ['catalog', ns, 'failures', window] as const,
-  items: (ns: string, filter: Record<string, unknown>) =>
-    ['catalog', ns, 'items', filter] as const,
+  items: (ns: string, filter: Record<string, unknown>) => ['catalog', ns, 'items', filter] as const,
   item: (ns: string, id: number | string) => ['catalog', ns, 'item', id] as const,
 }
 
@@ -247,7 +241,9 @@ function itemsQueryString(f: CatalogItemsFilter): string {
 
 export function useCatalogItems(ns: string | null, filter: CatalogItemsFilter = {}) {
   return useQuery({
-    queryKey: ns ? catalogKeys.items(ns, filter as Record<string, unknown>) : ['catalog', 'unknown', 'items'],
+    queryKey: ns
+      ? catalogKeys.items(ns, filter as Record<string, unknown>)
+      : ['catalog', 'unknown', 'items'],
     queryFn: () =>
       apiFetch<CatalogItemsListResponse>(
         `/api/admin/v1/namespaces/${ns}/catalog/items${itemsQueryString(filter)}`,
@@ -264,7 +260,8 @@ export function useCatalogItem(
 ) {
   return useQuery({
     queryKey: ns && id ? catalogKeys.item(ns, id) : ['catalog', 'unknown', 'item'],
-    queryFn: () => apiFetch<CatalogItemDetail>(`/api/admin/v1/namespaces/${ns}/catalog/items/${id}`),
+    queryFn: () =>
+      apiFetch<CatalogItemDetail>(`/api/admin/v1/namespaces/${ns}/catalog/items/${id}`),
     enabled: ns != null && id != null && ns !== '',
     ...options,
   })
@@ -323,13 +320,13 @@ export function useTriggerReEmbed(ns: string | null) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () =>
-      apiFetch<CatalogReEmbedResponse>(
-        `/api/admin/v1/namespaces/${ns}/catalog/re-embed`,
-        { method: 'POST' },
-      ),
+      apiFetch<CatalogReEmbedResponse>(`/api/admin/v1/namespaces/${ns}/catalog/re-embed`, {
+        method: 'POST',
+      }),
     onSuccess: () => {
       if (ns) {
         qc.invalidateQueries({ queryKey: catalogKeys.config(ns) })
+        qc.invalidateQueries({ queryKey: ['ns', ns] })
       }
     },
   })
@@ -363,6 +360,7 @@ export function useUpdateCatalogConfig(ns: string | null) {
     onSuccess: () => {
       if (ns) {
         qc.invalidateQueries({ queryKey: catalogKeys.config(ns) })
+        qc.invalidateQueries({ queryKey: ['ns', ns] })
         qc.invalidateQueries({ queryKey: ['namespaces'] })
       }
     },

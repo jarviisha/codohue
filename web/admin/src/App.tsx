@@ -18,6 +18,7 @@ const BatchRunsListPage = lazy(() => import('@/pages/batch-runs/BatchRunsListPag
 const DangerZonePage = lazy(() => import('@/pages/danger-zone/DangerZonePage'))
 const DemoDataPage = lazy(() => import('@/pages/demo-data/DemoDataPage'))
 const FleetOverviewPage = lazy(() => import('@/pages/fleet/FleetOverviewPage'))
+const RuntimePage = lazy(() => import('@/pages/system/RuntimePage'))
 const HealthPage = lazy(() => import('@/pages/health/HealthPage'))
 const NamespacesListPage = lazy(() => import('@/pages/namespaces/NamespacesListPage'))
 const CatalogItemDetailPage = lazy(() => import('@/pages/ns/catalog/CatalogItemDetailPage'))
@@ -57,6 +58,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: withSuspense(FleetOverviewPage) },
       { path: 'health', element: withSuspense(HealthPage) },
+      { path: 'system/runtime', element: withSuspense(RuntimePage) },
       { path: 'namespaces', element: withSuspense(NamespacesListPage) },
       { path: 'batch-runs', element: withSuspense(BatchRunsListPage) },
       { path: 'batch-runs/:id', element: withSuspense(BatchRunDetailPage) },
