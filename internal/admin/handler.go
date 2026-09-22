@@ -79,6 +79,7 @@ type adminSvc interface {
 
 // Handler handles HTTP requests for the admin API.
 type Handler struct {
+	configuration        ConfigurationStore
 	runtimeReader        func(context.Context) ([]config.RuntimeSnapshot, error)
 	identity             IdentityStore
 	identityOptions      IdentityOptions

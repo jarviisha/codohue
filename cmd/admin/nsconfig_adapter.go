@@ -7,6 +7,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/nsconfig"
 )
 
@@ -103,4 +104,14 @@ func mapNsConfigError(err error) error {
 	default:
 		return err
 	}
+}
+
+// configurationAdapter preserves the admin/domain dependency boundary.
+type configurationAdapter struct{ svc *nsconfig.Service }
+
+func (a *configurationAdapter) ReadConfiguration(ctx context.Context, ns string) (*namespace.Configuration, error) {
+	return a.svc.ReadConfiguration(ctx, ns)
+}
+func (a *configurationAdapter) PatchConfiguration(ctx context.Context, ns string, req *namespace.ConfigurationPatch, validate bool) (*namespace.Configuration, error) {
+	return a.svc.PatchConfiguration(ctx, ns, req, validate)
 }

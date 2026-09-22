@@ -205,6 +205,7 @@ func run() error {
 	}
 	var sessions *admin.SessionManager
 	h := admin.NewHandler(svc, "", sessions)
+	h.SetConfigurationStore(&configurationAdapter{svc: nsConfigSvc})
 	h.SetRuntimeReader(func(ctx context.Context) ([]config.RuntimeSnapshot, error) {
 		return infraredis.RuntimeSnapshots(ctx, redisClient)
 	})
