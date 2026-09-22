@@ -28,3 +28,16 @@ test('action map replacement preserves removals and rejects invalid raw drafts',
   for (const bad of ['[]', 'null', 'Invalid action weights: []'])
     assert.ok(parseChanges(baseline, { action_weights: bad }).errors.action_weights)
 })
+
+// The error summary focuses `#field-<name>`. TextInput takes the id directly;
+// Selector and Switch do not, so those need an explicit anchor element.
+test('every editable configuration field has an error-summary anchor', async () => {
+  const { readFileSync } = await import('node:fs')
+  const page = readFileSync(
+    new URL('../src/pages/ns/config/NamespaceConfigPage.tsx', import.meta.url),
+    'utf8',
+  )
+  for (const field of ['dense_source', 'dense_distance', 'exclude_authored', 'action_weights']) {
+    assert.ok(page.includes(`id="field-${field}"`), `${field} has no #field-${field} target`)
+  }
+})

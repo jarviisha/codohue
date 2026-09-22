@@ -6,7 +6,6 @@ import {
   Banner,
   Button,
   Heading,
-  IconButton,
   Link,
   Selector,
   Skeleton,
@@ -296,18 +295,24 @@ function Settings({ ns }: { ns: string }) {
                 {current.conflict ? 'Settings changed elsewhere' : 'Could not save this section'}
               </Heading>
               {current.failure && <p>{current.failure}</p>}
-              {Object.entries(current.errors).map(([field, message]) => (
-                <Link
-                  key={field}
-                  href={`#field-${field}`}
-                  onClick={(e) => {
-                    e.preventDefault()
-                    document.getElementById(`field-${field}`)?.focus()
-                  }}
-                >
-                  {fields[field]?.[0] ?? field}: {message}
-                </Link>
-              ))}
+              {Object.entries(current.errors).map(([field, message]) =>
+                // A cross-group failure is reported against "values", which owns
+                // no control; render it as text rather than a link to nowhere.
+                field === 'values' ? (
+                  <p key={field}>{message}</p>
+                ) : (
+                  <Link
+                    key={field}
+                    href={`#field-${field}`}
+                    onClick={(e) => {
+                      e.preventDefault()
+                      document.getElementById(`field-${field}`)?.focus()
+                    }}
+                  >
+                    {fields[field]?.[0] ?? field}: {message}
+                  </Link>
+                ),
+              )}
             </Stack>
           )}
           {current.conflict && (
@@ -481,12 +486,14 @@ function SettingsFields({
       {group === 'recommendations' && (
         <>
           {['alpha', 'gamma', 'max_results', 'seen_items_days'].map(input)}
-          <Switch
-            label="Exclude self-authored items"
-            description="Exclude items whose author matches the requesting subject. Requires author attribution on catalog items."
-            value={!!draft.exclude_authored}
-            onChange={(v) => update({ exclude_authored: v })}
-          />
+          <Stack gap={3} id="field-exclude_authored" tabIndex={-1}>
+            <Switch
+              label="Exclude self-authored items"
+              description="Exclude items whose author matches the requesting subject. Requires author attribution on catalog items."
+              value={!!draft.exclude_authored}
+              onChange={(v) => update({ exclude_authored: v })}
+            />
+          </Stack>
         </>
       )}
       {group === 'signals' && (
@@ -521,32 +528,36 @@ function SettingsFields({
       )}
       {group === 'embeddings' && (
         <>
-          <Selector
-            label="Dense source"
-            value={String(draft.dense_source)}
-            onChange={(v) => update({ dense_source: v })}
-            options={[
-              { value: 'disabled', label: 'Disabled — sparse only' },
-              { value: 'item2vec', label: 'Item2vec — trained from events' },
-              { value: 'svd', label: 'SVD — matrix factorisation' },
-              { value: 'byoe', label: 'BYOE — external embeddings' },
-              { value: 'catalog', label: 'Catalog — automatic embeddings' },
-            ]}
-          />
+          <Stack gap={3} id="field-dense_source" tabIndex={-1}>
+            <Selector
+              label="Dense source"
+              value={String(draft.dense_source)}
+              onChange={(v) => update({ dense_source: v })}
+              options={[
+                { value: 'disabled', label: 'Disabled — sparse only' },
+                { value: 'item2vec', label: 'Item2vec — trained from events' },
+                { value: 'svd', label: 'SVD — matrix factorisation' },
+                { value: 'byoe', label: 'BYOE — external embeddings' },
+                { value: 'catalog', label: 'Catalog — automatic embeddings' },
+              ]}
+            />
+          </Stack>
           {draft.dense_source !== 'disabled' && (
             <>
               {input('embedding_dim')}
-              <Selector
-                label="Dense distance"
-                description={locks.dense_distance ?? 'Similarity metric for dense vectors.'}
-                isDisabled={!!locks.dense_distance}
-                value={String(draft.dense_distance)}
-                onChange={(v) => update({ dense_distance: v })}
-                options={[
-                  { value: 'cosine', label: 'Cosine' },
-                  { value: 'dot', label: 'Dot product' },
-                ]}
-              />
+              <Stack gap={3} id="field-dense_distance" tabIndex={-1}>
+                <Selector
+                  label="Dense distance"
+                  description={locks.dense_distance ?? 'Similarity metric for dense vectors.'}
+                  isDisabled={!!locks.dense_distance}
+                  value={String(draft.dense_distance)}
+                  onChange={(v) => update({ dense_distance: v })}
+                  options={[
+                    { value: 'cosine', label: 'Cosine' },
+                    { value: 'dot', label: 'Dot product' },
+                  ]}
+                />
+              </Stack>
             </>
           )}
           {catalog && (
@@ -688,22 +699,10 @@ function WeightFields({
             }
             onChange={(v) => change(rows.map((r) => (r.id === row.id ? { ...r, value: v } : r)))}
           />
-          <IconButton
-            label={`Remove action ${row.name || index + 1}`}
-            tooltip="Remove action"
+          <Button
+            label="Remove"
+            aria-label={`Remove action ${row.name || index + 1}`}
             variant="ghost"
-            icon={
-              <svg
-                className="size-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.75}
-                aria-hidden="true"
-              >
-                <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7" />
-              </svg>
-            }
             onClick={() => change(rows.filter((r) => r.id !== row.id))}
           />
         </Stack>

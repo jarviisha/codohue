@@ -31,5 +31,5 @@ func (h *Handler) GetRuntime(w http.ResponseWriter, r *http.Request) {
 		Processes     []config.RuntimeSnapshot `json:"processes"`
 		ObservedAt    time.Time                `json:"observed_at"`
 		ExpirySeconds int                      `json:"expiry_seconds"`
-	}{snapshots, time.Now().UTC(), 120})
+	}{snapshots, time.Now().UTC(), int(config.RuntimeReportTTL.Seconds())})
 }

@@ -92,7 +92,7 @@ func (h *Handler) configurationDefaults(ctx context.Context, out *namespace.Conf
 		observation := namespace.ConfigurationDefault{State: "unknown", Process: source[0], Reports: []namespace.ConfigurationDefaultReport{}}
 		missing := false
 		for _, report := range reports {
-			if report.Process != source[0] || time.Since(report.ReportedAt) > 120*time.Second {
+			if report.Process != source[0] || time.Since(report.ReportedAt) > config.RuntimeReportTTL {
 				continue
 			}
 			found := false

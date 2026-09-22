@@ -34,7 +34,7 @@ func StartRuntimeReporter(ctx context.Context, client *goredis.Client, process s
 			body, err := json.Marshal(snapshot)
 			if err == nil {
 				writeCtx, done := context.WithTimeout(ctx, 3*time.Second)
-				err = client.Set(writeCtx, key, body, 2*time.Minute).Err()
+				err = client.Set(writeCtx, key, body, config.RuntimeReportTTL).Err()
 				done()
 			}
 			if err != nil && ctx.Err() == nil {

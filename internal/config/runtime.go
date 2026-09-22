@@ -2,6 +2,10 @@ package config
 
 import "time"
 
+// RuntimeReportTTL is how long a published snapshot stays readable. Reports are
+// republished well within it, so a missing key means the process stopped reporting.
+const RuntimeReportTTL = 2 * time.Minute
+
 // RuntimeSetting is an explicitly allowlisted, non-secret effective startup value.
 type RuntimeSetting struct {
 	Name  string `json:"name"`

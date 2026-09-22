@@ -16,6 +16,32 @@ type configurationRepository interface {
 	ChangeConfiguration(context.Context, string, *namespace.ConfigurationPatch, bool, func(*namespace.Configuration, map[string]json.RawMessage) error) (*namespace.Configuration, error)
 }
 
+// fieldAt returns the offset at which message names exactly this field, or -1.
+// Whole-identifier matching stops "lambda" claiming a "lambda_trending" error;
+// callers take the earliest match so an echoed value ("got \"dense_source\"")
+// never outranks the field the message actually complains about.
+func fieldAt(message, field string) int {
+	if field == "" {
+		return -1
+	}
+	identifier := func(b byte) bool {
+		return b == '_' || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+	}
+	for at := 0; at <= len(message)-len(field); {
+		i := strings.Index(message[at:], field)
+		if i < 0 {
+			return -1
+		}
+		i += at
+		end := i + len(field)
+		if (i == 0 || !identifier(message[i-1])) && (end == len(message) || !identifier(message[end])) {
+			return i
+		}
+		at = i + 1
+	}
+	return -1
+}
+
 func configurationInvalid(group, field, message string) error {
 	return &namespace.ConfigurationError{Status: 422, Code: "invalid_configuration", Message: message, Fields: map[string]string{group + "." + field: message}}
 }
@@ -147,11 +173,10 @@ func (s *Service) validateConfiguration(ctx context.Context, ns string, patch *n
 		return configurationInvalid(patch.Group, "values", "Invalid configuration values")
 	}
 	if err := validateUpsert(&req); err != nil {
-		field := "values"
+		field, first := "values", len(err.Error())
 		for _, f := range configurationFields[patch.Group] {
-			if strings.Contains(err.Error(), f) {
-				field = f
-				break
+			if at := fieldAt(err.Error(), f); at >= 0 && at < first {
+				field, first = f, at
 			}
 		}
 		return configurationInvalid(patch.Group, field, err.Error())
