@@ -87,3 +87,31 @@ func TestConfigurationDefaultObservations(t *testing.T) {
 		t.Fatal("stale report included")
 	}
 }
+
+// A 409 snapshot becomes the client's canonical cache, so it must carry the same
+// default observations a successful read would.
+func TestConfigurationConflictSnapshotCarriesDefaults(t *testing.T) {
+	conflict := &namespace.Configuration{Namespace: "test", Groups: map[string]namespace.ConfigurationGroup{}}
+	f := &configurationFake{err: &namespace.ConfigurationError{Status: 409, Code: "configuration_conflict", Message: "changed", Current: conflict}}
+	h := NewHandler(nil, "", nil)
+	h.SetConfigurationStore(f)
+	h.SetRuntimeReader(func(context.Context) ([]config.RuntimeSnapshot, error) {
+		return []config.RuntimeSnapshot{{Process: "embedder", Instance: "e1", ReportedAt: time.Now().UTC(), Settings: []config.RuntimeSetting{{Name: "max_attempts_default", Value: 7}}}}, nil
+	})
+	w := httptest.NewRecorder()
+	h.PatchConfiguration(w, httptest.NewRequest("PATCH", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
+	if w.Code != 409 {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Current *namespace.Configuration `json:"current"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Current == nil || body.Error.Current.Defaults["catalog_max_attempts"].State != "observed" {
+		t.Fatalf("conflict snapshot has no default observations: %s", w.Body.String())
+	}
+}

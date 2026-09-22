@@ -26,7 +26,7 @@ export default function TrendingPage() {
   const { ns } = useParams<{ ns: string }>()
   const [params, setParams] = useSearchParams()
   const page = readPage(params.get('page'))
-  const offset = (page - 1) * PAGE_SIZE
+  const offset = page * PAGE_SIZE
   const trending = useTrending(ns ?? null, { limit: PAGE_SIZE, offset })
 
   if (!ns) return null
@@ -35,8 +35,8 @@ export default function TrendingPage() {
   const prefix = `/ns/${encodeURIComponent(ns)}`
   const setPage = (next: number) => {
     const updated = new URLSearchParams(params)
-    if (next === 1) updated.delete('page')
-    else updated.set('page', String(next))
+    if (next <= 0) updated.delete('page')
+    else updated.set('page', String(next + 1))
     setParams(updated)
   }
 
@@ -91,9 +91,9 @@ export default function TrendingPage() {
           <Stack gap={4}>
             {data.items.length === 0 ? (
               <EmptyState
-                title={page > 1 ? 'No items on this page' : 'No trending items available'}
+                title={page > 0 ? 'No items on this page' : 'No trending items available'}
                 description={
-                  page > 1
+                  page > 0
                     ? 'Return to the previous page. The ranking may have changed since you last loaded it.'
                     : `The ranking may be empty because there are no eligible events in the configured ${data.window_hours}-hour window, no batch has produced a result yet, or the cached result has expired. Check Events and Batch runs to confirm the cause.`
                 }
@@ -133,15 +133,15 @@ export default function TrendingPage() {
                 </Table>
               </>
             )}
-            {(page > 1 || data.items.length === PAGE_SIZE) && (
+            {(page > 0 || data.items.length === PAGE_SIZE) && (
               <Stack direction="horizontal" gap={3} align="center">
                 <Button
                   label="Previous page"
                   variant="secondary"
-                  isDisabled={page === 1}
+                  isDisabled={page === 0}
                   onClick={() => setPage(page - 1)}
                 />
-                <p className="text-secondary text-sm">Page {page}</p>
+                <p className="text-secondary text-sm">Page {page + 1}</p>
                 <Button
                   label="Next page"
                   variant="secondary"

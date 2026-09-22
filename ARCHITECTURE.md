@@ -608,8 +608,10 @@ docker/                          Migration image and entrypoint
 
 Each of `cmd/api`, `cmd/admin`, `cmd/cron`, and `cmd/embedder` publishes an
 explicitly allowlisted snapshot of its effective startup settings every 30
-seconds. Redis keys `admin:runtime:v1:{process}:{boot-id}` expire after 120
-seconds; replicas and overlapping rolling restarts have separate keys. Reports
+seconds. Reports live in one Redis hash, `admin:runtime:v1`, keyed by field
+`{process}:{boot-id}` so replicas and overlapping rolling restarts stay distinct;
+the hash expires 120 seconds after the last write and readers drop, then prune,
+fields older than that. A read is a single `HGETALL`, never a keyspace scan. Reports
 are operational observations, not durable configuration or health checks.
 Missing reports may indicate unavailable Redis, an older binary, or a stopped
 process. Credentials and connection strings are excluded at snapshot creation.

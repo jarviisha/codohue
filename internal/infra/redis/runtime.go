@@ -14,7 +14,9 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
-const runtimePrefix = "admin:runtime:v1:"
+// runtimeKey holds every process report as one hash field per boot, so a reader
+// costs a single HGETALL instead of a keyspace scan on shared Redis.
+const runtimeKey = "admin:runtime:v1"
 
 // StartRuntimeReporter publishes effective, allowlisted settings every 30 seconds.
 // Each boot has its own expiring key, so replicas and rolling restarts are visible.
@@ -25,7 +27,7 @@ func StartRuntimeReporter(ctx context.Context, client *goredis.Client, process s
 	}
 	instance, _ := os.Hostname()
 	snapshot := config.RuntimeSnapshot{Process: process, Instance: instance, StartedAt: time.Now().UTC(), Settings: settings}
-	key := runtimePrefix + process + ":" + rand.Text()
+	field := process + ":" + rand.Text()
 	go func() {
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -34,7 +36,11 @@ func StartRuntimeReporter(ctx context.Context, client *goredis.Client, process s
 			body, err := json.Marshal(snapshot)
 			if err == nil {
 				writeCtx, done := context.WithTimeout(ctx, 3*time.Second)
-				err = client.Set(writeCtx, key, body, config.RuntimeReportTTL).Err()
+				// Refreshing the whole-hash expiry each tick means the key vanishes
+				// once every process stops reporting.
+				if err = client.HSet(writeCtx, runtimeKey, field, body).Err(); err == nil {
+					err = client.Expire(writeCtx, runtimeKey, config.RuntimeReportTTL).Err()
+				}
 				done()
 			}
 			if err != nil && ctx.Err() == nil {
@@ -55,30 +61,27 @@ func RuntimeSnapshots(ctx context.Context, client *goredis.Client) ([]config.Run
 	if client == nil {
 		return nil, fmt.Errorf("runtime reporting unavailable")
 	}
-	snapshots := make([]config.RuntimeSnapshot, 0)
-	iter := client.Scan(ctx, 0, runtimePrefix+"*", 100).Iterator()
-	seen := map[string]bool{}
-	for iter.Next(ctx) {
-		key := iter.Val()
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-		raw, err := client.Get(ctx, key).Bytes()
-		if err == goredis.Nil {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
+	entries, err := client.HGetAll(ctx, runtimeKey).Result()
+	if err != nil {
+		return nil, err
+	}
+	snapshots := make([]config.RuntimeSnapshot, 0, len(entries))
+	stale := make([]string, 0)
+	for field, raw := range entries {
 		var snapshot config.RuntimeSnapshot
-		if err := json.Unmarshal(raw, &snapshot); err != nil {
+		if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
 			return nil, fmt.Errorf("invalid runtime snapshot")
+		}
+		// Hash fields carry no individual TTL, so a boot that stopped reporting is
+		// dropped by age and pruned; the set is small and bounded by replica count.
+		if time.Since(snapshot.ReportedAt) > config.RuntimeReportTTL {
+			stale = append(stale, field)
+			continue
 		}
 		snapshots = append(snapshots, snapshot)
 	}
-	if err := iter.Err(); err != nil {
-		return nil, err
+	if len(stale) > 0 {
+		_ = client.HDel(ctx, runtimeKey, stale...).Err()
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
 		if snapshots[i].Process == snapshots[j].Process {

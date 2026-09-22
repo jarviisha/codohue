@@ -42,6 +42,7 @@ let savedBodies = []
 let summaryFailure = true
 let trendingFailure = true
 let trendingRows = []
+let trendingOffsets = []
 let healthFailure = false
 let healthDetails = false
 let catalogRequests = 0
@@ -180,16 +181,19 @@ await context.route('**/api/**', async (route) => {
       ],
     })
   if (path.endsWith('/trending')) {
-    assert.equal(new URL(route.request().url()).searchParams.has('window_hours'), false)
+    const query = new URL(route.request().url()).searchParams
+    assert.equal(query.has('window_hours'), false)
+    const offset = Number(query.get('offset') ?? 0)
+    trendingOffsets.push(offset)
     return trendingFailure
       ? json({ error: { message: 'Unavailable' } }, 503)
       : json({
           namespace: 'a',
-          items: trendingRows,
+          items: trendingRows.slice(offset, offset + 50),
           window_hours: 72,
           total: trendingRows.length,
           limit: 50,
-          offset: 0,
+          offset,
           cache_ttl_sec: 0,
           generated_at: config.updated_at,
         })
@@ -415,6 +419,28 @@ try {
   console.log(
     'PASS trending separates errors, empty results, configured window and stale snapshots',
   )
+
+  // A full page must page forward: the first request starts at offset 0, never a
+  // negative one, and "Next page" advances instead of looping back.
+  trendingFailure = false
+  trendingRows = Array.from({ length: 75 }, (_, i) => ({
+    object_id: `item-${i + 1}`,
+    score: 75 - i,
+    cache_ttl_sec: 0,
+  }))
+  trendingOffsets = []
+  await goto('/ns/a/trending')
+  await page.getByText('Showing ranks 1–50', { exact: true }).waitFor()
+  assert.deepEqual(trendingOffsets, [0])
+  await page.getByRole('button', { name: 'Next page', exact: true }).click()
+  await page.getByText('Showing ranks 51–75', { exact: true }).waitFor()
+  await page.getByText('Page 2', { exact: true }).waitFor()
+  assert.ok(page.url().includes('page=2'), page.url())
+  assert.ok(trendingOffsets.includes(50), JSON.stringify(trendingOffsets))
+  await page.getByRole('button', { name: 'Previous page', exact: true }).click()
+  await page.getByText('Showing ranks 1–50', { exact: true }).waitFor()
+  assert.ok(!page.url().includes('page='), page.url())
+  console.log('PASS trending pages forward and back from a full first page')
 
   await goto('/health')
   await page.getByText('PostgreSQL', { exact: true }).waitFor()

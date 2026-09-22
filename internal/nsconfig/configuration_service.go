@@ -110,6 +110,15 @@ func (s *Service) PatchConfiguration(ctx context.Context, ns string, req *namesp
 	} else {
 		err = change(ctx, nil)
 	}
+	// A conflict snapshot is read before validation runs, so it carries no locks.
+	// Clients adopt it as canonical, and an unlocked field would invite a save the
+	// server then rejects.
+	var conflict *namespace.ConfigurationError
+	if errors.As(err, &conflict) && conflict.Current != nil {
+		if lockErr := s.configurationLocks(ctx, ns, conflict.Current); lockErr != nil {
+			return nil, lockErr
+		}
+	}
 	if errors.Is(err, nslifecycle.ErrNamespaceNotFound) || errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
 		return nil, &namespace.ConfigurationError{Status: 404, Code: "not_found", Message: "Namespace is not active or does not exist"}
 	}
@@ -181,7 +190,9 @@ func (s *Service) validateConfiguration(ctx context.Context, ns string, patch *n
 		}
 		return configurationInvalid(patch.Group, field, err.Error())
 	}
-	if req.DenseDistance != nil && !denseDistances[*req.DenseDistance] {
+	// Empty means "unset" and is tolerated on write, matching validateUpsert.
+	// Rejecting it here would wedge every group on a namespace already storing it.
+	if req.DenseDistance != nil && *req.DenseDistance != "" && !denseDistances[*req.DenseDistance] {
 		return configurationInvalid("embeddings", "dense_distance", "Select cosine or dot")
 	}
 	for action := range req.ActionWeights {

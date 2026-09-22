@@ -74,3 +74,53 @@ func TestConfigurationIgnoresFieldNamesInsideValues(t *testing.T) {
 		t.Fatalf("echoed value misattributed to dense_source: %v", invalid.Fields)
 	}
 }
+
+type fakeDense struct{ exists bool }
+
+func (f fakeDense) DenseCollectionsExist(context.Context, string, int64) (bool, error) {
+	return f.exists, nil
+}
+
+type conflictRepo struct {
+	*Repository // unused; embedded only to satisfy the repository interface
+	current     *namespace.Configuration
+}
+
+func (r *conflictRepo) ReadConfiguration(context.Context, string) (*namespace.Configuration, error) {
+	return r.current, nil
+}
+func (r *conflictRepo) ChangeConfiguration(_ context.Context, _ string, _ *namespace.ConfigurationPatch, _ bool, _ func(*namespace.Configuration, map[string]json.RawMessage) error) (*namespace.Configuration, error) {
+	return nil, &namespace.ConfigurationError{Status: 409, Code: "configuration_conflict", Message: "changed", Current: r.current}
+}
+
+// The conflict snapshot is read before validation, so it must still be given the
+// collection locks; otherwise reconciling unlocks a field the server will reject.
+func TestConfigurationConflictSnapshotCarriesLocks(t *testing.T) {
+	current := &namespace.Configuration{Namespace: "n", Generation: 1, Groups: map[string]namespace.ConfigurationGroup{
+		"embeddings": {Revision: 1, Values: map[string]json.RawMessage{}, Locks: map[string]string{}},
+	}}
+	s := &Service{repo: &conflictRepo{current: current}}
+	s.SetDenseCollectionChecker(fakeDense{exists: true})
+	_, err := s.PatchConfiguration(context.Background(), "n", &namespace.ConfigurationPatch{Group: "embeddings", Generation: 1, BaseRevision: 1}, false)
+	var configErr *namespace.ConfigurationError
+	if !errors.As(err, &configErr) || configErr.Status != 409 {
+		t.Fatalf("want 409, got %v", err)
+	}
+	if configErr.Current.Groups["embeddings"].Locks["embedding_dim"] == "" {
+		t.Fatalf("conflict snapshot lost the dense collection lock: %+v", configErr.Current.Groups["embeddings"].Locks)
+	}
+}
+
+// A stored-empty dense_distance is tolerated by validateUpsert, so it must not
+// block saving unrelated groups through the merged-config validation.
+func TestConfigurationTolerlatesStoredEmptyDenseDistance(t *testing.T) {
+	s := NewService(nil)
+	vals := map[string]json.RawMessage{
+		"dense_distance":            json.RawMessage(`""`),
+		"catalog_max_attempts":      json.RawMessage(`null`),
+		"catalog_max_content_bytes": json.RawMessage(`null`),
+	}
+	if err := s.validateConfiguration(context.Background(), "x", &namespace.ConfigurationPatch{Group: "trending"}, &namespace.Configuration{}, vals); err != nil {
+		t.Fatalf("empty dense_distance blocked an unrelated group: %v", err)
+	}
+}

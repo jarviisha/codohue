@@ -66,6 +66,9 @@ func (h *Handler) writeConfiguration(w http.ResponseWriter, r *http.Request, out
 	if err != nil {
 		var configErr *namespace.ConfigurationError
 		if errors.As(err, &configErr) {
+			// A conflict snapshot is installed as the client's canonical cache,
+			// so it needs the same observations a successful read carries.
+			h.configurationDefaults(r.Context(), configErr.Current)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(configErr.Status)
 			_ = json.NewEncoder(w).Encode(map[string]any{"error": configErr})

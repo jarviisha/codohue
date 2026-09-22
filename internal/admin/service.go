@@ -280,13 +280,25 @@ func (s *Service) SetObservabilityToken(token string) {
 }
 
 // GetHealth retrieves component details when configured, otherwise aggregate health.
+// The token is read independently by cmd/api and cmd/admin, so a detailed read can
+// be rejected while the API is healthy; the sanitized aggregate is then still valid.
 func (s *Service) GetHealth(ctx context.Context) (*HealthResponse, int, error) {
+	if s.observabilityToken != "" {
+		health, code, err := s.fetchHealth(ctx, true)
+		if err == nil {
+			return health, code, nil
+		}
+	}
+	return s.fetchHealth(ctx, false)
+}
+
+func (s *Service) fetchHealth(ctx context.Context, details bool) (*HealthResponse, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.apiURL+"/healthz", http.NoBody)
 	if err != nil {
 		return nil, 0, fmt.Errorf("build health request: %w", err)
 	}
 
-	if s.observabilityToken != "" {
+	if details {
 		req.URL.RawQuery = "details=true"
 		req.Header.Set("Authorization", "Bearer "+s.observabilityToken)
 	}
