@@ -48,6 +48,7 @@ func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, 
 		r.Delete("/api/v1/auth/sessions/current", h.DeleteCurrentSession)
 
 		r.Get("/api/admin/v1/health", h.GetHealth)
+		r.Get("/api/admin/v1/runtime", h.GetRuntime)
 
 		// SSE smoke endpoint — kept around as a low-cost end-to-end probe for
 		// the streaming pipeline. Removeable once the SPA settles on real
@@ -66,6 +67,7 @@ func newAdminRouter(h *admin.Handler, sessions *admin.SessionManager, adminKey, 
 		r.Put("/api/admin/v1/namespaces/{ns}", h.UpsertNamespace)
 		r.Delete("/api/admin/v1/namespaces/{ns}", h.DeleteNamespace)
 		r.Post("/api/admin/v1/namespaces/{ns}/api-key", h.RotateNamespaceAPIKey)
+
 
 		// Per-namespace dashboard aggregate.
 		r.Get("/api/admin/v1/namespaces/{ns}/dashboard", h.GetNamespaceDashboard)

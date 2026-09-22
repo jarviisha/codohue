@@ -89,6 +89,9 @@ func run() error {
 		defer redisClient.Close() //nolint:errcheck // best-effort cleanup on shutdown
 	}
 
+	stopRuntime := infraredis.StartRuntimeReporter(ctx, redisClient, "admin", cfg.RuntimeSettings())
+	defer stopRuntime()
+
 	qdrantClient, err := infraqdrant.NewClient(cfg.QdrantHost, cfg.QdrantPort)
 	if err != nil {
 		slog.Warn("qdrant unavailable, sparse vector NNZ will be disabled", "error", err)
@@ -201,6 +204,9 @@ func run() error {
 	}
 	var sessions *admin.SessionManager
 	h := admin.NewHandler(svc, "", sessions)
+	h.SetRuntimeReader(func(ctx context.Context) ([]config.RuntimeSnapshot, error) {
+		return infraredis.RuntimeSnapshots(ctx, redisClient)
+	})
 	h.SetIdentity(identities, admin.IdentityOptions{SecureCookies: cfg.SecureCookies, TrustedProxies: proxies, AllowedOrigin: cfg.AllowDevOrigin})
 	go func() {
 		ticker := time.NewTicker(time.Hour)
