@@ -181,6 +181,7 @@ func run() error {
 		proxyToken = cfg.AdminAPIKey
 	}
 	svc := admin.NewService(repo, cfg.APIURL, proxyToken, redisClient, qdrantClient, job, nsAdapter)
+	svc.SetObservabilityToken(cfg.ObservabilityToken)
 	svc.SetLifecycleCoordinator(&lifecycleCoordinatorAdapter{service: lifecycleSvc, repo: lifecycleRepo})
 
 	// Catalog auto-embedding admin endpoints (US2). The adapter bridges

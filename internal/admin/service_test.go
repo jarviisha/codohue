@@ -1314,3 +1314,46 @@ func TestLifecycleOperationsMetricRecordsBothOutcomes(t *testing.T) {
 		t.Errorf("reset/failure = %v, want 0", got)
 	}
 }
+
+func TestGetHealth_ObservabilityContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, token, body string
+		code              int
+		want              HealthResponse
+		wantError         bool
+	}{
+		{name: "public aggregate", body: `{"status":"ok"}`, code: 200, want: HealthResponse{Status: "ok", Postgres: "unknown", Redis: "unknown", Qdrant: "unknown"}},
+		{name: "details", token: "observability-only", body: `{"status":"ok","postgres":"ok","redis":"ok","qdrant":"ok"}`, code: 200, want: HealthResponse{Status: "ok", Postgres: "ok", Redis: "ok", Qdrant: "ok"}},
+		{name: "degraded details", token: "observability-only", body: `{"status":"degraded","postgres":"ok","redis":"error: unavailable","qdrant":"ok"}`, code: 503, want: HealthResponse{Status: "degraded", Postgres: "ok", Redis: "error: unavailable", Qdrant: "ok"}},
+		{name: "empty fields", body: `{"status":" ","postgres":""}`, code: 200, want: HealthResponse{Status: "unknown", Postgres: "unknown", Redis: "unknown", Qdrant: "unknown"}},
+		{name: "unauthorized details", token: "observability-only", body: `{"error":"unauthorized"}`, code: 401, wantError: true},
+		{name: "disabled details", token: "observability-only", body: `{}`, code: 404, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/healthz" {
+					t.Errorf("unexpected path: %s", r.URL.Path)
+				}
+				wantAuth, wantQuery := "", ""
+				if tc.token != "" {
+					wantAuth, wantQuery = "Bearer "+tc.token, "details=true"
+				}
+				if r.Header.Get("Authorization") != wantAuth || r.URL.RawQuery != wantQuery {
+					t.Error("incorrect observability request credential or query")
+				}
+				w.WriteHeader(tc.code)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer fake.Close()
+			svc := newTestService(&fakeRepo{}, fake.URL, "data-proxy-token")
+			svc.SetObservabilityToken(tc.token)
+			got, code, err := svc.GetHealth(context.Background())
+			if (err != nil) != tc.wantError || code != tc.code {
+				t.Fatalf("code=%d err=%v", code, err)
+			}
+			if !tc.wantError && *got != tc.want {
+				t.Errorf("health=%+v; want %+v", *got, tc.want)
+			}
+		})
+	}
+}

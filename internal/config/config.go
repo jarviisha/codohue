@@ -170,7 +170,7 @@ type AdminConfig struct {
 	QdrantHost     string
 	QdrantPort     int
 	AllowDevOrigin string // CORS allow-origin for the Vite dev server; empty in prod (same-origin embed)
-	// ObservabilityToken protects the admin process's Prometheus endpoint.
+	// ObservabilityToken protects admin metrics and authenticates detailed API health reads.
 	// Empty leaves the route unavailable.
 	ObservabilityToken string
 
