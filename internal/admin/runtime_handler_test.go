@@ -3,10 +3,11 @@ package admin
 import (
 	"context"
 	"errors"
-	"github.com/jarviisha/codohue/internal/config"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/jarviisha/codohue/internal/config"
 )
 
 func TestRuntimeHandlerUnavailableAndSnapshots(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRuntimeHandlerUnavailableAndSnapshots(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h.SetRuntimeReader(tc.reader)
 			w := httptest.NewRecorder()
-			h.GetRuntime(w, httptest.NewRequest("GET", "/api/admin/v1/runtime", nil))
+			h.GetRuntime(w, httptest.NewRequestWithContext(context.Background(), "GET", "/api/admin/v1/runtime", nil))
 			if w.Code != tc.status || !strings.Contains(w.Body.String(), tc.contains) || strings.Contains(w.Body.String(), "secret connection") {
 				t.Fatalf("unexpected response: %d %s", w.Code, w.Body.String())
 			}

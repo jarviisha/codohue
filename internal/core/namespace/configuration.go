@@ -45,6 +45,8 @@ type ConfigurationDefault struct {
 	Value   any                          `json:"value,omitempty"`
 	Reports []ConfigurationDefaultReport `json:"reports"`
 }
+
+// ConfigurationDefaultReport is one process instance's view of an inherited default.
 type ConfigurationDefaultReport struct {
 	Instance   string `json:"instance"`
 	ReportedAt string `json:"reported_at"`

@@ -50,13 +50,13 @@ func (r *Repository) ReadConfiguration(ctx context.Context, ns string) (*namespa
 		return nil, err
 	}
 	var values map[string]json.RawMessage
-	if err = json.Unmarshal(raw, &values); err != nil {
-		return nil, err
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, fmt.Errorf("decode configuration row: %w", err)
 	}
 	for group, fields := range configurationFields {
 		g := namespace.ConfigurationGroup{Values: map[string]json.RawMessage{}, Locks: map[string]string{}, Guidance: configurationGuidance[group]}
-		if err = json.Unmarshal(values[group+"_revision"], &g.Revision); err != nil {
-			return nil, err
+		if err := json.Unmarshal(values[group+"_revision"], &g.Revision); err != nil {
+			return nil, fmt.Errorf("decode %s revision: %w", group, err)
 		}
 		for _, f := range fields {
 			g.Values[f] = values[f]

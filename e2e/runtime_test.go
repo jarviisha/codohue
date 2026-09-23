@@ -4,10 +4,11 @@ package e2e
 
 import (
 	"encoding/json"
-	"github.com/jarviisha/codohue/internal/config"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/config"
 )
 
 func TestAdmin_RuntimeSelfReports(t *testing.T) {

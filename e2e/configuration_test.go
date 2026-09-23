@@ -4,10 +4,11 @@ package e2e
 
 import (
 	"encoding/json"
-	"github.com/jarviisha/codohue/internal/core/namespace"
 	"net/http"
 	"strconv"
 	"testing"
+
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 func TestAdmin_GroupConfiguration(t *testing.T) {

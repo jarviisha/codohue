@@ -2,10 +2,11 @@ package admin
 
 import (
 	"context"
-	"github.com/jarviisha/codohue/internal/config"
-	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"net/http"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 // SetRuntimeReader connects the optional runtime reporting store during startup.

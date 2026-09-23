@@ -176,7 +176,7 @@ func validateConfigurationPatch(req *namespace.ConfigurationPatch) error {
 }
 
 func (s *Service) validateConfiguration(ctx context.Context, ns string, patch *namespace.ConfigurationPatch, current *namespace.Configuration, values map[string]json.RawMessage) error {
-	raw, _ := json.Marshal(values)
+	raw, _ := json.Marshal(values) //nolint:errcheck // values came from JSON and re-marshal cleanly
 	var req UpsertRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return configurationInvalid(patch.Group, "values", "Invalid configuration values")

@@ -69,17 +69,14 @@ func (h *Handler) writeConfiguration(w http.ResponseWriter, r *http.Request, out
 			// A conflict snapshot is installed as the client's canonical cache,
 			// so it needs the same observations a successful read carries.
 			h.configurationDefaults(r.Context(), configErr.Current)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(configErr.Status)
-			_ = json.NewEncoder(w).Encode(map[string]any{"error": configErr})
+			httpapi.WriteJSON(w, configErr.Status, map[string]any{"error": configErr})
 			return
 		}
 		writeInternalError(w, r, "Configuration request failed", err)
 		return
 	}
 	h.configurationDefaults(r.Context(), out)
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(out)
+	httpapi.WriteJSON(w, http.StatusOK, out)
 }
 
 func (h *Handler) configurationDefaults(ctx context.Context, out *namespace.Configuration) {
@@ -89,6 +86,7 @@ func (h *Handler) configurationDefaults(ctx context.Context, out *namespace.Conf
 	out.Defaults = map[string]namespace.ConfigurationDefault{}
 	var reports []config.RuntimeSnapshot
 	if h.runtimeReader != nil {
+		//nolint:errcheck // a failed read is reported as an unknown observation below
 		reports, _ = h.runtimeReader(ctx)
 	}
 	for field, source := range map[string][2]string{"catalog_max_attempts": {"embedder", "max_attempts_default"}, "catalog_max_content_bytes": {"api", "catalog_max_content_bytes"}} {

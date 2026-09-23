@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jarviisha/codohue/internal/core/namespace"
 	"testing"
+
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 func TestConfigurationPatchParsing(t *testing.T) {

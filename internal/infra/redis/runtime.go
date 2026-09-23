@@ -25,7 +25,7 @@ func StartRuntimeReporter(ctx context.Context, client *goredis.Client, process s
 	if client == nil {
 		return cancel
 	}
-	instance, _ := os.Hostname()
+	instance, _ := os.Hostname() //nolint:errcheck // an unnamed instance still reports usefully
 	snapshot := config.RuntimeSnapshot{Process: process, Instance: instance, StartedAt: time.Now().UTC(), Settings: settings}
 	field := process + ":" + rand.Text()
 	go func() {
@@ -63,7 +63,7 @@ func RuntimeSnapshots(ctx context.Context, client *goredis.Client) ([]config.Run
 	}
 	entries, err := client.HGetAll(ctx, runtimeKey).Result()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read runtime snapshots: %w", err)
 	}
 	snapshots := make([]config.RuntimeSnapshot, 0, len(entries))
 	stale := make([]string, 0)
@@ -81,7 +81,8 @@ func RuntimeSnapshots(ctx context.Context, client *goredis.Client) ([]config.Run
 		snapshots = append(snapshots, snapshot)
 	}
 	if len(stale) > 0 {
-		_ = client.HDel(ctx, runtimeKey, stale...).Err()
+		// Pruning is opportunistic; the age filter above already excluded them.
+		client.HDel(ctx, runtimeKey, stale...)
 	}
 	sort.Slice(snapshots, func(i, j int) bool {
 		if snapshots[i].Process == snapshots[j].Process {

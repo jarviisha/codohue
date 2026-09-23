@@ -3,12 +3,13 @@ package admin
 import (
 	"context"
 	"encoding/json"
-	"github.com/jarviisha/codohue/internal/config"
-	"github.com/jarviisha/codohue/internal/core/namespace"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jarviisha/codohue/internal/config"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 )
 
 type configurationFake struct {
@@ -31,7 +32,7 @@ func TestConfigurationHandlerStrictParsing(t *testing.T) {
 		h := NewHandler(nil, "", nil)
 		h.SetConfigurationStore(f)
 		w := httptest.NewRecorder()
-		h.PatchConfiguration(w, httptest.NewRequest("PATCH", "/", strings.NewReader(body)))
+		h.PatchConfiguration(w, httptest.NewRequestWithContext(context.Background(), "PATCH", "/", strings.NewReader(body)))
 		if w.Code != 422 || f.called {
 			t.Fatalf("body=%s status=%d called=%v", body, w.Code, f.called)
 		}
@@ -42,7 +43,7 @@ func TestConfigurationHandlerConflictAndValidation(t *testing.T) {
 	h := NewHandler(nil, "", nil)
 	h.SetConfigurationStore(f)
 	w := httptest.NewRecorder()
-	h.PatchConfiguration(w, httptest.NewRequest("PATCH", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
+	h.PatchConfiguration(w, httptest.NewRequestWithContext(context.Background(), "PATCH", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
 	var body struct {
 		Error namespace.ConfigurationError `json:"error"`
 	}
@@ -52,7 +53,7 @@ func TestConfigurationHandlerConflictAndValidation(t *testing.T) {
 	}
 	f.err = nil
 	w = httptest.NewRecorder()
-	h.ValidateConfiguration(w, httptest.NewRequest("POST", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
+	h.ValidateConfiguration(w, httptest.NewRequestWithContext(context.Background(), "POST", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
 	if w.Code != 200 || !f.validation {
 		t.Fatal("validation not delegated")
 	}
@@ -99,7 +100,7 @@ func TestConfigurationConflictSnapshotCarriesDefaults(t *testing.T) {
 		return []config.RuntimeSnapshot{{Process: "embedder", Instance: "e1", ReportedAt: time.Now().UTC(), Settings: []config.RuntimeSetting{{Name: "max_attempts_default", Value: 7}}}}, nil
 	})
 	w := httptest.NewRecorder()
-	h.PatchConfiguration(w, httptest.NewRequest("PATCH", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
+	h.PatchConfiguration(w, httptest.NewRequestWithContext(context.Background(), "PATCH", "/", strings.NewReader(`{"group":"trending","generation":1,"base_revision":1,"changes":{}}`)))
 	if w.Code != 409 {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}

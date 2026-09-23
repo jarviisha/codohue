@@ -121,11 +121,12 @@ func TestConfigurationSameGroupAndRecreation(t *testing.T) {
 	for range 2 {
 		err := <-results
 		var conflict *namespace.ConfigurationError
-		if err == nil {
+		switch {
+		case err == nil:
 			success++
-		} else if errors.As(err, &conflict) && conflict.Status == 409 {
+		case errors.As(err, &conflict) && conflict.Status == 409:
 			conflicts++
-		} else {
+		default:
 			t.Fatal(err)
 		}
 	}
