@@ -23,12 +23,12 @@ It ingests events and raw catalog content over HTTP and durable Redis Streams, p
 | ---------------- | ----- | ------- |
 | `cmd/api`        | 2001  | Data-plane HTTP API + Redis Streams ingest worker |
 | `cmd/cron`       | —     | Batch daemon: sparse + dense + trending recompute |
-| `cmd/admin`      | 2002  | Admin server: `/api/admin/v1/*` (session cookie or admin-key bearer) + embedded SPA |
+| `cmd/admin`      | 2002  | Admin server: `/api/admin/v1/*` (operator session cookie or scoped service token) + embedded SPA |
 | `cmd/embedder`   | 2003  | Catalog auto-embedding worker |
 
 ## Requirements
 
-- Go `1.26.1` (server). SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) target Go `1.24.13`.
+- Go `1.26.7` (server). SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) target Go `1.24.13`.
 - Docker + Docker Compose 2.24+ for local infra
 - `golangci-lint` (for `make lint`, `make fmt`)
 - `air` (for `make dev`)
@@ -103,8 +103,8 @@ Codohue loads `.env` automatically when present. Required: `DATABASE_URL` (or `D
 
 `/healthz` is public and reports only an aggregate `status` — no component
 names, no dependency errors. Anything more detailed needs the dedicated
-observability credential, which is deliberately **not** the admin key: a
-monitoring agent should not be able to delete namespaces.
+observability credential, which is deliberately separate from any operator or
+service credential: a monitoring agent should not be able to delete namespaces.
 
 ```bash
 curl http://localhost:2001/healthz                       # public: {"status":"ok"}
@@ -166,7 +166,7 @@ curl -b cookies.txt -X PUT http://localhost:2002/api/admin/v1/namespaces/demo \
   }'
 ```
 
-The response returns a **plaintext namespace API key once** — only the bcrypt hash is stored. Data-plane calls send it as `Authorization: Bearer <key>`. The shared global key has no default data-plane bypass. For repeatable Compose setup, supply a pre-generated `provision_api_key` or use `admin access provision`; matching retries preserve credentials/configuration and conflicts return 409.
+The response returns a **plaintext namespace API key once** — only the bcrypt hash is stored. Data-plane calls send it as `Authorization: Bearer <key>`; no credential bypasses that check by default. For repeatable Compose setup, supply a pre-generated `provision_api_key` or use `admin access provision`; matching retries preserve credentials/configuration and conflicts return 409.
 
 ## Sending events
 
@@ -184,57 +184,18 @@ redis-cli XADD codohue:events '*' payload \
 
 Built-in actions: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP`. Custom actions are accepted when defined in `namespace_configs.action_weights`.
 
-## Common Make targets
-
-[Makefile](Makefile) is the source of truth. Highlights:
-
-```bash
-# Build / run
-make build                     # all four binaries to ./tmp/
-make build-admin-embed         # admin binary with SPA bundled
-make run / run-cron / run-admin / run-embedder
-make dev / dev-admin / dev-all
-
-# Docker
-make up-d / up-infra / up-app-d
-make down / down-v / down-app
-make logs / logs-cron / logs-admin / logs-embedder
-make compose-check             # validate every compose file
-make test-docker               # configuration and deploy-script regressions
-
-# Quality
-make lint
-make fmt
-make test
-make test-race
-make test-pkg PKG=./internal/ingest/...
-
-# Coverage
-make coverage
-make coverage-html
-make coverage-check-all        # CI gate
-
-# E2E (build tag `e2e`, requires infra + migrations)
-make test-e2e
-make test-e2e-api
-make test-e2e-heavy
-
-# Migrations
-make migrate-up / migrate-down / migrate-version
-make migrate-create NAME=add_indexes
-```
-
 ## Testing
 
 ```bash
-make test           # unit + package tests across all go.work modules
-make test-race      # with -race
-
-# E2E
+make test                                      # unit + package tests across all go.work modules
+make test-race                                 # with -race
+make test-pkg PKG=./internal/ingest/...        # one package tree
 make up-infra && make migrate-up && make test-e2e
 ```
 
-The E2E suite launches the API binary on port `12001` and exercises HTTP contracts, Redis Streams ingest, cron recompute, hybrid recommendation, and catalog auto-embedding.
+The E2E suite (build tag `e2e`) launches the API binary on port `12001` and exercises HTTP contracts, Redis Streams ingest, cron recompute, hybrid recommendation, and catalog auto-embedding.
+
+[Makefile](Makefile) is the source of truth for the rest — build, Docker, coverage, lint and migration targets.
 
 ## Web admin SPA
 
@@ -249,7 +210,5 @@ make build-admin-embed    # production admin binary with SPA
 
 ## Notes
 
-- Namespace keys are returned in plaintext **only once**, on creation.
-- Do not commit `.env`, secrets, or plaintext namespace keys.
 - `make down-v` removes containers **and** volumes — full local reset.
 - Catalog ingest (`POST /v1/namespaces/{ns}/catalog`) only works when the namespace uses `dense_source="catalog"`, configured through `PUT /api/admin/v1/namespaces/{ns}/catalog`; in that mode, `PUT /v1/namespaces/{ns}/objects/{id}/embedding` returns `409 Conflict` because the catalog pipeline owns object vectors.

@@ -61,7 +61,7 @@ hybrid recommendation score *values* change once.
   the old bearer path alive for migration; it cannot manage identities and is
   rejected in production. Setup, permissions, and local recovery are in
   `deploy/operator-auth.md`.
-- **`POST /api/admin/v1/sessions` takes a username and password** — body
+- **`POST /api/v1/auth/sessions` takes a username and password** — body
   `{"username":"owner","password":"…"}` with header `X-Codohue-CSRF: 1`.
   Cookie-mutating routes require the CSRF header, forwarded headers require
   trusted proxy CIDRs, and open SSE connections revalidate every 15 seconds.
