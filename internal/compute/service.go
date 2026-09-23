@@ -71,6 +71,7 @@ type computeRepo interface {
 type idmapService interface {
 	GetOrCreateSubjectID(ctx context.Context, subjectID, namespace string) (uint64, error)
 	GetOrCreateObjectID(ctx context.Context, objectID, namespace string) (uint64, error)
+	GetOrCreateObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error)
 }
 
 // Service computes sparse vectors with time decay for each subject in a namespace.
@@ -125,28 +126,26 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	upserted := 0
 	keepSubjects := make(map[uint64]struct{}, len(subjects))
 	for _, subjectID := range subjects {
-		subjectVec, scores, maxTimes, createdTimes, err := s.buildVectors(ctx, namespace, subjectID, lambda)
+		built, err := s.buildVectors(ctx, namespace, subjectID, lambda)
 		if err != nil {
 			slog.Error("build vectors failed", "namespace", namespace, "subject_id", subjectID, "error", err)
 			continue
 		}
 
-		if err := s.upsertSubjectVector(ctx, namespace, subjectVec); err != nil {
+		if err := s.upsertSubjectVector(ctx, namespace, built.vec); err != nil {
 			slog.Error("upsert subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
 		} else {
 			upserted++
-			keepSubjects[subjectVec.NumericID] = struct{}{}
+			keepSubjects[built.vec.NumericID] = struct{}{}
 		}
 
-		if err := s.accumulateObjectCooccurrence(ctx, namespace, objectAccum, scores); err != nil {
-			slog.Error("accumulate object cooccurrence failed", "namespace", namespace, "subject_id", subjectID, "error", err)
-		}
+		s.accumulateObjectCooccurrence(objectAccum, built.scores, built.objectIDs)
 
-		for objID := range scores {
-			if t, ok := maxTimes[objID]; ok && t > objectMaxTime[objID] {
+		for objID := range built.scores {
+			if t, ok := built.maxTimes[objID]; ok && t > objectMaxTime[objID] {
 				objectMaxTime[objID] = t
 			}
-			if t, ok := createdTimes[objID]; ok && t > 0 {
+			if t, ok := built.createdTimes[objID]; ok && t > 0 {
 				if existing, has := objectCreatedAt[objID]; !has || t > existing {
 					objectCreatedAt[objID] = t
 				}
@@ -189,16 +188,12 @@ func (s *Service) cleanupCollection(ctx context.Context, collection string, keep
 	}
 }
 
-func (s *Service) accumulateObjectCooccurrence(ctx context.Context, namespace string, objectAccum map[string]map[uint64]float32, objectScores map[string]float64) error {
-	objectIDs := make(map[string]uint64, len(objectScores))
-	for objectID := range objectScores {
-		objNumID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
-		if err != nil {
-			return fmt.Errorf("get object id for %q: %w", objectID, err)
-		}
-		objectIDs[objectID] = objNumID
-	}
-
+// accumulateObjectCooccurrence folds one subject's scores into the namespace's
+// object co-occurrence rows. objectIDs is the resolved numeric id per object,
+// passed in rather than looked up here: buildVectors already resolved exactly
+// this key set for the subject vector, and resolving it twice per subject was
+// half of the 2N sequential queries each tick spent on id mapping.
+func (s *Service) accumulateObjectCooccurrence(objectAccum map[string]map[uint64]float32, objectScores map[string]float64, objectIDs map[string]uint64) {
 	for targetID := range objectScores {
 		for otherID, score := range objectScores {
 			if otherID == targetID {
@@ -210,16 +205,32 @@ func (s *Service) accumulateObjectCooccurrence(ctx context.Context, namespace st
 			objectAccum[targetID][objectIDs[otherID]] += float32(score)
 		}
 	}
-
-	return nil
 }
 
-// buildVectors computes the sparse vector for a subject and returns the decay-weighted scores,
-// the max occurred_at timestamp per object, and the explicit object_created_at per object when available.
-func (s *Service) buildVectors(ctx context.Context, namespace, subjectID string, lambda float64) (vec *SubjectVector, scores map[string]float64, maxTimes, createdTimes map[string]int64, err error) {
+// subjectVectors is everything one subject's event window produced: the sparse
+// vector itself, plus the per-object data the namespace-level accumulators
+// fold together afterwards. These five travel together to every caller, so
+// they are one value rather than a six-result signature.
+type subjectVectors struct {
+	vec *SubjectVector
+	// scores is the decay-weighted score per object.
+	scores map[string]float64
+	// maxTimes is the latest occurred_at per object.
+	maxTimes map[string]int64
+	// createdTimes is the explicit object_created_at per object, when the
+	// event source supplied one.
+	createdTimes map[string]int64
+	// objectIDs is the numeric id per object, resolved once so callers need
+	// not resolve it again.
+	objectIDs map[string]uint64
+}
+
+// buildVectors computes one subject's sparse vector and the per-object data
+// derived alongside it.
+func (s *Service) buildVectors(ctx context.Context, namespace, subjectID string, lambda float64) (*subjectVectors, error) {
 	events, err := s.repo.GetSubjectEvents(ctx, namespace, subjectID)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("get events: %w", err)
+		return nil, fmt.Errorf("get events: %w", err)
 	}
 
 	objectScores := make(map[string]float64)
@@ -242,15 +253,44 @@ func (s *Service) buildVectors(ctx context.Context, namespace, subjectID string,
 		}
 	}
 
-	subjectVec, err := s.buildSubjectVector(ctx, namespace, subjectID, objectScores)
+	// One resolution per subject, shared by the subject vector and the
+	// co-occurrence fold: both need exactly this key set.
+	objectIDs, err := s.resolveObjectIDs(ctx, namespace, objectScores)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("build subject vector: %w", err)
+		return nil, err
 	}
 
-	return subjectVec, objectScores, objectMaxTime, objectCreatedTimes, nil
+	vec, err := s.buildSubjectVector(ctx, namespace, subjectID, objectScores, objectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("build subject vector: %w", err)
+	}
+
+	return &subjectVectors{
+		vec:          vec,
+		scores:       objectScores,
+		maxTimes:     objectMaxTime,
+		createdTimes: objectCreatedTimes,
+		objectIDs:    objectIDs,
+	}, nil
 }
 
-func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID string, objectScores map[string]float64) (*SubjectVector, error) {
+// resolveObjectIDs maps every object key to its numeric id in one round-trip.
+func (s *Service) resolveObjectIDs(ctx context.Context, namespace string, objectScores map[string]float64) (map[string]uint64, error) {
+	if len(objectScores) == 0 {
+		return map[string]uint64{}, nil
+	}
+	keys := make([]string, 0, len(objectScores))
+	for objectID := range objectScores {
+		keys = append(keys, objectID)
+	}
+	objectIDs, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, keys, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get object ids: %w", err)
+	}
+	return objectIDs, nil
+}
+
+func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID string, objectScores map[string]float64, objectIDs map[string]uint64) (*SubjectVector, error) {
 	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, subjectID, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("get subject id for %q: %w", subjectID, err)
@@ -262,9 +302,9 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 	}
 	entries := make([]sparseEntry, 0, len(objectScores))
 	for objectID, score := range objectScores {
-		objNumID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
-		if err != nil {
-			return nil, fmt.Errorf("get object id for %q: %w", objectID, err)
+		objNumID, ok := objectIDs[objectID]
+		if !ok {
+			return nil, fmt.Errorf("no numeric id resolved for object %q", objectID)
 		}
 		index, err := sparseIndex(objNumID)
 		if err != nil {
@@ -337,6 +377,21 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 	upsertedIDs := make(map[uint64]struct{}, len(accum))
 	var batch []*qdrant.PointStruct
 
+	// One resolution for the whole accumulated set: these keys were already
+	// minted while building the subject vectors, so this is a bulk read.
+	objectKeys := make([]string, 0, len(accum))
+	for objectID := range accum {
+		objectKeys = append(objectKeys, objectID)
+	}
+	objectIDs := make(map[string]uint64, len(accum))
+	if len(objectKeys) > 0 {
+		resolved, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, objectKeys, namespace)
+		if err != nil {
+			return upsertedIDs, fmt.Errorf("get object ids: %w", err)
+		}
+		objectIDs = resolved
+	}
+
 	flush := func() error {
 		if len(batch) == 0 {
 			return nil
@@ -353,9 +408,9 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 	}
 
 	for objectID, subjectScores := range accum {
-		objNumID, err := s.idmapSvc.GetOrCreateObjectID(ctx, objectID, namespace)
-		if err != nil {
-			return upsertedIDs, fmt.Errorf("get object id %q: %w", objectID, err)
+		objNumID, ok := objectIDs[objectID]
+		if !ok {
+			return upsertedIDs, fmt.Errorf("no numeric id resolved for object %q", objectID)
 		}
 		upsertedIDs[objNumID] = struct{}{}
 
