@@ -269,9 +269,19 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		index, err := sparseIndex(objNumID)
 		if err != nil {
 			slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "subject_id", subjectID, "object_id", objectID, "error", err)
+			metrics.SparseDimensionsSkippedTotal.WithLabelValues(namespace, "subject").Inc()
 			continue
 		}
 		entries = append(entries, sparseEntry{index: index, value: float32(score)})
+	}
+
+	// Partial truncation degrades; total truncation must not pass as health.
+	// An empty vector is legitimate for a subject with no interactions, but a
+	// subject that had scores and kept none would be upserted empty and
+	// counted toward upserted++ — sparse search then returns nothing, requests
+	// fall to fallback_popular, and the run still reports success.
+	if len(objectScores) > 0 && len(entries) == 0 {
+		return nil, fmt.Errorf("every dimension exceeds the uint32 sparse index space (%d objects)", len(objectScores))
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -358,6 +368,7 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 			index, err := sparseIndex(subjNumID)
 			if err != nil {
 				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "error", err)
+				metrics.SparseDimensionsSkippedTotal.WithLabelValues(namespace, "object").Inc()
 				continue
 			}
 			entries = append(entries, sparseEntry{index: index, value: score})
