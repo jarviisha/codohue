@@ -13,7 +13,7 @@ replace (
 
 require (
 	github.com/coder/websocket v1.8.14
-	github.com/jarviisha/codohue/pkg/codohuetypes v0.6.0
+	github.com/jarviisha/codohue/pkg/codohuetypes v0.7.0
 	github.com/jarviisha/codohue/sdk/go/redistream v0.0.0-00010101000000-000000000000
 	github.com/redis/go-redis/v9 v9.18.0
 )

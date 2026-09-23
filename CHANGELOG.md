@@ -14,7 +14,10 @@ Nothing yet.
 ## v0.7.0 — 2026-09-23
 
 Operator identity, grouped namespace configuration, and hybrid scores that are
-actually cosines. Server tag: `v0.12.0`.
+actually cosines. Server tags: `v0.12.0`, `v0.12.1`.
+
+`v0.12.0`'s image build stopped at the feeder, so `migrate:v0.12.0` was never
+published. Use `v0.12.1` — same server code, complete image set.
 
 Every wire and SDK change is additive — nothing was removed, renamed, or
 retyped. The breaking items are **server behaviour**: the shared global admin
