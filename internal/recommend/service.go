@@ -603,6 +603,19 @@ func (s *Service) hybridRecommend(
 		denseResults = append(denseResults, scoresOnly(denseExtra)...)
 	}
 
+	// Effective alpha, matching Rank: the namespace blend when both arms
+	// answered, full weight to the surviving arm otherwise. Scaling a lone
+	// side by alpha would shrink every score for no reason, and would make
+	// the same outage return differently-scaled scores from the two endpoints
+	// that share this blend.
+	switch {
+	case sparseOK && denseOK:
+	case denseOK:
+		alpha = 0.0
+	default:
+		alpha = 1.0
+	}
+
 	candidates := blendHybridScores(sparseResults, denseResults, alpha, resolveGamma(cfg), cfg.DenseDistance, time.Now().UTC())
 
 	total := len(candidates)
@@ -707,14 +720,7 @@ func clampUnitScores(scores map[string]float64) map[string]float64 {
 		if !finiteScore(v) {
 			continue
 		}
-		switch {
-		case v <= 0:
-			result[id] = 0
-		case v > 1:
-			result[id] = 1
-		default:
-			result[id] = v
-		}
+		result[id] = clampUnit(v)
 	}
 	return result
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	"github.com/jackc/pgx/v5"
 
@@ -50,53 +51,25 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 	}
 }
 
-// GetOrCreate returns the numeric_id for the given string_id, inserting a new row if absent.
+// GetOrCreate returns the numeric_id for the given string_id, inserting a new
+// row if absent. It is GetOrCreateBatch at cardinality one plus a presence
+// check: the read-first, insert-on-miss, re-read-the-race-winner protocol is
+// subtle enough that a second hand-written copy would drift, and the two had
+// already forked on what a vanished raced insert means.
 //
-// The mapping is read-mostly — every batch cycle resolves the same ids again —
-// so this reads first and writes only on a miss. The single
-// INSERT ... ON CONFLICT DO UPDATE statement it replaced wrote on every call,
-// including the overwhelming majority that already had a row: it set string_id
-// to itself (a dead tuple and a WAL record per hit) and burned a BIGSERIAL
-// value per hit, because nextval() is evaluated before the conflict is
-// detected. Measured on the development stack: 3.48M updates against 43k real
-// rows. The wasted sequence range is not free — it walks numeric_id toward the
-// uint32 ceiling the Qdrant sparse index imposes (compute.sparseIndex).
+// Unlike the batch form, an id that cannot be resolved is an error here rather
+// than an omission — a single-id caller has no way to express "not in the
+// result".
 func (r *Repository) GetOrCreate(ctx context.Context, stringID, namespace, entityType string) (uint64, error) {
-	if r.requireLease {
-		if err := nslifecycle.RequireNamespaceLease(ctx, namespace); err != nil {
-			return 0, err
-		}
-	}
-	if id, found, err := r.Lookup(ctx, stringID, namespace, entityType); err != nil {
-		return 0, err
-	} else if found {
-		return id, nil
-	}
-
-	var numID int64
-	err := r.queryRowFn(ctx, `
-		INSERT INTO id_mappings (string_id, namespace, entity_type)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (namespace, entity_type, string_id) DO NOTHING
-		RETURNING numeric_id`,
-		stringID, namespace, entityType,
-	).Scan(&numID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// DO NOTHING returns no row on conflict, so a concurrent writer won
-		// the race between the lookup above and this insert. Read theirs.
-		id, found, lookupErr := r.Lookup(ctx, stringID, namespace, entityType)
-		if lookupErr != nil {
-			return 0, lookupErr
-		}
-		if !found {
-			return 0, fmt.Errorf("get or create id mapping for %q: insert conflicted but no mapping exists", stringID)
-		}
-		return id, nil
-	}
+	ids, err := r.GetOrCreateBatch(ctx, []string{stringID}, namespace, entityType)
 	if err != nil {
-		return 0, fmt.Errorf("get or create id mapping for %q: %w", stringID, err)
+		return 0, err
 	}
-	return uint64(numID), nil
+	id, ok := ids[stringID]
+	if !ok {
+		return 0, fmt.Errorf("get or create id mapping for %q: insert conflicted but no mapping exists", stringID)
+	}
+	return id, nil
 }
 
 // Lookup returns the numeric id for stringID without creating one. found is
@@ -184,12 +157,7 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 	if err != nil {
 		return nil, err
 	}
-	missing := make([]string, 0, len(distinct))
-	for _, id := range distinct {
-		if _, ok := out[id]; !ok {
-			missing = append(missing, id)
-		}
-	}
+	missing := missingFrom(distinct, out)
 	if len(missing) == 0 {
 		return out, nil
 	}
@@ -220,20 +188,23 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 
 	// Ids that conflicted returned no row: a concurrent writer inserted them
 	// between the lookup and the insert. Read the winner's mapping.
-	raced := make([]string, 0)
-	for _, id := range missing {
-		if _, ok := out[id]; !ok {
-			raced = append(raced, id)
-		}
-	}
-	if len(raced) > 0 {
+	if raced := missingFrom(missing, out); len(raced) > 0 {
 		won, err := r.LookupBatch(ctx, raced, namespace, entityType)
 		if err != nil {
 			return nil, err
 		}
-		for id, numID := range won {
-			out[id] = numID
-		}
+		maps.Copy(out, won)
 	}
 	return out, nil
+}
+
+// missingFrom returns the ids with no entry in have, preserving order.
+func missingFrom(ids []string, have map[string]uint64) []string {
+	missing := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := have[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	return missing
 }

@@ -628,12 +628,12 @@ func TestRecomputeNamespace_Generation1KeepsLegacyCollectionNames(t *testing.T) 
 }
 
 func TestSparseIndex_RefusesNarrowingInsteadOfColliding(t *testing.T) {
-	if _, err := sparseIndex(maxSparseIndex + 1); err == nil {
-		t.Fatal("id past the uint32 index space must fail, not truncate")
+	if _, fits := sparseIndex(maxSparseIndex + 1); fits {
+		t.Fatal("id past the uint32 index space must be refused, not truncated")
 	}
-	got, err := sparseIndex(maxSparseIndex)
-	if err != nil || got != maxSparseIndex {
-		t.Fatalf("boundary id: got %d err %v", got, err)
+	got, fits := sparseIndex(maxSparseIndex)
+	if !fits || got != maxSparseIndex {
+		t.Fatalf("boundary id: got %d fits %v", got, fits)
 	}
 }
 
