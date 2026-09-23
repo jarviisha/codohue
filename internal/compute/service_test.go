@@ -33,11 +33,14 @@ func (f *fakeComputeRepo) GetSubjectEvents(_ context.Context, _, subjectID strin
 }
 
 type fakeIDMap struct {
-	subjectID  uint64
-	subjectErr error
-	objectIDs  map[string]uint64
-	nextID     uint64
-	objectErrs map[string]error
+	subjectID   uint64
+	subjectErr  error
+	objectIDs   map[string]uint64
+	nextID      uint64
+	objectErrs  map[string]error
+	singleCalls int
+	batchCalls  int
+	batchErr    error
 }
 
 func newFakeIDMap() *fakeIDMap {
@@ -53,7 +56,7 @@ func (f *fakeIDMap) GetOrCreateSubjectID(_ context.Context, _, _ string) (uint64
 	return f.subjectID, f.subjectErr
 }
 
-func (f *fakeIDMap) GetOrCreateObjectID(_ context.Context, objectID, _ string) (uint64, error) {
+func (f *fakeIDMap) alloc(objectID string) (uint64, error) {
 	if err, ok := f.objectErrs[objectID]; ok {
 		return 0, err
 	}
@@ -63,6 +66,27 @@ func (f *fakeIDMap) GetOrCreateObjectID(_ context.Context, objectID, _ string) (
 	f.nextID++
 	f.objectIDs[objectID] = f.nextID
 	return f.nextID, nil
+}
+
+func (f *fakeIDMap) GetOrCreateObjectID(_ context.Context, objectID, _ string) (uint64, error) {
+	f.singleCalls++
+	return f.alloc(objectID)
+}
+
+func (f *fakeIDMap) GetOrCreateObjectIDs(_ context.Context, objectIDs []string, _ string) (map[string]uint64, error) {
+	f.batchCalls++
+	if f.batchErr != nil {
+		return nil, f.batchErr
+	}
+	out := make(map[string]uint64, len(objectIDs))
+	for _, objectID := range objectIDs {
+		id, err := f.alloc(objectID)
+		if err != nil {
+			return nil, err
+		}
+		out[objectID] = id
+	}
+	return out, nil
 }
 
 func newTestService(repo computeRepo, idmap idmapService) *Service {
@@ -93,17 +117,17 @@ func TestBuildVectors_SingleEvent(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	_, scores, maxTimes, _, err := svc.buildVectors(context.Background(), "ns", "u1", 0.05)
+	built, err := svc.buildVectors(context.Background(), "ns", "u1", 0.05)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// Event happened now → freshness ≈ 1.0, score ≈ weight.
-	if math.Abs(scores["o1"]-5.0) > 0.01 {
-		t.Errorf("score: got %.4f, want ≈5.0", scores["o1"])
+	if math.Abs(built.scores["o1"]-5.0) > 0.01 {
+		t.Errorf("score: got %.4f, want ≈5.0", built.scores["o1"])
 	}
-	if maxTimes["o1"] != now {
-		t.Errorf("maxTime: got %d, want %d", maxTimes["o1"], now)
+	if built.maxTimes["o1"] != now {
+		t.Errorf("maxTime: got %d, want %d", built.maxTimes["o1"], now)
 	}
 }
 
@@ -116,14 +140,14 @@ func TestBuildVectors_TimeDecayApplied(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
 	lambda := 0.05
-	_, scores, _, _, err := svc.buildVectors(context.Background(), "ns", "u1", lambda)
+	built, err := svc.buildVectors(context.Background(), "ns", "u1", lambda)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	want := math.Exp(-lambda * 10)
-	if math.Abs(scores["o1"]-want) > 0.01 {
-		t.Errorf("decayed score: got %.6f, want %.6f", scores["o1"], want)
+	if math.Abs(built.scores["o1"]-want) > 0.01 {
+		t.Errorf("decayed score: got %.6f, want %.6f", built.scores["o1"], want)
 	}
 }
 
@@ -136,17 +160,17 @@ func TestBuildVectors_MultipleEventsAccumulate(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	_, scores, _, _, err := svc.buildVectors(context.Background(), "ns", "u1", 0.0)
+	built, err := svc.buildVectors(context.Background(), "ns", "u1", 0.0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// lambda=0 → freshness=1.0 everywhere, scores are pure sums.
-	if math.Abs(scores["o1"]-5.0) > 1e-9 {
-		t.Errorf("o1 accumulated score: got %.4f, want 5.0", scores["o1"])
+	// lambda=0 → freshness=1.0 everywhere, built.scores are pure sums.
+	if math.Abs(built.scores["o1"]-5.0) > 1e-9 {
+		t.Errorf("o1 accumulated score: got %.4f, want 5.0", built.scores["o1"])
 	}
-	if math.Abs(scores["o2"]-1.0) > 1e-9 {
-		t.Errorf("o2 score: got %.4f, want 1.0", scores["o2"])
+	if math.Abs(built.scores["o2"]-1.0) > 1e-9 {
+		t.Errorf("o2 score: got %.4f, want 1.0", built.scores["o2"])
 	}
 }
 
@@ -158,38 +182,38 @@ func TestBuildVectors_ObjectCreatedAtTracked(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	_, _, _, createdTimes, err := svc.buildVectors(context.Background(), "ns", "u1", 0.0)
+	built, err := svc.buildVectors(context.Background(), "ns", "u1", 0.0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if createdTimes["o1"] != created {
-		t.Errorf("createdTime: got %d, want %d", createdTimes["o1"], created)
+	if built.createdTimes["o1"] != created {
+		t.Errorf("createdTime: got %d, want %d", built.createdTimes["o1"], created)
 	}
 }
 
 func TestBuildVectors_NoEvents_EmptyResult(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{events: nil}, newFakeIDMap())
 
-	vec, scores, maxTimes, createdTimes, err := svc.buildVectors(context.Background(), "ns", "u1", 0.05)
+	built, err := svc.buildVectors(context.Background(), "ns", "u1", 0.05)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if len(scores) != 0 {
-		t.Errorf("expected empty scores, got %v", scores)
+	if len(built.scores) != 0 {
+		t.Errorf("expected empty scores, got %v", built.scores)
 	}
-	if len(maxTimes) != 0 {
-		t.Errorf("expected empty maxTimes, got %v", maxTimes)
+	if len(built.maxTimes) != 0 {
+		t.Errorf("expected empty maxTimes, got %v", built.maxTimes)
 	}
-	if len(createdTimes) != 0 {
-		t.Errorf("expected empty createdTimes, got %v", createdTimes)
+	if len(built.createdTimes) != 0 {
+		t.Errorf("expected empty createdTimes, got %v", built.createdTimes)
 	}
-	if vec == nil {
+	if built.vec == nil {
 		t.Fatal("expected non-nil SubjectVector even for empty events")
 	}
-	if len(vec.Indices) != 0 {
-		t.Errorf("expected empty indices, got %v", vec.Indices)
+	if len(built.vec.Indices) != 0 {
+		t.Errorf("expected empty indices, got %v", built.vec.Indices)
 	}
 }
 
@@ -202,13 +226,13 @@ func TestBuildVectors_MaxTimeTracksLatest(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	_, _, maxTimes, _, err := svc.buildVectors(context.Background(), "ns", "u1", 0.0)
+	built, err := svc.buildVectors(context.Background(), "ns", "u1", 0.0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if maxTimes["o1"] != newer {
-		t.Errorf("maxTime: got %d, want %d (newer)", maxTimes["o1"], newer)
+	if built.maxTimes["o1"] != newer {
+		t.Errorf("maxTime: got %d, want %d (newer)", built.maxTimes["o1"], newer)
 	}
 }
 
@@ -219,14 +243,12 @@ func TestObjectCooccurrenceAccumulation(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
 	objectAccum := make(map[string]map[uint64]float32)
-	err := svc.accumulateObjectCooccurrence(context.Background(), "ns", objectAccum, map[string]float64{
-		"obj-A": 2.0,
-		"obj-B": 1.5,
-		"obj-C": 0.8,
-	})
+	scores := map[string]float64{"obj-A": 2.0, "obj-B": 1.5, "obj-C": 0.8}
+	objectIDs, err := svc.resolveObjectIDs(context.Background(), "ns", scores)
 	if err != nil {
-		t.Fatalf("accumulateObjectCooccurrence: %v", err)
+		t.Fatalf("resolveObjectIDs: %v", err)
 	}
+	svc.accumulateObjectCooccurrence(objectAccum, scores, objectIDs)
 
 	objAID := idmap.objectIDs["obj-A"]
 	objBID := idmap.objectIDs["obj-B"]
@@ -261,20 +283,30 @@ func TestBuildSubjectVector_SubjectIDError(t *testing.T) {
 	idmap.subjectErr = context.DeadlineExceeded
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
-	_, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{"o1": 1})
+	_, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{"o1": 1}, map[string]uint64{"o1": 11})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
-func TestBuildSubjectVector_ObjectIDError(t *testing.T) {
+// Resolution moved upstream into resolveObjectIDs; a failure there must still
+// sink the subject rather than silently building a vector without it.
+func TestResolveObjectIDs_PropagatesBatchError(t *testing.T) {
 	idmap := newFakeIDMap()
-	idmap.objectErrs["o1"] = context.Canceled
+	idmap.batchErr = context.Canceled
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
-	_, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{"o1": 1})
-	if err == nil {
+	if _, err := svc.resolveObjectIDs(context.Background(), "ns", map[string]float64{"o1": 1}); err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestBuildSubjectVector_UnresolvedObjectIsAnError(t *testing.T) {
+	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
+
+	_, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{"o1": 1}, map[string]uint64{})
+	if err == nil {
+		t.Fatal("an object with no resolved numeric id must fail, not be dropped")
 	}
 }
 
@@ -617,7 +649,8 @@ func TestBuildSubjectVector_SkipsObjectPastSparseIndexSpace(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
 	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1",
-		map[string]float64{"o-bad": 1, "o-good": 2})
+		map[string]float64{"o-bad": 1, "o-good": 2},
+		map[string]uint64{"o-bad": maxSparseIndex + 1, "o-good": 7})
 	if err != nil {
 		t.Fatalf("unrepresentable dimension must not fail the subject: %v", err)
 	}
@@ -638,7 +671,8 @@ func TestBuildSubjectVector_TotalTruncationIsAnError(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
 	_, err := svc.buildSubjectVector(context.Background(), "ns", "u1",
-		map[string]float64{"o-bad": 1, "o-worse": 2})
+		map[string]float64{"o-bad": 1, "o-worse": 2},
+		map[string]uint64{"o-bad": maxSparseIndex + 1, "o-worse": maxSparseIndex + 2})
 	if err == nil {
 		t.Fatal("a subject whose every dimension was skipped must fail, not upsert empty")
 	}
@@ -649,7 +683,7 @@ func TestBuildSubjectVector_TotalTruncationIsAnError(t *testing.T) {
 func TestBuildSubjectVector_NoScoresIsNotTruncation(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
 
-	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{})
+	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{}, map[string]uint64{})
 	if err != nil {
 		t.Fatalf("empty score set is not truncation: %v", err)
 	}
@@ -694,7 +728,7 @@ func TestL2Normalize(t *testing.T) {
 func TestBuildSubjectVector_IsUnitNorm(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
 	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1",
-		map[string]float64{"o1": 3, "o2": 4})
+		map[string]float64{"o1": 3, "o2": 4}, map[string]uint64{"o1": 11, "o2": 12})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -725,5 +759,41 @@ func TestUpsertObjectVectors_RowsAreUnitNorm(t *testing.T) {
 	}
 	if math.Abs(sum-1) > 1e-6 {
 		t.Fatalf("object row norm² = %f, want 1", sum)
+	}
+}
+
+// Object ids must be resolved once per subject through the batch API, not one
+// sequential query per object per consumer. The old shape cost 2N round-trips
+// per subject per tick — buildSubjectVector and accumulateObjectCooccurrence
+// each resolving the same key set — which measured as ~3.48M resolutions
+// against 43k real rows in under two hours on the development stack.
+func TestRecomputeNamespace_ResolvesObjectIDsInBatches(t *testing.T) {
+	now := time.Now().Unix()
+	repo := &fakeComputeRepo{
+		subjects: []string{"u1", "u2"},
+		subjectEvents: map[string][]*RawEvent{
+			"u1": {
+				{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now},
+				{SubjectID: "u1", ObjectID: "o2", Weight: 1, OccurredAt: now},
+				{SubjectID: "u1", ObjectID: "o3", Weight: 1, OccurredAt: now},
+			},
+			"u2": {
+				{SubjectID: "u2", ObjectID: "o2", Weight: 1, OccurredAt: now},
+				{SubjectID: "u2", ObjectID: "o4", Weight: 1, OccurredAt: now},
+			},
+		},
+	}
+	idmap := newFakeIDMap()
+	svc := newTestService(repo, idmap)
+
+	if _, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0.05); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if idmap.singleCalls != 0 {
+		t.Fatalf("object ids must resolve in batches, got %d per-id calls", idmap.singleCalls)
+	}
+	// One batch per subject plus one for the accumulated object rows.
+	if idmap.batchCalls != 3 {
+		t.Fatalf("expected 3 batch resolutions (2 subjects + object rows), got %d", idmap.batchCalls)
 	}
 }

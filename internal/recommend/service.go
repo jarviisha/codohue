@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -557,29 +558,49 @@ func (s *Service) hybridRecommend(
 	// the request, but it marks the response degraded all the same: the
 	// suppressed ordering is as unfit to cache for the full TTL as the one a
 	// failed primary search produces.
+	// Both id sets are read before either search runs, so the two backfills
+	// are order-independent and can go out concurrently: one added round-trip
+	// instead of two.
+	var sparseMissing, denseMissing []*qdrant.PointId
 	if sparseOK {
-		if ids := pointIDsMissingFrom(sparseResults, denseResults); len(ids) > 0 {
-			extra, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec,
-				&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
-			if err != nil {
-				slog.Warn("hybrid: sparse backfill failed; dense-only candidates keep sparse 0", "namespace", req.Namespace, "error", err)
-				req.degraded = true
-			} else {
-				sparseResults = append(sparseResults, scoresOnly(extra)...)
-			}
-		}
+		sparseMissing = pointIDsMissingFrom(sparseResults, denseResults)
 	}
 	if denseOK {
-		if ids := pointIDsMissingFrom(denseResults, sparseResults); len(ids) > 0 {
-			extra, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec,
-				&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
-			if err != nil {
-				slog.Warn("hybrid: dense backfill failed; sparse-only candidates keep dense 0", "namespace", req.Namespace, "error", err)
-				req.degraded = true
-			} else {
-				denseResults = append(denseResults, scoresOnly(extra)...)
-			}
-		}
+		denseMissing = pointIDsMissingFrom(denseResults, sparseResults)
+	}
+
+	var wg sync.WaitGroup
+	var sparseExtra, denseExtra []*qdrant.ScoredPoint
+	var sparseErr, denseErr error
+	if len(sparseMissing) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sparseExtra, sparseErr = s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec,
+				hasIDFilter(sparseMissing), uint64(len(sparseMissing)))
+		}()
+	}
+	if len(denseMissing) > 0 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			denseExtra, denseErr = s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec,
+				hasIDFilter(denseMissing), uint64(len(denseMissing)))
+		}()
+	}
+	wg.Wait()
+
+	if sparseErr != nil {
+		slog.Warn("hybrid: sparse backfill failed; dense-only candidates keep sparse 0", "namespace", req.Namespace, "error", sparseErr)
+		req.degraded = true
+	} else {
+		sparseResults = append(sparseResults, scoresOnly(sparseExtra)...)
+	}
+	if denseErr != nil {
+		slog.Warn("hybrid: dense backfill failed; sparse-only candidates keep dense 0", "namespace", req.Namespace, "error", denseErr)
+		req.degraded = true
+	} else {
+		denseResults = append(denseResults, scoresOnly(denseExtra)...)
 	}
 
 	candidates := blendHybridScores(sparseResults, denseResults, alpha, resolveGamma(cfg), cfg.DenseDistance, time.Now().UTC())
@@ -662,8 +683,8 @@ func (s *Service) searchObjectsDense(ctx context.Context, ns string, queryVec []
 func extractScores(points []*qdrant.ScoredPoint) map[string]float64 {
 	m := make(map[string]float64, len(points))
 	for _, p := range points {
-		if v, ok := p.Payload["object_id"]; ok {
-			m[v.GetStringValue()] = float64(p.Score)
+		if id, ok := objectIDOf(p); ok {
+			m[id] = float64(p.Score)
 		}
 	}
 	return m
@@ -726,21 +747,39 @@ func boundDenseScores(scores map[string]float64, distance string) map[string]flo
 func pointIDsMissingFrom(base, have []*qdrant.ScoredPoint) []*qdrant.PointId {
 	inBase := make(map[string]struct{}, len(base))
 	for _, p := range base {
-		if v, ok := p.Payload["object_id"]; ok {
-			inBase[v.GetStringValue()] = struct{}{}
+		if id, ok := objectIDOf(p); ok {
+			inBase[id] = struct{}{}
 		}
 	}
-	var ids []*qdrant.PointId
+	ids := make([]*qdrant.PointId, 0, len(have))
 	for _, p := range have {
-		v, ok := p.Payload["object_id"]
+		id, ok := objectIDOf(p)
 		if !ok {
 			continue
 		}
-		if _, seen := inBase[v.GetStringValue()]; !seen {
+		if _, seen := inBase[id]; !seen {
 			ids = append(ids, p.Id)
 		}
 	}
 	return ids
+}
+
+// hasIDFilter restricts a search to an explicit point-id set — the mechanism
+// Rank uses to score a caller's candidates, borrowed here for the backfill.
+func hasIDFilter(ids []*qdrant.PointId) *qdrant.Filter {
+	return &qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}
+}
+
+// objectIDOf reads the object_id a scored point carries. One definition of
+// "which object is this point" keeps the backfill's membership test and the
+// blend's scoring keyed the same way: if they diverged, the backfill would
+// fetch candidates the blend then ignores.
+func objectIDOf(p *qdrant.ScoredPoint) (string, bool) {
+	v, ok := p.Payload["object_id"]
+	if !ok {
+		return "", false
+	}
+	return v.GetStringValue(), true
 }
 
 // scoresOnly drops created_at from backfilled points. A backfilled point
@@ -816,11 +855,10 @@ func buildCreatedAtLookup(sets ...[]*qdrant.ScoredPoint) map[string]time.Time {
 	m := make(map[string]time.Time)
 	for _, pts := range sets {
 		for _, p := range pts {
-			objVal, ok := p.Payload["object_id"]
+			id, ok := objectIDOf(p)
 			if !ok {
 				continue
 			}
-			id := objVal.GetStringValue()
 			if _, seen := m[id]; seen {
 				continue
 			}

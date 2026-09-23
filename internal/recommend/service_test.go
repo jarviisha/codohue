@@ -2573,7 +2573,10 @@ func TestHybridRecommend_BackfillsMissingArmScores(t *testing.T) {
 			// Backfill call for the dense-only candidate: its real sparse
 			// score is high — it merely fell outside sparse top-K.
 			if ids[0] != 77 {
-				t.Fatalf("sparse backfill must target the dense-only point id, got %v", ids)
+				// Backfills run concurrently, so this fake executes off the
+				// test goroutine: Errorf, not Fatalf.
+				t.Errorf("sparse backfill must target the dense-only point id, got %v", ids)
+				return nil, nil
 			}
 			return []*qdrant.ScoredPoint{
 				{Id: qdrant.NewIDNum(77), Score: 0.8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": now}},
