@@ -35,6 +35,7 @@ import (
 // Indirection points so cmd/embedder/main_test.go can stub out the heavy
 // infra dependencies — same pattern as cmd/cron/main.go and cmd/api/main.go.
 var (
+	startRuntimeFn    = infraredis.StartRuntimeReporter
 	loadConfigFn      = config.LoadEmbedder
 	newPoolFn         = infrapg.NewPool
 	newRedisFn        = infraredis.NewClient
@@ -80,6 +81,9 @@ func run() error {
 			slog.Error("close redis failed", "error", err)
 		}
 	}()
+
+	stopRuntime := startRuntimeFn(ctx, redisClient, "embedder", cfg.RuntimeSettings())
+	defer stopRuntime()
 
 	qdrantClient, err := newQdrantFn(cfg.QdrantHost, cfg.QdrantPort)
 	if err != nil {

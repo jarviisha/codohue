@@ -1314,3 +1314,75 @@ func TestLifecycleOperationsMetricRecordsBothOutcomes(t *testing.T) {
 		t.Errorf("reset/failure = %v, want 0", got)
 	}
 }
+
+func TestGetHealth_ObservabilityContract(t *testing.T) {
+	for _, tc := range []struct {
+		name, token, body string
+		code              int
+		want              HealthResponse
+		wantError         bool
+	}{
+		{name: "public aggregate", body: `{"status":"ok"}`, code: 200, want: HealthResponse{Status: "ok", Postgres: "unknown", Redis: "unknown", Qdrant: "unknown"}},
+		{name: "details", token: "observability-only", body: `{"status":"ok","postgres":"ok","redis":"ok","qdrant":"ok"}`, code: 200, want: HealthResponse{Status: "ok", Postgres: "ok", Redis: "ok", Qdrant: "ok"}},
+		{name: "degraded details", token: "observability-only", body: `{"status":"degraded","postgres":"ok","redis":"error: unavailable","qdrant":"ok"}`, code: 503, want: HealthResponse{Status: "degraded", Postgres: "ok", Redis: "error: unavailable", Qdrant: "ok"}},
+		{name: "empty fields", body: `{"status":" ","postgres":""}`, code: 200, want: HealthResponse{Status: "unknown", Postgres: "unknown", Redis: "unknown", Qdrant: "unknown"}},
+		{name: "unauthorized details falls back and the aggregate also fails", token: "observability-only", body: `{"error":"unauthorized"}`, code: 401, wantError: true},
+		{name: "disabled details falls back and the aggregate also fails", token: "observability-only", body: `{}`, code: 404, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/healthz" {
+					t.Errorf("unexpected path: %s", r.URL.Path)
+				}
+				// A detailed read carries the token; a fallback aggregate read carries
+				// neither. Anything else means the credential leaked into the wrong call.
+				detailed := r.URL.RawQuery == "details=true" && r.Header.Get("Authorization") == "Bearer "+tc.token
+				aggregate := r.URL.RawQuery == "" && r.Header.Get("Authorization") == ""
+				if tc.token == "" && !aggregate {
+					t.Error("aggregate health must not send a credential or details query")
+				}
+				if tc.token != "" && !detailed && !aggregate {
+					t.Error("incorrect observability request credential or query")
+				}
+				w.WriteHeader(tc.code)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer fake.Close()
+			svc := newTestService(&fakeRepo{}, fake.URL, "data-proxy-token")
+			svc.SetObservabilityToken(tc.token)
+			got, code, err := svc.GetHealth(context.Background())
+			if (err != nil) != tc.wantError || code != tc.code {
+				t.Fatalf("code=%d err=%v", code, err)
+			}
+			if !tc.wantError && *got != tc.want {
+				t.Errorf("health=%+v; want %+v", *got, tc.want)
+			}
+		})
+	}
+}
+
+// A token that admin holds but the API rejects must not black out health: the
+// sanitized aggregate still describes overall status.
+func TestGetHealth_FallsBackToAggregateWhenDetailsRejected(t *testing.T) {
+	for _, code := range []int{401, 404} {
+		fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.RawQuery == "details=true" {
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+				return
+			}
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		}))
+		svc := newTestService(&fakeRepo{}, fake.URL, "data-proxy-token")
+		svc.SetObservabilityToken("mismatched-token")
+		got, status, err := svc.GetHealth(context.Background())
+		fake.Close()
+		if err != nil || status != 200 {
+			t.Fatalf("details %d: status=%d err=%v", code, status, err)
+		}
+		if got.Status != "ok" || got.Postgres != "unknown" {
+			t.Fatalf("details %d: health=%+v", code, *got)
+		}
+	}
+}

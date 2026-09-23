@@ -21,12 +21,12 @@ export type PageContainerSize = keyof typeof MAX_WIDTH
 
 export default function PageContainer({
   size = 'lg',
-  padding = 6,
+  padding = 0,
   className,
   children,
 }: {
   size?: PageContainerSize
-  /** Astryx spacing step (4px base); 6 = 24px, matching the old page padding. */
+  /** AppShell owns page gutters; standalone screens explicitly request padding. */
   padding?: 0 | 4 | 6 | 8 | 10
   className?: string
   children: ReactNode

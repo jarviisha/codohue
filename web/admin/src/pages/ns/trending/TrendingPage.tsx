@@ -1,164 +1,158 @@
-import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Badge,
-  Banner,
   Button,
   EmptyState,
-  Pagination,
   Skeleton,
   Stack,
   Table,
+  proportional,
   TableBody,
   TableCell,
   TableHeader,
   TableHeaderCell,
   TableRow,
+  Token,
 } from '@astryxdesign/core'
 import PageContainer from '@/components/PageContainer'
+import QueryFeedback from '@/components/QueryFeedback'
+import { readPage } from '@/services/operatorUx'
 import { useTrending } from '@/services/trending'
 import PageHeader from '@/components/shell/PageHeader'
-import MetaLine from '@/components/MetaLine'
 
 const PAGE_SIZE = 50
-const WINDOW_OPTIONS = [
-  { value: 0, label: 'config default' },
-  { value: 1, label: '1h' },
-  { value: 6, label: '6h' },
-  { value: 24, label: '24h' },
-  { value: 168, label: '7d' },
-] as const
 
-/**
- * TrendingPage surfaces the Redis-backed trending ZSET for one namespace.
- *
- * Operators use it to sanity-check the cold-start path: when a subject has
- * fewer than 5 interactions the recommend service blends 70% trending + 30%
- * CF, so an empty or stale trending list directly degrades cold rec quality.
- *
- * The header pill renders the namespace-level cache TTL (the ZSET's TTL).
- * `cache_ttl_sec` on individual rows is reserved for per-object TTLs which
- * the backend doesn't yet populate — kept in the wire type for parity.
- */
+/** Displays the cached ranking; refresh only reads it, while batch runs rebuild it. */
 export default function TrendingPage() {
   const { ns } = useParams<{ ns: string }>()
-  const [offset, setOffset] = useState(0)
-  const [windowHours, setWindowHours] = useState<number>(0)
-
-  const trending = useTrending(ns ?? null, { limit: PAGE_SIZE, offset, windowHours })
+  const [params, setParams] = useSearchParams()
+  const page = readPage(params.get('page'))
+  const offset = page * PAGE_SIZE
+  const trending = useTrending(ns ?? null, { limit: PAGE_SIZE, offset })
 
   if (!ns) return null
 
-  const total = trending.data?.total ?? 0
-  const items = trending.data?.items ?? []
-  const cacheTTL = trending.data?.cache_ttl_sec ?? null
+  const data = trending.data
+  const prefix = `/ns/${encodeURIComponent(ns)}`
+  const setPage = (next: number) => {
+    const updated = new URLSearchParams(params)
+    if (next <= 0) updated.delete('page')
+    else updated.set('page', String(next + 1))
+    setParams(updated)
+  }
 
   return (
     <PageContainer size="full">
       <PageHeader>
-        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
-          <Stack gap={1}>
-            <Stack gap={4} direction="horizontal" align="center">
-              <h1 className="text-primary text-xl font-semibold">Trending</h1>
-              {cacheTTL != null && <CacheTTLBadge ttl={cacheTTL} />}
-            </Stack>
-            <p className="text-secondary text-sm">
-              Redis ZSET surfaced for the cold-start recommendation path. Auto-refreshes every 30
-              seconds.
-            </p>
-          </Stack>
-          <Stack gap={4} direction="horizontal" align="center">
-            {WINDOW_OPTIONS.map((w) => (
-              <Button
-                key={w.value}
-                size="sm"
-                variant="primary"
-                
-                onClick={() => {
-                  setWindowHours(w.value)
-                  setOffset(0)
-                }} label={w.label} />
-            ))}
-          </Stack>
+        <Stack gap={2}>
+          <h1 className="text-primary text-xl font-semibold">Trending</h1>
+          <p className="text-secondary text-sm">
+            Ranked items from the latest available batch result. This page checks for updates every
+            30 seconds; Refresh reloads the result without recalculating scores.
+          </p>
         </Stack>
       </PageHeader>
 
       <Stack gap={6}>
-        {trending.isError && (
-          <Banner
-            status="error"
-            title="Could not load trending data"
-            description={trending.error?.message ?? 'unknown error'}
-          />
-        )}
+        <Stack gap={2}>
+          {data && (
+            <Stack direction="horizontal" gap={3} align="center" wrap="wrap">
+              <Token color="gray" label={`Configured event window: ${data.window_hours} hours`} />
+              {data.items.length > 0 && data.cache_ttl_sec > 0 && (
+                <Token color="gray" label={`Cache expires in ${data.cache_ttl_sec}s`} />
+              )}
+              {data.items.length > 0 && data.cache_ttl_sec === -1 && (
+                <Token color="gray" label="Cache has no expiry" />
+              )}
+            </Stack>
+          )}
+          <p className="text-secondary text-sm">
+            The event window is set in Configuration. After changing it, run a batch or wait for the
+            next scheduled batch to rebuild the ranking. An unexpired cache does not guarantee
+            recent activity.
+          </p>
+          <Stack direction="horizontal" gap={4} wrap="wrap">
+            <Link className="text-primary underline" to={`${prefix}/config`}>
+              Configuration
+            </Link>
+            <Link className="text-primary underline" to={`${prefix}/batch-runs`}>
+              Batch runs
+            </Link>
+            <Link className="text-primary underline" to={`${prefix}/events`}>
+              Events
+            </Link>
+          </Stack>
+        </Stack>
+
+        <QueryFeedback query={trending} label="Trending" />
 
         {trending.isLoading ? (
           <Skeleton className="h-60 w-full" />
-        ) : items.length === 0 ? (
-          <EmptyState
-            title="Trending ZSET is empty"
-            description={
-              cacheTTL === -2
-                ? 'The Redis key has not been written yet. Wait for the cron Trending phase to run, or trigger a batch run manually.'
-                : 'No events landed inside the current window. Try a wider window or wait for ingest to land more activity.'
-            }
-          />
-        ) : (
-          <Stack gap={6}>
-            <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
-              <MetaLine
-                size="xs"
-                className="tabular-nums"
-                items={[
-                  `${total.toLocaleString()} entr${total === 1 ? 'y' : 'ies'}`,
-                  `window ${
-                    trending.data?.window_hours
-                      ? `${trending.data.window_hours}h`
-                      : 'config default'
-                  }`,
-                  `generated ${new Date(trending.data!.generated_at).toLocaleTimeString()}`,
-                ]}
+        ) : data ? (
+          <Stack gap={4}>
+            {data.items.length === 0 ? (
+              <EmptyState
+                title={page > 0 ? 'No items on this page' : 'No trending items available'}
+                description={
+                  page > 0
+                    ? 'Return to the previous page. The ranking may have changed since you last loaded it.'
+                    : `The ranking may be empty because there are no eligible events in the configured ${data.window_hours}-hour window, no batch has produced a result yet, or the cached result has expired. Check Events and Batch runs to confirm the cause.`
+                }
               />
-            </Stack>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHeaderCell className="text-right" >Rank</TableHeaderCell>
-                    <TableHeaderCell>Object ID</TableHeaderCell>
-                    <TableHeaderCell className="text-right" >Score</TableHeaderCell>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {items.map((it, i) => (
-                    <TableRow key={`${it.object_id}-${i}`}>
-                      <TableCell  className="text-right tabular-nums">
-                        {offset + i + 1}
-                      </TableCell>
-                      <TableCell>
-                        <code className="text-primary text-xs">{it.object_id}</code>
-                      </TableCell>
-                      <TableCell  className="text-right tabular-nums">
-                        {it.score.toFixed(6)}
-                      </TableCell>
+            ) : (
+              <>
+                <p className="text-secondary text-sm" role="status">
+                  Showing ranks {offset + 1}–{offset + data.items.length}
+                </p>
+                <Table
+                  columns={['Rank', 'Object ID', 'Score'].map((key) => ({
+                    key,
+                    label: key,
+                    width: proportional(1),
+                  }))}
+                >
+                  <TableHeader>
+                    <TableRow>
+                      <TableHeaderCell className="text-right">Rank</TableHeaderCell>
+                      <TableHeaderCell>Object ID</TableHeaderCell>
+                      <TableHeaderCell className="text-right">Score</TableHeaderCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            <Pagination
-              page={Math.floor(offset / PAGE_SIZE) + 1}
-              totalPages={Math.max(1, Math.ceil(total / PAGE_SIZE))}
-              onChange={(page) => setOffset((page - 1) * PAGE_SIZE)}
-            />
+                  </TableHeader>
+                  <TableBody>
+                    {data.items.map((item, i) => (
+                      <TableRow key={item.object_id}>
+                        <TableCell className="text-right tabular-nums">{offset + i + 1}</TableCell>
+                        <TableCell>
+                          <code className="text-primary text-xs break-all">{item.object_id}</code>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {item.score.toFixed(6)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </>
+            )}
+            {(page > 0 || data.items.length === PAGE_SIZE) && (
+              <Stack direction="horizontal" gap={3} align="center">
+                <Button
+                  label="Previous page"
+                  variant="secondary"
+                  isDisabled={page === 0}
+                  onClick={() => setPage(page - 1)}
+                />
+                <p className="text-secondary text-sm">Page {page + 1}</p>
+                <Button
+                  label="Next page"
+                  variant="secondary"
+                  isDisabled={data.items.length < PAGE_SIZE}
+                  onClick={() => setPage(page + 1)}
+                />
+              </Stack>
+            )}
           </Stack>
-        )}
+        ) : null}
       </Stack>
     </PageContainer>
   )
-}
-
-function CacheTTLBadge({ ttl }: { ttl: number }) {
-  if (ttl === -2) return <Badge variant="warning" label="redis key missing" />
-  if (ttl === -1) return <Badge variant="neutral" label="no TTL" />
-  if (ttl < 60) return <Badge variant="warning" label={`expires in ${ttl}s`} />
-  return <Badge variant="success" label={`fresh ${Math.round(ttl / 60)}m left`} />
 }

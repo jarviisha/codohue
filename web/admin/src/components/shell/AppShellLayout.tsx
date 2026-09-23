@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react'
 import {
   AppShell,
   Avatar,
-  Badge,
+  Token,
+  Button,
+  Kbd,
   BreadcrumbItem,
   Breadcrumbs,
   DropdownMenu,
@@ -53,7 +55,7 @@ export default function AppShellLayout() {
   const location = useLocation()
   // PageHeader portal target — ref callback re-renders consumers via state
   // when the slot mounts (avoids first-paint flash of empty header).
-  const [pageHeaderSlot, setPageHeaderSlot] = useState<HTMLDivElement | null>(null)
+  const [pageHeaderSlot, setPageHeaderSlot] = useState<HTMLElement | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const ns = useNamespaceParam()
 
@@ -119,7 +121,7 @@ export default function AppShellLayout() {
       <Stack gap={4} padding={6}>
         <Stack gap={2}>
           <RouteBreadcrumbs pathname={location.pathname} />
-          <div ref={setPageHeaderSlot} className="page-header-slot" />
+          <Stack ref={setPageHeaderSlot} />
         </Stack>
 
         <PageHeaderSlotContext.Provider value={pageHeaderSlot}>
@@ -143,18 +145,16 @@ export default function AppShellLayout() {
  * where the keyboard semantics (Arrow/Enter/Esc) live.
  */
 function PaletteTrigger({ onOpen }: { onOpen: () => void }) {
-  const isMac = typeof navigator !== 'undefined' && /mac/i.test(navigator.platform)
-  const shortcut = isMac ? '⌘K' : 'Ctrl+K'
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
+      size="sm"
       onClick={onOpen}
       aria-label="Open command palette"
-      className="flex-1 max-w-md flex items-center justify-between px-3 py-1.5 rounded border border-border bg-surface text-secondary text-sm hover:bg-muted transition-colors"
-    >
-      <span>Jump to…</span>
-      <kbd className="font-mono text-xs">{shortcut}</kbd>
-    </button>
+      label="Jump to…"
+      endContent={<Kbd keys="mod+k" />}
+    />
   )
 }
 
@@ -171,7 +171,7 @@ function ThemeMenu() {
         variant: 'ghost',
         size: 'sm',
         label: 'Theme',
-        endContent: <Badge label={resolvedMode} />,
+        endContent: <Token label={resolvedMode} />,
       }}
       items={options.map((o) => ({
         label: o.label,

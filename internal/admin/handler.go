@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
+	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/access"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
@@ -78,6 +79,8 @@ type adminSvc interface {
 
 // Handler handles HTTP requests for the admin API.
 type Handler struct {
+	configuration        ConfigurationStore
+	runtimeReader        func(context.Context) ([]config.RuntimeSnapshot, error)
 	identity             IdentityStore
 	identityOptions      IdentityOptions
 	sessionCheckInterval time.Duration

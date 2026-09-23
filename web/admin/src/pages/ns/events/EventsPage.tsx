@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Badge,
+  Token,
+  Skeleton,
+  SegmentedControl,
+  SegmentedControlItem,
+  Grid,
+  ProgressBar,
   Banner,
   Button,
   Card,
@@ -13,6 +18,7 @@ import {
   LayoutFooter,
   Stack,
   Table,
+  proportional,
   TableBody,
   TableCell,
   TableHeader,
@@ -30,6 +36,8 @@ import {
   type EventsSummaryWindow,
 } from '@/services/events'
 import { useServerStream } from '@/services/stream'
+import PageContainer from '@/components/PageContainer'
+import QueryFeedback from '@/components/QueryFeedback'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 
@@ -97,9 +105,16 @@ export default function EventsPage() {
     eventsStreamPath(ns, { action: action || undefined, subjectId: subjectId || undefined }) ?? ''
 
   return (
-    <div className="px-6 py-6">
+    <PageContainer size="full">
       <PageHeader>
-        <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
+        <Stack
+          gap={4}
+          direction="horizontal"
+          align="center"
+          justify="between"
+          className="w-full"
+          wrap="wrap"
+        >
           <Stack gap={1}>
             <h1 className="text-primary text-xl font-semibold">Events</h1>
             <p className="text-secondary text-sm">Live ingest tail, forward-only</p>
@@ -108,7 +123,7 @@ export default function EventsPage() {
         </Stack>
       </PageHeader>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
+      <Grid columns={{ minWidth: 320, max: 2 }} gap={6}>
         <Stack gap={6}>
           {lastInjectedId != null && (
             <Banner
@@ -130,9 +145,7 @@ export default function EventsPage() {
                 placeholder="Filter by action — exact, case-sensitive"
               />
             </form>
-            {action && (
-              <Badge variant="info" label={`action = ${action}`} />
-            )}
+            {action && <Token color="blue" label={`action = ${action}`} />}
             <form onSubmit={applySubject} className="max-w-xs w-full ml-auto">
               <TextInput
                 value={draftSubject}
@@ -155,7 +168,7 @@ export default function EventsPage() {
         </Stack>
 
         <SummarySidebar namespace={ns} />
-      </div>
+      </Grid>
 
       <Dialog isOpen={injectOpen} onOpenChange={setInjectOpen} width={560} purpose="form">
         {injectOpen && (
@@ -166,7 +179,7 @@ export default function EventsPage() {
           />
         )}
       </Dialog>
-    </div>
+    </PageContainer>
   )
 }
 
@@ -244,11 +257,13 @@ function LiveTail({
   return (
     <Stack gap={6}>
       <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
-        <Badge variant={connected ? 'success' : 'neutral'} label={connected ? 'streaming' : 'offline'} />
+        <Token
+          color={connected ? 'green' : 'gray'}
+          label={connected ? 'Streaming' : 'Connecting / disconnected'}
+        />
         <Button
           size="sm"
           variant="secondary"
-          
           onClick={() => (paused ? resume() : setPaused(true))}
           label={paused ? `Resume${pendingCount > 0 ? ` (${pendingCount})` : ''}` : 'Pause'}
         />
@@ -270,9 +285,7 @@ function LiveTail({
               ? 'Resume to start appending live events again.'
               : 'This is a forward-only tail — rows appear as ingest lands them. Inject a test event to see it flow through.'
           }
-          actions={
-            <Button size="sm" onClick={onInject} label="Inject test event" />
-          }
+          actions={<Button size="sm" onClick={onInject} label="Inject test event" />}
         />
       ) : (
         <TailTable namespace={namespace} items={events} flashIds={flashIds} />
@@ -291,14 +304,22 @@ function TailTable({
   flashIds: Set<number>
 }) {
   return (
-      <Table>
+    <Stack className="min-w-0">
+      <Table
+        aria-label="Live events"
+        columns={['Occurred', 'Subject', 'Object', 'Action', 'Weight'].map((key) => ({
+          key,
+          header: key,
+          width: proportional(1),
+        }))}
+      >
         <TableHeader>
           <TableRow>
             <TableHeaderCell>Occurred</TableHeaderCell>
             <TableHeaderCell>Subject</TableHeaderCell>
             <TableHeaderCell>Object</TableHeaderCell>
             <TableHeaderCell>Action</TableHeaderCell>
-            <TableHeaderCell className="text-right" >Weight</TableHeaderCell>
+            <TableHeaderCell className="text-right">Weight</TableHeaderCell>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -306,7 +327,9 @@ function TailTable({
             <TableRow
               key={e.id}
               className={
-                flashIds.has(e.id) ? 'bg-accent-muted transition-colors' : 'transition-colors'
+                flashIds.has(e.id)
+                  ? 'bg-accent-muted motion-safe:transition-colors'
+                  : 'motion-safe:transition-colors'
               }
             >
               <TableCell className="text-secondary text-xs tabular-nums">
@@ -324,15 +347,14 @@ function TailTable({
                 <code className="text-secondary text-xs">{e.object_id}</code>
               </TableCell>
               <TableCell>
-                <Badge variant="neutral" label={e.action} />
+                <Token color="gray" label={e.action} />
               </TableCell>
-              <TableCell  className="text-right tabular-nums">
-                {e.weight.toFixed(2)}
-              </TableCell>
+              <TableCell className="text-right tabular-nums">{e.weight.toFixed(2)}</TableCell>
             </TableRow>
           ))}
         </TableBody>
       </Table>
+    </Stack>
   )
 }
 
@@ -342,39 +364,40 @@ function SummarySidebar({ namespace }: { namespace: string }) {
 
   return (
     <Stack gap={6}>
-      <Stack gap={4} direction="horizontal" align="center">
+      <SegmentedControl
+        label="Event summary time window"
+        value={window}
+        onChange={(next) => setWindow(next as EventsSummaryWindow)}
+      >
         {WINDOWS.map((w) => (
-          <Button
-            key={w}
-            size="sm"
-            variant="primary"
-            
-            onClick={() => setWindow(w)} label={w} />
+          <SegmentedControlItem key={w} value={w} label={w} />
         ))}
-      </Stack>
+      </SegmentedControl>
+      <QueryFeedback query={summary} label="Event summary" />
+      {summary.isLoading && <Skeleton className="h-24 w-full" />}
+      {summary.data && (
+        <>
+          <Stack align="center" gap={4} direction="horizontal" wrap="wrap">
+            <SummaryTile label={`Events (${window})`} value={summary.data.total.toLocaleString()} />
+            <SummaryTile label="Rate / s" value={summary.data.rate_per_second.toFixed(2)} />
+          </Stack>
 
-      <Stack align="center" gap={4} direction="horizontal" wrap="wrap">
-        <SummaryTile
-          label={`Events (${window})`}
-          value={(summary.data?.total ?? 0).toLocaleString()}
-        />
-        <SummaryTile label="Rate / s" value={(summary.data?.rate_per_second ?? 0).toFixed(2)} />
-      </Stack>
+          <ActionMix data={summary.data} />
 
-      <ActionMix data={summary.data} />
-
-      <Stack gap={6}>
-        <span className="text-secondary text-xs uppercase tracking-wide">Over time</span>
-        {summary.data && summary.data.series.length > 0 ? (
-          <TimeSeriesChart
-            data={summary.data.series.map((b) => ({ ts: b.ts, count: b.count }))}
-            series={[{ key: 'count', label: 'Events', color: 'var(--color-success)' }]}
-            height={140}
-          />
-        ) : (
-          <p className="text-secondary text-sm">No events in this window.</p>
-        )}
-      </Stack>
+          <Stack gap={6}>
+            <span className="text-secondary text-xs uppercase tracking-wide">Over time</span>
+            {summary.data && summary.data.series.length > 0 ? (
+              <TimeSeriesChart
+                data={summary.data.series.map((b) => ({ ts: b.ts, count: b.count }))}
+                series={[{ key: 'count', label: 'Events', color: 'var(--color-success)' }]}
+                height={140}
+              />
+            ) : (
+              <p className="text-secondary text-sm">No events in this window.</p>
+            )}
+          </Stack>
+        </>
+      )}
     </Stack>
   )
 }
@@ -382,10 +405,10 @@ function SummarySidebar({ namespace }: { namespace: string }) {
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
     <Card className="flex-1 min-w-30">
-        <Stack gap={6}>
-          <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
-          <span className="text-primary text-xl font-semibold tabular-nums">{value}</span>
-        </Stack>
+      <Stack gap={6}>
+        <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
+        <span className="text-primary text-xl font-semibold tabular-nums">{value}</span>
+      </Stack>
     </Card>
   )
 }
@@ -409,9 +432,7 @@ function ActionMix({ data }: { data: EventsSummaryResponse | undefined }) {
                   {a.count.toLocaleString()} ({pct}%)
                 </span>
               </Stack>
-              <div className="h-1.5 w-full rounded-full bg-muted">
-                <div className="h-1.5 rounded-full bg-success" style={{ width: `${pct}%` }} />
-              </div>
+              <ProgressBar value={pct} label={`${a.action}: ${pct}%`} />
             </Stack>
           )
         })}

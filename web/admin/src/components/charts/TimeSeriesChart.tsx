@@ -1,5 +1,17 @@
 import { useMemo } from 'react'
-import { Card } from '@astryxdesign/core'
+import {
+  Card,
+  Section,
+  Stack,
+  Table,
+  proportional,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+  TableBody,
+  TableCell,
+  Text,
+} from '@astryxdesign/core'
 import {
   Area,
   CartesianGrid,
@@ -65,54 +77,96 @@ export default function TimeSeriesChart({
 
   return (
     <Card>
-        <div style={{ width: '100%', height }}>
-          <ResponsiveContainer width="100%" height="100%">
-        <ComposedChart data={formatted} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-          <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
-          <XAxis
-            dataKey="_label"
-            stroke="var(--color-text-secondary)"
-            fontSize={11}
-            tickLine={false}
-            axisLine={false}
-          />
-          <YAxis
-            stroke="var(--color-text-secondary)"
-            fontSize={11}
-            tickLine={false}
-            axisLine={false}
-            allowDecimals={false}
-            width={32}
-          />
-          <RechartsTooltip
-            contentStyle={{
-              background: 'var(--color-background-popover)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 4,
-              fontSize: 12,
-            }}
-            labelStyle={{ color: 'var(--color-text-primary)' }}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: 12, color: 'var(--color-text-secondary)' }}
-            iconType="circle"
-          />
-          {series.map((s) => (
-            <Area
-              key={s.key}
-              type="monotone"
-              dataKey={s.key}
-              name={s.label}
-              stroke={s.color}
-              fill={s.color}
-              fillOpacity={stacked ? 0.7 : 0.25}
-              stackId={stacked ? 'stack' : s.stack}
-              strokeWidth={1.5}
+      <Section variant="transparent" padding={0} width="100%" height={height}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart
+            accessibilityLayer
+            data={formatted}
+            margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
+            <XAxis
+              dataKey="_label"
+              stroke="var(--color-text-secondary)"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
             />
-          ))}
+            <YAxis
+              stroke="var(--color-text-secondary)"
+              fontSize={11}
+              tickLine={false}
+              axisLine={false}
+              allowDecimals={false}
+              width={32}
+            />
+            <RechartsTooltip
+              contentStyle={{
+                background: 'var(--color-background-popover)',
+                border: '1px solid var(--color-border)',
+                borderRadius: 4,
+                fontSize: 12,
+              }}
+              labelStyle={{ color: 'var(--color-text-primary)' }}
+            />
+            <Legend
+              wrapperStyle={{ fontSize: 12, color: 'var(--color-text-secondary)' }}
+              iconType="circle"
+            />
+            {series.map((s) => (
+              <Area
+                key={s.key}
+                type="monotone"
+                isAnimationActive={false}
+                dataKey={s.key}
+                name={s.label}
+                stroke={s.color}
+                fill={s.color}
+                fillOpacity={stacked ? 0.7 : 0.25}
+                stackId={stacked ? 'stack' : s.stack}
+                strokeWidth={1.5}
+              />
+            ))}
           </ComposedChart>
         </ResponsiveContainer>
-        </div>
+      </Section>
+      <Stack gap={2}>
+        <Text type="supporting">
+          {series.map((item) => item.label).join(', ')} over {data.length} recorded time points.
+        </Text>
+        <details>
+          <summary>View chart data</summary>
+          <Stack className="min-w-0">
+            <Table
+              aria-label="Chart data"
+              columns={['Time', ...series.map((item) => item.key)].map((key) => ({
+                key,
+                header: key,
+                width: proportional(1),
+              }))}
+            >
+              <TableHeader>
+                <TableRow>
+                  <TableHeaderCell>Time</TableHeaderCell>
+                  {series.map((item) => (
+                    <TableHeaderCell key={item.key}>{item.label}</TableHeaderCell>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.map((point, index) => (
+                  <TableRow key={`${point.ts}-${index}`}>
+                    <TableCell>{new Date(point.ts).toLocaleString()}</TableCell>
+                    {series.map((item) => (
+                      <TableCell key={item.key}>{point[item.key] ?? 'Unavailable'}</TableCell>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Stack>
+        </details>
+      </Stack>
     </Card>
   )
 }

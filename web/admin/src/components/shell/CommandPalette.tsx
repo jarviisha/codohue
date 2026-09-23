@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { CommandPalette as AstryxCommandPalette, Stack, Text } from '@astryxdesign/core'
 import type { SearchableItem, SearchSource } from '@astryxdesign/core'
@@ -51,6 +51,8 @@ export default function CommandPalette({ open, onOpenChange }: Props) {
     [navigate, onOpenChange, currentNs, recents],
   )
 
+  const dynamicCommands = useRef<Command[]>([])
+
   const searchSource = useMemo<SearchSource<Command>>(
     () => ({
       bootstrap: () => commands,
@@ -62,7 +64,8 @@ export default function CommandPalette({ open, onOpenChange }: Props) {
             `${c.label} ${aux.subtitle ?? ''} ${aux.keywords ?? ''} ${aux.group}`.toLowerCase()
           return haystack.includes(q.toLowerCase())
         })
-        return [...deepLinks(q, currentNs, navigate, onClose), ...matches]
+        dynamicCommands.current = deepLinks(q, currentNs, navigate, onClose)
+        return [...dynamicCommands.current, ...matches]
       },
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -75,7 +78,7 @@ export default function CommandPalette({ open, onOpenChange }: Props) {
       onOpenChange={onOpenChange}
       searchSource={searchSource}
       onValueChange={(id) => {
-        const hit = commands.find((c) => c.id === id)
+        const hit = [...commands, ...dynamicCommands.current].find((c) => c.id === id)
         if (hit) hit.auxiliaryData!.run()
       }}
       emptySearchText="No matches."
@@ -83,9 +86,7 @@ export default function CommandPalette({ open, onOpenChange }: Props) {
         <Stack gap={0.5}>
           <Text weight="medium">{item.label}</Text>
           <Text type="supporting" size="xsm">
-            {[item.auxiliaryData?.group, item.auxiliaryData?.subtitle]
-              .filter(Boolean)
-              .join(' · ')}
+            {[item.auxiliaryData?.group, item.auxiliaryData?.subtitle].filter(Boolean).join(' · ')}
           </Text>
         </Stack>
       )}
@@ -170,7 +171,14 @@ function buildCommands({
   commands.push(
     cmd('fleet', 'Fleet', 'Global', '/', go('/'), 'overview home'),
     cmd('namespaces', 'Namespaces', 'Global', '/namespaces', go('/namespaces')),
-    cmd('namespaces-new', 'New namespace', 'Global', '/namespaces', go('/namespaces?new=1'), 'create'),
+    cmd(
+      'namespaces-new',
+      'New namespace',
+      'Global',
+      '/namespaces',
+      go('/namespaces?new=1'),
+      'create',
+    ),
     cmd('batch-runs', 'Batch runs', 'Global', '/batch-runs', go('/batch-runs')),
     cmd('health', 'Health', 'Global', '/health', go('/health')),
     cmd('demo-data', 'Demo data', 'Global', '/demo-data', go('/demo-data'), 'seed sample bundled'),
@@ -182,12 +190,58 @@ function buildCommands({
     const ns = encodeURIComponent(currentNs)
     commands.push(
       cmd('ns-overview', 'Overview', 'Namespace', `/ns/${currentNs}`, go(`/ns/${ns}`)),
-      cmd('ns-batch-runs', 'Batch runs', 'Namespace', `/ns/${currentNs}/batch-runs`, go(`/ns/${ns}/batch-runs`)),
-      cmd('ns-catalog', 'Catalog', 'Namespace', `/ns/${currentNs}/catalog`, go(`/ns/${ns}/catalog`)),
-      cmd('ns-catalog-items', 'Catalog items', 'Namespace', `/ns/${currentNs}/catalog/items`, go(`/ns/${ns}/catalog/items`)),
-      cmd('ns-subjects', 'Subjects', 'Namespace', `/ns/${currentNs}/subjects`, go(`/ns/${ns}/subjects`), 'inspector recommend'),
-      cmd('ns-events', 'Events', 'Namespace', `/ns/${currentNs}/events`, go(`/ns/${ns}/events`), 'tail ingest'),
-      cmd('ns-trending', 'Trending', 'Namespace', `/ns/${currentNs}/trending`, go(`/ns/${ns}/trending`)),
+      cmd(
+        'ns-batch-runs',
+        'Batch runs',
+        'Namespace',
+        `/ns/${currentNs}/batch-runs`,
+        go(`/ns/${ns}/batch-runs`),
+      ),
+      cmd(
+        'ns-catalog',
+        'Catalog',
+        'Namespace',
+        `/ns/${currentNs}/catalog`,
+        go(`/ns/${ns}/catalog`),
+      ),
+      cmd(
+        'ns-catalog-items',
+        'Catalog items',
+        'Namespace',
+        `/ns/${currentNs}/catalog/items`,
+        go(`/ns/${ns}/catalog/items`),
+      ),
+      cmd(
+        'ns-subjects',
+        'Subjects',
+        'Namespace',
+        `/ns/${currentNs}/subjects`,
+        go(`/ns/${ns}/subjects`),
+        'inspector recommend',
+      ),
+      cmd(
+        'ns-events',
+        'Events',
+        'Namespace',
+        `/ns/${currentNs}/events`,
+        go(`/ns/${ns}/events`),
+        'tail ingest',
+      ),
+      cmd(
+        'ns-config',
+        'Configuration',
+        'Namespace',
+        `/ns/${currentNs}/config`,
+        go(`/ns/${ns}/config`),
+        'settings weights',
+      ),
+      cmd(
+        'ns-trending',
+        'Trending',
+        'Namespace',
+        `/ns/${currentNs}/trending`,
+        go(`/ns/${ns}/trending`),
+      ),
     )
   }
 

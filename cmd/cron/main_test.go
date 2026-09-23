@@ -70,6 +70,9 @@ func TestRun_NewQdrantError(t *testing.T) {
 }
 
 func withCronTestHooks(t *testing.T) {
+	originalRuntime := startRuntimeFn
+	t.Cleanup(func() { startRuntimeFn = originalRuntime })
+	startRuntimeFn = func(context.Context, *goredis.Client, string, []config.RuntimeSetting) func() { return func() {} }
 	t.Helper()
 	origLoad := loadConfigFn
 	origPool := newPoolFn

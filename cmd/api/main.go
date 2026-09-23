@@ -37,6 +37,7 @@ import (
 )
 
 var (
+	startRuntimeFn    = infraredis.StartRuntimeReporter
 	loadConfigFn      = config.LoadAPI
 	newPoolFn         = infrapg.NewPool
 	newRedisFn        = infraredis.NewClient
@@ -95,6 +96,9 @@ func run() error {
 			slog.Error("close redis failed", "error", err)
 		}
 	}()
+
+	stopRuntime := startRuntimeFn(ctx, redisClient, "api", cfg.RuntimeSettings("api"))
+	defer stopRuntime()
 
 	qdrantClient, err := newQdrantFn(cfg.QdrantHost, cfg.QdrantPort)
 	if err != nil {

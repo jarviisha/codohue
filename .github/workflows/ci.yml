@@ -124,6 +124,14 @@ jobs:
         run: npm run build
         working-directory: web/admin
 
+      - name: Install browser for SPA regression tests
+        run: npx playwright install --with-deps chromium
+        working-directory: web/admin
+
+      - name: Test operator workflows in browser
+        run: npm run test:browser
+        working-directory: web/admin
+
       - name: Verify dist/ produced
         run: |
           test -s web/admin/dist/index.html

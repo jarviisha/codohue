@@ -391,7 +391,8 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | PUT | `/api/admin/v1/accounts/{username}` | Owner: create/update `{password?,role,disabled}`; invalidate account sessions (204; last-owner conflict 409) |
 | PUT | `/api/admin/v1/service-tokens/{name}` | Owner: immutable `{token,permissions,namespaces}` provisioning (204; conflict 409) |
 | DELETE | `/api/admin/v1/service-tokens/{name}` | Owner: revoke service token (204) |
-| GET    | `/api/admin/v1/health`                                            | Proxy `/healthz` from `cmd/api` |
+| GET    | `/api/admin/v1/health`                                            | Proxy `/healthz?details=true` from `cmd/api` with the configured observability token; otherwise aggregate `/healthz` with component statuses `unknown` |
+| GET    | `/api/admin/v1/runtime` | Recent allowlisted runtime settings self-reported by API, Admin, Cron and Embedder; 503 when the reporting store is unavailable |
 | GET    | `/api/admin/v1/ping/stream`                                       | **(SSE)** Smoke-test stream for the SSE pipeline; not a production endpoint |
 | GET    | `/api/admin/v1/overview`                                          | Fleet aggregate: health + cron/embedder heartbeat + alerts + per-namespace summary |
 | GET    | `/api/admin/v1/metrics/summary`                                   | Curated rolling-window metrics: ingest events/sec (1m/5m) per ns + cron batch lag |
@@ -511,7 +512,7 @@ Built-in: `VIEW`, `LIKE`, `COMMENT`, `SHARE`, `SKIP` (with default weights). Cus
 - **Rolling metrics** — `internal/admin/metricsroll` maintains in-process 1m/5m windows behind `/api/admin/v1/metrics/summary`.
 - **Backlog timeline** — `catalog_backlog_samples`, written by the embedder's sampler, backs `/catalog/backlog-history`.
 - **slog format** — `CODOHUE_LOG_FORMAT=text` (default) or `json` (the prod compose defaults to `json`).
-- **Healthcheck** — unauthenticated `GET /healthz` exposes sanitized aggregate status. A valid observability bearer can request `/healthz?details=true` for component diagnostics; admin proxies the sanitized endpoint at `/api/admin/v1/health`.
+- **Healthcheck** — unauthenticated `GET /healthz` exposes sanitized aggregate status. A valid observability bearer can request `/healthz?details=true` for component diagnostics; admin uses the same `CODOHUE_OBSERVABILITY_TOKEN` as the API to retrieve component details server-side at `/api/admin/v1/health`; without it, only aggregate health is available and component statuses are `unknown`.
 - **Retention** — `internal/retention` prunes `batch_run_logs` and `catalog_backlog_samples`; setting either `*_RETENTION_DAYS` to 0 disables that prune.
 - **Stream retention** — producers never trim streams. A periodic exact `XTRIM MINID` pass derives the safe frontier from every consumer group and never trims pending work.
 
@@ -602,3 +603,72 @@ docker/                          Migration image and entrypoint
 - [sdk/go/README.md](sdk/go/README.md) — Go SDK + Redis Streams transport.
 - [specs/](specs/) — per-feature specs and design docs.
 - [internal/architecture/imports_test.go](internal/architecture/imports_test.go) — import rule enforcement.
+
+### Runtime configuration reports
+
+Each of `cmd/api`, `cmd/admin`, `cmd/cron`, and `cmd/embedder` publishes an
+explicitly allowlisted snapshot of its effective startup settings every 30
+seconds. Reports live in one Redis hash, `admin:runtime:v1`, keyed by field
+`{process}:{boot-id}` so replicas and overlapping rolling restarts stay distinct;
+the hash expires 120 seconds after the last write and readers drop, then prune,
+fields older than that. A read is a single `HGETALL`, never a keyspace scan. Reports
+are operational observations, not durable configuration or health checks.
+Missing reports may indicate unavailable Redis, an older binary, or a stopped
+process. Credentials and connection strings are excluded at snapshot creation.
+
+`GET /api/admin/v1/runtime` requires the existing administrative read identity
+and returns `processes`, `observed_at`, and `expiry_seconds`. Store failures
+return 503 instead of an empty successful snapshot. System Runtime is read-only:
+operators change startup settings through deployment and restart the affected
+process. Namespace overrides continue to use the namespace configuration APIs.
+
+### Independently saved namespace configuration
+
+Migration **029_configuration_revisions** adds four positive group revisions to
+`namespace_configs`. A PostgreSQL `BEFORE UPDATE` trigger compares each group's
+owned columns using `IS DISTINCT FROM`, advancing only affected groups. Timestamps
+and key rotation do not advance a group revision. Existing namespace, provisioning,
+demo and catalog writers use the same table and therefore participate automatically.
+These revisions are independent of the namespace lifecycle generation.
+
+| Method | Admin endpoint | Behavior |
+| --- | --- | --- |
+| GET | `/api/admin/v1/namespaces/{ns}/configuration` | Read generation, group revisions, stored values, collection lock reasons, process default observations and application guidance |
+| PATCH | `/api/admin/v1/namespaces/{ns}/configuration` | Merge and save one group using generation and revision preconditions; return canonical values |
+| POST | `/api/admin/v1/namespaces/{ns}/configuration/validation` | Validate the same candidate without writing or starting work; PATCH revalidates |
+
+These routes use the existing admin identity, namespace scope, read/write permission
+and session CSRF checks. Example PATCH body:
+
+```json
+{"group":"trending","generation":1,"base_revision":5,"changes":{"trending_window":72,"trending_ttl":3600}}
+```
+
+Groups own disjoint fields: `recommendations` owns alpha, gamma, max_results,
+seen_items_days and exclude_authored; `signals` owns action_weights and lambda;
+`trending` owns trending_window, trending_ttl and lambda_trending; `embeddings`
+owns dense_source, embedding_dim, dense_distance and catalog strategy/override fields.
+Only catalog_max_attempts and catalog_max_content_bytes accept explicit null to
+restore inheritance. Omission retains stored values; action_weights replaces the
+whole map. Unknown fields, wrong groups/types and invalid candidates return 422
+with field paths in `error.fields`. Revision/generation mismatch returns 409 with
+`error.current`; inactive/missing namespaces return 404 and are never created by PATCH.
+
+The namespace domain acquires the lifecycle writer lease, transaction advisory
+lock and row lock before merging against current values and validating the whole
+candidate. Source, shape, strategy and overrides persist in one UPDATE. Dense
+collection dimension/distance changes are rejected while collections exist.
+No-op updates retain revisions. Saves do not enqueue batch or re-embed jobs, and
+PostgreSQL persistence does not claim atomicity with Redis or Qdrant. Guidance is
+about future consumption, not confirmation that workers applied a revision.
+
+GET and successful PATCH return the canonical configuration projection (never
+credentials). `defaults` contains observations from recent API/embedder runtime
+reports, including instance/time provenance; unknown/mixed defaults are explicit
+and do not prevent storing inheritance. Consumer startup defaults are not inferred
+from the admin process environment.
+
+Legacy PUT routes remain wire-compatible and last-write-wins. Their writes
+invalidate affected new-client revisions, but legacy clients without preconditions
+cannot themselves offer stale-write protection. New Settings clients save each
+tab independently and retain unrelated drafts, including on save failure/conflict.

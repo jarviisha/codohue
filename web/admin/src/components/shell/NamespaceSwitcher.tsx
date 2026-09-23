@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { safeNamespaceSection } from '@/services/operatorUx'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Selector } from '@astryxdesign/core'
 import { useNamespaces } from '@/services/namespaces'
@@ -21,18 +22,8 @@ export default function NamespaceSwitcher() {
   const nsList = useNamespaces()
   const recents = useRecentNamespaces()
 
-  // Sub-path retained on namespace switch: everything after /ns/{currentNs},
-  // truncated at the first id-shaped (numeric) segment so cross-namespace
-  // jumps don't carry ids unique to the source ns.
-  const subPath = useMemo(() => {
-    if (!currentNs) return ''
-    const segs = location.pathname.split('/').filter(Boolean)
-    if (segs[0] !== 'ns' || segs[1] !== currentNs) return ''
-    const after = segs.slice(2)
-    const firstNumIdx = after.findIndex((s) => /^\d+$/.test(s))
-    const safe = firstNumIdx >= 0 ? after.slice(0, firstNumIdx) : after
-    return safe.length > 0 ? '/' + safe.join('/') : ''
-  }, [location.pathname, currentNs])
+  // Carry the section across namespaces, never an entity identifier.
+  const subPath = safeNamespaceSection(location.pathname)
 
   // Recent-first (excluding the current one), then the rest alphabetically.
   // Operators bouncing between two namespaces get a one-keystroke switch; the

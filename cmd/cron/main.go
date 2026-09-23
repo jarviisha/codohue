@@ -23,6 +23,7 @@ import (
 )
 
 var (
+	startRuntimeFn  = infraredis.StartRuntimeReporter
 	loadConfigFn    = config.LoadCron
 	newPoolFn       = infrapg.NewPool
 	newQdrantFn     = infraqdrant.NewClient
@@ -69,6 +70,9 @@ func run() error {
 		slog.Warn("redis unavailable, trending phase will be skipped", "error", err)
 		redisClient = nil
 	}
+
+	stopRuntime := startRuntimeFn(ctx, redisClient, "cron", cfg.RuntimeSettings("cron"))
+	defer stopRuntime()
 
 	idmapRepo := idmap.NewRepository(db)
 	idmapSvc := idmap.NewService(idmapRepo)

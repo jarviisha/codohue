@@ -27,7 +27,7 @@ export default function LoginPage() {
   }
 
   return (
-    <PageContainer size="sm" className="py-16">
+    <PageContainer size="sm" padding={6} className="py-16">
       <Card>
         <Stack gap={1}>
           <Text weight="semibold">codohue admin</Text>

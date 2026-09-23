@@ -165,24 +165,25 @@ type qdrantPointReader interface {
 
 // Service implements admin business logic.
 type Service struct {
-	repo            adminRepo
-	apiURL          string
-	apiKey          string
-	redisClient     *goredis.Client
-	qdrantClient    *qdrant.Client
-	httpClient      *http.Client
-	job             batchRunner
-	nsConfigSvc     nsConfigUpserter
-	catalogConfig   nsCatalogConfigurator
-	catalogBacklog  catalogBacklogReader
-	catalogPicker   catalogStrategyPicker
-	streamPublisher streamPublisher
-	qdrantDeleter   qdrantPointDeleter
-	qdrantReader    qdrantPointReader
-	eventRate       eventRateReader
-	lifecycle       lifecycleCoordinator
-	nowFn           func() time.Time
-	runningReembed  sync.Map // keyed by namespace name; serializes re-embed triggers
+	repo               adminRepo
+	apiURL             string
+	apiKey             string
+	observabilityToken string
+	redisClient        *goredis.Client
+	qdrantClient       *qdrant.Client
+	httpClient         *http.Client
+	job                batchRunner
+	nsConfigSvc        nsConfigUpserter
+	catalogConfig      nsCatalogConfigurator
+	catalogBacklog     catalogBacklogReader
+	catalogPicker      catalogStrategyPicker
+	streamPublisher    streamPublisher
+	qdrantDeleter      qdrantPointDeleter
+	qdrantReader       qdrantPointReader
+	eventRate          eventRateReader
+	lifecycle          lifecycleCoordinator
+	nowFn              func() time.Time
+	runningReembed     sync.Map // keyed by namespace name; serializes re-embed triggers
 
 	// collectionStatsFn backs the overview's dense-downgrade alert; wired to
 	// qdrantCollection in NewService, replaceable in tests (the concrete
@@ -272,11 +273,34 @@ func (s *Service) SetNowFn(fn func() time.Time) {
 	s.nowFn = fn
 }
 
-// GetHealth proxies GET <apiURL>/healthz and returns the parsed response.
+// SetObservabilityToken configures the dedicated credential for component health details.
+// Call it during startup, before serving requests.
+func (s *Service) SetObservabilityToken(token string) {
+	s.observabilityToken = token
+}
+
+// GetHealth retrieves component details when configured, otherwise aggregate health.
+// The token is read independently by cmd/api and cmd/admin, so a detailed read can
+// be rejected while the API is healthy; the sanitized aggregate is then still valid.
 func (s *Service) GetHealth(ctx context.Context) (*HealthResponse, int, error) {
+	if s.observabilityToken != "" {
+		health, code, err := s.fetchHealth(ctx, true)
+		if err == nil {
+			return health, code, nil
+		}
+	}
+	return s.fetchHealth(ctx, false)
+}
+
+func (s *Service) fetchHealth(ctx context.Context, details bool) (*HealthResponse, int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.apiURL+"/healthz", http.NoBody)
 	if err != nil {
 		return nil, 0, fmt.Errorf("build health request: %w", err)
+	}
+
+	if details {
+		req.URL.RawQuery = "details=true"
+		req.Header.Set("Authorization", "Bearer "+s.observabilityToken)
 	}
 
 	resp, err := s.httpClient.Do(req)
@@ -285,9 +309,17 @@ func (s *Service) GetHealth(ctx context.Context) (*HealthResponse, int, error) {
 	}
 	defer resp.Body.Close() //nolint:errcheck // nothing useful to do if close fails on a read-only response body
 
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusServiceUnavailable {
+		return nil, resp.StatusCode, fmt.Errorf("health proxy: unexpected HTTP status %d", resp.StatusCode)
+	}
 	var health HealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("decode health response: %w", err)
+	}
+	for _, status := range []*string{&health.Status, &health.Postgres, &health.Redis, &health.Qdrant} {
+		if strings.TrimSpace(*status) == "" {
+			*status = "unknown"
+		}
 	}
 	return &health, resp.StatusCode, nil
 }

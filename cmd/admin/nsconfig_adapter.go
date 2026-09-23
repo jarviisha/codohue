@@ -7,6 +7,7 @@ import (
 
 	"github.com/jarviisha/codohue/internal/admin"
 	"github.com/jarviisha/codohue/internal/core/embedstrategy"
+	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/nsconfig"
 )
 
@@ -25,7 +26,7 @@ type nsConfigAdapter struct {
 	svc nsConfigUpsertSvc
 }
 
-func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *admin.NamespaceUpsertRequest) (*admin.NamespaceUpsertResponse, error) {
+func (a *nsConfigAdapter) Upsert(ctx context.Context, ns string, req *admin.NamespaceUpsertRequest) (*admin.NamespaceUpsertResponse, error) {
 	// Pointers pass straight through: nil carries "not supplied" all the way
 	// to the SQL, where COALESCE leaves the column alone. Dereferencing here
 	// is what used to turn an unsent field into a zero value and wipe it.
@@ -50,7 +51,7 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 		CatalogStrategyParams:  req.CatalogStrategyParams,
 	}
 
-	resp, err := a.svc.Upsert(ctx, namespace, nsReq)
+	resp, err := a.svc.Upsert(ctx, ns, nsReq)
 	if err != nil {
 		return nil, mapNsConfigError(err)
 	}
@@ -70,8 +71,8 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, namespace string, req *adm
 // RotateAPIKey adapts nsconfig's key rotation to the admin DTO. nsconfig's
 // not-found sentinel becomes (nil, nil) so the admin handler maps it to 404
 // without importing the peer domain's errors.
-func (a *nsConfigAdapter) RotateAPIKey(ctx context.Context, namespace string) (*admin.NamespaceKeyRotateResponse, error) {
-	resp, err := a.svc.RotateAPIKey(ctx, namespace)
+func (a *nsConfigAdapter) RotateAPIKey(ctx context.Context, ns string) (*admin.NamespaceKeyRotateResponse, error) {
+	resp, err := a.svc.RotateAPIKey(ctx, ns)
 	if err != nil {
 		if errors.Is(err, nsconfig.ErrNamespaceNotFound) {
 			return nil, nil
@@ -103,4 +104,14 @@ func mapNsConfigError(err error) error {
 	default:
 		return err
 	}
+}
+
+// configurationAdapter preserves the admin/domain dependency boundary.
+type configurationAdapter struct{ svc *nsconfig.Service }
+
+func (a *configurationAdapter) ReadConfiguration(ctx context.Context, ns string) (*namespace.Configuration, error) {
+	return a.svc.ReadConfiguration(ctx, ns)
+}
+func (a *configurationAdapter) PatchConfiguration(ctx context.Context, ns string, req *namespace.ConfigurationPatch, validate bool) (*namespace.Configuration, error) {
+	return a.svc.PatchConfiguration(ctx, ns, req, validate)
 }
