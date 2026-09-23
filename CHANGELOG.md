@@ -11,6 +11,124 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
 
 Nothing yet.
 
+## v0.7.0 — 2026-09-23
+
+Operator identity, grouped namespace configuration, and hybrid scores that are
+actually cosines. Server tag: `v0.12.0`.
+
+Every wire and SDK change is additive — nothing was removed, renamed, or
+retyped. The breaking items are **server behaviour**: the shared global admin
+key is replaced by named operator accounts and separately scoped service
+tokens, namespace configuration is saved per group instead of as one form, and
+hybrid recommendation score *values* change once.
+
+### Breaking
+
+- **Hybrid recommendation scores change value.** Sparse vectors are now
+  L2-normalized at compute time on both sides, so Qdrant's raw dot product is a
+  cosine, and the serve-time saturating curve `x/(x+5)` is replaced by a clamp
+  (it survives only for dot-distance dense namespaces, renamed `dotNormK`).
+  Before this, measured top-1 scores on live data spread from 0.08 to 6094 and
+  everything above the curve's calibration range mapped to ~0.99, leaving
+  γ-freshness rather than relevance to order the top of the list. Response
+  contract and field types are unchanged — **re-baseline anything that
+  thresholds on, stores, or diffs raw score values.** Rollout: new serving code
+  reads old unnormalized vectors for up to one batch cycle plus the response
+  cache TTL, during which raw dots clamp to 1.0; it self-heals at the first
+  recompute with no operator step.
+- **Ranking order changes on the hybrid path.** Each arm's top-K is now
+  backfilled on the other arm via `HasID`, so a missing score means "not
+  indexed on that side" instead of "fell outside top-K" — a dense-only
+  candidate is no longer capped at `(1-alpha)` and can outrank a sparse one.
+  A surviving arm also gets full weight when the other fails, matching `Rank`.
+  Backfill failure degrades to the old zero-fill reading and never fails the
+  request; cost is at most two extra Qdrant queries per hybrid request.
+- **Minting a numeric id past the sparse index ceiling now fails loudly.**
+  Migration `030` caps `id_mappings_numeric_id_seq` at 2^32-1, since Qdrant
+  sparse dimensions are `uint32` and anything above folded two entities onto
+  one dimension or silently dropped them. A subject that keeps no representable
+  dimension now fails instead of being upserted as an empty vector and counted
+  as a success. The migration is conditional — a deployment already past 2^32
+  gets a warning, not a failed migration.
+
+- **The global admin key no longer authenticates anything by default.**
+  `cmd/admin` now has named owner/admin accounts with durable opaque sessions,
+  and machine access moves to service tokens carrying explicit permissions and
+  namespace scopes. A bearer credential cannot create a human session.
+  Upgrading requires migration `028_operator_accounts`, provisioning the first
+  owner, and reissuing automation credentials. Existing JWT cookies are
+  invalidated — operators sign in again. `CODOHUE_LEGACY_ADMIN_AUTH=true` keeps
+  the old bearer path alive for migration; it cannot manage identities and is
+  rejected in production. Setup, permissions, and local recovery are in
+  `deploy/operator-auth.md`.
+- **`POST /api/admin/v1/sessions` takes a username and password** — body
+  `{"username":"owner","password":"…"}` with header `X-Codohue-CSRF: 1`.
+  Cookie-mutating routes require the CSRF header, forwarded headers require
+  trusted proxy CIDRs, and open SSE connections revalidate every 15 seconds.
+  Disable, password reset, and logout revoke sessions across replicas and
+  restarts.
+- **Admin ports default to loopback** and the optional feeder no longer
+  receives database authority or a known admin credential. Existing Compose
+  installations can set `CODOHUE_PROVISION_APPLICATION=false` to keep their
+  namespaces through the identity migration.
+- **Catalog content that PostgreSQL cannot store is now rejected, not
+  retried.** NUL bytes and invalid UTF-8 in identifiers fail the request;
+  in payload they are sanitized. A persist failing with SQLSTATE class 22
+  returns `ErrUnstorable` and the stream worker acks it instead of
+  redelivering forever — previously a handful of such posts pinned 80k entries
+  in `codohue:catalog` against `XTRIM`.
+- **Runtime report storage changed shape**, from per-boot string keys
+  `admin:runtime:v1:{process}:{boot-id}` to one hash `admin:runtime:v1`. During
+  rollout, processes still on the old binary write keys the new admin does not
+  read; System Runtime under-reports until every process has restarted, and the
+  orphans expire within 120s.
+
+### Added
+
+- **Wire: admin identity types.** `OperatorIdentity`, `OperatorAccount`,
+  `OperatorSessionRequest`, `OperatorSessionResponse`, `OperatorAccountRequest`,
+  and `ServiceTokenRequest`, with golden snapshots. No credential material is
+  ever carried on a response type.
+- **SDK: `admin.ProvisionCatalogRequest.ProvisionAPIKey`.** Supplying a
+  pre-generated namespace key makes provisioning immutable and retry-safe: a
+  matching retry preserves existing state, a conflicting key fails without
+  rotating anything.
+- **Grouped namespace configuration.** `PATCH
+  /api/admin/v1/namespaces/{ns}/configuration` saves one of four groups under
+  optimistic concurrency (`generation` + `base_revision`), so two operators
+  editing unrelated settings no longer clobber each other. Responds with the
+  full canonical projection; `409` carries `error.current`, `422` addresses
+  fields as `group.field`. Requires migration `029_configuration_revisions`.
+  Legacy `PUT` stays wire-compatible and last-write-wins.
+- **`GET /api/admin/v1/runtime`** — an allowlisted, credential-free snapshot of
+  each process's effective startup settings.
+- **Live Bluesky firehose feeder** (`examples/bskyfeed`, own Go module, GHCR
+  image, `bskyfeed` Compose profile, off by default) — real repeat behaviour to
+  exercise collaborative filtering instead of synthetic loadgen traffic.
+- **Metric `codohue_sparse_dimensions_skipped_total{namespace,entity_type}`** —
+  counts dimensions dropped for exceeding the `uint32` ceiling, previously
+  visible only as a cron `Warn` line.
+
+### Fixed
+
+- **`idmap` no longer writes on every read.** `GetOrCreate` reads first and
+  writes only on a miss, so resolving an already-mapped id stops producing a
+  dead tuple, a WAL record, and a burned `BIGSERIAL` value. Measured on the
+  dev stack: 80 no-op updates per real row and ~2.1M sequence values burned per
+  hour. No migration; the already-wasted sequence range is not reclaimed.
+- **`compute` resolves each subject's object ids once per tick** instead of
+  once per consumer, and batches the object-row pass — one batch call replaces
+  a sequential query per object.
+
+### Changed
+
+- **`web/admin` migrated from Davinci to Astryx** (`@astryxdesign/core`, MIT):
+  net −1045 lines, the command palette, alert dialog, and hotkeys come from the
+  library. The namespace switcher moved into the top bar and is now visible on
+  every route; the sidebar no longer swaps contents per route. Settings is four
+  independently saved tabs, and System Runtime is a new read-only page.
+- `sdk/go` and `sdk/go/redistream` require `pkg/codohuetypes v0.7.0`.
+
 ## v0.6.0 — 2026-08-27
 
 Backend audit remediation. Server tags: `v0.10.0`, `v0.11.0`.
