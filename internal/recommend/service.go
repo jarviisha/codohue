@@ -515,18 +515,22 @@ func (s *Service) hybridRecommend(
 	denseTopK := uint64((req.Offset + limit) * denseOverFetchFactor)
 
 	// Sparse retrieval.
+	sparseOK := true
 	sparseResults, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec, seenFilter, sparseTopK)
 	if err != nil {
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
+		sparseOK = false
 		req.degraded = true
 	}
 
 	// Dense retrieval.
+	denseOK := true
 	denseResults, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec, seenFilter, denseTopK)
 	if err != nil {
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
+		denseOK = false
 		req.degraded = true
 	}
 
@@ -543,23 +547,38 @@ func (s *Service) hybridRecommend(
 	// this borrows the mechanism for the retrieved union. After the
 	// backfill a still-missing score is a real verdict: the object is not
 	// indexed on that side (e.g. no catalog embedding), and 0 is honest.
-	// Backfill failure degrades to the zero-fill reading, not to an error.
-	if ids := pointIDsMissingFrom(sparseResults, denseResults); len(ids) > 0 {
-		extra, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec,
-			&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
-		if err != nil {
-			slog.Warn("hybrid: sparse backfill failed; dense-only candidates keep sparse 0", "namespace", req.Namespace, "error", err)
-		} else {
-			sparseResults = append(sparseResults, extra...)
+	//
+	// An arm whose primary search just failed is not backfilled: re-querying
+	// a backend that errored milliseconds ago adds load exactly when the
+	// service should shed it, and a retry that happens to succeed yields
+	// neither the healthy blend nor the documented zero-fill degradation.
+	//
+	// Backfill failure degrades to the zero-fill reading rather than failing
+	// the request, but it marks the response degraded all the same: the
+	// suppressed ordering is as unfit to cache for the full TTL as the one a
+	// failed primary search produces.
+	if sparseOK {
+		if ids := pointIDsMissingFrom(sparseResults, denseResults); len(ids) > 0 {
+			extra, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec,
+				&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
+			if err != nil {
+				slog.Warn("hybrid: sparse backfill failed; dense-only candidates keep sparse 0", "namespace", req.Namespace, "error", err)
+				req.degraded = true
+			} else {
+				sparseResults = append(sparseResults, scoresOnly(extra)...)
+			}
 		}
 	}
-	if ids := pointIDsMissingFrom(denseResults, sparseResults); len(ids) > 0 {
-		extra, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec,
-			&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
-		if err != nil {
-			slog.Warn("hybrid: dense backfill failed; sparse-only candidates keep dense 0", "namespace", req.Namespace, "error", err)
-		} else {
-			denseResults = append(denseResults, extra...)
+	if denseOK {
+		if ids := pointIDsMissingFrom(denseResults, sparseResults); len(ids) > 0 {
+			extra, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec,
+				&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
+			if err != nil {
+				slog.Warn("hybrid: dense backfill failed; sparse-only candidates keep dense 0", "namespace", req.Namespace, "error", err)
+				req.degraded = true
+			} else {
+				denseResults = append(denseResults, scoresOnly(extra)...)
+			}
 		}
 	}
 
@@ -722,6 +741,20 @@ func pointIDsMissingFrom(base, have []*qdrant.ScoredPoint) []*qdrant.PointId {
 		}
 	}
 	return ids
+}
+
+// scoresOnly drops created_at from backfilled points. A backfilled point
+// exists only to carry its arm's score: its object_id is by construction
+// already present in the arm that asked for the backfill, and that arm's
+// payload owns the object's creation time. Left in place, the backfilled
+// copy could win buildCreatedAtLookup's first-seen-wins pass and replace a
+// true creation time with cron's fallback — the last interaction — which
+// would hand a two-year-old object the freshness multiplier of a new one.
+func scoresOnly(points []*qdrant.ScoredPoint) []*qdrant.ScoredPoint {
+	for _, p := range points {
+		delete(p.Payload, "created_at")
+	}
+	return points
 }
 
 // blendedCandidate is one object scored by the shared hybrid blend.
