@@ -1503,7 +1503,7 @@ func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
 func TestRank_ChunkedCallsMatchUnionOrdering(t *testing.T) {
 	// SC-002: scoring 1000 candidates as two 500-item requests must produce
 	// scores that merge into the same ordering as one 1000-item request.
-	// This only holds because saturateScores is batch-independent.
+	// This only holds because clampUnitScores is batch-independent.
 	const n = 1000
 	candidates := make([]string, n)
 	for i := range candidates {
