@@ -626,6 +626,38 @@ func TestBuildSubjectVector_SkipsObjectPastSparseIndexSpace(t *testing.T) {
 	}
 }
 
+// Partial truncation degrades; total truncation must not pass as health. A
+// subject that had interactions but produced no representable dimension would
+// otherwise be upserted as an empty vector and counted toward upserted++, so
+// sparse search returns nothing, requests fall to fallback_popular, and the
+// run still reports success.
+func TestBuildSubjectVector_TotalTruncationIsAnError(t *testing.T) {
+	idmap := newFakeIDMap()
+	idmap.objectIDs["o-bad"] = maxSparseIndex + 1
+	idmap.objectIDs["o-worse"] = maxSparseIndex + 2
+	svc := newTestService(&fakeComputeRepo{}, idmap)
+
+	_, err := svc.buildSubjectVector(context.Background(), "ns", "u1",
+		map[string]float64{"o-bad": 1, "o-worse": 2})
+	if err == nil {
+		t.Fatal("a subject whose every dimension was skipped must fail, not upsert empty")
+	}
+}
+
+// A subject with no interactions legitimately has an empty vector — that path
+// must stay distinct from total truncation.
+func TestBuildSubjectVector_NoScoresIsNotTruncation(t *testing.T) {
+	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
+
+	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{})
+	if err != nil {
+		t.Fatalf("empty score set is not truncation: %v", err)
+	}
+	if len(vec.Indices) != 0 {
+		t.Fatalf("expected empty vector, got %v", vec.Indices)
+	}
+}
+
 func TestUpsertObjectVectors_SkipsCooccurrenceEntryPastSparseIndexSpace(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
 	var got *qdrant.UpsertPoints

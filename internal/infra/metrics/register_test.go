@@ -17,7 +17,7 @@ func TestRegister(t *testing.T) {
 
 	Register()
 
-	if gotCount != 33 {
-		t.Fatalf("expected 33 collectors, got %d", gotCount)
+	if gotCount != 34 {
+		t.Fatalf("expected 34 collectors, got %d", gotCount)
 	}
 }

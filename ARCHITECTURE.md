@@ -130,7 +130,7 @@ Migrations live under [migrations/](migrations/) as `NNN_name.up.sql` / `NNN_nam
 | -------------------------- | ---- |
 | `namespace_configs`        | Per-namespace config: `action_weights`, `lambda`, `gamma`, `max_results`, `seen_items_days`, `alpha`, `dense_source`, `embedding_dim`, `dense_distance`, `trending_*`, `exclude_authored`, `api_key_hash`, `catalog_strategy_id`, `catalog_strategy_version`, `catalog_strategy_params`, nullable `catalog_max_attempts` / `catalog_max_content_bytes` |
 | `events`                   | Behavioral events: `namespace`, `subject_id`, `object_id`, `action`, `occurred_at`, `object_created_at`. Indexed on `(namespace, subject_id)`, `occurred_at`, and `(namespace, subject_id, occurred_at DESC)` |
-| `id_mappings`              | String ID → BIGSERIAL numeric, **primary key `(namespace, entity_type, string_id)`**. Used as the Qdrant point ID to avoid hash collisions |
+| `id_mappings`              | String ID → BIGSERIAL numeric, **primary key `(namespace, entity_type, string_id)`**. Used as the Qdrant point ID to avoid hash collisions. One sequence serves every namespace and both entity types, and it is **capped at 2^32-1** (migration 030) because Qdrant sparse vectors index dimensions with `uint32`: the cap makes the ceiling a loud insert failure instead of silently unsearchable entities (§6). Resolution reads before it writes — the earlier `ON CONFLICT DO UPDATE` upsert burned a sequence value and wrote a dead tuple on every already-mapped id, which walked the ceiling ~80× faster than real growth. Raising the ceiling needs a separate sparse index space, not a bigger cap |
 | `objects`                  | Per-object metadata: `namespace`, `object_id`, `author_subject_id`. Independent of `dense_source` |
 | `catalog_items`            | Raw content per object: state machine `pending → embedding → embedded` (plus `failed` / `dead_letter`); `content`, `metadata`, strategy version |
 | `batch_run_logs`           | History of every cron tick / admin re-embed: `trigger_source ∈ {cron, manual, admin_reembed}`, phase{1,2,3} ok/duration/entities/objects/error, `log_lines` JSONB, `cancel_requested`, `target_strategy_*` |
@@ -164,6 +164,7 @@ Schema evolution after `001_initial`:
 - **025** adds validated namespace foreign keys and the catalog keyset index backing `next_cursor`
 - **026** scopes numeric ID uniqueness to `(namespace, entity_type)` and adds the durable ID-mapping repair run/item manifests
 - **027** records rebuilt namespaces on ID-mapping repair runs so verification uses durable evidence
+- **030** caps the `id_mappings.numeric_id` sequence at 2^32-1 to match the Qdrant sparse index space; skipped with a warning on a deployment already past that value, where `codohue_sparse_dimensions_skipped_total` reports the damage instead
 
 ### 5.2 Redis
 
@@ -209,7 +210,7 @@ Each tick iterates over every namespace and runs three sequential phases; each p
 
 | Phase | Name      | Description |
 | ----- | --------- | ----------- |
-| 1     | Sparse    | Reads `events` from the last 90 days, applies `action_weights × e^(-λ × days_since)`, builds L2-normalized subject/object sparse vectors, upserts into `{ns}_subjects` / `{ns}_objects`. Sparse dimensions are indexed by `uint32`, so an `id_mappings.numeric_id` past 2^32 cannot be represented: that dimension is **dropped from every vector** with a `Warn` and no metric. Dropping is uniform, so it cannot collide two entities, but an object whose id crosses the ceiling silently stops appearing in sparse CF |
+| 1     | Sparse    | Reads `events` from the last 90 days, applies `action_weights × e^(-λ × days_since)`, builds L2-normalized subject/object sparse vectors, upserts into `{ns}_subjects` / `{ns}_objects`. Sparse dimensions are indexed by `uint32`, so an `id_mappings.numeric_id` past 2^32 cannot be represented: that dimension is **dropped from every vector**, counted by `codohue_sparse_dimensions_skipped_total`. Dropping is uniform, so it cannot collide two entities; a subject that kept *no* dimension fails instead of upserting an empty vector, which would have passed as a healthy run. Migration 030 caps the sequence at 2^32-1 so the ceiling is reached at mint time (a loud insert failure) rather than here — see §4 |
 | 2     | Dense     | Derives subject vectors by mean-pooling the dense vectors of each subject's interacted items and upserts `{ns}_subjects_dense`. Runs when `dense_source ∈ {item2vec, svd, catalog}`; **skipped** for `byoe` and `disabled` |
 | 3     | Trending  | Computes time-decayed trending from recent events into a Redis ZSET. **Skipped** when Redis is unavailable |
 

@@ -44,6 +44,17 @@ var (
 		Help: "Total ID mapping lookup/create errors.",
 	}, []string{"entity_type"})
 
+	// SparseDimensionsSkippedTotal counts sparse vector dimensions dropped
+	// because their id_mappings.numeric_id exceeds the uint32 sparse index
+	// space. Migration 030 caps the sequence so new ids cannot cross that
+	// ceiling; this stays non-zero only on a deployment that crossed it
+	// before the cap, where the drop is otherwise visible in nothing but a
+	// cron Warn line.
+	SparseDimensionsSkippedTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "codohue_sparse_dimensions_skipped_total",
+		Help: "Sparse vector dimensions dropped for exceeding the uint32 index space.",
+	}, []string{"namespace", "entity_type"})
+
 	// TrendingItemsTotal tracks the number of items with a trending score per namespace.
 	TrendingItemsTotal = prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "codohue_trending_items_total",
@@ -273,6 +284,7 @@ func Register() {
 		RecommendRequests,
 		BatchEntitiesProcessed,
 		IDMappingErrors,
+		SparseDimensionsSkippedTotal,
 		TrendingItemsTotal,
 		TrendingRequestsTotal,
 		EventsIngestedTotal,
