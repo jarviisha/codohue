@@ -2642,6 +2642,109 @@ func TestHybridRecommend_BackfillFailureDegradesToZeroFill(t *testing.T) {
 	}
 }
 
+// A backfill blip suppresses ordering exactly like a primary-search blip, so
+// it must mark the response degraded too — otherwise Recommend caches the
+// suppressed ordering for the full TTL, the very thing the cache gate exists
+// to prevent.
+func TestHybridRecommend_BackfillFailureMarksDegraded(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			return nil, errors.New("qdrant blip")
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			return nil, nil
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(77), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": now}},
+		}, nil
+	}
+
+	req := &Request{SubjectID: "u1", Namespace: "ns"}
+	if _, err := s.hybridRecommend(context.Background(), req, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !req.degraded {
+		t.Fatal("backfill failure must mark the response degraded so it is not cached")
+	}
+}
+
+// Backfilling an arm whose primary search just failed re-queries a backend
+// that errored milliseconds earlier — extra load exactly when the service
+// should shed it, and the result is neither the healthy blend nor the
+// documented zero-fill degradation.
+func TestHybridRecommend_SkipsBackfillForFailedArm(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	sparseCalls := 0
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		sparseCalls++
+		return nil, errors.New("qdrant down")
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			return nil, nil
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(77), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": now}},
+		}, nil
+	}
+
+	if _, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sparseCalls != 1 {
+		t.Fatalf("failed sparse arm must not be re-queried for backfill, got %d calls", sparseCalls)
+	}
+}
+
+// A backfilled point exists only to carry a score: its object_id is by
+// construction already in the other arm, whose payload owns created_at.
+// Letting it win the first-seen-wins lookup would swap the object's true
+// creation time for cron's fallback (last interaction), inflating freshness.
+func TestHybridRecommend_BackfillDoesNotOverrideCreatedAt(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	old := qdrant.NewValueString(time.Now().UTC().AddDate(-2, 0, 0).Format(time.RFC3339))
+	fresh := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			// Cron's sparse payload carries the last interaction time, not
+			// the object's real creation time.
+			return []*qdrant.ScoredPoint{
+				{Id: qdrant.NewIDNum(77), Score: 1, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": fresh}},
+			}, nil
+		}
+		return nil, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			return nil, nil
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(77), Score: 1, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": old}},
+		}, nil
+	}
+
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 1.0}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// gamma=1.0 over two years decays to ~0; if the backfilled point's
+	// created_at won, the score would stay at the undecayed 1.0.
+	if resp.Items[0].Score > 0.01 {
+		t.Fatalf("dense payload's created_at must survive backfill, got score %v", resp.Items[0].Score)
+	}
+}
+
 func TestPointIDsMissingFrom(t *testing.T) {
 	pt := func(num uint64, obj string) *qdrant.ScoredPoint {
 		return &qdrant.ScoredPoint{Id: qdrant.NewIDNum(num), Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString(obj)}}
