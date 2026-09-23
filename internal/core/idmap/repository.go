@@ -151,6 +151,12 @@ func (r *Repository) LookupBatch(ctx context.Context, stringIDs []string, namesp
 // GetOrCreateBatch resolves many string ids in one round-trip. With the
 // exclude_authored cap at 5000, the per-id variant cost ~5000 sequential
 // queries per uncached recommendation request.
+//
+// An id whose insert conflicted and whose mapping vanished before the
+// follow-up read (raced create + delete) is omitted from the result map, the
+// same partial-result contract as LookupBatch — unlike GetOrCreate, which
+// reports that state as an error. Callers indexing the map must not assume
+// every requested id is present.
 func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
 	if len(stringIDs) == 0 {
 		return map[string]uint64{}, nil

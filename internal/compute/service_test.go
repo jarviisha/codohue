@@ -605,21 +605,41 @@ func TestSparseIndex_RefusesNarrowingInsteadOfColliding(t *testing.T) {
 	}
 }
 
-func TestBuildSubjectVector_RejectsObjectIDPastSparseIndexSpace(t *testing.T) {
+// An id past the uint32 index space skips that dimension only: the dimension
+// is equally unrepresentable in every vector, so dropping it cannot collide or
+// corrupt, while erroring here failed the whole subject (this site) or the
+// whole run, permanently, at the object site — the offending id never goes
+// away.
+func TestBuildSubjectVector_SkipsObjectPastSparseIndexSpace(t *testing.T) {
 	idmap := newFakeIDMap()
-	idmap.objectIDs["o1"] = maxSparseIndex + 1
+	idmap.objectIDs["o-bad"] = maxSparseIndex + 1
+	idmap.objectIDs["o-good"] = 7
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
-	if _, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{"o1": 1}); err == nil {
-		t.Fatal("expected error, got nil")
+	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1",
+		map[string]float64{"o-bad": 1, "o-good": 2})
+	if err != nil {
+		t.Fatalf("unrepresentable dimension must not fail the subject: %v", err)
+	}
+	if len(vec.Indices) != 1 || vec.Indices[0] != 7 {
+		t.Fatalf("vector must keep only the representable dimension, got %v", vec.Indices)
 	}
 }
 
-func TestUpsertObjectVectors_RejectsCooccurrenceIDPastSparseIndexSpace(t *testing.T) {
+func TestUpsertObjectVectors_SkipsCooccurrenceEntryPastSparseIndexSpace(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
-	accum := map[string]map[uint64]float32{"o1": {maxSparseIndex + 1: 1}}
+	var got *qdrant.UpsertPoints
+	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+		got = points
+		return nil
+	}
+	accum := map[string]map[uint64]float32{"o1": {maxSparseIndex + 1: 1, 5: 2}}
 
-	if _, err := svc.upsertObjectVectors(context.Background(), "ns", accum, nil, nil); err == nil {
-		t.Fatal("expected error, got nil")
+	if _, err := svc.upsertObjectVectors(context.Background(), "ns", accum, nil, nil); err != nil {
+		t.Fatalf("unrepresentable dimension must not fail the run: %v", err)
+	}
+	idx := got.Points[0].GetVectors().GetVectors().GetVectors()[sparseVectorName].GetSparse().GetIndices()
+	if len(idx) != 1 || idx[0] != 5 {
+		t.Fatalf("row must keep only the representable dimension, got %v", idx)
 	}
 }

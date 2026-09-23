@@ -28,9 +28,11 @@ const (
 )
 
 // sparseIndex narrows a numeric id to a sparse vector dimension, refusing the
-// narrowing rather than performing it silently. The callers treat this as a
-// per-entity failure: one subject is skipped and logged, and a run where every
-// subject fails is reported red — both louder than a corrupt vector.
+// narrowing rather than performing it silently. Callers skip the offending
+// dimension and log: the dimension is equally unrepresentable in every
+// vector, so dropping it cannot collide or corrupt, whereas propagating an
+// error failed the whole subject — or, at the object site, the whole run —
+// permanently, because the over-limit id never goes away.
 func sparseIndex(numericID uint64) (uint32, error) {
 	if numericID > maxSparseIndex {
 		return 0, fmt.Errorf("numeric id %d exceeds the uint32 sparse index space", numericID)
@@ -243,7 +245,8 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		}
 		index, err := sparseIndex(objNumID)
 		if err != nil {
-			return nil, fmt.Errorf("object %q: %w", objectID, err)
+			slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "subject_id", subjectID, "object_id", objectID, "error", err)
+			continue
 		}
 		entries = append(entries, sparseEntry{index: index, value: float32(score)})
 	}
@@ -330,7 +333,8 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 		for subjNumID, score := range subjectScores {
 			index, err := sparseIndex(subjNumID)
 			if err != nil {
-				return upsertedIDs, fmt.Errorf("object %q: %w", objectID, err)
+				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "error", err)
+				continue
 			}
 			entries = append(entries, sparseEntry{index: index, value: score})
 		}
