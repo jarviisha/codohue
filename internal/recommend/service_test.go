@@ -2762,3 +2762,29 @@ func TestPointIDsMissingFrom(t *testing.T) {
 		t.Fatalf("nothing missing the other way, got %v", got)
 	}
 }
+
+// Rank gives the surviving arm full weight when the other fails, because
+// scaling a lone side by alpha shrinks every score for no reason. Recommend
+// shares the blend, so it must share that reading too — otherwise the same
+// outage returns differently-scaled scores from the two endpoints.
+func TestHybridRecommend_FailedArmGivesSurvivorFullWeight(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, errors.New("dense down")
+	}
+
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if math.Abs(resp.Items[0].Score-0.9) > 1e-6 {
+		t.Fatalf("surviving sparse arm must keep full weight (0.9), got %v", resp.Items[0].Score)
+	}
+}

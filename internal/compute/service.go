@@ -27,17 +27,43 @@ const (
 	maxSparseIndex = math.MaxUint32
 )
 
-// sparseIndex narrows a numeric id to a sparse vector dimension, refusing the
-// narrowing rather than performing it silently. Callers skip the offending
-// dimension and log: the dimension is equally unrepresentable in every
-// vector, so dropping it cannot collide or corrupt, whereas propagating an
-// error failed the whole subject — or, at the object site, the whole run —
+// sparseIndex narrows a numeric id to a sparse vector dimension, reporting
+// whether the id fits rather than narrowing silently. Callers skip the
+// offending dimension and log: the dimension is equally unrepresentable in
+// every vector, so dropping it cannot collide or corrupt, whereas propagating
+// an error failed the whole subject — or, at the object site, the whole run —
 // permanently, because the over-limit id never goes away.
-func sparseIndex(numericID uint64) (uint32, error) {
+func sparseIndex(numericID uint64) (uint32, bool) {
 	if numericID > maxSparseIndex {
-		return 0, fmt.Errorf("numeric id %d exceeds the uint32 sparse index space", numericID)
+		return 0, false
 	}
-	return uint32(numericID), nil
+	return uint32(numericID), true
+}
+
+// sparseVectorFrom sorts entries by dimension and splits them into the
+// parallel index/value slices Qdrant takes, unit-normalized. Both build sites
+// need exactly this, and they must agree: if subject and object vectors stop
+// being mutually unit length, their dot product stops being a cosine and the
+// serving clamp silently mis-scores one side.
+func sparseVectorFrom(entries []sparseEntry) (indices []uint32, values []float32) {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].index < entries[j].index
+	})
+	indices = make([]uint32, 0, len(entries))
+	values = make([]float32, 0, len(entries))
+	for _, entry := range entries {
+		indices = append(indices, entry.index)
+		values = append(values, entry.value)
+	}
+	l2Normalize(values)
+	return indices, values
+}
+
+// sparseEntry is one dimension of a sparse vector before it is split into the
+// parallel slices Qdrant takes.
+type sparseEntry struct {
+	index uint32
+	value float32
 }
 
 // l2Normalize scales values to unit Euclidean norm in place. Qdrant sparse
@@ -296,19 +322,15 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		return nil, fmt.Errorf("get subject id for %q: %w", subjectID, err)
 	}
 
-	type sparseEntry struct {
-		index uint32
-		value float32
-	}
 	entries := make([]sparseEntry, 0, len(objectScores))
 	for objectID, score := range objectScores {
 		objNumID, ok := objectIDs[objectID]
 		if !ok {
 			return nil, fmt.Errorf("no numeric id resolved for object %q", objectID)
 		}
-		index, err := sparseIndex(objNumID)
-		if err != nil {
-			slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "subject_id", subjectID, "object_id", objectID, "error", err)
+		index, fits := sparseIndex(objNumID)
+		if !fits {
+			slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "subject_id", subjectID, "object_id", objectID, "numeric_id", objNumID)
 			metrics.SparseDimensionsSkippedTotal.WithLabelValues(namespace, "subject").Inc()
 			continue
 		}
@@ -324,17 +346,7 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		return nil, fmt.Errorf("every dimension exceeds the uint32 sparse index space (%d objects)", len(objectScores))
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].index < entries[j].index
-	})
-
-	indices := make([]uint32, 0, len(entries))
-	values := make([]float32, 0, len(entries))
-	for _, entry := range entries {
-		indices = append(indices, entry.index)
-		values = append(values, entry.value)
-	}
-	l2Normalize(values)
+	indices, values := sparseVectorFrom(entries)
 
 	return &SubjectVector{
 		SubjectID: subjectID,
@@ -414,31 +426,17 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 		}
 		upsertedIDs[objNumID] = struct{}{}
 
-		type sparseEntry struct {
-			index uint32
-			value float32
-		}
 		entries := make([]sparseEntry, 0, len(subjectScores))
-		for subjNumID, score := range subjectScores {
-			index, err := sparseIndex(subjNumID)
-			if err != nil {
-				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "error", err)
+		for coNumID, score := range subjectScores {
+			index, fits := sparseIndex(coNumID)
+			if !fits {
+				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "numeric_id", coNumID)
 				metrics.SparseDimensionsSkippedTotal.WithLabelValues(namespace, "object").Inc()
 				continue
 			}
 			entries = append(entries, sparseEntry{index: index, value: score})
 		}
-		sort.Slice(entries, func(i, j int) bool {
-			return entries[i].index < entries[j].index
-		})
-
-		indices := make([]uint32, 0, len(entries))
-		values := make([]float32, 0, len(entries))
-		for _, entry := range entries {
-			indices = append(indices, entry.index)
-			values = append(values, entry.value)
-		}
-		l2Normalize(values)
+		indices, values := sparseVectorFrom(entries)
 
 		// Prefer explicit object_created_at from the event payload; fall back to max occurred_at.
 		createdAt := time.Now().UTC().Format(time.RFC3339)
