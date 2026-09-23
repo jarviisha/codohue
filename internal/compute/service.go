@@ -18,7 +18,27 @@ const (
 	defaultLambda    = 0.05 // time decay per day
 	sparseVectorName = "sparse_interactions"
 	qdrantBatchSize  = 100
+
+	// maxSparseIndex bounds the numeric ids that can address a Qdrant sparse
+	// vector dimension. idmap hands out uint64 ids from one BIGSERIAL, but the
+	// sparse protocol indexes with uint32, so a plain cast folds two distinct
+	// entities onto one dimension once ids pass 2^32 — wrong recommendations,
+	// no error, nothing in the logs.
+	maxSparseIndex = math.MaxUint32
 )
+
+// sparseIndex narrows a numeric id to a sparse vector dimension, refusing the
+// narrowing rather than performing it silently. Callers skip the offending
+// dimension and log: the dimension is equally unrepresentable in every
+// vector, so dropping it cannot collide or corrupt, whereas propagating an
+// error failed the whole subject — or, at the object site, the whole run —
+// permanently, because the over-limit id never goes away.
+func sparseIndex(numericID uint64) (uint32, error) {
+	if numericID > maxSparseIndex {
+		return 0, fmt.Errorf("numeric id %d exceeds the uint32 sparse index space", numericID)
+	}
+	return uint32(numericID), nil
+}
 
 type computeRepo interface {
 	GetActiveSubjects(ctx context.Context, namespace string) ([]string, error)
@@ -223,7 +243,12 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		if err != nil {
 			return nil, fmt.Errorf("get object id for %q: %w", objectID, err)
 		}
-		entries = append(entries, sparseEntry{index: uint32(objNumID), value: float32(score)})
+		index, err := sparseIndex(objNumID)
+		if err != nil {
+			slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "subject_id", subjectID, "object_id", objectID, "error", err)
+			continue
+		}
+		entries = append(entries, sparseEntry{index: index, value: float32(score)})
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
@@ -306,7 +331,12 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 		}
 		entries := make([]sparseEntry, 0, len(subjectScores))
 		for subjNumID, score := range subjectScores {
-			entries = append(entries, sparseEntry{index: uint32(subjNumID), value: score})
+			index, err := sparseIndex(subjNumID)
+			if err != nil {
+				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "error", err)
+				continue
+			}
+			entries = append(entries, sparseEntry{index: index, value: score})
 		}
 		sort.Slice(entries, func(i, j int) bool {
 			return entries[i].index < entries[j].index

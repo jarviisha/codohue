@@ -51,20 +51,48 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 }
 
 // GetOrCreate returns the numeric_id for the given string_id, inserting a new row if absent.
+//
+// The mapping is read-mostly — every batch cycle resolves the same ids again —
+// so this reads first and writes only on a miss. The single
+// INSERT ... ON CONFLICT DO UPDATE statement it replaced wrote on every call,
+// including the overwhelming majority that already had a row: it set string_id
+// to itself (a dead tuple and a WAL record per hit) and burned a BIGSERIAL
+// value per hit, because nextval() is evaluated before the conflict is
+// detected. Measured on the development stack: 3.48M updates against 43k real
+// rows. The wasted sequence range is not free — it walks numeric_id toward the
+// uint32 ceiling the Qdrant sparse index imposes (compute.sparseIndex).
 func (r *Repository) GetOrCreate(ctx context.Context, stringID, namespace, entityType string) (uint64, error) {
 	if r.requireLease {
 		if err := nslifecycle.RequireNamespaceLease(ctx, namespace); err != nil {
 			return 0, err
 		}
 	}
+	if id, found, err := r.Lookup(ctx, stringID, namespace, entityType); err != nil {
+		return 0, err
+	} else if found {
+		return id, nil
+	}
+
 	var numID int64
 	err := r.queryRowFn(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (namespace, entity_type, string_id) DO UPDATE SET string_id = EXCLUDED.string_id
+		ON CONFLICT (namespace, entity_type, string_id) DO NOTHING
 		RETURNING numeric_id`,
 		stringID, namespace, entityType,
 	).Scan(&numID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// DO NOTHING returns no row on conflict, so a concurrent writer won
+		// the race between the lookup above and this insert. Read theirs.
+		id, found, lookupErr := r.Lookup(ctx, stringID, namespace, entityType)
+		if lookupErr != nil {
+			return 0, lookupErr
+		}
+		if !found {
+			return 0, fmt.Errorf("get or create id mapping for %q: insert conflicted but no mapping exists", stringID)
+		}
+		return id, nil
+	}
 	if err != nil {
 		return 0, fmt.Errorf("get or create id mapping for %q: %w", stringID, err)
 	}
@@ -123,6 +151,12 @@ func (r *Repository) LookupBatch(ctx context.Context, stringIDs []string, namesp
 // GetOrCreateBatch resolves many string ids in one round-trip. With the
 // exclude_authored cap at 5000, the per-id variant cost ~5000 sequential
 // queries per uncached recommendation request.
+//
+// An id whose insert conflicted and whose mapping vanished before the
+// follow-up read (raced create + delete) is omitted from the result map, the
+// same partial-result contract as LookupBatch — unlike GetOrCreate, which
+// reports that state as an error. Callers indexing the map must not assume
+// every requested id is present.
 func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, namespace, entityType string) (map[string]uint64, error) {
 	if len(stringIDs) == 0 {
 		return map[string]uint64{}, nil
@@ -132,9 +166,9 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 			return nil, err
 		}
 	}
-	// Deduplicate before unnest: ON CONFLICT DO UPDATE errors with "cannot
-	// affect row a second time" if the same key appears twice in one INSERT,
-	// and callers (e.g. Rank candidates) may legitimately pass duplicates.
+	// Deduplicate before the lookup: callers (e.g. Rank candidates) may
+	// legitimately pass the same id twice, and the miss set is derived from
+	// this slice.
 	distinct := make([]string, 0, len(stringIDs))
 	seen := make(map[string]struct{}, len(stringIDs))
 	for _, id := range stringIDs {
@@ -144,19 +178,34 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 		seen[id] = struct{}{}
 		distinct = append(distinct, id)
 	}
+
+	// Read first, insert only the misses — same reasoning as GetOrCreate.
+	out, err := r.LookupBatch(ctx, distinct, namespace, entityType)
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]string, 0, len(distinct))
+	for _, id := range distinct {
+		if _, ok := out[id]; !ok {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return out, nil
+	}
+
 	rows, err := r.queryFn(ctx, `
 		INSERT INTO id_mappings (string_id, namespace, entity_type)
 		SELECT unnest($1::text[]), $2, $3
-		ON CONFLICT (namespace, entity_type, string_id) DO UPDATE SET string_id = EXCLUDED.string_id
+		ON CONFLICT (namespace, entity_type, string_id) DO NOTHING
 		RETURNING string_id, numeric_id`,
-		distinct, namespace, entityType,
+		missing, namespace, entityType,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("batch get or create id mappings: %w", err)
 	}
 	defer rows.Close()
 
-	out := make(map[string]uint64, len(stringIDs))
 	for rows.Next() {
 		var sid string
 		var numID int64
@@ -167,6 +216,24 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate id mappings: %w", err)
+	}
+
+	// Ids that conflicted returned no row: a concurrent writer inserted them
+	// between the lookup and the insert. Read the winner's mapping.
+	raced := make([]string, 0)
+	for _, id := range missing {
+		if _, ok := out[id]; !ok {
+			raced = append(raced, id)
+		}
+	}
+	if len(raced) > 0 {
+		won, err := r.LookupBatch(ctx, raced, namespace, entityType)
+		if err != nil {
+			return nil, err
+		}
+		for id, numID := range won {
+			out[id] = numID
+		}
 	}
 	return out, nil
 }
