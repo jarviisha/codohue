@@ -34,14 +34,15 @@ const (
 	cfOverFetchFactor    = 5
 	denseOverFetchFactor = 3
 
-	// sparseNormK is the half-saturation constant of the batch-independent
-	// sparse-score map x/(x+k): a raw dot product of k maps to 0.5. It is a
-	// single global constant on purpose — a per-namespace or per-batch value
-	// would reintroduce the cross-request incomparability the map exists to
-	// remove. k=5 puts the demo dataset's typical sparse scores (low single
-	// digits) on the steep part of the curve; the exact value only shapes
-	// the sparse/dense balance, which alpha already tunes per namespace.
-	sparseNormK = 5.0
+	// dotNormK is the half-saturation constant of the batch-independent
+	// score map x/(x+k) applied to unbounded dot products: a raw dot of k
+	// maps to 0.5. It is a single global constant on purpose — a
+	// per-namespace or per-batch value would reintroduce the cross-request
+	// incomparability the map exists to remove. Since compute started
+	// L2-normalizing sparse vectors, sparse scores are cosines and only
+	// clamp; the curve remains for dot-distance dense namespaces, whose
+	// BYOE vectors arrive with arbitrary magnitude.
+	dotNormK = 5.0
 
 	// denseDistanceDot mirrors infra/qdrant's distance vocabulary.
 	denseDistanceDot = "dot"
@@ -514,23 +515,71 @@ func (s *Service) hybridRecommend(
 	denseTopK := uint64((req.Offset + limit) * denseOverFetchFactor)
 
 	// Sparse retrieval.
+	sparseOK := true
 	sparseResults, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec, seenFilter, sparseTopK)
 	if err != nil {
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
+		sparseOK = false
 		req.degraded = true
 	}
 
 	// Dense retrieval.
+	denseOK := true
 	denseResults, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec, seenFilter, denseTopK)
 	if err != nil {
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
+		denseOK = false
 		req.degraded = true
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
 		return s.fallbackPopular(ctx, req, limit, cfg, nil)
+	}
+
+	// Each arm's top-K must also be scored by the other arm before blending.
+	// The blend treats a missing score as 0, but for a candidate that simply
+	// fell outside the other arm's top-K, 0 means "not retrieved", not
+	// "dissimilar" — under that reading a dense-only candidate capped at
+	// (1-alpha) and could never outrank an ordinary sparse one. Rank solved
+	// the same problem by scoring both arms over one HasID candidate set;
+	// this borrows the mechanism for the retrieved union. After the
+	// backfill a still-missing score is a real verdict: the object is not
+	// indexed on that side (e.g. no catalog embedding), and 0 is honest.
+	//
+	// An arm whose primary search just failed is not backfilled: re-querying
+	// a backend that errored milliseconds ago adds load exactly when the
+	// service should shed it, and a retry that happens to succeed yields
+	// neither the healthy blend nor the documented zero-fill degradation.
+	//
+	// Backfill failure degrades to the zero-fill reading rather than failing
+	// the request, but it marks the response degraded all the same: the
+	// suppressed ordering is as unfit to cache for the full TTL as the one a
+	// failed primary search produces.
+	if sparseOK {
+		if ids := pointIDsMissingFrom(sparseResults, denseResults); len(ids) > 0 {
+			extra, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec,
+				&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
+			if err != nil {
+				slog.Warn("hybrid: sparse backfill failed; dense-only candidates keep sparse 0", "namespace", req.Namespace, "error", err)
+				req.degraded = true
+			} else {
+				sparseResults = append(sparseResults, scoresOnly(extra)...)
+			}
+		}
+	}
+	if denseOK {
+		if ids := pointIDsMissingFrom(denseResults, sparseResults); len(ids) > 0 {
+			extra, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec,
+				&qdrant.Filter{Must: []*qdrant.Condition{qdrant.NewHasID(ids...)}}, uint64(len(ids)))
+			if err != nil {
+				slog.Warn("hybrid: dense backfill failed; sparse-only candidates keep dense 0", "namespace", req.Namespace, "error", err)
+				req.degraded = true
+			} else {
+				denseResults = append(denseResults, scoresOnly(extra)...)
+			}
+		}
 	}
 
 	candidates := blendHybridScores(sparseResults, denseResults, alpha, resolveGamma(cfg), cfg.DenseDistance, time.Now().UTC())
@@ -620,12 +669,43 @@ func extractScores(points []*qdrant.ScoredPoint) map[string]float64 {
 	return m
 }
 
-// saturateScores maps raw sparse dot products through the fixed saturating
-// curve x/(x+sparseNormK). Unlike the min-max normalization it replaced, the
-// mapping does not depend on the other scores in the request, so scores from
-// separate calls stay comparable — chunked Rank callers merge results from
-// multiple requests into one ordering. Non-positive scores map to 0.
-func saturateScores(scores map[string]float64) map[string]float64 {
+// clampUnitScores puts scores that are cosines by construction on a fixed
+// [0, 1] scale: negatives clamp to 0 (dissimilar must not drag the blend
+// below "no signal") and float rounding artifacts above 1 clamp to 1. Sparse
+// scores qualify because compute L2-normalizes both sides of the sparse dot
+// product; the previous saturating curve x/(x+5) was calibrated for raw dots
+// in the low single digits and, against live data whose raw dots reached the
+// thousands, flattened the entire top of the ranking into ~1.0 — freshness
+// decay, not relevance, was deciding the order. Like the curve it replaces,
+// the mapping does not depend on the other scores in the request, so scores
+// from separate calls stay comparable — chunked Rank callers merge results
+// from multiple requests into one ordering.
+func clampUnitScores(scores map[string]float64) map[string]float64 {
+	result := make(map[string]float64, len(scores))
+	for id, v := range scores {
+		if !finiteScore(v) {
+			continue
+		}
+		switch {
+		case v <= 0:
+			result[id] = 0
+		case v > 1:
+			result[id] = 1
+		default:
+			result[id] = v
+		}
+	}
+	return result
+}
+
+// boundDenseScores puts dense similarities on a fixed [0, 1] scale. Cosine
+// scores are bounded and clamp like sparse. Dot-product namespaces carry
+// BYOE vectors of arbitrary magnitude, so they go through the saturating
+// curve x/(x+dotNormK) instead.
+func boundDenseScores(scores map[string]float64, distance string) map[string]float64 {
+	if distance != denseDistanceDot {
+		return clampUnitScores(scores)
+	}
 	result := make(map[string]float64, len(scores))
 	for id, v := range scores {
 		if !finiteScore(v) {
@@ -635,34 +715,46 @@ func saturateScores(scores map[string]float64) map[string]float64 {
 			result[id] = 0
 			continue
 		}
-		result[id] = v / (v + sparseNormK)
+		result[id] = v / (v + dotNormK)
 	}
 	return result
 }
 
-// boundDenseScores puts dense similarities on a fixed [0, 1] scale. Cosine
-// scores are already bounded — negatives clamp to 0 (dissimilar must not drag
-// the blend below "no signal") and rounding artifacts above 1 clamp to 1.
-// Dot-product namespaces have unbounded scores, so they go through the same
-// saturating curve as sparse.
-func boundDenseScores(scores map[string]float64, distance string) map[string]float64 {
-	result := make(map[string]float64, len(scores))
-	for id, v := range scores {
-		if !finiteScore(v) {
-			continue
-		}
-		switch {
-		case v <= 0:
-			result[id] = 0
-		case distance == denseDistanceDot:
-			result[id] = v / (v + sparseNormK)
-		case v > 1:
-			result[id] = 1
-		default:
-			result[id] = v
+// pointIDsMissingFrom returns the Qdrant point ids of candidates present in
+// have but absent from base, keyed by the object_id payload both arms carry.
+// Feeding these to a HasID search scores them on base's arm.
+func pointIDsMissingFrom(base, have []*qdrant.ScoredPoint) []*qdrant.PointId {
+	inBase := make(map[string]struct{}, len(base))
+	for _, p := range base {
+		if v, ok := p.Payload["object_id"]; ok {
+			inBase[v.GetStringValue()] = struct{}{}
 		}
 	}
-	return result
+	var ids []*qdrant.PointId
+	for _, p := range have {
+		v, ok := p.Payload["object_id"]
+		if !ok {
+			continue
+		}
+		if _, seen := inBase[v.GetStringValue()]; !seen {
+			ids = append(ids, p.Id)
+		}
+	}
+	return ids
+}
+
+// scoresOnly drops created_at from backfilled points. A backfilled point
+// exists only to carry its arm's score: its object_id is by construction
+// already present in the arm that asked for the backfill, and that arm's
+// payload owns the object's creation time. Left in place, the backfilled
+// copy could win buildCreatedAtLookup's first-seen-wins pass and replace a
+// true creation time with cron's fallback — the last interaction — which
+// would hand a two-year-old object the freshness multiplier of a new one.
+func scoresOnly(points []*qdrant.ScoredPoint) []*qdrant.ScoredPoint {
+	for _, p := range points {
+		delete(p.Payload, "created_at")
+	}
+	return points
 }
 
 // blendedCandidate is one object scored by the shared hybrid blend.
@@ -677,7 +769,7 @@ type blendedCandidate struct {
 // Callers with only one side available pass alpha 1 (sparse-only) or 0
 // (dense-only) so the present side keeps full weight.
 func blendHybridScores(sparseResults, denseResults []*qdrant.ScoredPoint, alpha, gamma float64, denseDistance string, now time.Time) []blendedCandidate {
-	normSparse := saturateScores(extractScores(sparseResults))
+	normSparse := clampUnitScores(extractScores(sparseResults))
 	normDense := boundDenseScores(extractScores(denseResults), denseDistance)
 
 	candidateSet := make(map[string]struct{}, len(normSparse)+len(normDense))

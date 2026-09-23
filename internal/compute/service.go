@@ -40,6 +40,29 @@ func sparseIndex(numericID uint64) (uint32, error) {
 	return uint32(numericID), nil
 }
 
+// l2Normalize scales values to unit Euclidean norm in place. Qdrant sparse
+// search is a raw dot product (sparse vectors have no cosine mode), so without
+// this the score scale is arbitrary: measured on live Bluesky data, top-1
+// scores spread from 0.08 to 6094 across subjects, and an object touched by
+// many subjects accumulated a co-occurrence row whose sheer magnitude — not
+// its direction — dominated every search it appeared in. With both sides unit
+// length the dot product is a cosine in [-1, 1]: comparable across subjects,
+// and popularity expresses itself only through direction. A zero vector stays
+// zero.
+func l2Normalize(values []float32) {
+	var sum float64
+	for _, v := range values {
+		sum += float64(v) * float64(v)
+	}
+	if sum == 0 {
+		return
+	}
+	norm := math.Sqrt(sum)
+	for i := range values {
+		values[i] = float32(float64(values[i]) / norm)
+	}
+}
+
 type computeRepo interface {
 	GetActiveSubjects(ctx context.Context, namespace string) ([]string, error)
 	GetSubjectEvents(ctx context.Context, namespace, subjectID string) ([]*RawEvent, error)
@@ -261,6 +284,7 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 		indices = append(indices, entry.index)
 		values = append(values, entry.value)
 	}
+	l2Normalize(values)
 
 	return &SubjectVector{
 		SubjectID: subjectID,
@@ -348,6 +372,7 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 			indices = append(indices, entry.index)
 			values = append(values, entry.value)
 		}
+		l2Normalize(values)
 
 		// Prefer explicit object_created_at from the event payload; fall back to max occurred_at.
 		createdAt := time.Now().UTC().Format(time.RFC3339)
