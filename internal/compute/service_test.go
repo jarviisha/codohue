@@ -594,3 +594,32 @@ func TestRecomputeNamespace_Generation1KeepsLegacyCollectionNames(t *testing.T) 
 		}
 	}
 }
+
+func TestSparseIndex_RefusesNarrowingInsteadOfColliding(t *testing.T) {
+	if _, err := sparseIndex(maxSparseIndex + 1); err == nil {
+		t.Fatal("id past the uint32 index space must fail, not truncate")
+	}
+	got, err := sparseIndex(maxSparseIndex)
+	if err != nil || got != maxSparseIndex {
+		t.Fatalf("boundary id: got %d err %v", got, err)
+	}
+}
+
+func TestBuildSubjectVector_RejectsObjectIDPastSparseIndexSpace(t *testing.T) {
+	idmap := newFakeIDMap()
+	idmap.objectIDs["o1"] = maxSparseIndex + 1
+	svc := newTestService(&fakeComputeRepo{}, idmap)
+
+	if _, err := svc.buildSubjectVector(context.Background(), "ns", "u1", map[string]float64{"o1": 1}); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestUpsertObjectVectors_RejectsCooccurrenceIDPastSparseIndexSpace(t *testing.T) {
+	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
+	accum := map[string]map[uint64]float32{"o1": {maxSparseIndex + 1: 1}}
+
+	if _, err := svc.upsertObjectVectors(context.Background(), "ns", accum, nil, nil); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}

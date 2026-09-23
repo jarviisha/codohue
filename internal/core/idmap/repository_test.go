@@ -136,10 +136,10 @@ func TestRepositoryGetOrCreateBatch_Empty(t *testing.T) {
 }
 
 func TestRepositoryGetOrCreateBatch_DedupsAndMaps(t *testing.T) {
-	var gotArgs []any
+	var lookedUp []string
 	repo := &Repository{
 		queryFn: func(_ context.Context, _ string, args ...any) (rowsIterator, error) {
-			gotArgs = args
+			lookedUp = args[2].([]string)
 			return &fakeRows{rows: [][]any{{"a", int64(1)}, {"b", int64(2)}}}, nil
 		},
 	}
@@ -150,11 +150,119 @@ func TestRepositoryGetOrCreateBatch_DedupsAndMaps(t *testing.T) {
 	if out["a"] != 1 || out["b"] != 2 {
 		t.Fatalf("result map wrong: %v", out)
 	}
-	// The duplicate "a" must be collapsed before unnest — ON CONFLICT DO UPDATE
-	// errors on a repeated key in one statement.
-	distinct := gotArgs[0].([]string)
-	if len(distinct) != 2 {
-		t.Fatalf("input must be deduped to 2, got %v", distinct)
+	if len(lookedUp) != 2 {
+		t.Fatalf("input must be deduped to 2, got %v", lookedUp)
+	}
+}
+
+// Every id already mapped must cost one SELECT and no write at all: the
+// INSERT ... ON CONFLICT DO UPDATE this replaced burned a sequence value and
+// left a dead tuple per already-mapped id, 80x the real row count in practice.
+func TestRepositoryGetOrCreateBatch_ExistingIDsIssueNoWrite(t *testing.T) {
+	var statements []string
+	repo := &Repository{
+		queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+			statements = append(statements, sql)
+			return &fakeRows{rows: [][]any{{"a", int64(1)}}}, nil
+		},
+	}
+	if _, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(statements) != 1 {
+		t.Fatalf("hit must issue exactly one statement, got %d: %v", len(statements), statements)
+	}
+	if strings.Contains(statements[0], "INSERT") {
+		t.Fatalf("hit must not write: %s", statements[0])
+	}
+}
+
+func TestRepositoryGetOrCreateBatch_InsertsOnlyMissingIDs(t *testing.T) {
+	var insertArgs []string
+	repo := &Repository{
+		queryFn: func(_ context.Context, sql string, args ...any) (rowsIterator, error) {
+			if strings.Contains(sql, "INSERT") {
+				insertArgs = args[0].([]string)
+				return &fakeRows{rows: [][]any{{"b", int64(2)}}}, nil
+			}
+			return &fakeRows{rows: [][]any{{"a", int64(1)}}}, nil
+		},
+	}
+	out, err := repo.GetOrCreateBatch(context.Background(), []string{"a", "b"}, "ns", "object")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["a"] != 1 || out["b"] != 2 {
+		t.Fatalf("result map wrong: %v", out)
+	}
+	if len(insertArgs) != 1 || insertArgs[0] != "b" {
+		t.Fatalf("insert must carry only the missing id, got %v", insertArgs)
+	}
+}
+
+// A conflicting insert returns no row under DO NOTHING; the id must still
+// resolve via the follow-up read rather than vanish from the result map.
+func TestRepositoryGetOrCreateBatch_ResolvesRacedInsert(t *testing.T) {
+	lookups := 0
+	repo := &Repository{
+		queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+			if strings.Contains(sql, "INSERT") {
+				return &fakeRows{rows: [][]any{}}, nil
+			}
+			lookups++
+			if lookups == 1 {
+				return &fakeRows{rows: [][]any{}}, nil
+			}
+			return &fakeRows{rows: [][]any{{"a", int64(9)}}}, nil
+		},
+	}
+	out, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out["a"] != 9 {
+		t.Fatalf("raced id must resolve to the winner's mapping, got %v", out)
+	}
+}
+
+func TestRepositoryGetOrCreate_ExistingIDIssuesNoWrite(t *testing.T) {
+	var statements []string
+	repo := &Repository{
+		queryRowFn: func(_ context.Context, sql string, _ ...any) rowScanner {
+			statements = append(statements, sql)
+			return fakeRow{scanFn: func(dest ...any) error { *dest[0].(*int64) = 42; return nil }}
+		},
+	}
+	id, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
+	if err != nil || id != 42 {
+		t.Fatalf("GetOrCreate id=%d err=%v", id, err)
+	}
+	if len(statements) != 1 {
+		t.Fatalf("hit must issue exactly one statement, got %d: %v", len(statements), statements)
+	}
+	if strings.Contains(statements[0], "INSERT") {
+		t.Fatalf("hit must not write: %s", statements[0])
+	}
+}
+
+func TestRepositoryGetOrCreate_ResolvesRacedInsert(t *testing.T) {
+	calls := 0
+	repo := &Repository{
+		queryRowFn: func(_ context.Context, sql string, _ ...any) rowScanner {
+			calls++
+			switch {
+			case strings.Contains(sql, "INSERT"):
+				return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
+			case calls == 1:
+				return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
+			default:
+				return fakeRow{scanFn: func(dest ...any) error { *dest[0].(*int64) = 9; return nil }}
+			}
+		},
+	}
+	id, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
+	if err != nil || id != 9 {
+		t.Fatalf("raced GetOrCreate id=%d err=%v", id, err)
 	}
 }
 
