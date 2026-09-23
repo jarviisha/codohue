@@ -820,24 +820,28 @@ func TestBlendItemsExactRatio(t *testing.T) {
 	}
 }
 
-func TestSaturateScores(t *testing.T) {
-	norm := saturateScores(map[string]float64{"mid": sparseNormK, "neg": -3, "zero": 0, "big": 1e6})
-	if math.Abs(norm["mid"]-0.5) > 1e-9 {
-		t.Errorf("score k = %f, want 0.5", norm["mid"])
+func TestClampUnitScores(t *testing.T) {
+	// Sparse dots are cosines since compute L2-normalizes both sides: the
+	// interesting cases are the two clamps, not a saturating curve. A score
+	// of 0.5 passing through unchanged is what separates this from the old
+	// x/(x+5) map, which sent 0.5 to 0.09.
+	norm := clampUnitScores(map[string]float64{"mid": 0.5, "neg": -3, "zero": 0, "over": 1.0001})
+	if norm["mid"] != 0.5 {
+		t.Errorf("in-range score must pass through, got %f", norm["mid"])
 	}
 	if norm["neg"] != 0 || norm["zero"] != 0 {
 		t.Errorf("non-positive scores must map to 0, got neg=%f zero=%f", norm["neg"], norm["zero"])
 	}
-	if norm["big"] >= 1 || norm["big"] < 0.99 {
-		t.Errorf("large score = %f, want just below 1", norm["big"])
+	if norm["over"] != 1 {
+		t.Errorf("rounding artifact above 1 must clamp, got %f", norm["over"])
 	}
 }
 
-func TestSaturateScores_BatchIndependent(t *testing.T) {
+func TestClampUnitScores_BatchIndependent(t *testing.T) {
 	// The same raw score must map identically regardless of what else is in
 	// the request — the property chunked Rank callers rely on.
-	alone := saturateScores(map[string]float64{"a": 4})
-	together := saturateScores(map[string]float64{"a": 4, "b": 400, "c": 0.1})
+	alone := clampUnitScores(map[string]float64{"a": 0.4})
+	together := clampUnitScores(map[string]float64{"a": 0.4, "b": 0.9, "c": 0.1})
 	if alone["a"] != together["a"] {
 		t.Errorf("score for a depends on batch: %f vs %f", alone["a"], together["a"])
 	}
@@ -848,7 +852,8 @@ func TestBoundDenseScores(t *testing.T) {
 	if cos["neg"] != 0 || cos["in"] != 0.7 || cos["over"] != 1 {
 		t.Errorf("cosine bounds wrong: %+v", cos)
 	}
-	dot := boundDenseScores(map[string]float64{"x": sparseNormK}, denseDistanceDot)
+	// Dot-distance (BYOE, unbounded magnitude) keeps the saturating curve.
+	dot := boundDenseScores(map[string]float64{"x": dotNormK}, denseDistanceDot)
 	if math.Abs(dot["x"]-0.5) > 1e-9 {
 		t.Errorf("dot-distance score = %f, want saturated 0.5", dot["x"])
 	}
@@ -858,8 +863,8 @@ func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
-			{Score: 15, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
-			{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
+			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
+			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 		}, nil
 	}
 	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
@@ -1187,8 +1192,8 @@ func TestRank_HybridBlendsSparseAndDense(t *testing.T) {
 			t.Fatalf("sparse search must carry the candidate HasID filter, got %#v", filter)
 		}
 		return []*qdrant.ScoredPoint{
-			{Score: 15, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-s")}},
-			{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b")}},
+			{Score: 0.7, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-s")}},
+			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b")}},
 		}, nil
 	}
 	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
@@ -1205,7 +1210,8 @@ func TestRank_HybridBlendsSparseAndDense(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// sat(15)=.75, sat(5)=.5; blend α=.5: obj-b=.25+.25=.5, obj-d=.45, obj-s=.375.
+	// Sparse scores are cosines (clamped, not saturated); blend α=.5:
+	// obj-b=.25+.25=.5, obj-d=.45, obj-s=.35.
 	want := []string{"obj-b", "obj-d", "obj-s"}
 	for i, w := range want {
 		if resp.Items[i].ObjectID != w {
@@ -2199,7 +2205,7 @@ func TestRank_DenseSearchFailureKeepsSparseAtFullWeight(t *testing.T) {
 	}
 	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
-			{Score: float32(sparseNormK), Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
 		}, nil
 	}
 	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
@@ -2210,7 +2216,7 @@ func TestRank_DenseSearchFailureKeepsSparseAtFullWeight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// The surviving side keeps full weight: sat(k)=0.5, NOT 0.5*alpha.
+	// The surviving side keeps full weight: clamp(0.5)=0.5, NOT 0.5*alpha.
 	if resp.Source != SourceHybridRank || math.Abs(resp.Items[0].Score-0.5) > 1e-6 {
 		t.Fatalf("dense failure must not scale the sparse side down: %+v", resp.Items)
 	}
@@ -2553,5 +2559,100 @@ func TestDeleteObject_IdempotentRetryAfterPartialFailure(t *testing.T) {
 	failing = false
 	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
 		t.Fatalf("retry after a partial failure must succeed, got %v", err)
+	}
+}
+
+// A candidate retrieved by only one arm must get its true score on the other
+// arm via the HasID backfill — not an implicit 0 that caps dense-only
+// candidates at (1-alpha) forever.
+func TestHybridRecommend_BackfillsMissingArmScores(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if ids := hasIDNums(filter); len(ids) > 0 {
+			// Backfill call for the dense-only candidate: its real sparse
+			// score is high — it merely fell outside sparse top-K.
+			if ids[0] != 77 {
+				t.Fatalf("sparse backfill must target the dense-only point id, got %v", ids)
+			}
+			return []*qdrant.ScoredPoint{
+				{Id: qdrant.NewIDNum(77), Score: 0.8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": now}},
+			}, nil
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if ids := hasIDNums(filter); len(ids) > 0 {
+			// obj-sparse has no dense vector: backfill legitimately finds nothing.
+			return nil, nil
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(77), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": now}},
+		}, nil
+	}
+
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// obj-dense = .7*.8 + .3*.9 = .83 beats obj-sparse = .7*.9 = .63. With
+	// the old zero-fill obj-dense capped at .27 and could never rank first.
+	if resp.Items[0].ObjectID != "obj-dense" {
+		t.Fatalf("backfilled dense-only candidate must win: %+v", resp.Items)
+	}
+	if math.Abs(resp.Items[0].Score-0.83) > 1e-6 {
+		t.Fatalf("blend must use the backfilled sparse score: %+v", resp.Items[0])
+	}
+}
+
+func TestHybridRecommend_BackfillFailureDegradesToZeroFill(t *testing.T) {
+	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			return nil, errors.New("qdrant blip")
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
+		}, nil
+	}
+	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		if len(hasIDNums(filter)) > 0 {
+			return nil, errors.New("qdrant blip")
+		}
+		return []*qdrant.ScoredPoint{
+			{Id: qdrant.NewIDNum(77), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": now}},
+		}, nil
+	}
+
+	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
+		t.Fatalf("backfill failure must not fail the request: %v", err)
+	}
+	if len(resp.Items) != 2 {
+		t.Fatalf("both candidates must still return: %+v", resp.Items)
+	}
+	// Zero-fill reading: obj-sparse .7*.9=.63, obj-dense .3*.9=.27.
+	if resp.Items[0].ObjectID != "obj-sparse" || math.Abs(resp.Items[1].Score-0.27) > 1e-6 {
+		t.Fatalf("degraded blend must match the zero-fill scores: %+v", resp.Items)
+	}
+}
+
+func TestPointIDsMissingFrom(t *testing.T) {
+	pt := func(num uint64, obj string) *qdrant.ScoredPoint {
+		return &qdrant.ScoredPoint{Id: qdrant.NewIDNum(num), Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString(obj)}}
+	}
+	base := []*qdrant.ScoredPoint{pt(1, "a")}
+	have := []*qdrant.ScoredPoint{pt(1, "a"), pt(2, "b")}
+	ids := pointIDsMissingFrom(base, have)
+	if len(ids) != 1 || ids[0].GetNum() != 2 {
+		t.Fatalf("want point 2 only, got %v", ids)
+	}
+	if got := pointIDsMissingFrom(have, base); len(got) != 0 {
+		t.Fatalf("nothing missing the other way, got %v", got)
 	}
 }

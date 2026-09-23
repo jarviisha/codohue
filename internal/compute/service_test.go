@@ -643,3 +643,55 @@ func TestUpsertObjectVectors_SkipsCooccurrenceEntryPastSparseIndexSpace(t *testi
 		t.Fatalf("row must keep only the representable dimension, got %v", idx)
 	}
 }
+
+func TestL2Normalize(t *testing.T) {
+	v := []float32{3, 4}
+	l2Normalize(v)
+	if math.Abs(float64(v[0])-0.6) > 1e-6 || math.Abs(float64(v[1])-0.8) > 1e-6 {
+		t.Fatalf("normalized = %v, want [0.6 0.8]", v)
+	}
+	zero := []float32{0, 0}
+	l2Normalize(zero)
+	if zero[0] != 0 || zero[1] != 0 {
+		t.Fatalf("zero vector must stay zero, got %v", zero)
+	}
+}
+
+// The stored vectors are what makes sparse dot products cosines; if either
+// side ships unnormalized the serving clamp is wrong, so pin both.
+func TestBuildSubjectVector_IsUnitNorm(t *testing.T) {
+	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
+	vec, err := svc.buildSubjectVector(context.Background(), "ns", "u1",
+		map[string]float64{"o1": 3, "o2": 4})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var sum float64
+	for _, v := range vec.Values {
+		sum += float64(v) * float64(v)
+	}
+	if math.Abs(sum-1) > 1e-6 {
+		t.Fatalf("subject vector norm² = %f, want 1", sum)
+	}
+}
+
+func TestUpsertObjectVectors_RowsAreUnitNorm(t *testing.T) {
+	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
+	var got *qdrant.UpsertPoints
+	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+		got = points
+		return nil
+	}
+	accum := map[string]map[uint64]float32{"o1": {1: 3, 2: 4}}
+	if _, err := svc.upsertObjectVectors(context.Background(), "ns", accum, nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	vals := got.Points[0].GetVectors().GetVectors().GetVectors()[sparseVectorName].GetSparse().GetValues()
+	var sum float64
+	for _, v := range vals {
+		sum += float64(v) * float64(v)
+	}
+	if math.Abs(sum-1) > 1e-6 {
+		t.Fatalf("object row norm² = %f, want 1", sum)
+	}
+}
