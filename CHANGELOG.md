@@ -23,10 +23,15 @@ renamed, or retyped.
   emitted. `collaborative_filtering` and `hybrid` emit `scored: true`. Mirrors
   the flag `RankedItem` has carried since v0.7.0.
 
-  **Read `scored` before thresholding on `score`.** A `0` from a fallback means
-  "this response carries no personalised score", not "this item is irrelevant".
-  Existing clients that ignore the field are unaffected; Go SDK callers pick it
-  up automatically, since `sdk/go` returns `codohuetypes.Response` directly.
+  **Read `scored` per item rather than deriving it from `source`.** The two
+  usually agree, but a `hybrid_cold` response degrades to pass-through CF
+  results when the trending/popular arm is unavailable, and those items keep
+  the real scores they were retrieved with.
+
+  A `0` from a fallback means "this response carries no personalised score",
+  not "this item is irrelevant". Existing clients that ignore the field are
+  unaffected; Go SDK callers pick it up automatically, since `sdk/go` returns
+  `codohuetypes.Response` directly.
 
 ### Fixed
 
@@ -38,7 +43,18 @@ renamed, or retyped.
   now decoded once at the route boundary, including the object-mutation routes.
   Affects any id with reserved characters: DIDs, AT-URIs, URLs.
 
-  Server-side only; no client change is required, and no wire type changed.
+  No client change is required and no wire type changed, but the fix is not
+  purely server-side for deployments whose clients escaped ids on the three
+  write routes that carry one — `PUT /objects/{id}`,
+  `PUT /objects/{id}/embedding` and `PUT /subjects/{id}/embedding`. Those calls
+  minted `id_mappings` rows, `objects` rows and Qdrant points under the escaped
+  string. After the upgrade the same client addresses the decoded id, so the
+  old records are orphaned: still searchable, and still able to surface in
+  recommendations under an `object_id` the client cannot resolve. Reads never
+  minted rows (they look up, never create), and `POST /events` and the catalog
+  routes carry ids in the body, so neither is affected.
+  See [deploy/escaped-id-orphans.md](deploy/escaped-id-orphans.md) to detect
+  and clear them.
 
 - **Recommendation cache keys move from `rec:v2:*` to `rec:v3:*`.** The cached
   body is JSON, so an entry written before `scored` existed decodes with the

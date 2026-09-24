@@ -39,6 +39,10 @@ func buildListOptions(opts []ListOption) listOptions {
 // The fallback sources — "fallback_popular" and "hybrid_cold", named in
 // Response.Source — rank by a namespace-wide signal, so they report Scored
 // false and a Score of 0 that means "no personalised score", not "irrelevant".
+//
+// Read Scored per item; it is not a property of Source. A "hybrid_cold"
+// response degrades to pass-through CF results when the trending/popular arm
+// is unavailable, and those items keep their real scores.
 func (n *Namespace) Recommend(ctx context.Context, subjectID string, opts ...ListOption) (*codohuetypes.Response, error) {
 	o := buildListOptions(opts)
 

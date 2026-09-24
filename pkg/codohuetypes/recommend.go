@@ -10,8 +10,12 @@ import "time"
 // trending, and the cold-start blend — order items by a signal shared across
 // every subject, so there is no personalised score to report and Score is a 0
 // placeholder. Read that 0 as "this response carries no score", not as "this
-// item is irrelevant to the subject"; the response Source names which path ran.
-// Mirrors RankedItem.Scored.
+// item is irrelevant to the subject". Mirrors RankedItem.Scored.
+//
+// Read the flag per item rather than inferring it from Source. The two usually
+// agree, but a "hybrid_cold" response degrades to pass-through CF results when
+// the popular/trending arm is unavailable, and those items keep the real scores
+// they were retrieved with.
 type RecommendedItem struct {
 	ObjectID string  `json:"object_id"`
 	Score    float64 `json:"score"`
