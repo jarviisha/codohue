@@ -310,7 +310,7 @@ function RecommendationsTable({ items }: { items: RecommendDebugItem[] }) {
                 <code className="text-primary text-xs">{it.object_id}</code>
               </TableCell>
               <TableCell  className="text-right tabular-nums">
-                {it.score.toFixed(6)}
+                {it.scored ? it.score.toFixed(6) : <span className="text-secondary">not scored</span>}
               </TableCell>
             </TableRow>
           ))}

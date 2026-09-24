@@ -637,6 +637,7 @@ func (s *Service) hybridRecommend(
 			ObjectID: c.objectID,
 			Score:    c.score,
 			Rank:     start + i + 1,
+			Scored:   true,
 		}
 	}
 
@@ -947,7 +948,11 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 
 	items := make([]RecommendedItem, len(blended))
 	for i, id := range blended {
-		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1}
+		// blendItems interleaves two differently-scaled lists by position, so
+		// the CF score that survived into the blend no longer describes the
+		// item's rank here. Report the ordering without a score rather than a
+		// 0 that reads as "irrelevant".
+		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1, Scored: false}
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybridCold).Inc()
@@ -1064,10 +1069,14 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	// client's pagination.
 	items := make([]RecommendedItem, len(entries))
 	for i, e := range entries {
+		// The trending ZSET score is a namespace-wide popularity count, not a
+		// score for this subject; TrendingResponse exposes it where it means
+		// something.
 		items[i] = RecommendedItem{
 			ObjectID: e.ObjectID,
 			Score:    0,
 			Rank:     req.Offset + i + 1,
+			Scored:   false,
 		}
 	}
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
@@ -1108,7 +1117,7 @@ func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, 
 
 	items := make([]RecommendedItem, len(rawItems))
 	for i, id := range rawItems {
-		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1}
+		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1, Scored: false}
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
@@ -1351,6 +1360,7 @@ func pageItems(scored []scoredItem, offset, limit int) []RecommendedItem {
 			ObjectID: s.objectID,
 			Score:    s.finalScore,
 			Rank:     start + i + 1,
+			Scored:   true,
 		}
 	}
 	return items

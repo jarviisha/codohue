@@ -35,6 +35,9 @@ export type RecommendDebugItem = {
   object_id: string
   score: number
   rank: number
+  /** False on fallback paths, where score is a 0 placeholder rather than a
+   *  relevance verdict for this subject. */
+  scored: boolean
 }
 
 export type RecommendDebug = {

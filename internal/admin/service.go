@@ -18,6 +18,8 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	goredis "github.com/redis/go-redis/v9"
 
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
+
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
@@ -528,33 +530,17 @@ func (s *Service) GetSubjectRecommendations(ctx context.Context, namespace, subj
 		return nil, resp.StatusCode, fmt.Errorf("recommend proxy returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var raw struct {
-		SubjectID string `json:"subject_id"`
-		Namespace string `json:"namespace"`
-		Items     []struct {
-			ObjectID string  `json:"object_id"`
-			Score    float64 `json:"score"`
-			Rank     int     `json:"rank"`
-		} `json:"items"`
-		Source      string    `json:"source"`
-		Limit       int       `json:"limit"`
-		Offset      int       `json:"offset"`
-		Total       int       `json:"total"`
-		GeneratedAt time.Time `json:"generated_at"`
-	}
+	// Decode into the shared wire type: a locally restated struct drops any
+	// field the API adds, which is how `scored` went missing here.
+	var raw codohuetypes.Response
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("decode recommend response: %w", err)
-	}
-
-	items := make([]RecommendDebugItem, len(raw.Items))
-	for i, it := range raw.Items {
-		items[i] = RecommendDebugItem{ObjectID: it.ObjectID, Score: it.Score, Rank: it.Rank}
 	}
 
 	result := &RecommendResponse{
 		SubjectID:   raw.SubjectID,
 		Namespace:   raw.Namespace,
-		Items:       items,
+		Items:       raw.Items,
 		Source:      raw.Source,
 		Limit:       raw.Limit,
 		Offset:      raw.Offset,

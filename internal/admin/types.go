@@ -3,6 +3,8 @@ package admin
 import (
 	"errors"
 	"time"
+
+	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
 
 // NamespaceConfig is the admin view of a namespace configuration.
@@ -406,11 +408,11 @@ type RecommendDebug struct {
 }
 
 // RecommendDebugItem is a single item in the recommendation debug response.
-type RecommendDebugItem struct {
-	ObjectID string  `json:"object_id"`
-	Score    float64 `json:"score"`
-	Rank     int     `json:"rank"`
-}
+//
+// Aliased to the wire type rather than restated: the hand-copied version
+// silently dropped `scored`, so the operator UI read a fallback's placeholder
+// 0 as a relevance score.
+type RecommendDebugItem = codohuetypes.RecommendedItem
 
 // RecommendResponse is the body returned by the admin recommendations
 // sub-resource endpoint. The Debug block is populated only when debug=true.
