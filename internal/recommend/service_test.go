@@ -2888,3 +2888,39 @@ func TestScoredTracksTheServingPath(t *testing.T) {
 		})
 	}
 }
+
+// TestHybridCold_DegradedCFPassThroughKeepsRealScores pins the one case where
+// scored does not follow source. When trending and popular are both
+// unavailable, hybridCold relabels a pure CF response as hybrid_cold; those
+// items were retrieved against the subject's own vector, so zeroing them to
+// match the label would throw away a real verdict and re-create the ambiguity
+// the flag exists to remove.
+func TestHybridCold_DegradedCFPassThroughKeepsRealScores(t *testing.T) {
+	repo := &fakeRepo{count: 3, popularErr: errors.New("popular unavailable")}
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
+		}, nil
+	}
+	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return nil, errors.New("redis unavailable")
+	}
+
+	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceHybridCold || len(resp.Items) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if !resp.Items[0].Scored {
+		t.Error("pass-through CF item reported unscored; its score is a real verdict")
+	}
+	if resp.Items[0].Score == 0 {
+		t.Error("pass-through CF item lost its score")
+	}
+}

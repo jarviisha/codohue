@@ -199,6 +199,11 @@ func TestRecommendComputed_EscapedSubjectIDServesTheSameSubject(t *testing.T) {
 	if literal.Source != "collaborative_filtering" {
 		t.Fatalf("literal source = %q, want collaborative_filtering (the fixture did not warm up)", literal.Source)
 	}
+	// Without this the per-item comparisons below pass vacuously on two empty
+	// lists, which is exactly what a broken CF lookup returns.
+	if len(literal.Items) == 0 {
+		t.Fatal("literal spelling returned no items; the per-item assertions would prove nothing")
+	}
 	if encoded.SubjectID != subjectID {
 		t.Errorf("encoded subject_id = %q, want the decoded %q", encoded.SubjectID, subjectID)
 	}
