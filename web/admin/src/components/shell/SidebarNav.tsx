@@ -1,6 +1,7 @@
-import { useLocation } from 'react-router-dom'
 import { SideNav, SideNavItem, SideNavSection, useAppShellMobile } from '@astryxdesign/core'
 import useNamespaceParam from '@/components/shell/useNamespaceParam'
+import useNavigationPending from '@/components/shell/useNavigationPending'
+import useResolvedPathname from '@/components/shell/useResolvedPathname'
 
 type NavEntry = {
   label: string
@@ -58,19 +59,29 @@ function isActive(pathname: string, entry: NavEntry): boolean {
  * page. Hence the explicit closeMobileNav() after each navigation.
  */
 export default function SidebarNav() {
-  const ns = useNamespaceParam()
-  const location = useLocation()
+  // Both the scope (global vs namespace) and the selected item follow the
+  // pending destination during a navigation, so a click moves the highlight
+  // immediately instead of after the destination's chunk has downloaded.
+  const pathname = useResolvedPathname()
+  const ns = useNamespaceParam(pathname)
   const { closeMobileNav } = useAppShellMobile()
+  const { isPending, to } = useNavigationPending()
 
-  const renderEntry = (entry: NavEntry) => (
-    <SideNavItem
-      key={entry.to}
-      label={entry.label}
-      isSelected={isActive(location.pathname, entry)}
-      href={entry.to}
-      onClick={() => closeMobileNav()}
-    />
-  )
+  const renderEntry = (entry: NavEntry) => {
+    const isSelected = isActive(pathname, entry)
+    return (
+      <SideNavItem
+        key={entry.to}
+        label={entry.label}
+        isSelected={isSelected}
+        // The selected item is already the pending one, so mark it busy while
+        // its page loads rather than announcing a second, competing location.
+        aria-busy={isPending && isSelected && to === entry.to ? true : undefined}
+        href={entry.to}
+        onClick={() => closeMobileNav()}
+      />
+    )
+  }
 
   return (
     <SideNav aria-label="Main navigation">

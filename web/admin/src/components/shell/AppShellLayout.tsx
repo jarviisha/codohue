@@ -23,6 +23,8 @@ import { PageHeaderSlotContext } from '@/components/shell/pageHeaderSlot'
 import useNamespaceParam from '@/components/shell/useNamespaceParam'
 import ReembedOverlay from '@/components/shell/ReembedOverlay'
 import RouteErrorBoundary from '@/components/shell/ErrorBoundary'
+import NavigationProgress from '@/components/shell/NavigationProgress'
+import useNavigationPending from '@/components/shell/useNavigationPending'
 import NamespaceTag from '@/components/NamespaceTag'
 import OpsToastBridge from '@/components/shell/OpsToastBridge'
 import CommandPalette from '@/components/shell/CommandPalette'
@@ -58,6 +60,9 @@ export default function AppShellLayout() {
   const [pageHeaderSlot, setPageHeaderSlot] = useState<HTMLElement | null>(null)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const ns = useNamespaceParam()
+  // Marks the outlet busy for the whole navigation, including the first 150ms
+  // before NavigationProgress draws its bar.
+  const { isPending: isNavigating } = useNavigationPending()
 
   // Cmd+K (Mac) / Ctrl+K (everywhere else) opens the command palette from any
   // focused element. useHotkeys already skips events originating in inputs,
@@ -118,8 +123,9 @@ export default function AppShellLayout() {
       }
       sideNav={<SidebarNav />}
     >
-      <Stack gap={4} padding={6}>
+      <Stack gap={4} padding={6} aria-busy={isNavigating || undefined}>
         <Stack gap={2}>
+          <NavigationProgress />
           <RouteBreadcrumbs pathname={location.pathname} />
           <Stack ref={setPageHeaderSlot} />
         </Stack>
