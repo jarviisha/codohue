@@ -50,7 +50,7 @@ func (f *fakeQdrantCleaner) DeleteCollection(_ context.Context, name string) err
 }
 
 func TestDeleteRedisGenerationRemovesGenerationQualifiedKeys(t *testing.T) {
-	redis := &fakeRedisCleaner{keysFound: []string{"rec:v2:abc:sub-1:10"}}
+	redis := &fakeRedisCleaner{keysFound: []string{"rec:v3:abc:sub-1:10"}}
 	cleaner := &storeGenerationCleaner{redis: redis}
 
 	candidate := nslifecycle.CleanupCandidate{Namespace: "shop", Generation: 2}
@@ -63,7 +63,7 @@ func TestDeleteRedisGenerationRemovesGenerationQualifiedKeys(t *testing.T) {
 	want := map[string]bool{
 		"trending:shop:g2":      true,
 		"catalog:embed:shop:g2": true,
-		"rec:v2:abc:sub-1:10":   true,
+		"rec:v3:abc:sub-1:10":   true,
 	}
 	if len(redis.deleted) != len(want) {
 		t.Fatalf("deleted %v, want %d keys", redis.deleted, len(want))

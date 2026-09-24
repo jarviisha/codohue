@@ -174,7 +174,7 @@ Schema evolution after `001_initial`:
 | `codohue:catalog`                  | Stream      | Main Backend (SDK `redistream.CatalogProducer`) | `cmd/api` catalog worker (consumer group, same replica name). **Not producer-trimmed** — entries persist until consumed and acked, so content published during a Codohue outage is ingested on recovery |
 | `catalog:embed:{ns}`               | Stream      | `internal/catalog` (publishes on POST catalog) | `cmd/embedder` (consumer group, `CODOHUE_EMBEDDER_REPLICA_NAME`) |
 | `trending:{ns}`                    | Sorted set  | `cmd/cron` phase 3 | `recommend` service; TTL = `trending_ttl` |
-| `rec:{ns}:{subject}:limit=N:offset=M` | String   | `recommend`     | `recommend`; TTL 5 minutes |
+| `rec:v3:{b64 ns}:{b64 subject}:limit=N:offset=M` | String | `recommend` | `recommend`; TTL 5 minutes. Both tokens are base64 so a `:` inside either cannot make the key ambiguous. `v3` versions the key shape **and** the cached JSON body — bump it when a `Response` field is added, or entries written by the previous build decode with that field at its zero value for a full TTL |
 | `codohue:events-tail:{ns}`         | Pub/Sub     | `cmd/api` tail publisher | `cmd/admin` events-tail bridge → SSE |
 | `codohue:batchrun-events`          | Pub/Sub     | `cmd/cron` observer | `cmd/admin` batch-run bridge → SSE |
 | `codohue:catalog-events:{ns}`      | Pub/Sub     | `cmd/embedder`  | `cmd/admin` catalog bridge → SSE |
