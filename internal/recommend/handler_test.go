@@ -683,23 +683,24 @@ func TestMutationRoutes_EscapedObjectIDReachesSameObject(t *testing.T) {
 	}
 
 	for _, rt := range routes {
-		svc := &fakeSvc{}
-		router := chi.NewRouter()
-		router.Method(rt.method, rt.pattern, rt.handler(&Handler{service: svc}))
+		t.Run(rt.name, func(t *testing.T) {
+			svc := &fakeSvc{}
+			router := chi.NewRouter()
+			router.Method(rt.method, rt.pattern, rt.handler(&Handler{service: svc}))
 
-		var body io.Reader = http.NoBody
-		if rt.body != "" {
-			body = strings.NewReader(rt.body)
-		}
-		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), rt.method, rt.target, body))
+			var body io.Reader = http.NoBody
+			if rt.body != "" {
+				body = strings.NewReader(rt.body)
+			}
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), rt.method, rt.target, body))
 
-		if rec.Code != http.StatusNoContent {
-			t.Errorf("%s: status = %d, want 204", rt.name, rec.Code)
-			continue
-		}
-		if svc.gotObjectID != want {
-			t.Errorf("%s: object id = %q, want %q", rt.name, svc.gotObjectID, want)
-		}
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, want 204", rec.Code)
+			}
+			if svc.gotObjectID != want {
+				t.Errorf("object id = %q, want %q", svc.gotObjectID, want)
+			}
+		})
 	}
 }

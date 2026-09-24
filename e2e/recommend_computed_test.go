@@ -4,8 +4,6 @@ package e2e
 
 import (
 	"net/http"
-	"net/url"
-	"strings"
 	"testing"
 	"time"
 )
@@ -59,9 +57,8 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 		SubjectID string `json:"subject_id"`
 		Namespace string `json:"namespace"`
 		Items     []struct {
-			ObjectID string  `json:"object_id"`
-			Score    float64 `json:"score"`
-			Scored   bool    `json:"scored"`
+			ObjectID string `json:"object_id"`
+			Scored   bool   `json:"scored"`
 		} `json:"items"`
 		Source string `json:"source"`
 	}
@@ -117,9 +114,8 @@ func TestRecommendComputed_ColdStartFallsBackToTrendingOrPopular(t *testing.T) {
 
 	var body struct {
 		Items []struct {
-			ObjectID string  `json:"object_id"`
-			Score    float64 `json:"score"`
-			Scored   bool    `json:"scored"`
+			ObjectID string `json:"object_id"`
+			Scored   bool   `json:"scored"`
 		} `json:"items"`
 		Source string `json:"source"`
 	}
@@ -155,13 +151,10 @@ func TestRecommendComputed_EscapedSubjectIDServesTheSameSubject(t *testing.T) {
 		"dense_source":    "disabled",
 	})
 
+	// Escaped by hand: url.PathEscape leaves ':' alone, and the encoded
+	// spelling reaching the router is the whole point of the test.
 	const subjectID = "did:plc:e2eescapedsubject"
-	escaped := url.PathEscape(subjectID)
-	if escaped == subjectID {
-		// PathEscape leaves ':' alone, so escape it explicitly — the point of
-		// the test is the encoded spelling reaching the router.
-		escaped = strings.ReplaceAll(subjectID, ":", "%3A")
-	}
+	const escaped = "did%3Aplc%3Ae2eescapedsubject"
 
 	// The subject needs enough interactions to clear the cold-start threshold,
 	// or both spellings land on a fallback and the comparison proves nothing.

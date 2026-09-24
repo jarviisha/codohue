@@ -2806,6 +2806,11 @@ func TestScoredTracksTheServingPath(t *testing.T) {
 				{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-2")}},
 			}, nil
 		}
+		s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+			return []*qdrant.ScoredPoint{
+				{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
+			}, nil
+		}
 		s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
 			return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}, {ObjectID: "pop-2", Score: 9}}, nil
 		}
@@ -2825,6 +2830,15 @@ func TestScoredTracksTheServingPath(t *testing.T) {
 				return s.collaborativeFiltering(c, r, 4, cfg)
 			},
 			wantSource: SourceCollaborativeFiltering,
+			wantScored: true,
+		},
+		{
+			name: "hybrid blends two scored arms into one comparable score",
+			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+				return s.hybridRecommend(c, r, 4, &namespace.Config{Alpha: 0.7, Gamma: 0},
+					&qdrant.SparseVector{}, []float32{1}, nil)
+			},
+			wantSource: SourceHybrid,
 			wantScored: true,
 		},
 		{
