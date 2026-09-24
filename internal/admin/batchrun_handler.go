@@ -8,15 +8,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
 // parseRunID is the shared id-parser for /batch-runs/{id} routes. Returns the
 // id or writes a 400 + false and lets the caller bail out.
 func parseRunID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	raw := chi.URLParam(r, "id")
+	raw := httpapi.URLParam(r, "id")
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id <= 0 {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "id must be a positive integer")

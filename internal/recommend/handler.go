@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -55,8 +54,8 @@ func NewHandler(service *Service) *Handler {
 // It returns collaborative-filtering recommendations for a subject as a typed
 // response { items, total, source, generated_at }.
 func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Request) {
-	namespace := chi.URLParam(r, "ns")
-	subjectID := chi.URLParam(r, "id")
+	namespace := httpapi.URLParam(r, "ns")
+	subjectID := httpapi.URLParam(r, "id")
 
 	if namespace == "" || subjectID == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "namespace and subject id are required")
@@ -107,7 +106,7 @@ func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Reque
 // Rank handles POST /v1/namespaces/{ns}/rankings — scores and ranks a list of
 // candidate items for a subject.
 func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
-	namespace := chi.URLParam(r, "ns")
+	namespace := httpapi.URLParam(r, "ns")
 	if namespace == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "namespace is required")
 		return
@@ -151,7 +150,7 @@ func (h *Handler) Rank(w http.ResponseWriter, r *http.Request) {
 // GetTrending handles GET /v1/namespaces/{ns}/trending — returns trending items
 // from the Redis ZSET.
 func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return
@@ -209,8 +208,8 @@ func (h *Handler) StoreSubjectEmbedding(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h *Handler) storeEmbedding(w http.ResponseWriter, r *http.Request, entityType string) {
-	ns := chi.URLParam(r, "ns")
-	id := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	id := httpapi.URLParam(r, "id")
 
 	if ns == "" || id == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "ns and id are required")
@@ -280,8 +279,8 @@ func writeNamespaceResolutionError(w http.ResponseWriter, err error) bool {
 // DeleteObject handles DELETE /v1/namespaces/{ns}/objects/{id} — removes an
 // object from Qdrant. Idempotent: deleting a non-existent object also returns 204.
 func (h *Handler) DeleteObject(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	id := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	id := httpapi.URLParam(r, "id")
 
 	if ns == "" || id == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_required_fields", "ns and id are required")

@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
 )
@@ -30,7 +29,7 @@ func NewHandler(service *Service) *Handler {
 // the request body is silently overwritten (the path is the single source of
 // truth).
 func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
-	namespace := chi.URLParam(r, "ns")
+	namespace := httpapi.URLParam(r, "ns")
 	if namespace == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return

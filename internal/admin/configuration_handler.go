@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/internal/core/namespace"
@@ -30,7 +29,7 @@ func (h *Handler) GetConfiguration(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 503, "unavailable", "Configuration is unavailable")
 		return
 	}
-	out, err := h.configuration.ReadConfiguration(r.Context(), chi.URLParam(r, "ns"))
+	out, err := h.configuration.ReadConfiguration(r.Context(), httpapi.URLParam(r, "ns"))
 	h.writeConfiguration(w, r, out, err)
 }
 
@@ -59,7 +58,7 @@ func (h *Handler) changeConfiguration(w http.ResponseWriter, r *http.Request, va
 		httpapi.WriteError(w, 422, "invalid_configuration", "Expected one JSON object")
 		return
 	}
-	out, err := h.configuration.PatchConfiguration(r.Context(), chi.URLParam(r, "ns"), req, validation)
+	out, err := h.configuration.PatchConfiguration(r.Context(), httpapi.URLParam(r, "ns"), req, validation)
 	h.writeConfiguration(w, r, out, err)
 }
 func (h *Handler) writeConfiguration(w http.ResponseWriter, r *http.Request, out *namespace.Configuration, err error) {

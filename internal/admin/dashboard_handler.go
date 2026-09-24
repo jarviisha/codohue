@@ -4,8 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -22,7 +20,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 // GetNamespaceDashboard handles GET /api/admin/v1/namespaces/{ns}/dashboard.
 // 404 when the namespace does not exist.
 func (h *Handler) GetNamespaceDashboard(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return

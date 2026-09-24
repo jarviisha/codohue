@@ -19,6 +19,7 @@ import (
 // ─── fake service ────────────────────────────────────────────────────────────
 
 type fakeSvc struct {
+	recommendReq  *Request
 	recommendResp *Response
 	recommendErr  error
 	trendingResp  *TrendingResponse
@@ -30,7 +31,8 @@ type fakeSvc struct {
 	deleteErr     error
 }
 
-func (f *fakeSvc) Recommend(_ context.Context, _ *Request) (*Response, error) {
+func (f *fakeSvc) Recommend(_ context.Context, req *Request) (*Response, error) {
+	f.recommendReq = req
 	return f.recommendResp, f.recommendErr
 }
 
@@ -613,5 +615,36 @@ func TestStoreEmbedding_NonFiniteVector_KeepsInvalidEmbeddingCode(t *testing.T) 
 	}
 	if !strings.Contains(rec.Body.String(), "invalid_embedding") {
 		t.Errorf("expected error code invalid_embedding, got %s", rec.Body.String())
+	}
+}
+
+// TestGetSubjectRecommendations_EscapedSubjectIDReachesSameSubject mounts the
+// real router: "did%3Aplc%3A…" and "did:plc:…" name one subject, so both must
+// reach the service with the same id. Before decoding at the boundary the
+// escaped spelling was an unknown subject and fell back to popular items.
+func TestGetSubjectRecommendations_EscapedSubjectIDReachesSameSubject(t *testing.T) {
+	const want = "did:plc:i4juv47rkmi6as6ut7g2ojgq"
+
+	for _, target := range []string{
+		"/v1/namespaces/bluesky/subjects/did:plc:i4juv47rkmi6as6ut7g2ojgq/recommendations",
+		"/v1/namespaces/bluesky/subjects/did%3Aplc%3Ai4juv47rkmi6as6ut7g2ojgq/recommendations",
+	} {
+		svc := &fakeSvc{recommendResp: &Response{SubjectID: want, Namespace: "bluesky"}}
+		router := chi.NewRouter()
+		router.Get("/v1/namespaces/{ns}/subjects/{id}/recommendations",
+			(&Handler{service: svc}).GetSubjectRecommendations)
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, http.NoBody))
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want 200", target, rec.Code)
+		}
+		if svc.recommendReq == nil {
+			t.Fatalf("GET %s: service was never called", target)
+		}
+		if svc.recommendReq.SubjectID != want {
+			t.Errorf("GET %s: subject id = %q, want %q", target, svc.recommendReq.SubjectID, want)
+		}
 	}
 }

@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+
+	"github.com/go-chi/chi/v5"
 
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 
@@ -107,4 +110,24 @@ func WriteLifecycleError(w http.ResponseWriter, err error) bool {
 		return false
 	}
 	return true
+}
+
+// URLParam returns a chi route parameter with its percent-encoding resolved.
+//
+// chi matches against r.URL.RawPath whenever the client escaped anything, so
+// chi.URLParam hands back the escaped text: "did%3Aplc%3Aabc" instead of
+// "did:plc:abc". The two spellings name the same subject but produce different
+// ID mappings, vector lookups, cache keys and echoed response fields, so the
+// escaped form silently degrades to a cold-start fallback. Decoding cannot be
+// done before routing — unescaping "%2F" first would split one segment into
+// two — so every handler reads its parameters through this instead.
+//
+// A malformed escape is returned verbatim for the handler's own validation.
+func URLParam(r *http.Request, key string) string {
+	raw := chi.URLParam(r, key)
+	decoded, err := url.PathUnescape(raw)
+	if err != nil {
+		return raw
+	}
+	return decoded
 }

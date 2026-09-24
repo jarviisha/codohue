@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/access"
@@ -215,7 +213,7 @@ func (h *Handler) ListNamespaces(w http.ResponseWriter, r *http.Request) {
 
 // GetNamespace handles GET /api/admin/v1/namespaces/{ns}.
 func (h *Handler) GetNamespace(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	cfg, err := h.svc.GetNamespace(r.Context(), ns)
 	if err != nil {
 		writeInternalError(w, r, "could not get namespace", err, slog.String("namespace", ns))
@@ -230,7 +228,7 @@ func (h *Handler) GetNamespace(w http.ResponseWriter, r *http.Request) {
 
 // UpsertNamespace handles PUT /api/admin/v1/namespaces/{ns}.
 func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 
 	// DecodeStrict: with PATCH semantics a typo'd field name would silently
 	// no-op the whole edit — reject it loudly instead.
@@ -270,7 +268,7 @@ func (h *Handler) UpsertNamespace(w http.ResponseWriter, r *http.Request) {
 // snapshot, 404 when the namespace does not exist, or 503 when the
 // catalog feature is not wired in this deployment.
 func (h *Handler) GetCatalogConfig(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	resp, err := h.svc.GetCatalogConfig(r.Context(), ns)
 	if err != nil {
 		if errors.Is(err, ErrCatalogConfiguratorUnavailable) {
@@ -324,7 +322,7 @@ func (h *Handler) ListCatalogStrategies(w http.ResponseWriter, r *http.Request) 
 //	404 Not Found                — namespace does not exist
 //	503 Service Unavailable      — catalog adapter not wired
 func (h *Handler) UpdateCatalogConfig(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 
 	var req NamespaceCatalogUpdateRequest
 	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
@@ -371,7 +369,7 @@ func (h *Handler) UpdateCatalogConfig(w http.ResponseWriter, r *http.Request) {
 // present — otherwise the scoped route would silently serve fleet-wide runs.
 func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		ns = q.Get("namespace")
 	}
@@ -415,8 +413,8 @@ func (h *Handler) GetBatchRuns(w http.ResponseWriter, r *http.Request) {
 // Optional query params: limit, offset, debug. The debug flag enriches the
 // response with operator diagnostics.
 func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	id := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	id := httpapi.URLParam(r, "id")
 	if ns == "" || id == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace and subject id are required")
 		return
@@ -457,7 +455,7 @@ func (h *Handler) GetSubjectRecommendations(w http.ResponseWriter, r *http.Reque
 
 // GetQdrant handles GET /api/admin/v1/namespaces/{ns}/qdrant.
 func (h *Handler) GetQdrant(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	stats, err := h.svc.GetQdrant(r.Context(), ns)
 	if err != nil {
 		writeInternalError(w, r, "could not get qdrant stats", err, slog.String("namespace", ns))
@@ -469,7 +467,7 @@ func (h *Handler) GetQdrant(w http.ResponseWriter, r *http.Request) {
 // ListSubjects handles GET /api/admin/v1/namespaces/{ns}/subjects.
 // Optional query params: q (subject id prefix), sort, limit, offset.
 func (h *Handler) ListSubjects(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
@@ -506,8 +504,8 @@ func (h *Handler) ListSubjects(w http.ResponseWriter, r *http.Request) {
 
 // GetSubjectProfile handles GET /api/admin/v1/namespaces/{ns}/subjects/{id}/profile.
 func (h *Handler) GetSubjectProfile(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	id := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	id := httpapi.URLParam(r, "id")
 
 	profile, err := h.svc.GetSubjectProfile(r.Context(), ns, id)
 	if err != nil {
@@ -520,7 +518,7 @@ func (h *Handler) GetSubjectProfile(w http.ResponseWriter, r *http.Request) {
 
 // GetTrending handles GET /api/admin/v1/namespaces/{ns}/trending.
 func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	q := r.URL.Query()
 
 	limit := 50
@@ -554,7 +552,7 @@ func (h *Handler) GetTrending(w http.ResponseWriter, r *http.Request) {
 // CreateBatchRun handles POST /api/admin/v1/namespaces/{ns}/batch-runs.
 // Returns 202 Accepted with a Location header pointing to the created run.
 func (h *Handler) CreateBatchRun(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 
 	result, err := h.svc.CreateBatchRun(r.Context(), ns)
 	if err != nil {
@@ -583,7 +581,7 @@ func (h *Handler) CreateBatchRun(w http.ResponseWriter, r *http.Request) {
 
 // GetRecentEvents handles GET /api/admin/v1/namespaces/{ns}/events.
 func (h *Handler) GetRecentEvents(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	q := r.URL.Query()
 
 	limit := 50
@@ -618,7 +616,7 @@ func (h *Handler) GetRecentEvents(w http.ResponseWriter, r *http.Request) {
 
 // InjectEvent handles POST /api/admin/v1/namespaces/{ns}/events.
 func (h *Handler) InjectEvent(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 
 	var req InjectEventRequest
 	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {
@@ -659,7 +657,7 @@ func windowParam(raw string) time.Duration {
 // GetEventsSummary handles GET /api/admin/v1/namespaces/{ns}/events/summary.
 // The bucket is auto-derived as window/60 (≈60 points), floored at 1s.
 func (h *Handler) GetEventsSummary(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
@@ -716,7 +714,7 @@ func (h *Handler) DeleteDemoData(w http.ResponseWriter, r *http.Request) {
 // Returns 200 with the summary body, or 404 when the namespace does not
 // exist.
 func (h *Handler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
@@ -739,7 +737,7 @@ func (h *Handler) DeleteNamespace(w http.ResponseWriter, r *http.Request) {
 // The plaintext is returned exactly once. 200 on success, 404 for unknown
 // namespaces.
 func (h *Handler) RotateNamespaceAPIKey(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return

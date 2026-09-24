@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/admin/eventbus"
 	"github.com/jarviisha/codohue/internal/admin/sse"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
@@ -117,7 +115,7 @@ func (h *Handler) StreamCatalog(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusServiceUnavailable, "stream_unavailable", "event bus is not wired")
 		return
 	}
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
@@ -201,7 +199,3 @@ func sseEventName(kind string) string {
 func isTerminalKind(kind string) bool {
 	return kind == "batch_run.completed" || kind == "batch_run.cancelled"
 }
-
-// chi import kept for parity with handler.go pattern even when only used
-// indirectly via parseRunID (helps grep find the handler file).
-var _ = chi.URLParam
