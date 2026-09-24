@@ -5,7 +5,8 @@ Codohue is a hybrid (sparse + dense) collaborative-filtering recommendation serv
 It ingests events and raw catalog content over HTTP and durable Redis Streams, persists them in PostgreSQL, recomputes sparse/dense vectors on a schedule, auto-embeds catalog content (the recommended core mode), and serves recommendations and candidate rankings through HTTP APIs backed by Qdrant.
 
 > **Architecture details, data model, API surface, design decisions:** see [ARCHITECTURE.md](ARCHITECTURE.md).
-> **Contributor conventions:** see [AGENTS.md](AGENTS.md).
+> **Contributing — commits, branches, pull requests:** see [Contributing](#contributing).
+> **Instructions for AI coding agents (Codex, Claude Code):** see [AGENTS.md](AGENTS.md).
 > **Go SDK:** see [sdk/go/README.md](sdk/go/README.md).
 
 ## Highlights
@@ -207,6 +208,51 @@ make build-admin-embed    # production admin binary with SPA
 ```
 
 `make build-admin` (no `-embed`) builds an admin binary that serves only the API.
+
+## Contributing
+
+Work on a branch off `main`, keep the change focused, and open a pull request.
+
+### Commits and branches
+
+Both use [Conventional Commits](https://www.conventionalcommits.org/) vocabulary.
+
+- Commit: `type(scope): summary` — imperative mood, concise, lowercase except proper nouns, API names and versions.
+- Branch: `type/scope-summary` — lowercase and hyphen-separated, e.g. `feat/api-namespace-routes`.
+- Types: `feat`, `fix`, `refactor`, `test`, `docs`, `ci`, `chore`.
+- Scopes: `api`, `cron`, `admin`, `embedder`, `ingest`, `compute`, `recommend`, `nsconfig`, `auth`, `catalog`, `embedstrategy`, `idmap`, `qdrant`, `redis`, `postgres`, `metrics`, `e2e`, `docs`, `ci`.
+
+Pick one primary scope per commit and keep each commit to one logical change. Describe
+repository behavior, not Spec Kit phase labels or task IDs such as `T012`. Older styles
+such as `scope: summary` or numeric branch names such as `001-feature-name` are not used
+for new work.
+
+### Before opening a pull request
+
+```bash
+make fmt && make lint
+make test && make test-race
+make up-infra && make migrate-up && make test-e2e   # if you touched API behavior,
+                                                    # migrations, Redis/Qdrant, or cron
+```
+
+Then in the pull request description:
+
+- describe the behavior change and the modules it affects,
+- call out migration or configuration changes explicitly,
+- include a sample request and response for API changes,
+- note rollout steps if Redis, Qdrant, or cron behavior changes.
+
+### Code conventions
+
+- Keep feature logic in its domain package. The default shape is `docs.go`, `types.go`, `repository.go`, `service.go`, `handler.go`, plus matching tests.
+- Domain packages may import `core`, `infra`, and `config` — not each other.
+- Every package needs a `docs.go` holding the package doc comment and package declaration only.
+- Every `service.go`, `repository.go`, `job.go`, and `worker.go` needs a `_test.go`; `types.go` and `docs.go` do not.
+- Write code comments, doc comments, and TODOs in English.
+- Update [ARCHITECTURE.md](ARCHITECTURE.md) whenever an endpoint, migration, storage contract, process responsibility, or cross-domain flow changes.
+- `pkg/codohuetypes` is the public wire contract; a deliberate change there must update its golden snapshots and the REST API table in [ARCHITECTURE.md](ARCHITECTURE.md).
+- Never commit secrets or plaintext namespace keys.
 
 ## Notes
 
