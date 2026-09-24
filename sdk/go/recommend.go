@@ -34,6 +34,11 @@ func buildListOptions(opts []ListOption) listOptions {
 
 // Recommend returns collaborative-filtering recommendations for the given
 // subject in this namespace.
+//
+// Check RecommendedItem.Scored before treating a score as a relevance verdict.
+// The fallback sources — "fallback_popular" and "hybrid_cold", named in
+// Response.Source — rank by a namespace-wide signal, so they report Scored
+// false and a Score of 0 that means "no personalised score", not "irrelevant".
 func (n *Namespace) Recommend(ctx context.Context, subjectID string, opts ...ListOption) (*codohuetypes.Response, error) {
 	o := buildListOptions(opts)
 

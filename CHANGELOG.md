@@ -9,7 +9,42 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
 
 ## Unreleased
 
-Nothing yet.
+Additive: one new field on an existing response type. Nothing was removed,
+renamed, or retyped.
+
+### Added
+
+- **`RecommendedItem.Scored`** (`scored` on the wire) on
+  `GET /v1/namespaces/{ns}/subjects/{id}/recommendations`. It reports whether
+  `score` is a relevance verdict for that subject. The fallback sources —
+  `fallback_popular` and `hybrid_cold`, both already named in `source` — rank
+  by a namespace-wide signal and have no personalised score to give, so they
+  emit `scored: false` alongside the `score: 0` placeholder they always
+  emitted. `collaborative_filtering` and `hybrid` emit `scored: true`. Mirrors
+  the flag `RankedItem` has carried since v0.7.0.
+
+  **Read `scored` before thresholding on `score`.** A `0` from a fallback means
+  "this response carries no personalised score", not "this item is irrelevant".
+  Existing clients that ignore the field are unaffected; Go SDK callers pick it
+  up automatically, since `sdk/go` returns `codohuetypes.Response` directly.
+
+### Fixed
+
+- **Percent-escaped path parameters named a different entity.** chi matches on
+  `r.URL.RawPath`, so `did%3Aplc%3A…` and `did:plc:…` reached handlers as two
+  different ids — separate id mappings, vectors, response cache entries and
+  echoed `subject_id` — and the escaped spelling degraded to
+  `fallback_popular`. Every route parameter across the data and admin planes is
+  now decoded once at the route boundary, including the object-mutation routes.
+  Affects any id with reserved characters: DIDs, AT-URIs, URLs.
+
+  Server-side only; no client change is required, and no wire type changed.
+
+- **Recommendation cache keys move from `rec:v2:*` to `rec:v3:*`.** The cached
+  body is JSON, so an entry written before `scored` existed decodes with the
+  field at its zero value — a genuinely scored hybrid result reported as
+  `scored: false` for a full cache TTL after deploy. Old entries are abandoned
+  rather than migrated; they expire on their own TTL.
 
 ## v0.7.0 — 2026-09-23
 
