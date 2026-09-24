@@ -60,6 +60,18 @@ services:
   cron:
     <<: *app
     image: ghcr.io/jarviisha/codohue/cron:${IMAGE_TAG:-latest}
+    # A batch run holds the namespace writer lease for its whole recompute,
+    # which starves provision's exclusive Activate and times it out in 60s.
+    # Waiting for provision (which itself waits for migrate) keeps the order.
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+        required: false
+      qdrant:
+        condition: service_healthy
+        required: false
     environment:
       <<: *environment
       CODOHUE_BATCH_INTERVAL_MINUTES: "${CODOHUE_BATCH_INTERVAL_MINUTES:-5}"
