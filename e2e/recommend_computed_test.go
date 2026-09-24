@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -57,7 +59,9 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 		SubjectID string `json:"subject_id"`
 		Namespace string `json:"namespace"`
 		Items     []struct {
-			ObjectID string `json:"object_id"`
+			ObjectID string  `json:"object_id"`
+			Score    float64 `json:"score"`
+			Scored   bool    `json:"scored"`
 		} `json:"items"`
 		Source string `json:"source"`
 	}
@@ -78,6 +82,9 @@ func TestRecommendComputed_WarmSubjectExcludesSeenItems(t *testing.T) {
 	for _, item := range body.Items {
 		if seen[item.ObjectID] {
 			t.Fatalf("recommended seen item %q", item.ObjectID)
+		}
+		if !item.Scored {
+			t.Errorf("item %q: scored = false on the CF path, want true", item.ObjectID)
 		}
 	}
 }
@@ -110,7 +117,9 @@ func TestRecommendComputed_ColdStartFallsBackToTrendingOrPopular(t *testing.T) {
 
 	var body struct {
 		Items []struct {
-			ObjectID string `json:"object_id"`
+			ObjectID string  `json:"object_id"`
+			Score    float64 `json:"score"`
+			Scored   bool    `json:"scored"`
 		} `json:"items"`
 		Source string `json:"source"`
 	}
@@ -121,5 +130,98 @@ func TestRecommendComputed_ColdStartFallsBackToTrendingOrPopular(t *testing.T) {
 	}
 	if len(body.Items) == 0 {
 		t.Fatal("expected non-empty fallback recommendations for cold subject")
+	}
+	// The fallback ranks the namespace, not this subject: the 0 it reports is
+	// a placeholder and must be labelled as one.
+	for _, item := range body.Items {
+		if item.Scored {
+			t.Errorf("item %q: scored = true on the fallback path, want false", item.ObjectID)
+		}
+	}
+}
+
+// TestRecommendComputed_EscapedSubjectIDServesTheSameSubject exercises the
+// spelling a real Bluesky client sends. A DID contains reserved characters, so
+// clients escape it; chi matches on the raw path, and before the route
+// boundary decoded its parameters the escaped spelling was an unknown subject
+// and silently fell back to popular items.
+func TestRecommendComputed_EscapedSubjectIDServesTheSameSubject(t *testing.T) {
+	namespace, apiKey := createIsolatedNamespace(t, "recommend_escaped_id", map[string]any{
+		"action_weights":  map[string]float64{"VIEW": 1.0, "LIKE": 4.0},
+		"lambda":          0.01,
+		"gamma":           0.5,
+		"max_results":     10,
+		"seen_items_days": 30,
+		"dense_source":    "disabled",
+	})
+
+	const subjectID = "did:plc:e2eescapedsubject"
+	escaped := url.PathEscape(subjectID)
+	if escaped == subjectID {
+		// PathEscape leaves ':' alone, so escape it explicitly — the point of
+		// the test is the encoded spelling reaching the router.
+		escaped = strings.ReplaceAll(subjectID, ":", "%3A")
+	}
+
+	// The subject needs enough interactions to clear the cold-start threshold,
+	// or both spellings land on a fallback and the comparison proves nothing.
+	now := time.Now().UTC().Truncate(time.Second)
+	seedEvent(t, namespace, subjectID, "item_1", "LIKE", 4.0, now.Add(-50*time.Minute), nil)
+	seedEvent(t, namespace, subjectID, "item_2", "LIKE", 4.0, now.Add(-48*time.Minute), nil)
+	seedEvent(t, namespace, subjectID, "item_1", "VIEW", 1.0, now.Add(-46*time.Minute), nil)
+	seedEvent(t, namespace, subjectID, "item_2", "VIEW", 1.0, now.Add(-44*time.Minute), nil)
+	seedEvent(t, namespace, subjectID, "item_1", "LIKE", 4.0, now.Add(-42*time.Minute), nil)
+	seedEvent(t, namespace, subjectID, "item_2", "LIKE", 4.0, now.Add(-40*time.Minute), nil)
+	seedEvent(t, namespace, "peer_user", "item_2", "LIKE", 4.0, now.Add(-38*time.Minute), nil)
+	seedEvent(t, namespace, "peer_user", "item_3", "LIKE", 4.0, now.Add(-35*time.Minute), nil)
+	seedEvent(t, namespace, "peer_user", "item_4", "VIEW", 1.0, now.Add(-30*time.Minute), nil)
+
+	runCronOnceUntil(t, 20*time.Second, func() (bool, error) {
+		return qdrantCollectionExists(t, namespace+"_subjects") &&
+			qdrantPointCount(t, namespace+"_subjects") > 0, nil
+	})
+
+	type recBody struct {
+		SubjectID string `json:"subject_id"`
+		Items     []struct {
+			ObjectID string `json:"object_id"`
+			Scored   bool   `json:"scored"`
+		} `json:"items"`
+		Source string `json:"source"`
+	}
+
+	get := func(pathID string) recBody {
+		t.Helper()
+		resp := doRequest(t, http.MethodGet,
+			baseURL+"/v1/namespaces/"+namespace+"/subjects/"+pathID+"/recommendations?limit=3",
+			apiKey, nil)
+		var body recBody
+		decodeJSON(t, resp, &body)
+		return body
+	}
+
+	literal := get(subjectID)
+	encoded := get(escaped)
+
+	if literal.Source != "collaborative_filtering" {
+		t.Fatalf("literal source = %q, want collaborative_filtering (the fixture did not warm up)", literal.Source)
+	}
+	if encoded.SubjectID != subjectID {
+		t.Errorf("encoded subject_id = %q, want the decoded %q", encoded.SubjectID, subjectID)
+	}
+	if encoded.Source != literal.Source {
+		t.Errorf("encoded source = %q, want %q — the two spellings must name one subject",
+			encoded.Source, literal.Source)
+	}
+	if len(encoded.Items) != len(literal.Items) {
+		t.Fatalf("encoded returned %d items, literal returned %d", len(encoded.Items), len(literal.Items))
+	}
+	for i := range literal.Items {
+		if encoded.Items[i].ObjectID != literal.Items[i].ObjectID {
+			t.Errorf("items[%d]: encoded = %q, literal = %q", i, encoded.Items[i].ObjectID, literal.Items[i].ObjectID)
+		}
+		if !encoded.Items[i].Scored {
+			t.Errorf("items[%d]: encoded spelling came back unscored", i)
+		}
 	}
 }

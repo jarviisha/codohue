@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,6 +30,7 @@ type fakeSvc struct {
 	rankNamespace string
 	storeErr      error
 	deleteErr     error
+	gotObjectID   string
 }
 
 func (f *fakeSvc) Recommend(_ context.Context, req *Request) (*Response, error) {
@@ -45,7 +47,8 @@ func (f *fakeSvc) Rank(_ context.Context, _ *RankRequest, namespace string) (*Ra
 	return f.rankResp, f.rankErr
 }
 
-func (f *fakeSvc) StoreObjectEmbedding(_ context.Context, _, _ string, _ []float32, _ *time.Time) error {
+func (f *fakeSvc) StoreObjectEmbedding(_ context.Context, _, objectID string, _ []float32, _ *time.Time) error {
+	f.gotObjectID = objectID
 	return f.storeErr
 }
 
@@ -53,7 +56,8 @@ func (f *fakeSvc) StoreSubjectEmbedding(_ context.Context, _, _ string, _ []floa
 	return f.storeErr
 }
 
-func (f *fakeSvc) DeleteObject(_ context.Context, _, _ string) error {
+func (f *fakeSvc) DeleteObject(_ context.Context, _, objectID string) error {
+	f.gotObjectID = objectID
 	return f.deleteErr
 }
 
@@ -645,6 +649,57 @@ func TestGetSubjectRecommendations_EscapedSubjectIDReachesSameSubject(t *testing
 		}
 		if svc.recommendReq.SubjectID != want {
 			t.Errorf("GET %s: subject id = %q, want %q", target, svc.recommendReq.SubjectID, want)
+		}
+	}
+}
+
+// TestMutationRoutes_EscapedObjectIDReachesSameObject covers the half the
+// production audit could not exercise: a DELETE or embedding PUT whose object
+// id is escaped must address the same object as the literal spelling, or a
+// client deletes nothing and writes a vector onto a phantom id.
+func TestMutationRoutes_EscapedObjectIDReachesSameObject(t *testing.T) {
+	const want = "at://did:plc:abc/app.bsky.feed.post/3k"
+	escaped := "at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp.bsky.feed.post%2F3k"
+
+	routes := []struct {
+		name, pattern, method, target, body string
+		handler                             func(*Handler) http.HandlerFunc
+	}{
+		{
+			name:    "delete object",
+			pattern: "/v1/namespaces/{ns}/objects/{id}",
+			method:  http.MethodDelete,
+			target:  "/v1/namespaces/bsky/objects/" + escaped,
+			handler: func(h *Handler) http.HandlerFunc { return h.DeleteObject },
+		},
+		{
+			name:    "store object embedding",
+			pattern: "/v1/namespaces/{ns}/objects/{id}/embedding",
+			method:  http.MethodPut,
+			target:  "/v1/namespaces/bsky/objects/" + escaped + "/embedding",
+			body:    `{"vector":[0.1,0.2]}`,
+			handler: func(h *Handler) http.HandlerFunc { return h.StoreObjectEmbedding },
+		},
+	}
+
+	for _, rt := range routes {
+		svc := &fakeSvc{}
+		router := chi.NewRouter()
+		router.Method(rt.method, rt.pattern, rt.handler(&Handler{service: svc}))
+
+		var body io.Reader = http.NoBody
+		if rt.body != "" {
+			body = strings.NewReader(rt.body)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), rt.method, rt.target, body))
+
+		if rec.Code != http.StatusNoContent {
+			t.Errorf("%s: status = %d, want 204", rt.name, rec.Code)
+			continue
+		}
+		if svc.gotObjectID != want {
+			t.Errorf("%s: object id = %q, want %q", rt.name, svc.gotObjectID, want)
 		}
 	}
 }
