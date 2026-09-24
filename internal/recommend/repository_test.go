@@ -304,8 +304,10 @@ func TestRecCacheKey_SeparatesGenerations(t *testing.T) {
 	if legacy == recreated {
 		t.Errorf("generations share cache key %q", legacy)
 	}
-	// Generation 1 must keep the key shape that is already live in Redis.
-	if want := "rec:v2:dGVuYW50:dTE:limit=10:offset=0"; legacy != want {
+	// Generation 1 tracks the version token in nslifecycle rather than the
+	// namespace generation. Changing it abandons live entries on purpose, so
+	// it must never move by accident.
+	if want := "rec:v3:dGVuYW50:dTE:limit=10:offset=0"; legacy != want {
 		t.Errorf("generation 1 key changed: got %q, want %q", legacy, want)
 	}
 	// Paging and subject stay part of the key regardless of generation.

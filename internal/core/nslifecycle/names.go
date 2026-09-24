@@ -57,10 +57,13 @@ func PhysicalName(kind PhysicalKind, namespace string, generation int64) (string
 	case KindRecommendationCache:
 		// The namespace is base64'd because the rest of the key encodes a
 		// caller-supplied subject id the same way, and a raw ':' in either
-		// would make the key ambiguous. `v2` is the key-shape version: the
-		// serving path writes these keys and namespace deletion scans for
-		// them, so the shape has to be defined exactly once.
-		return "rec:v2:" + base64.RawURLEncoding.EncodeToString([]byte(qualified)), nil
+		// would make the key ambiguous. `v3` versions both the key shape and
+		// the cached payload: the serving path writes these keys and namespace
+		// deletion scans for them, so the shape has to be defined exactly once,
+		// and a cached JSON body written before a Response field existed would
+		// otherwise decode with that field at its zero value for a full TTL
+		// after deploy. Bump on either change; stale entries age out.
+		return "rec:v3:" + base64.RawURLEncoding.EncodeToString([]byte(qualified)), nil
 	case KindTrending:
 		return "trending:" + qualified, nil
 	case KindEmbedStream:
