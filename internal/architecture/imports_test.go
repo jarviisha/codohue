@@ -169,23 +169,24 @@ func collectImports(root string) (map[string][]string, error) {
 	return out, nil
 }
 
-// chiRouterPkg is the router whose URLParam returns percent-escaped values.
-const chiRouterPkg = "github.com/go-chi/chi/v5"
-
 // TestHandlersReadRouteParamsThroughHTTPAPI keeps the path-decoding fix from
-// rotting. chi.URLParam returns the raw segment when the client escaped
-// anything, so "did%3Aplc%3Aabc" and "did:plc:abc" arrive as two different
-// ids — separate vector lookups, cache keys and echoed response fields.
-// httpapi.URLParam resolves that exactly once; a handler calling chi directly
-// silently reintroduces the bug on its own route, which no handler test
+// rotting. chi hands back the raw segment when the client escaped anything, so
+// "did%3Aplc%3Aabc" and "did:plc:abc" arrive as two different ids — separate
+// vector lookups, cache keys and echoed response fields. httpapi.URLParam
+// resolves that exactly once; a handler reading the parameter straight from
+// chi silently reintroduces the bug on its own route, which no handler test
 // catches because a hand-built RouteContext returns whatever the test stored.
 //
-// internal/core/httpapi is the one legal caller: it *is* the wrapper. Other
-// chi APIs (NewRouter, RouteContext, Mount) stay freely available.
+// Matching on the method name rather than on the chi import covers every way
+// in — chi.URLParam, an aliased import, chi.URLParamFromCtx, and
+// chi.RouteContext(r).URLParam(…) — because only the wrapper is spelled
+// httpapi.URLParam. Other chi APIs (NewRouter, RoutePattern, Mount) are
+// untouched.
 func TestHandlersReadRouteParamsThroughHTTPAPI(t *testing.T) {
 	// internal/ holds the handlers; cmd/ wires the routers and reads {ns} for
 	// auth, so both are in scope.
 	roots := []string{"..", "../../cmd"}
+	// internal/core/httpapi is the one legal caller: it *is* the wrapper.
 	const wrapperDir = "core/httpapi"
 
 	walk := func(path string, d fs.DirEntry, err error) error {
@@ -205,35 +206,19 @@ func TestHandlersReadRouteParamsThroughHTTPAPI(t *testing.T) {
 			return err
 		}
 
-		// Resolve the file's local name for chi: an alias would slip past a
-		// hardcoded "chi." check.
-		local := ""
-		for _, spec := range file.Imports {
-			imported, err := strconv.Unquote(spec.Path.Value)
-			if err != nil {
-				return err
-			}
-			if imported != chiRouterPkg {
-				continue
-			}
-			local = "chi"
-			if spec.Name != nil {
-				local = spec.Name.Name
-			}
-		}
-		if local == "" || local == "_" {
-			return nil
-		}
-
 		ast.Inspect(file, func(n ast.Node) bool {
 			sel, ok := n.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "URLParam" {
+			if !ok {
 				return true
 			}
-			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == local {
-				t.Errorf("%s:%d: calls %s.URLParam directly; use httpapi.URLParam so the parameter is decoded once",
-					path, fset.Position(sel.Pos()).Line, local)
+			if sel.Sel.Name != "URLParam" && sel.Sel.Name != "URLParamFromCtx" {
+				return true
 			}
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "httpapi" {
+				return true
+			}
+			t.Errorf("%s:%d: reads a route parameter straight from chi; use httpapi.URLParam so it is decoded once",
+				path, fset.Position(sel.Pos()).Line)
 			return true
 		})
 		return nil
