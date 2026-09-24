@@ -32,10 +32,10 @@ func TestGoldenWireContract(t *testing.T) {
 		name string
 		v    any
 	}{
-		{"recommended_item", codohuetypes.RecommendedItem{ObjectID: "obj-1", Score: 0.875, Rank: 1}},
+		{"recommended_item", codohuetypes.RecommendedItem{ObjectID: "obj-1", Score: 0.875, Rank: 1, Scored: true}},
 		{"response", codohuetypes.Response{
 			SubjectID: "subj-1", Namespace: "feed",
-			Items:  []codohuetypes.RecommendedItem{{ObjectID: "obj-1", Score: 0.875, Rank: 1}},
+			Items:  []codohuetypes.RecommendedItem{{ObjectID: "obj-1", Score: 0.875, Rank: 1, Scored: true}},
 			Source: "collaborative_filtering", Limit: 20, Offset: 0, Total: 1, GeneratedAt: ts,
 		}},
 		{"rank_request", codohuetypes.RankRequest{SubjectID: "subj-1", Candidates: []string{"obj-1", "obj-2"}}},

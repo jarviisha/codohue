@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -22,7 +21,7 @@ import (
 //	500 Internal Server Error — unexpected DB / Redis error.
 //	503 Service Unavailable   — catalog feature not wired in this deployment.
 func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return
@@ -82,7 +81,7 @@ func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
 //	object_id  — substring filter over object_id (case-insensitive).
 //	author     — exact filter over author_subject_id.
 func (h *Handler) ListCatalogItems(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	q := r.URL.Query()
 
 	state := q.Get("state")
@@ -124,8 +123,8 @@ func (h *Handler) ListCatalogItems(w http.ResponseWriter, r *http.Request) {
 // GetCatalogItem handles GET /api/admin/v1/namespaces/{ns}/catalog/items/{id}.
 // Returns 200 with the full record, or 404 when the row is not found.
 func (h *Handler) GetCatalogItem(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	idStr := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	idStr := httpapi.URLParam(r, "id")
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
@@ -152,8 +151,8 @@ func (h *Handler) GetCatalogItem(w http.ResponseWriter, r *http.Request) {
 // Returns 202 on success, 404 when the row is not found OR is in a state
 // that cannot be redriven (only `failed` and `dead_letter` are eligible).
 func (h *Handler) RedriveCatalogItem(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	idStr := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	idStr := httpapi.URLParam(r, "id")
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {
@@ -185,7 +184,7 @@ func (h *Handler) RedriveCatalogItem(w http.ResponseWriter, r *http.Request) {
 // BulkRedriveDeadletter handles POST /api/admin/v1/namespaces/{ns}/catalog/items/redrive-deadletter.
 // Returns 200 with a count of redriven items.
 func (h *Handler) BulkRedriveDeadletter(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return
@@ -214,8 +213,8 @@ func (h *Handler) BulkRedriveDeadletter(w http.ResponseWriter, r *http.Request) 
 // DeleteCatalogItem handles DELETE /api/admin/v1/namespaces/{ns}/catalog/items/{id}.
 // Idempotent — deleting a non-existent item still returns 204.
 func (h *Handler) DeleteCatalogItem(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	idStr := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	idStr := httpapi.URLParam(r, "id")
 
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil || id <= 0 {

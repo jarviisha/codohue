@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
@@ -17,7 +15,7 @@ import (
 // Window is a Go duration string (e.g. "1h", "24h", "7d"). Default 1h —
 // matches the Catalog status page's initial chart window.
 func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
@@ -42,7 +40,7 @@ func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Reques
 // counts + a sample object_id so operators can drill into a representative
 // failed item.
 func (h *Handler) GetCatalogFailuresSummary(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return

@@ -205,7 +205,7 @@ func (h *Handler) RequireIdentity(legacySessions *SessionManager, legacyKey stri
 				identityError(w, err)
 				return
 			}
-			ns := chi.URLParam(r, "ns")
+			ns := httpapi.URLParam(r, "ns")
 			permission := "admin:read"
 			if r.Method != "GET" && r.Method != "HEAD" {
 				permission = "admin:write"
@@ -293,7 +293,7 @@ func (h *Handler) PutAccount(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid_request", "invalid account")
 		return
 	}
-	if err := h.identity.SetAccount(r.Context(), "operator:"+access.CurrentActor(r.Context()).Name, chi.URLParam(r, "username"), req.Password, req.Role, req.Disabled, false); err != nil {
+	if err := h.identity.SetAccount(r.Context(), "operator:"+access.CurrentActor(r.Context()).Name, httpapi.URLParam(r, "username"), req.Password, req.Role, req.Disabled, false); err != nil {
 		identityError(w, err)
 		return
 	}
@@ -312,7 +312,7 @@ func (h *Handler) PutServiceToken(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid_request", "invalid token specification")
 		return
 	}
-	if err := h.identity.ProvisionToken(r.Context(), "operator:"+access.CurrentActor(r.Context()).Name, chi.URLParam(r, "name"), req.Token, req.Permissions, req.Namespaces); err != nil {
+	if err := h.identity.ProvisionToken(r.Context(), "operator:"+access.CurrentActor(r.Context()).Name, httpapi.URLParam(r, "name"), req.Token, req.Permissions, req.Namespaces); err != nil {
 		identityError(w, err)
 		return
 	}
@@ -325,7 +325,7 @@ func (h *Handler) DeleteServiceToken(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 503, "unavailable", "tokens unavailable")
 		return
 	}
-	if err := h.identity.RevokeToken(r.Context(), "operator:"+access.CurrentActor(r.Context()).Name, chi.URLParam(r, "name")); err != nil {
+	if err := h.identity.RevokeToken(r.Context(), "operator:"+access.CurrentActor(r.Context()).Name, httpapi.URLParam(r, "name")); err != nil {
 		identityError(w, err)
 		return
 	}

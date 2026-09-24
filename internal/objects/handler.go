@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
@@ -38,8 +36,8 @@ func NewHandler(service objectsUpserter) *Handler {
 //	200 OK          — stored
 //	400 Bad Request — invalid JSON, unknown field, or missing path params
 func (h *Handler) Upsert(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
-	id := chi.URLParam(r, "id")
+	ns := httpapi.URLParam(r, "ns")
+	id := httpapi.URLParam(r, "id")
 
 	var req UpsertRequest
 	if err := httpapi.DecodeStrict(r.Body, &req); err != nil {

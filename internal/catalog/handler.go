@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/pkg/codohuetypes"
 )
@@ -48,7 +46,7 @@ func NewHandler(service *Service) *Handler {
 //	422 Unprocessable Entity — content empty after trimming
 //	500 Internal Server Error — unexpected server-side failure
 func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return
@@ -77,7 +75,7 @@ func (h *Handler) Ingest(w http.ResponseWriter, r *http.Request) {
 // missing and not-enabled); everything item-level is a 202 with the outcome
 // in the body.
 func (h *Handler) BatchIngest(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return
@@ -102,7 +100,7 @@ func (h *Handler) BatchIngest(w http.ResponseWriter, r *http.Request) {
 // updated_at ascending so a repair pass pages forward and resumes from the
 // last timestamp it saw.
 func (h *Handler) ListObjects(w http.ResponseWriter, r *http.Request) {
-	ns := chi.URLParam(r, "ns")
+	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
 		httpapi.WriteError(w, http.StatusBadRequest, "missing_namespace", "ns is required")
 		return

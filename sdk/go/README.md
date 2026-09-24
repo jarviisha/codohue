@@ -45,11 +45,14 @@ func main() {
     ns := c.Namespace("feed", "your-namespace-api-key")
     ctx := context.Background()
 
-    // Recommendations
+    // Recommendations. Check Scored before treating a score as a verdict:
+    // the fallback sources ("fallback_popular", "hybrid_cold") rank by a
+    // namespace-wide signal, so they report scored=false and score=0 meaning
+    // "no personalised score", not "irrelevant to this subject".
     rec, err := ns.Recommend(ctx, "user-123", codohue.WithLimit(20))
     if err != nil { log.Fatal(err) }
     for _, it := range rec.Items {
-        log.Printf("rank=%d object=%s score=%.4f", it.Rank, it.ObjectID, it.Score)
+        log.Printf("rank=%d object=%s score=%.4f scored=%t", it.Rank, it.ObjectID, it.Score, it.Scored)
     }
     log.Printf("source=%s total=%d", rec.Source, rec.Total)
 

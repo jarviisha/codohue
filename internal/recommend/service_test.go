@@ -1707,13 +1707,13 @@ func TestDeleteFromCollection_Error(t *testing.T) {
 
 func TestRecCacheKey(t *testing.T) {
 	key := recCacheKey("ns_feed", 1, "user123", 20, 0)
-	want := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=0"
+	want := "rec:v3:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=0"
 	if key != want {
 		t.Errorf("got %q, want %q", key, want)
 	}
 
 	keyWithOffset := recCacheKey("ns_feed", 1, "user123", 20, 10)
-	wantWithOffset := "rec:v2:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=10"
+	wantWithOffset := "rec:v3:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=10"
 	if keyWithOffset != wantWithOffset {
 		t.Errorf("got %q, want %q", keyWithOffset, wantWithOffset)
 	}
@@ -2786,5 +2786,141 @@ func TestHybridRecommend_FailedArmGivesSurvivorFullWeight(t *testing.T) {
 	}
 	if math.Abs(resp.Items[0].Score-0.9) > 1e-6 {
 		t.Fatalf("surviving sparse arm must keep full weight (0.9), got %v", resp.Items[0].Score)
+	}
+}
+
+// TestScoredTracksTheServingPath pins the contract the `scored` flag exists
+// for: it must say whether Score is a relevance verdict for this subject, not
+// merely whether the field is populated. A fallback that reported scored=true
+// would reintroduce the ambiguity the flag was added to remove.
+func TestScoredTracksTheServingPath(t *testing.T) {
+	newService := func() *Service {
+		repo := &fakeRepo{count: 3, popularItems: []string{"pop-db-1", "pop-db-2"}}
+		s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+		s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+			return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+		}
+		s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+			return []*qdrant.ScoredPoint{
+				{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
+				{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-2")}},
+			}, nil
+		}
+		s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+			return []*qdrant.ScoredPoint{
+				{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
+			}, nil
+		}
+		s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+			return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}, {ObjectID: "pop-2", Score: 9}}, nil
+		}
+		return s
+	}
+
+	cfg := &namespace.Config{Gamma: 0}
+	cases := []struct {
+		name       string
+		call       func(*Service, context.Context, *Request) (*Response, error)
+		wantSource string
+		wantScored bool
+	}{
+		{
+			name: "collaborative filtering scores against the subject vector",
+			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+				return s.collaborativeFiltering(c, r, 4, cfg)
+			},
+			wantSource: SourceCollaborativeFiltering,
+			wantScored: true,
+		},
+		{
+			name: "hybrid blends two scored arms into one comparable score",
+			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+				return s.hybridRecommend(c, r, 4, &namespace.Config{Alpha: 0.7, Gamma: 0},
+					&qdrant.SparseVector{}, []float32{1}, nil)
+			},
+			wantSource: SourceHybrid,
+			wantScored: true,
+		},
+		{
+			name: "trending ranks the namespace, not the subject",
+			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+				return s.fallbackTrending(c, r, 4, cfg, nil)
+			},
+			wantSource: SourceFallbackPopular,
+			wantScored: false,
+		},
+		{
+			name: "popular ranks the namespace, not the subject",
+			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+				return s.fallbackPopular(c, r, 4, cfg, nil)
+			},
+			wantSource: SourceFallbackPopular,
+			wantScored: false,
+		},
+		{
+			name:       "cold blend interleaves two scales, so neither survives",
+			call:       func(s *Service, c context.Context, r *Request) (*Response, error) { return s.hybridCold(c, r, 4, cfg) },
+			wantSource: SourceHybridCold,
+			wantScored: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resp, err := tc.call(newService(), context.Background(), &Request{SubjectID: "u1", Namespace: "ns"})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if resp.Source != tc.wantSource {
+				t.Fatalf("source = %q, want %q", resp.Source, tc.wantSource)
+			}
+			if len(resp.Items) == 0 {
+				t.Fatal("no items returned; the case proves nothing")
+			}
+			for i, it := range resp.Items {
+				if it.Scored != tc.wantScored {
+					t.Errorf("items[%d] (%s): scored = %t, want %t", i, it.ObjectID, it.Scored, tc.wantScored)
+				}
+				if !tc.wantScored && it.Score != 0 {
+					t.Errorf("items[%d] (%s): score = %v, want the 0 placeholder", i, it.ObjectID, it.Score)
+				}
+			}
+		})
+	}
+}
+
+// TestHybridCold_DegradedCFPassThroughKeepsRealScores pins the one case where
+// scored does not follow source. When trending and popular are both
+// unavailable, hybridCold relabels a pure CF response as hybrid_cold; those
+// items were retrieved against the subject's own vector, so zeroing them to
+// match the label would throw away a real verdict and re-create the ambiguity
+// the flag exists to remove.
+func TestHybridCold_DegradedCFPassThroughKeepsRealScores(t *testing.T) {
+	repo := &fakeRepo{count: 3, popularErr: errors.New("popular unavailable")}
+	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
+		}, nil
+	}
+	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return nil, errors.New("redis unavailable")
+	}
+
+	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceHybridCold || len(resp.Items) != 1 {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+	if !resp.Items[0].Scored {
+		t.Error("pass-through CF item reported unscored; its score is a real verdict")
+	}
+	if resp.Items[0].Score == 0 {
+		t.Error("pass-through CF item lost its score")
 	}
 }

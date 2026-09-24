@@ -3,13 +3,24 @@ package codohuetypes
 import "time"
 
 // RecommendedItem is a single recommendation with its relevance score and rank.
-// Score is 0 for fallback paths (popular, trending cold-start) where no
-// personalised relevance signal is available. Rank is 1-based global position
-// accounting for the requested offset (rank = offset + i + 1).
+// Rank is 1-based global position accounting for the requested offset
+// (rank = offset + i + 1).
+//
+// Scored says whether Score means anything. The fallback paths — popular,
+// trending, and the cold-start blend — order items by a signal shared across
+// every subject, so there is no personalised score to report and Score is a 0
+// placeholder. Read that 0 as "this response carries no score", not as "this
+// item is irrelevant to the subject". Mirrors RankedItem.Scored.
+//
+// Read the flag per item rather than inferring it from Source. The two usually
+// agree, but a "hybrid_cold" response degrades to pass-through CF results when
+// the popular/trending arm is unavailable, and those items keep the real scores
+// they were retrieved with.
 type RecommendedItem struct {
 	ObjectID string  `json:"object_id"`
 	Score    float64 `json:"score"`
 	Rank     int     `json:"rank"`
+	Scored   bool    `json:"scored"`
 }
 
 // Response is returned by the recommendations endpoint.

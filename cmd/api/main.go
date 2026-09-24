@@ -24,6 +24,7 @@ import (
 	"github.com/jarviisha/codohue/internal/catalog"
 	"github.com/jarviisha/codohue/internal/config"
 	"github.com/jarviisha/codohue/internal/core/access"
+	"github.com/jarviisha/codohue/internal/core/httpapi"
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	"github.com/jarviisha/codohue/internal/infra/metrics"
@@ -199,7 +200,7 @@ func run() error {
 	// global key is populated only during an explicit compatibility period.
 	r.Group(func(r chi.Router) {
 		r.Use(auth.RequireNamespace(cfg.AdminAPIKey, keyHashFn, func(r *http.Request) string {
-			return chi.URLParam(r, "ns")
+			return httpapi.URLParam(r, "ns")
 		}, access.NewStore(db).ServiceToken))
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
 		r.Post("/v1/namespaces/{ns}/catalog", catalogHandler.Ingest)

@@ -1,6 +1,7 @@
 package architecture
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -166,4 +167,66 @@ func collectImports(root string) (map[string][]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// TestHandlersReadRouteParamsThroughHTTPAPI keeps the path-decoding fix from
+// rotting. chi hands back the raw segment when the client escaped anything, so
+// "did%3Aplc%3Aabc" and "did:plc:abc" arrive as two different ids — separate
+// vector lookups, cache keys and echoed response fields. httpapi.URLParam
+// resolves that exactly once; a handler reading the parameter straight from
+// chi silently reintroduces the bug on its own route, which no handler test
+// catches because a hand-built RouteContext returns whatever the test stored.
+//
+// Matching on the method name rather than on the chi import covers every way
+// in — chi.URLParam, an aliased import, chi.URLParamFromCtx, and
+// chi.RouteContext(r).URLParam(…) — because only the wrapper is spelled
+// httpapi.URLParam. Other chi APIs (NewRouter, RoutePattern, Mount) are
+// untouched.
+func TestHandlersReadRouteParamsThroughHTTPAPI(t *testing.T) {
+	// internal/ holds the handlers; cmd/ wires the routers and reads {ns} for
+	// auth, so both are in scope.
+	roots := []string{"..", "../../cmd"}
+	// internal/core/httpapi is the one legal caller: it *is* the wrapper.
+	const wrapperDir = "core/httpapi"
+
+	walk := func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.Contains(filepath.ToSlash(filepath.Dir(path)), wrapperDir) {
+			return nil
+		}
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return err
+		}
+
+		ast.Inspect(file, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if sel.Sel.Name != "URLParam" && sel.Sel.Name != "URLParamFromCtx" {
+				return true
+			}
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == "httpapi" {
+				return true
+			}
+			t.Errorf("%s:%d: reads a route parameter straight from chi; use httpapi.URLParam so it is decoded once",
+				path, fset.Position(sel.Pos()).Line)
+			return true
+		})
+		return nil
+	}
+
+	for _, root := range roots {
+		if err := filepath.WalkDir(root, walk); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
