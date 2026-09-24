@@ -1,6 +1,7 @@
 package architecture
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -166,4 +167,81 @@ func collectImports(root string) (map[string][]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// chiRouterPkg is the router whose URLParam returns percent-escaped values.
+const chiRouterPkg = "github.com/go-chi/chi/v5"
+
+// TestHandlersReadRouteParamsThroughHTTPAPI keeps the path-decoding fix from
+// rotting. chi.URLParam returns the raw segment when the client escaped
+// anything, so "did%3Aplc%3Aabc" and "did:plc:abc" arrive as two different
+// ids — separate vector lookups, cache keys and echoed response fields.
+// httpapi.URLParam resolves that exactly once; a handler calling chi directly
+// silently reintroduces the bug on its own route, which no handler test
+// catches because a hand-built RouteContext returns whatever the test stored.
+//
+// internal/core/httpapi is the one legal caller: it *is* the wrapper. Other
+// chi APIs (NewRouter, RouteContext, Mount) stay freely available.
+func TestHandlersReadRouteParamsThroughHTTPAPI(t *testing.T) {
+	// internal/ holds the handlers; cmd/ wires the routers and reads {ns} for
+	// auth, so both are in scope.
+	roots := []string{"..", "../../cmd"}
+	const wrapperDir = "core/httpapi"
+
+	walk := func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		if strings.Contains(filepath.ToSlash(filepath.Dir(path)), wrapperDir) {
+			return nil
+		}
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			return err
+		}
+
+		// Resolve the file's local name for chi: an alias would slip past a
+		// hardcoded "chi." check.
+		local := ""
+		for _, spec := range file.Imports {
+			imported, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				return err
+			}
+			if imported != chiRouterPkg {
+				continue
+			}
+			local = "chi"
+			if spec.Name != nil {
+				local = spec.Name.Name
+			}
+		}
+		if local == "" || local == "_" {
+			return nil
+		}
+
+		ast.Inspect(file, func(n ast.Node) bool {
+			sel, ok := n.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "URLParam" {
+				return true
+			}
+			if ident, ok := sel.X.(*ast.Ident); ok && ident.Name == local {
+				t.Errorf("%s:%d: calls %s.URLParam directly; use httpapi.URLParam so the parameter is decoded once",
+					path, fset.Position(sel.Pos()).Line, local)
+			}
+			return true
+		})
+		return nil
+	}
+
+	for _, root := range roots {
+		if err := filepath.WalkDir(root, walk); err != nil {
+			t.Fatal(err)
+		}
+	}
 }

@@ -122,9 +122,19 @@ func WriteLifecycleError(w http.ResponseWriter, err error) bool {
 // done before routing — unescaping "%2F" first would split one segment into
 // two — so every handler reads its parameters through this instead.
 //
+// Decoding happens exactly once. chi falls back to the already-decoded
+// r.URL.Path when RawPath is empty, which is what net/http leaves behind for
+// an id whose own text contains a '%' ("a%252Fb" → Path holds the literal
+// "a%2Fb"). Unescaping that a second time would eat the '%' and resolve to a
+// different id than the client named, so the RawPath check is what makes this
+// a normalisation rather than a second decode.
+//
 // A malformed escape is returned verbatim for the handler's own validation.
 func URLParam(r *http.Request, key string) string {
 	raw := chi.URLParam(r, key)
+	if r.URL.RawPath == "" {
+		return raw
+	}
 	decoded, err := url.PathUnescape(raw)
 	if err != nil {
 		return raw
