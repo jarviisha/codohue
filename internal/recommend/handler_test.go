@@ -635,7 +635,7 @@ func TestGetSubjectRecommendations_EscapedSubjectIDReachesSameSubject(t *testing
 			(&Handler{service: svc}).GetSubjectRecommendations)
 
 		rec := httptest.NewRecorder()
-		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, http.NoBody))
+		router.ServeHTTP(rec, httptest.NewRequestWithContext(context.Background(), http.MethodGet, target, http.NoBody))
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("GET %s: status = %d, want 200", target, rec.Code)

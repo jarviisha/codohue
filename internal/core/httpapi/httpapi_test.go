@@ -88,7 +88,7 @@ func TestURLParam_DecodesThroughRealRouter(t *testing.T) {
 		r.Get("/ns/{ns}/subjects/{id}/x", func(_ http.ResponseWriter, req *http.Request) {
 			got = URLParam(req, "id")
 		})
-		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, tc.target, http.NoBody))
+		r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequestWithContext(context.Background(), http.MethodGet, tc.target, http.NoBody))
 		if got != tc.want {
 			t.Errorf("GET %s: id = %q, want %q", tc.target, got, tc.want)
 		}
@@ -102,7 +102,7 @@ func TestURLParam_DecodesThroughRealRouter(t *testing.T) {
 func TestURLParam_MalformedEscapePassesThrough(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", "100%")
-	req := httptest.NewRequest(http.MethodGet, "/x", http.NoBody)
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/x", http.NoBody)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 
 	if got := URLParam(req, "id"); got != "100%" {
