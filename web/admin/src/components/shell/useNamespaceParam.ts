@@ -13,11 +13,16 @@ import { useLocation } from 'react-router-dom'
  *
  * Reading the pathname sidesteps the context entirely, which is what the
  * command palette and the recent-namespace recorder already do.
+ *
+ * Callers that need the namespace of a *pending* navigation rather than the
+ * committed one (the sidebar, so its scope switches on click instead of on
+ * load) pass a pathname explicitly; everyone else gets the current location.
  */
-export default function useNamespaceParam(): string | null {
+export default function useNamespaceParam(pathname?: string): string | null {
   const location = useLocation()
+  const source = pathname ?? location.pathname
   return useMemo(() => {
-    const m = location.pathname.match(/^\/ns\/([^/]+)/)
+    const m = source.match(/^\/ns\/([^/]+)/)
     return m ? decodeURIComponent(m[1]) : null
-  }, [location.pathname])
+  }, [source])
 }
