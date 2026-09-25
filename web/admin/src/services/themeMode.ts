@@ -29,9 +29,19 @@ function readStored(): ThemeMode {
 let mode: ThemeMode = readStored()
 const listeners = new Set<() => void>()
 
-function subscribe(listener: () => void) {
+// subscribe/getThemeMode/resolveThemeMode are exported for the store tests;
+// the app itself goes through useThemeMode.
+export function subscribe(listener: () => void) {
   listeners.add(listener)
   return () => listeners.delete(listener)
+}
+
+export function getThemeMode(): ThemeMode {
+  return mode
+}
+
+export function resolveThemeMode(mode: ThemeMode, systemDark: boolean): 'light' | 'dark' {
+  return mode === 'system' ? (systemDark ? 'dark' : 'light') : mode
 }
 
 export function setThemeMode(next: ThemeMode) {
@@ -52,7 +62,7 @@ function prefersDark(): boolean {
 export function useThemeMode() {
   const current = useSyncExternalStore(
     subscribe,
-    () => mode,
+    getThemeMode,
     () => 'system' as ThemeMode,
   )
   const [systemDark, setSystemDark] = useState(prefersDark)
@@ -64,8 +74,7 @@ export function useThemeMode() {
     return () => query.removeEventListener('change', onChange)
   }, [])
 
-  const resolvedMode: 'light' | 'dark' =
-    current === 'system' ? (systemDark ? 'dark' : 'light') : current
+  const resolvedMode = resolveThemeMode(current, systemDark)
 
   return { mode: current, resolvedMode, setMode: setThemeMode }
 }
