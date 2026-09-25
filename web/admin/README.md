@@ -63,7 +63,7 @@ make build-admin-embed  # canonical production sequence: npm ci → build → go
 
 ## Architecture in three sentences
 
-1. **Routes** live in [src/App.tsx](src/App.tsx). The URL identifies the active namespace (`:ns`) and page; the sidebar and namespace switcher derive their context from it.
+1. **Routes** live in [src/routes.tsx](src/routes.tsx). The URL identifies the active namespace (`:ns`) and page; the sidebar and namespace switcher derive their context from it. Each page is a separate chunk loaded through React Router's own `lazy`, so the download is part of the navigation: `useNavigation()` reports it, the shell draws a progress bar and marks the outlet `aria-busy`, the sidebar selects the pending destination, and [RouterLink](src/components/RouterLink.tsx) warms the module on hover or focus.
 2. **Services** under [src/services/](src/services/) own one domain each: types, request functions, and TanStack Query hooks all colocated in the same file. Every HTTP call goes through [services/http.ts](src/services/http.ts) — the `urls.test.mjs` smoke enforces no raw `fetch(`.
 3. **UI primitives** come from [@astryxdesign/core](https://github.com/facebook/astryx); pages compose them and reach for Tailwind only for local layout. Tailwind utilities are bound to Astryx tokens through `@astryxdesign/core/tailwind-theme.css` (see [src/index.css](src/index.css)), so `text-secondary` / `bg-surface` follow the active theme — never hardcode a colour.
 

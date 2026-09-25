@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "node --test tests/*.test.mjs",
     "astryx": "astryx",
-    "test:browser": "node tests/operator-ux.browser.mjs && node tests/events-performance.browser.mjs"
+    "test:browser": "node tests/operator-ux.browser.mjs && node tests/navigation.browser.mjs && node tests/events-performance.browser.mjs"
   },
   "dependencies": {
     "@astryxdesign/core": "^0.5.4",
