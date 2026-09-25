@@ -13,8 +13,6 @@ import (
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
 	"github.com/qdrant/go-client/qdrant"
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
 )
 
 // ─── fakes ───────────────────────────────────────────────────────────────────
@@ -136,86 +134,155 @@ func (f *fakeIDMapper) LookupObjectIDs(ctx context.Context, ids []string, ns str
 	return out, nil
 }
 
-// newTestService builds a Service with all infra replaced by no-ops / fakes.
-func newTestService(repo recommendRepo, ns recommendNsConfig, idmap recommendIDMapper) *Service {
-	s := &Service{
-		repo:        repo,
-		nsConfigSvc: ns,
-		idmapSvc:    idmap,
-		qdrant:      nil,
-	}
-	// Cache always misses by default.
-	s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+// fakeStores implements vectorStore, recommendationCache and trendingSource
+// with per-method overridable funcs. A nil func falls back to the benign
+// default noted on each method, so tests only set what they assert on.
+type fakeStores struct {
+	getCacheFn               func(ctx context.Context, key string) (string, error)
+	setCacheFn               func(ctx context.Context, key, value string, ttl time.Duration)
+	getTrendingFn            func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error)
+	fetchSubjectVecFn        func(ctx context.Context, ns string, numericID uint64) (*qdrant.SparseVector, error)
+	fetchSubjectDenseVecFn   func(ctx context.Context, ns string, numericID uint64) ([]float32, error)
+	searchObjectsFn          func(ctx context.Context, ns string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
+	searchObjectsDenseFn     func(ctx context.Context, ns string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
+	upsertDensePointFn       func(ctx context.Context, collection string, numericID uint64, vector []float32, payload map[string]*qdrant.Value) error
+	deleteFromCollectionFn   func(ctx context.Context, collection string, ids []*qdrant.PointId) error
+	ensureDenseCollectionsFn func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error
+}
+
+// Get defaults to a cache miss.
+func (f *fakeStores) Get(ctx context.Context, key string) (string, error) {
+	if f.getCacheFn == nil {
 		return "", errors.New("cache miss")
 	}
-	s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) {}
-	// Trending empty by default.
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	return f.getCacheFn(ctx, key)
+}
+
+// Set defaults to a no-op.
+func (f *fakeStores) Set(ctx context.Context, key, value string, ttl time.Duration) {
+	if f.setCacheFn != nil {
+		f.setCacheFn(ctx, key, value, ttl)
+	}
+}
+
+// GetTrending defaults to no trending data.
+func (f *fakeStores) GetTrending(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	if f.getTrendingFn == nil {
 		return nil, nil
 	}
-	// No subject vector by default → CF falls back to popular.
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	return f.getTrendingFn(ctx, ns, generation, offset, limit)
+}
+
+// FetchSubjectVector defaults to no subject vector → CF falls back to popular.
+func (f *fakeStores) FetchSubjectVector(ctx context.Context, ns string, numericID uint64) (*qdrant.SparseVector, error) {
+	if f.fetchSubjectVecFn == nil {
 		return nil, nil
 	}
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	return f.fetchSubjectVecFn(ctx, ns, numericID)
+}
+
+// FetchSubjectDenseVector defaults to no dense vector.
+func (f *fakeStores) FetchSubjectDenseVector(ctx context.Context, ns string, numericID uint64) ([]float32, error) {
+	if f.fetchSubjectDenseVecFn == nil {
 		return nil, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	return f.fetchSubjectDenseVecFn(ctx, ns, numericID)
+}
+
+// SearchObjects defaults to no results.
+func (f *fakeStores) SearchObjects(ctx context.Context, ns string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
+	if f.searchObjectsFn == nil {
 		return nil, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	return f.searchObjectsFn(ctx, ns, queryVec, filter, topK)
+}
+
+// SearchObjectsDense defaults to no results.
+func (f *fakeStores) SearchObjectsDense(ctx context.Context, ns string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
+	if f.searchObjectsDenseFn == nil {
 		return nil, nil
 	}
-	s.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error {
-		return nil
-	}
-	s.qdrantGetFn = func(_ context.Context, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-		return nil, nil
-	}
-	s.qdrantSearchFn = func(_ context.Context, _ *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error) {
-		return nil, nil
-	}
-	s.qdrantQueryFn = func(_ context.Context, _ *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error) {
-		return nil, nil
-	}
-	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+	return f.searchObjectsDenseFn(ctx, ns, queryVec, filter, topK)
+}
+
+// UpsertDensePoint defaults to failing; tests that reach qdrant get an error.
+func (f *fakeStores) UpsertDensePoint(ctx context.Context, collection string, numericID uint64, vector []float32, payload map[string]*qdrant.Value) error {
+	if f.upsertDensePointFn == nil {
 		return errors.New("qdrant error")
 	}
-	s.qdrantDeleteFn = func(_ context.Context, _ *qdrant.DeletePoints) error {
+	return f.upsertDensePointFn(ctx, collection, numericID, vector, payload)
+}
+
+// DeleteFromCollection defaults to success.
+func (f *fakeStores) DeleteFromCollection(ctx context.Context, collection string, ids []*qdrant.PointId) error {
+	if f.deleteFromCollectionFn == nil {
 		return nil
 	}
-	// EnsureDenseCollections is a no-op by default; tests that reach qdrant get an error.
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
+	return f.deleteFromCollectionFn(ctx, collection, ids)
+}
+
+// EnsureDenseCollections defaults to failing; tests that reach qdrant get an error.
+func (f *fakeStores) EnsureDenseCollections(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+	if f.ensureDenseCollectionsFn == nil {
 		return errors.New("qdrant error")
 	}
-	return s
+	return f.ensureDenseCollectionsFn(ctx, inc, dim, distance)
+}
+
+// newTestService builds a Service through the supported dependency
+// constructor with all infra replaced by one fakeStores, returned so tests
+// can override individual operations.
+func newTestService(repo recommendRepo, ns recommendNsConfig, idmap recommendIDMapper) (*Service, *fakeStores) {
+	f := &fakeStores{}
+	return newServiceWithDeps(repo, ns, idmap, f, f, f), f
 }
 
 func TestNewService(t *testing.T) {
+	t.Parallel()
 	svc := NewService(nil, nil, nil, nil, nil)
 
 	if svc == nil {
 		t.Fatal("expected non-nil service")
 	}
-	if svc.getCacheFn == nil || svc.setCacheFn == nil {
-		t.Fatal("expected cache hooks to be initialized")
+	if _, ok := svc.vectors.(*qdrantVectorStore); !ok {
+		t.Fatalf("vectors: expected the production qdrant adapter, got %T", svc.vectors)
 	}
-	if svc.getTrendingFn == nil || svc.fetchSubjectVecFn == nil || svc.fetchSubjectDenseVecFn == nil {
-		t.Fatal("expected query hooks to be initialized")
+	cache, ok := svc.cache.(*redisStore)
+	if !ok {
+		t.Fatalf("cache: expected the production redis adapter, got %T", svc.cache)
 	}
-	if svc.qdrantGetFn == nil || svc.qdrantSearchFn == nil || svc.qdrantQueryFn == nil || svc.qdrantUpsertFn == nil || svc.qdrantDeleteFn == nil {
-		t.Fatal("expected qdrant hooks to be initialized")
+	trending, ok := svc.trending.(*redisStore)
+	if !ok {
+		t.Fatalf("trending: expected the production redis adapter, got %T", svc.trending)
 	}
-	if svc.ensureDenseCollectionsFn == nil || svc.deleteFromCollectionFn == nil {
-		t.Fatal("expected collection hooks to be initialized")
+	if cache != trending {
+		t.Fatal("cache and trending must share one redis adapter")
+	}
+}
+
+func TestNewServiceWithDeps_WiresProvidedCollaborators(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{}
+	nsCfg := &fakeNsConfig{}
+	idmap := newFakeIDMapper()
+	f := &fakeStores{}
+
+	svc := newServiceWithDeps(repo, nsCfg, idmap, f, f, f)
+
+	if svc.repo != recommendRepo(repo) || svc.nsConfigSvc != recommendNsConfig(nsCfg) || svc.idmapSvc != recommendIDMapper(idmap) {
+		t.Fatal("domain dependencies not wired")
+	}
+	if svc.vectors != vectorStore(f) || svc.cache != recommendationCache(f) || svc.trending != trendingSource(f) {
+		t.Fatal("infrastructure collaborators not wired")
 	}
 }
 
 // ─── Recommend: cache hit ────────────────────────────────────────────────────
 
 func TestRecommend_CacheHit(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.getCacheFn = func(_ context.Context, _ string) (string, error) {
 		return `{"subject_id":"u1","namespace":"ns","items":[{"object_id":"cached-item","score":0,"rank":1}],"source":"cf","limit":10,"offset":0,"total":1,"generated_at":"2024-01-01T00:00:00Z"}`, nil
 	}
 
@@ -229,9 +296,10 @@ func TestRecommend_CacheHit(t *testing.T) {
 }
 
 func TestRecommend_IgnoresCacheEntryForDifferentIdentity(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 0, popularItems: []string{"fresh-item"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	f.getCacheFn = func(_ context.Context, _ string) (string, error) {
 		return `{"subject_id":"other","namespace":"tenant","items":[{"object_id":"cached-item","rank":1}]}`, nil
 	}
 
@@ -247,8 +315,9 @@ func TestRecommend_IgnoresCacheEntryForDifferentIdentity(t *testing.T) {
 // ─── doRecommend: cold start (count=0) ───────────────────────────────────────
 
 func TestDoRecommend_ColdStart_NoTrending_FallsBackToPopular(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 0, popularItems: []string{"popular-1", "popular-2"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s, _ := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	// getTrendingFn returns empty → falls back to popular
 
 	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
@@ -264,9 +333,10 @@ func TestDoRecommend_ColdStart_NoTrending_FallsBackToPopular(t *testing.T) {
 }
 
 func TestDoRecommend_ColdStart_UsesTrendingCache(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 0}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{
 			{ObjectID: "trending-1", Score: 10.0},
 			{ObjectID: "trending-2", Score: 8.0},
@@ -293,8 +363,9 @@ func TestDoRecommend_ColdStart_UsesTrendingCache(t *testing.T) {
 // ─── doRecommend: CF (count>=5) falls back to popular when no subject vector ─
 
 func TestDoRecommend_CF_NoSubjectVector_FallsBackToPopular(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 10, popularItems: []string{"pop-1"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s, _ := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	// fetchSubjectVecFn returns nil by default → falls back to popular
 
 	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
@@ -307,10 +378,11 @@ func TestDoRecommend_CF_NoSubjectVector_FallsBackToPopular(t *testing.T) {
 }
 
 func TestDoRecommend_CF_SubjectIDError_FallsBackToPopular(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 10, popularItems: []string{"pop-1"}}
 	idmap := newFakeIDMapper()
 	idmap.subjectErr = errors.New("idmap failure")
-	s := newTestService(repo, &fakeNsConfig{}, idmap)
+	s, _ := newTestService(repo, &fakeNsConfig{}, idmap)
 
 	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
 	if err != nil {
@@ -322,12 +394,13 @@ func TestDoRecommend_CF_SubjectIDError_FallsBackToPopular(t *testing.T) {
 }
 
 func TestCollaborativeFiltering_SeenItemsError_StillQueriesAndReturnsCF(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 10, seenItemsErr: errors.New("seen lookup failed")}
-	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if filter != nil {
 			t.Fatalf("expected nil filter when seen-items lookup fails, got %#v", filter)
 		}
@@ -349,18 +422,19 @@ func TestCollaborativeFiltering_SeenItemsError_StillQueriesAndReturnsCF(t *testi
 }
 
 func TestCollaborativeFiltering_UsesSeenItemsDaysFromConfig(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 10, seenItems: []string{"seen-1"}}
 	idmap := newFakeIDMapper()
 	var gotDays int
-	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{SeenItemsDays: 14, Gamma: 0}}, idmap)
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
-		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
-	}
-	s.repo = recommendRepo(&fakeRepoWithSeenDays{
+	seenRepo := &fakeRepoWithSeenDays{
 		fakeRepo: repo,
 		onSeen:   func(days int) { gotDays = days },
-	})
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	}
+	s, f := newTestService(seenRepo, &fakeNsConfig{cfg: &namespace.Config{SeenItemsDays: 14, Gamma: 0}}, idmap)
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if filter == nil || len(filter.MustNot) == 0 {
 			t.Fatal("expected seen-items filter to be built")
 		}
@@ -384,8 +458,9 @@ func TestCollaborativeFiltering_UsesSeenItemsDaysFromConfig(t *testing.T) {
 // ─── doRecommend: popular error ──────────────────────────────────────────────
 
 func TestDoRecommend_ColdStart_PopularError_ReturnsError(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 0, popularErr: errors.New("db error")}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s, _ := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 
 	_, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
 	if err == nil {
@@ -396,9 +471,10 @@ func TestDoRecommend_ColdStart_PopularError_ReturnsError(t *testing.T) {
 // ─── GetTrending: window resolution ─────────────────────────────────────────
 
 func TestGetTrending_ReportsConfigWindowOnly(t *testing.T) {
+	t.Parallel()
 	// There is one trending ZSET per namespace, built with the configured
 	// window — the response must report that window, never a per-request one.
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{TrendingWindow: 48},
 	}, newFakeIDMapper())
 
@@ -412,7 +488,8 @@ func TestGetTrending_ReportsConfigWindowOnly(t *testing.T) {
 }
 
 func TestGetTrending_UsesConfigWindow(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{TrendingWindow: 72},
 	}, newFakeIDMapper())
 
@@ -426,7 +503,8 @@ func TestGetTrending_UsesConfigWindow(t *testing.T) {
 }
 
 func TestGetTrending_DefaultWindow(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: nil}, newFakeIDMapper())
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: nil}, newFakeIDMapper())
 
 	resp, err := s.GetTrending(context.Background(), "ns", 10, 0)
 	if err != nil {
@@ -438,8 +516,9 @@ func TestGetTrending_DefaultWindow(t *testing.T) {
 }
 
 func TestGetTrending_ReturnsItems(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{
 			{ObjectID: "item-1", Score: 9.5},
 			{ObjectID: "item-2", Score: 7.0},
@@ -459,8 +538,9 @@ func TestGetTrending_ReturnsItems(t *testing.T) {
 }
 
 func TestGetTrending_NormalizesLimitAndOffset(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		if offset != 0 {
 			t.Fatalf("expected normalized offset 0, got %d", offset)
 		}
@@ -480,9 +560,10 @@ func TestGetTrending_NormalizesLimitAndOffset(t *testing.T) {
 }
 
 func TestGetTrending_ConfigErrorFailsBeforeRedis(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("config failed")}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("config failed")}, newFakeIDMapper())
 	redisCalled := false
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		redisCalled = true
 		return nil, errors.New("redis failed")
 	}
@@ -499,7 +580,8 @@ func TestGetTrending_ConfigErrorFailsBeforeRedis(t *testing.T) {
 // ─── storeEmbedding: dimension validation ────────────────────────────────────
 
 func TestStoreEmbedding_DimMismatch_ReturnsError(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 64},
 	}, newFakeIDMapper())
 
@@ -515,7 +597,8 @@ func TestStoreEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 }
 
 func TestStoreEmbedding_NsConfigError_ReturnsError(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		err: errors.New("db error"),
 	}, newFakeIDMapper())
 
@@ -526,8 +609,9 @@ func TestStoreEmbedding_NsConfigError_ReturnsError(t *testing.T) {
 }
 
 func TestStoreEmbedding_NoDimConfig_NoDimCheck(t *testing.T) {
+	t.Parallel()
 	// When config has EmbeddingDim=0, any dimension is accepted — no error before qdrant.
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 0},
 	}, newFakeIDMapper())
 
@@ -539,7 +623,8 @@ func TestStoreEmbedding_NoDimConfig_NoDimCheck(t *testing.T) {
 }
 
 func TestStoreSubjectEmbedding_DimMismatch_ReturnsError(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, newFakeIDMapper())
 
@@ -556,7 +641,8 @@ func TestStoreSubjectEmbedding_DimMismatch_ReturnsError(t *testing.T) {
 // OBJECT dense vectors are rejected with ErrCatalogActive so the catalog
 // stays the single source of truth.
 func TestStoreObjectEmbedding_CatalogEnabled_ReturnsErrCatalogActive(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{
 			EmbeddingDim:           4,
 			DenseSource:            "catalog",
@@ -574,8 +660,9 @@ func TestStoreObjectEmbedding_CatalogEnabled_ReturnsErrCatalogActive(t *testing.
 // Subject BYOE writes are NOT guarded under catalog mode — the spec
 // keeps subject vectors flowing through the cron mean-pool path.
 func TestStoreSubjectEmbedding_CatalogEnabled_NotGuarded(t *testing.T) {
+	t.Parallel()
 	idmap := newFakeIDMapper()
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{
 			EmbeddingDim:           4,
 			DenseDistance:          "cosine",
@@ -584,9 +671,9 @@ func TestStoreSubjectEmbedding_CatalogEnabled_NotGuarded(t *testing.T) {
 			CatalogStrategyVersion: "v1",
 		},
 	}, idmap)
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
+	f.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 	called := false
-	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+	f.upsertDensePointFn = func(_ context.Context, _ string, _ uint64, _ []float32, _ map[string]*qdrant.Value) error {
 		called = true
 		return nil
 	}
@@ -604,21 +691,22 @@ func TestStoreSubjectEmbedding_CatalogEnabled_NotGuarded(t *testing.T) {
 }
 
 func TestStoreEmbedding_Success(t *testing.T) {
+	t.Parallel()
 	idmap := newFakeIDMapper()
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 3, DenseDistance: "dot"},
 	}, idmap)
-	s.ensureDenseCollectionsFn = func(_ context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+	f.ensureDenseCollectionsFn = func(_ context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
 		if inc.Namespace() != "ns" || inc.Generation() != 1 || dim != 3 || distance != "dot" {
 			t.Fatalf("unexpected ensure args inc=%v dim=%d distance=%s", inc, dim, distance)
 		}
 		return nil
 	}
 	called := false
-	s.qdrantUpsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+	f.upsertDensePointFn = func(_ context.Context, collection string, _ uint64, _ []float32, _ map[string]*qdrant.Value) error {
 		called = true
-		if points.CollectionName != "ns_objects_dense" {
-			t.Fatalf("unexpected collection: %s", points.CollectionName)
+		if collection != "ns_objects_dense" {
+			t.Fatalf("unexpected collection: %s", collection)
 		}
 		return nil
 	}
@@ -632,22 +720,23 @@ func TestStoreEmbedding_Success(t *testing.T) {
 }
 
 func TestStoreSubjectEmbedding_Success(t *testing.T) {
+	t.Parallel()
 	idmap := newFakeIDMapper()
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, idmap)
-	s.ensureDenseCollectionsFn = func(_ context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+	f.ensureDenseCollectionsFn = func(_ context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
 		if inc.Namespace() != "ns" || inc.Generation() != 1 || dim != 2 || distance != "cosine" {
 			t.Fatalf("unexpected ensure args inc=%v dim=%d distance=%s", inc, dim, distance)
 		}
 		return nil
 	}
-	s.qdrantUpsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
-		if points.CollectionName != "ns_subjects_dense" {
-			t.Fatalf("unexpected collection: %s", points.CollectionName)
+	f.upsertDensePointFn = func(_ context.Context, collection string, _ uint64, vector []float32, _ map[string]*qdrant.Value) error {
+		if collection != "ns_subjects_dense" {
+			t.Fatalf("unexpected collection: %s", collection)
 		}
-		if len(points.Points) != 1 {
-			t.Fatalf("expected one point, got %d", len(points.Points))
+		if len(vector) != 2 {
+			t.Fatalf("expected the 2-dim vector, got %v", vector)
 		}
 		return nil
 	}
@@ -658,10 +747,11 @@ func TestStoreSubjectEmbedding_Success(t *testing.T) {
 }
 
 func TestStoreEmbedding_EnsureDenseCollectionsError(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, newFakeIDMapper())
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
+	f.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
 		return errors.New("ensure failed")
 	}
 
@@ -686,7 +776,8 @@ func (f *fakeRepoWithSeenDays) GetSeenItems(ctx context.Context, ns, subjectID s
 // ─── rankFallback ────────────────────────────────────────────────────────────
 
 func TestRankFallback(t *testing.T) {
-	svc := &Service{}
+	t.Parallel()
+	svc, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	req := &RankRequest{
 		SubjectID:  "user_a",
 		Candidates: []string{"post_1", "post_2", "post_3"},
@@ -717,7 +808,8 @@ func TestRankFallback(t *testing.T) {
 }
 
 func TestRankFallbackIsolation(t *testing.T) {
-	svc := &Service{}
+	t.Parallel()
+	svc, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	req := &RankRequest{Candidates: []string{"post_x", "post_y"}}
 	resp := svc.rankFallback(req, "ns")
 	resp.Items[0] = RankedItem{ObjectID: "mutated"}
@@ -729,6 +821,7 @@ func TestRankFallbackIsolation(t *testing.T) {
 // ─── pure helpers (kept for regression) ─────────────────────────────────────
 
 func TestRerank(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	old := now.Add(-100 * 24 * time.Hour)
 	recent := now.Add(-1 * 24 * time.Hour)
@@ -754,6 +847,7 @@ func TestRerank(t *testing.T) {
 }
 
 func TestRerankLimit(t *testing.T) {
+	t.Parallel()
 	points := make([]*qdrant.ScoredPoint, 10)
 	for i := range points {
 		points[i] = &qdrant.ScoredPoint{
@@ -767,6 +861,7 @@ func TestRerankLimit(t *testing.T) {
 }
 
 func TestRerankNoCreatedAt(t *testing.T) {
+	t.Parallel()
 	points := []*qdrant.ScoredPoint{
 		{Score: 7.0, Payload: map[string]*qdrant.Value{
 			"object_id": qdrant.NewValueString("obj-no-time"),
@@ -779,6 +874,7 @@ func TestRerankNoCreatedAt(t *testing.T) {
 }
 
 func TestBlendItems(t *testing.T) {
+	t.Parallel()
 	popular := []string{"p1", "p2", "p3", "p4", "p5", "p6", "p7"}
 	cf := []string{"c1", "c2", "c3", "p1", "c4"}
 
@@ -796,6 +892,7 @@ func TestBlendItems(t *testing.T) {
 }
 
 func TestBlendItemsExactRatio(t *testing.T) {
+	t.Parallel()
 	popular := make([]string, 20)
 	cf := make([]string, 20)
 	for i := range popular {
@@ -821,6 +918,7 @@ func TestBlendItemsExactRatio(t *testing.T) {
 }
 
 func TestClampUnitScores(t *testing.T) {
+	t.Parallel()
 	// Sparse dots are cosines since compute L2-normalizes both sides: the
 	// interesting cases are the two clamps, not a saturating curve. A score
 	// of 0.5 passing through unchanged is what separates this from the old
@@ -838,6 +936,7 @@ func TestClampUnitScores(t *testing.T) {
 }
 
 func TestClampUnitScores_BatchIndependent(t *testing.T) {
+	t.Parallel()
 	// The same raw score must map identically regardless of what else is in
 	// the request — the property chunked Rank callers rely on.
 	alone := clampUnitScores(map[string]float64{"a": 0.4})
@@ -848,6 +947,7 @@ func TestClampUnitScores_BatchIndependent(t *testing.T) {
 }
 
 func TestBoundDenseScores(t *testing.T) {
+	t.Parallel()
 	cos := boundDenseScores(map[string]float64{"neg": -0.4, "in": 0.7, "over": 1.3}, "")
 	if cos["neg"] != 0 || cos["in"] != 0.7 || cos["over"] != 1 {
 		t.Errorf("cosine bounds wrong: %+v", cos)
@@ -860,14 +960,15 @@ func TestBoundDenseScores(t *testing.T) {
 }
 
 func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dense"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
 			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-both"), "created_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))}},
@@ -890,16 +991,17 @@ func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
 }
 
 func TestHybridRecommend_AppliesFreshnessDecay(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	old := time.Now().UTC().Add(-30 * 24 * time.Hour).Format(time.RFC3339)
 	now := time.Now().UTC().Format(time.RFC3339)
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 10, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("old"), "created_at": qdrant.NewValueString(old)}},
 			{Score: 10, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("fresh"), "created_at": qdrant.NewValueString(now)}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, nil
 	}
 
@@ -913,6 +1015,7 @@ func TestHybridRecommend_AppliesFreshnessDecay(t *testing.T) {
 }
 
 func TestHybridRecommend_OrderingFixture(t *testing.T) {
+	t.Parallel()
 	// SC-009 safety net: fixed inputs whose blended ordering must survive both
 	// the blend-helper extraction and the normalization change. The four
 	// objects rank identically on the sparse and dense sides and the
@@ -922,8 +1025,8 @@ func TestHybridRecommend_OrderingFixture(t *testing.T) {
 	ts := func(daysAgo int) *qdrant.Value {
 		return qdrant.NewValueString(now.Add(-time.Duration(daysAgo) * 24 * time.Hour).Format(time.RFC3339))
 	}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 12, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-a"), "created_at": ts(0)}},
 			{Score: 8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b"), "created_at": ts(0)}},
@@ -931,7 +1034,7 @@ func TestHybridRecommend_OrderingFixture(t *testing.T) {
 			{Score: 1, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-d"), "created_at": ts(40)}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-a"), "created_at": ts(0)}},
 			{Score: 0.7, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b"), "created_at": ts(0)}},
@@ -956,11 +1059,12 @@ func TestHybridRecommend_OrderingFixture(t *testing.T) {
 }
 
 func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
-	s := newTestService(&fakeRepo{popularItems: []string{"popular-1"}}, &fakeNsConfig{}, newFakeIDMapper())
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{popularItems: []string{"popular-1"}}, &fakeNsConfig{}, newFakeIDMapper())
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, nil
 	}
 
@@ -974,9 +1078,10 @@ func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
 }
 
 func TestBuildSeenItemsFilter_SkipsUnmappableIDs(t *testing.T) {
+	t.Parallel()
 	idmap := newFakeIDMapper()
 	idmap.objectErrs["seen-bad"] = errors.New("mapping failed")
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
 
 	filter := s.buildSeenItemsFilter(context.Background(), "ns", []string{"seen-good", "seen-bad"})
 	if filter == nil {
@@ -988,6 +1093,7 @@ func TestBuildSeenItemsFilter_SkipsUnmappableIDs(t *testing.T) {
 }
 
 func TestExtractScores_IgnoresPointsWithoutObjectID(t *testing.T) {
+	t.Parallel()
 	got := extractScores([]*qdrant.ScoredPoint{
 		{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
 		{Score: 9, Payload: map[string]*qdrant.Value{}},
@@ -998,6 +1104,7 @@ func TestExtractScores_IgnoresPointsWithoutObjectID(t *testing.T) {
 }
 
 func TestBuildCreatedAtLookup_IgnoresBadTimestampAndDuplicates(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Second)
 	got := buildCreatedAtLookup(
 		[]*qdrant.ScoredPoint{
@@ -1016,102 +1123,13 @@ func TestBuildCreatedAtLookup_IgnoresBadTimestampAndDuplicates(t *testing.T) {
 	}
 }
 
-func TestFetchSubjectVector_Success(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantGetFn = func(_ context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-		if points.CollectionName != "ns_subjects" {
-			t.Fatalf("unexpected collection: %s", points.CollectionName)
-		}
-		return []*qdrant.RetrievedPoint{{
-			Vectors: &qdrant.VectorsOutput{
-				VectorsOptions: &qdrant.VectorsOutput_Vectors{
-					Vectors: &qdrant.NamedVectorsOutput{
-						Vectors: map[string]*qdrant.VectorOutput{
-							sparseVectorName: {Vector: &qdrant.VectorOutput_Sparse{Sparse: &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{2}}}},
-						},
-					},
-				},
-			},
-		}}, nil
-	}
-
-	vec, err := s.fetchSubjectVector(context.Background(), "ns", 7)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if vec == nil || len(vec.Indices) != 1 || vec.Indices[0] != 1 {
-		t.Fatalf("unexpected vector: %+v", vec)
-	}
-}
-
-func TestFetchSubjectDenseVector_Success(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantGetFn = func(_ context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-		if points.CollectionName != "ns_subjects_dense" {
-			t.Fatalf("unexpected collection: %s", points.CollectionName)
-		}
-		return []*qdrant.RetrievedPoint{{
-			Vectors: &qdrant.VectorsOutput{
-				VectorsOptions: &qdrant.VectorsOutput_Vectors{
-					Vectors: &qdrant.NamedVectorsOutput{
-						Vectors: map[string]*qdrant.VectorOutput{
-							denseVectorName: {Vector: &qdrant.VectorOutput_Dense{Dense: &qdrant.DenseVector{Data: []float32{0.1, 0.2}}}},
-						},
-					},
-				},
-			},
-		}}, nil
-	}
-
-	vec, err := s.fetchSubjectDenseVector(context.Background(), "ns", 7)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(vec) != 2 || vec[0] != 0.1 {
-		t.Fatalf("unexpected vector: %+v", vec)
-	}
-}
-
-func TestSearchObjectsDense_QueryError(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantQueryFn = func(_ context.Context, _ *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error) {
-		return nil, errors.New("query failed")
-	}
-
-	if _, err := s.searchObjectsDense(context.Background(), "ns", []float32{0.1}, nil, 5); err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
-
-func TestSearchObjects_Success(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantSearchFn = func(_ context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error) {
-		if points.CollectionName != "ns_objects" {
-			t.Fatalf("unexpected collection: %s", points.CollectionName)
-		}
-		if points.VectorName == nil || *points.VectorName != "sparse_interactions" {
-			t.Fatalf("unexpected vector name: %#v", points.VectorName)
-		}
-		return []*qdrant.ScoredPoint{
-			{Score: 1, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
-		}, nil
-	}
-
-	res, err := s.searchObjects(context.Background(), "ns", &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{2}}, nil, 5)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(res) != 1 || res[0].Payload["object_id"].GetStringValue() != "obj-1" {
-		t.Fatalf("unexpected results: %+v", res)
-	}
-}
-
 func TestRank_UsesSearchResults(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
 		if filter == nil || len(filter.Must) != 1 {
 			t.Fatalf("expected candidate filter, got %#v", filter)
 		}
@@ -1134,7 +1152,8 @@ func TestRank_UsesSearchResults(t *testing.T) {
 }
 
 func TestRank_FallsBackWhenSubjectVectorMissing(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "u1", Candidates: []string{"obj-1", "obj-2"}}, "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1145,11 +1164,12 @@ func TestRank_FallsBackWhenSubjectVectorMissing(t *testing.T) {
 }
 
 func TestRank_FallsBackWhenAllCandidateIDsFail(t *testing.T) {
+	t.Parallel()
 	idmap := newFakeIDMapper()
 	idmap.objectErrs["obj-1"] = errors.New("map failed")
 	idmap.objectErrs["obj-2"] = errors.New("map failed")
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
 
@@ -1179,15 +1199,16 @@ func hasIDNums(f *qdrant.Filter) []uint64 {
 }
 
 func TestRank_HybridBlendsSparseAndDense(t *testing.T) {
+	t.Parallel()
 	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 		return []float32{1, 2}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) != 3 {
 			t.Fatalf("sparse search must carry the candidate HasID filter, got %#v", filter)
 		}
@@ -1196,7 +1217,7 @@ func TestRank_HybridBlendsSparseAndDense(t *testing.T) {
 			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-b")}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) != 3 {
 			t.Fatalf("dense search must carry the candidate HasID filter, got %#v", filter)
 		}
@@ -1224,20 +1245,21 @@ func TestRank_HybridBlendsSparseAndDense(t *testing.T) {
 }
 
 func TestRank_DenseOnly_WhenNoSparseVector(t *testing.T) {
+	t.Parallel()
 	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "catalog"}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return nil, nil
 	}
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 		return []float32{1}, nil
 	}
 	sparseSearched := false
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		sparseSearched = true
 		return nil, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 0.8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
 			{Score: 0.4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-2")}},
@@ -1262,17 +1284,18 @@ func TestRank_DenseOnly_WhenNoSparseVector(t *testing.T) {
 }
 
 func TestRank_DenseGateClosed_WhenAlphaOne(t *testing.T) {
+	t.Parallel()
 	cfg := &namespace.Config{Alpha: 1.0, DenseSource: "byoe"}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
 	denseFetched := false
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 		denseFetched = true
 		return []float32{1}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
 		}, nil
@@ -1287,23 +1310,24 @@ func TestRank_DenseGateClosed_WhenAlphaOne(t *testing.T) {
 }
 
 func TestRank_AlphaFromConfigDecidesBalance(t *testing.T) {
+	t.Parallel()
 	// obj-sp is sparse-strong, obj-dn dense-strong; the winner must follow
 	// the namespace alpha (D1: no per-request override).
 	run := func(alpha float64) []RankedItem {
 		cfg := &namespace.Config{Alpha: alpha, DenseSource: "byoe"}
-		s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-		s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+		f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 			return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 		}
-		s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 			return []float32{1}, nil
 		}
-		s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 			return []*qdrant.ScoredPoint{
 				{Score: 20, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sp")}},
 			}, nil
 		}
-		s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 			return []*qdrant.ScoredPoint{
 				{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-dn")}},
 			}, nil
@@ -1332,13 +1356,14 @@ func mustNotCount(f *qdrant.Filter) int {
 }
 
 func TestRank_ExcludesSeenItems(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{seenItems: []string{"obj-seen"}}
 	cfg := &namespace.Config{SeenItemsDays: 30}
-	s := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if mustNotCount(filter) != 1 {
 			t.Fatalf("expected seen-items MustNot on the candidate filter, got %#v", filter)
 		}
@@ -1365,13 +1390,14 @@ func TestRank_ExcludesSeenItems(t *testing.T) {
 }
 
 func TestRank_ExcludesAuthoredObjectsWhenEnabled(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{authored: []string{"obj-mine"}}
 	cfg := &namespace.Config{ExcludeAuthored: true}
-	s := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if mustNotCount(filter) != 1 {
 			t.Fatalf("expected authored MustNot on the candidate filter, got %#v", filter)
 		}
@@ -1400,12 +1426,13 @@ func TestRank_ExcludesAuthoredObjectsWhenEnabled(t *testing.T) {
 }
 
 func TestRank_AuthoredFilterOffByDefault(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{authored: []string{"obj-mine"}}
-	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{}}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if mustNotCount(filter) != 0 {
 			t.Fatalf("no exclusions expected with the flag off, got %#v", filter)
 		}
@@ -1427,13 +1454,14 @@ func TestRank_AuthoredFilterOffByDefault(t *testing.T) {
 }
 
 func TestRank_ExclusionLookupFailureDegradesToUnfiltered(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{seenItemsErr: errors.New("db down"), authoredErr: errors.New("db down")}
 	cfg := &namespace.Config{SeenItemsDays: 30, ExcludeAuthored: true}
-	s := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if mustNotCount(filter) != 0 {
 			t.Fatalf("exclusion lookup failure must degrade to unfiltered, got %#v", filter)
 		}
@@ -1452,11 +1480,12 @@ func TestRank_ExclusionLookupFailureDegradesToUnfiltered(t *testing.T) {
 }
 
 func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
+	t.Parallel()
 	// Before the scored flag, "no subject vector", "candidate not indexed"
 	// and "indexed but zero overlap" were all Score:0 + hybrid_rank.
 
 	// Outcome 1: subject unknown → whole-response no_subject_vector marker.
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "ghost", Candidates: []string{"obj-1"}}, "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1467,11 +1496,11 @@ func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
 
 	// Outcomes 2+3: known subject; obj-zero is indexed with zero overlap
 	// (a real relevance verdict), obj-missing was never indexed.
-	s = newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f = newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 8, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-hit")}},
 			{Score: 0, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-zero")}},
@@ -1501,6 +1530,7 @@ func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
 }
 
 func TestRank_ChunkedCallsMatchUnionOrdering(t *testing.T) {
+	t.Parallel()
 	// SC-002: scoring 1000 candidates as two 500-item requests must produce
 	// scores that merge into the same ordering as one 1000-item request.
 	// This only holds because clampUnitScores is batch-independent.
@@ -1524,11 +1554,11 @@ func TestRank_ChunkedCallsMatchUnionOrdering(t *testing.T) {
 		return float32((i*37)%1009) + 1
 	}
 
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		rev := byNum()
 		var out []*qdrant.ScoredPoint
 		for _, num := range hasIDNums(filter) {
@@ -1578,18 +1608,19 @@ func TestRank_ChunkedCallsMatchUnionOrdering(t *testing.T) {
 }
 
 func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 3}
-	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-2")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{
 			{ObjectID: "pop-1", Score: 10},
 			{ObjectID: "pop-2", Score: 9},
@@ -1609,17 +1640,18 @@ func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
 }
 
 func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 3, popularErr: errors.New("popular failed")}
-	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, errors.New("redis failed")
 	}
 
@@ -1633,8 +1665,9 @@ func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) 
 }
 
 func TestHybridCold_WhenCFEmptyReturnsPopular(t *testing.T) {
-	s := newTestService(&fakeRepo{count: 3}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{count: 3}, &fakeNsConfig{}, newFakeIDMapper())
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}}, nil
 	}
 
@@ -1648,9 +1681,10 @@ func TestHybridCold_WhenCFEmptyReturnsPopular(t *testing.T) {
 }
 
 func TestDeleteObject_DeletesSparseAndDense(t *testing.T) {
+	t.Parallel()
 	var collections []string
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.deleteFromCollectionFn = func(_ context.Context, collection string, ids []*qdrant.PointId) error {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.deleteFromCollectionFn = func(_ context.Context, collection string, ids []*qdrant.PointId) error {
 		if len(ids) != 1 {
 			t.Fatalf("expected 1 point id, got %d", len(ids))
 		}
@@ -1667,9 +1701,10 @@ func TestDeleteObject_DeletesSparseAndDense(t *testing.T) {
 }
 
 func TestDeleteObject_ReturnsDenseCleanupFailureAfterAllStages(t *testing.T) {
+	t.Parallel()
 	var collections []string
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
 		collections = append(collections, collection)
 		if collection == "ns_objects_dense" {
 			return errors.New("dense cleanup failed")
@@ -1685,27 +1720,8 @@ func TestDeleteObject_ReturnsDenseCleanupFailureAfterAllStages(t *testing.T) {
 	}
 }
 
-func TestDeleteFromCollection_NotFoundIsNoOp(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantDeleteFn = func(_ context.Context, _ *qdrant.DeletePoints) error {
-		return grpcstatus.Error(codes.NotFound, "missing")
-	}
-	if err := s.deleteFromCollection(context.Background(), "ns_objects", []*qdrant.PointId{qdrant.NewIDNum(1)}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestDeleteFromCollection_Error(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.qdrantDeleteFn = func(_ context.Context, _ *qdrant.DeletePoints) error {
-		return errors.New("delete failed")
-	}
-	if err := s.deleteFromCollection(context.Background(), "ns_objects", []*qdrant.PointId{qdrant.NewIDNum(1)}); err == nil {
-		t.Fatal("expected error, got nil")
-	}
-}
-
 func TestRecCacheKey(t *testing.T) {
+	t.Parallel()
 	key := recCacheKey("ns_feed", 1, "user123", 20, 0)
 	want := "rec:v3:bnNfZmVlZA:dXNlcjEyMw:limit=20:offset=0"
 	if key != want {
@@ -1720,6 +1736,7 @@ func TestRecCacheKey(t *testing.T) {
 }
 
 func TestRecCacheKey_DelimiterCannotCollide(t *testing.T) {
+	t.Parallel()
 	first := recCacheKey("a", 1, "b:c", 20, 0)
 	second := recCacheKey("a:b", 1, "c", 20, 0)
 	if first == second {
@@ -1730,8 +1747,9 @@ func TestRecCacheKey_DelimiterCannotCollide(t *testing.T) {
 // ─── exclude_authored ─────────────────────────────────────────────────────────
 
 func TestAuthoredObjectSet_OffByDefault(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{authored: []string{"o1"}}
-	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+	svc, _ := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
 	got := svc.authoredObjectSet(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1"}, &namespace.Config{})
@@ -1746,8 +1764,9 @@ func TestAuthoredObjectSet_OffByDefault(t *testing.T) {
 
 // A query failure must degrade to unfiltered results, never fail the request.
 func TestAuthoredObjectSet_QueryErrorDegrades(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{authoredErr: errors.New("db down")}
-	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+	svc, _ := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
 	got := svc.authoredObjectSet(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1"}, &namespace.Config{ExcludeAuthored: true})
@@ -1758,9 +1777,10 @@ func TestAuthoredObjectSet_QueryErrorDegrades(t *testing.T) {
 }
 
 func TestExcludedObjectIDs_MergesAndDedupes(t *testing.T) {
+	t.Parallel()
 	// o2 is both seen and authored — it must appear exactly once.
 	repo := &fakeRepo{authored: []string{"o2", "o3"}}
-	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+	svc, _ := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
 	got := svc.excludedObjectIDs(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1"},
@@ -1782,7 +1802,8 @@ func TestExcludedObjectIDs_MergesAndDedupes(t *testing.T) {
 }
 
 func TestExcludedObjectIDs_PassesThroughWhenNoAuthors(t *testing.T) {
-	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, &fakeIDMapper{})
+	t.Parallel()
+	svc, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, &fakeIDMapper{})
 	seen := []string{"o1", "o2"}
 
 	got := svc.excludedObjectIDs(context.Background(),
@@ -1795,6 +1816,7 @@ func TestExcludedObjectIDs_PassesThroughWhenNoAuthors(t *testing.T) {
 }
 
 func TestDropAuthored(t *testing.T) {
+	t.Parallel()
 	authored := map[string]struct{}{"b": {}, "d": {}}
 	got := dropAuthored([]string{"a", "b", "c", "d", "e"}, authored)
 	if len(got) != 3 || got[0] != "a" || got[1] != "c" || got[2] != "e" {
@@ -1810,11 +1832,12 @@ func TestDropAuthored(t *testing.T) {
 // Trending must exclude before paging, otherwise the offset counts rows that
 // are about to be dropped and page 2 skips real results.
 func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{authored: []string{"t2", "t4"}}
-	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+	svc, f := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
 	var gotOffset, gotLimit int
-	svc.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		gotOffset, gotLimit = offset, limit
 		return []infraredis.TrendingEntry{
 			{ObjectID: "t1", Score: 9}, {ObjectID: "t2", Score: 8},
@@ -1840,11 +1863,12 @@ func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
 }
 
 func TestFallbackPopular_ExcludesAuthored(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{
 		popularItems: []string{"p1", "p2", "p3"},
 		authored:     []string{"p2"},
 	}
-	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
+	svc, _ := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
 	resp, err := svc.fallbackPopular(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1"}, 10,
@@ -1877,10 +1901,11 @@ func (f *fakeObjectMetaDeleter) Delete(_ context.Context, ns, objectID string) e
 // Without this the attribution outlives the object, so re-creating the same
 // object_id later silently inherits the old author.
 func TestDeleteObject_DropsMetadataRow(t *testing.T) {
+	t.Parallel()
 	meta := &fakeObjectMetaDeleter{}
-	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	svc.SetObjectMetadataDeleter(meta)
-	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
+	f.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
 
 	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
 		t.Fatalf("DeleteObject: %v", err)
@@ -1891,10 +1916,11 @@ func TestDeleteObject_DropsMetadataRow(t *testing.T) {
 }
 
 func TestDeleteObject_MetadataFailureIsReturnedForSafeRetry(t *testing.T) {
+	t.Parallel()
 	meta := &fakeObjectMetaDeleter{err: errors.New("db down")}
-	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	svc.SetObjectMetadataDeleter(meta)
-	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
+	f.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
 
 	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err == nil {
 		t.Fatal("expected metadata cleanup failure")
@@ -1904,8 +1930,9 @@ func TestDeleteObject_MetadataFailureIsReturnedForSafeRetry(t *testing.T) {
 // cmd/cron and cmd/embedder build a recommend.Service without the objects
 // domain wired; the nil deleter must be skipped, not dereferenced.
 func TestDeleteObject_NilMetadataDeleterIsSkipped(t *testing.T) {
-	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
+	t.Parallel()
+	svc, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error { return nil }
 
 	if err := svc.DeleteObject(context.Background(), "ns", "o1"); err != nil {
 		t.Fatalf("DeleteObject with no metadata deleter: %v", err)
@@ -1915,16 +1942,17 @@ func TestDeleteObject_NilMetadataDeleterIsSkipped(t *testing.T) {
 // ─── remediation phase 3: degraded-cache, hybridCold offset, trending paging, rank ───
 
 func TestRecommend_DegradedFallbackNotCached(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 10, popularItems: []string{"p1", "p2"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, errors.New("qdrant blip")
 	}
 	cached := false
-	s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+	f.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
 
 	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 2})
 	if err != nil {
@@ -1939,10 +1967,11 @@ func TestRecommend_DegradedFallbackNotCached(t *testing.T) {
 }
 
 func TestRecommend_ColdStartFallbackIsCached(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 0, popularItems: []string{"p1", "p2"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	cached := false
-	s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+	f.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
 
 	if _, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 2}); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1953,21 +1982,22 @@ func TestRecommend_ColdStartFallbackIsCached(t *testing.T) {
 }
 
 func TestHybridCold_DegradedCFBranchAppliesOffset(t *testing.T) {
+	t.Parallel()
 	// Trending errors → the CF response (built from offset 0) is served and
 	// must be re-paginated to the caller's offset.
 	repo := &fakeRepo{count: 2}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o1")}},
 			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o2")}},
 			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o3")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, errors.New("redis down")
 	}
 	repo.popularErr = errors.New("db down") // popular path also fails → cf branch
@@ -1992,11 +2022,12 @@ func TestHybridCold_DegradedCFBranchAppliesOffset(t *testing.T) {
 }
 
 func TestHybridCold_EmptyCFBranchAppliesOffset(t *testing.T) {
+	t.Parallel()
 	// CF succeeds with zero items → the trending response (built from
 	// offset 0) is served and must be re-paginated.
 	repo := &fakeRepo{count: 2}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 3}, {ObjectID: "t2", Score: 2}, {ObjectID: "t3", Score: 1}}
 		if offset >= len(all) {
 			return nil, nil
@@ -2025,10 +2056,11 @@ func TestHybridCold_EmptyCFBranchAppliesOffset(t *testing.T) {
 }
 
 func TestFallbackTrending_PastEndReturnsEmptyPageNotPopular(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{popularItems: []string{"p1", "p2", "p3"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 2}, {ObjectID: "t2", Score: 1}}
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		if offset >= len(all) {
 			return nil, nil
 		}
@@ -2049,8 +2081,9 @@ func TestFallbackTrending_PastEndReturnsEmptyPageNotPopular(t *testing.T) {
 }
 
 func TestFallbackTrending_NoTrendingAtAllFallsToPopular(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{popularItems: []string{"p1", "p2"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	s, _ := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	// default getTrendingFn returns empty at every offset
 
 	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 5, nil, nil)
@@ -2063,11 +2096,12 @@ func TestFallbackTrending_NoTrendingAtAllFallsToPopular(t *testing.T) {
 }
 
 func TestRank_ReturnsAllCandidatesIncludingUnscored(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("c2")}},
 		}, nil
@@ -2095,9 +2129,10 @@ func TestRank_ReturnsAllCandidatesIncludingUnscored(t *testing.T) {
 }
 
 func TestHybridCold_TrendingShareDropsSeenItems(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 2, seenItems: []string{"t1"}}
-	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 3}, {ObjectID: "t2", Score: 2}, {ObjectID: "t3", Score: 1}}
 		if offset >= len(all) {
 			return nil, nil
@@ -2124,13 +2159,14 @@ func TestHybridCold_TrendingShareDropsSeenItems(t *testing.T) {
 }
 
 func TestStoreObjectEmbedding_WritesCreatedAtPayload(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	var payload map[string]*qdrant.Value
-	s.qdrantUpsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
-		payload = points.Points[0].Payload
+	f.upsertDensePointFn = func(_ context.Context, _ string, _ uint64, _ []float32, p map[string]*qdrant.Value) error {
+		payload = p
 		return nil
 	}
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
+	f.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{1, 2}, &created); err != nil {
@@ -2147,13 +2183,14 @@ func TestStoreObjectEmbedding_WritesCreatedAtPayload(t *testing.T) {
 // id_mapping. DELETE must still drop that metadata row — skipping it when the
 // mapping is absent was a Phase 6 regression from switching to Lookup.
 func TestDeleteObject_NoMappingStillDropsMetadata(t *testing.T) {
+	t.Parallel()
 	meta := &fakeObjectMetaDeleter{}
 	idmap := newFakeIDMapper()
 	idmap.lookupMiss = true // LookupObjectID reports not-found for unknown ids
-	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
+	svc, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, idmap)
 	svc.SetObjectMetadataDeleter(meta)
 	qdrantCalled := false
-	svc.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error {
+	f.deleteFromCollectionFn = func(_ context.Context, _ string, _ []*qdrant.PointId) error {
 		qdrantCalled = true
 		return nil
 	}
@@ -2170,18 +2207,19 @@ func TestDeleteObject_NoMappingStillDropsMetadata(t *testing.T) {
 }
 
 func TestRank_BothSearchesFail_FallsBack(t *testing.T) {
+	t.Parallel()
 	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 		return []float32{1}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, errors.New("qdrant down")
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, errors.New("qdrant down")
 	}
 
@@ -2195,20 +2233,21 @@ func TestRank_BothSearchesFail_FallsBack(t *testing.T) {
 }
 
 func TestRank_DenseSearchFailureKeepsSparseAtFullWeight(t *testing.T) {
+	t.Parallel()
 	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 		return []float32{1}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 0.5, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, errors.New("dense collection missing")
 	}
 
@@ -2223,15 +2262,16 @@ func TestRank_DenseSearchFailureKeepsSparseAtFullWeight(t *testing.T) {
 }
 
 func TestRank_SparseFetchErrorFallsThroughToDense(t *testing.T) {
+	t.Parallel()
 	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "catalog"}
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: cfg}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return nil, errors.New("sparse collection unavailable")
 	}
-	s.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
 		return []float32{1}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 0.7, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
 		}, nil
@@ -2247,6 +2287,7 @@ func TestRank_SparseFetchErrorFallsThroughToDense(t *testing.T) {
 }
 
 func TestMergeExclusions(t *testing.T) {
+	t.Parallel()
 	a := map[string]struct{}{"x": {}, "y": {}}
 	b := map[string]struct{}{"y": {}, "z": {}}
 	if got := mergeExclusions(nil, nil); got != nil {
@@ -2285,9 +2326,10 @@ func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func
 // lease reports — deleting from the previous incarnation's collections would
 // silently leave the live ones intact.
 func TestDeleteObject_RunsUnderLeaseAndTargetsLeaseGeneration(t *testing.T) {
+	t.Parallel()
 	var collections []string
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
 		collections = append(collections, collection)
 		return nil
 	}
@@ -2307,9 +2349,10 @@ func TestDeleteObject_RunsUnderLeaseAndTargetsLeaseGeneration(t *testing.T) {
 }
 
 func TestDeleteObject_InactiveNamespaceTouchesNothing(t *testing.T) {
+	t.Parallel()
 	var collections []string
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	f.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
 		collections = append(collections, collection)
 		return nil
 	}
@@ -2326,9 +2369,10 @@ func TestDeleteObject_InactiveNamespaceTouchesNothing(t *testing.T) {
 // BYOE vectors are client-owned writes into namespace state; the same fence
 // applies, and an inactive namespace must not accept one.
 func TestStoreEmbedding_RunsUnderLifecycleLease(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
-	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error { return nil }
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
+	f.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
+	f.upsertDensePointFn = func(_ context.Context, _ string, _ uint64, _ []float32, _ map[string]*qdrant.Value) error { return nil }
 	lifecycle := &fakeLifecycleWriter{generation: 3}
 	s.SetLifecycleWriter(lifecycle)
 
@@ -2341,7 +2385,7 @@ func TestStoreEmbedding_RunsUnderLifecycleLease(t *testing.T) {
 
 	s.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
 	var upserted bool
-	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+	f.upsertDensePointFn = func(_ context.Context, _ string, _ uint64, _ []float32, _ map[string]*qdrant.Value) error {
 		upserted = true
 		return nil
 	}
@@ -2358,6 +2402,7 @@ func TestStoreEmbedding_RunsUnderLifecycleLease(t *testing.T) {
 // One documented clock-skew rule covers events and BYOE alike: at most five
 // minutes ahead, boundary inclusive.
 func TestStoreObjectEmbedding_FutureCreatedAtRejectedAtTheSameBoundaryAsEvents(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	for _, tc := range []struct {
 		name       string
@@ -2369,10 +2414,10 @@ func TestStoreObjectEmbedding_FutureCreatedAtRejectedAtTheSameBoundaryAsEvents(t
 		{"beyond the boundary", now.Add(maxObjectCreatedAtSkew + time.Minute), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
+			s, f := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
 			var upserted bool
-			s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
-			s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
+			f.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
+			f.upsertDensePointFn = func(_ context.Context, _ string, _ uint64, _ []float32, _ map[string]*qdrant.Value) error {
 				upserted = true
 				return nil
 			}
@@ -2402,7 +2447,8 @@ func TestStoreObjectEmbedding_FutureCreatedAtRejectedAtTheSameBoundaryAsEvents(t
 // A non-finite vector value is a separate failure from a bad timestamp: both
 // are 400s, but they must not be reported as the same thing.
 func TestStoreObjectEmbedding_NonFiniteVectorIsNotATimestampError(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2}}, newFakeIDMapper())
+	t.Parallel()
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2}}, newFakeIDMapper())
 
 	err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{float32(math.NaN()), 0.2}, nil)
 
@@ -2421,6 +2467,7 @@ func TestStoreObjectEmbedding_NonFiniteVectorIsNotATimestampError(t *testing.T) 
 // caching the result would persist that wrong answer for the whole TTL, long
 // after the config store recovered.
 func TestReadPaths_ResolveConfigBeforeTouchingTheCache(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		nsCfg   *fakeNsConfig
@@ -2447,13 +2494,13 @@ func TestReadPaths_ResolveConfigBeforeTouchingTheCache(t *testing.T) {
 			}},
 		} {
 			t.Run(path.name+"/"+tc.name, func(t *testing.T) {
-				s := newTestService(&fakeRepo{}, tc.nsCfg, newFakeIDMapper())
+				s, f := newTestService(&fakeRepo{}, tc.nsCfg, newFakeIDMapper())
 				cacheRead, cacheWritten := false, false
-				s.getCacheFn = func(_ context.Context, _ string) (string, error) {
+				f.getCacheFn = func(_ context.Context, _ string) (string, error) {
 					cacheRead = true
 					return "", errors.New("cache miss")
 				}
-				s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cacheWritten = true }
+				f.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cacheWritten = true }
 
 				err := path.call(s)
 
@@ -2475,10 +2522,11 @@ func TestReadPaths_ResolveConfigBeforeTouchingTheCache(t *testing.T) {
 // they must stay distinguishable all the way up: a missing namespace is
 // permanent, an unreadable config store is worth retrying.
 func TestNamespaceResolutionErrors_StayDistinguishable(t *testing.T) {
-	missing := newTestService(&fakeRepo{}, &fakeNsConfig{missing: true}, newFakeIDMapper())
+	t.Parallel()
+	missing, _ := newTestService(&fakeRepo{}, &fakeNsConfig{missing: true}, newFakeIDMapper())
 	_, missingErr := missing.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1"})
 
-	unavailable := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("db down")}, newFakeIDMapper())
+	unavailable, _ := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("db down")}, newFakeIDMapper())
 	_, unavailableErr := unavailable.Recommend(context.Background(), &Request{Namespace: "ns", SubjectID: "u1"})
 
 	if errors.Is(missingErr, ErrNamespaceConfigUnavailable) {
@@ -2496,6 +2544,7 @@ func TestNamespaceResolutionErrors_StayDistinguishable(t *testing.T) {
 // second attempt — but the request must still fail, because a 204 tells the
 // caller the object is gone everywhere.
 func TestDeleteObject_AttemptsEveryStageThenFails(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		failOn     string
@@ -2512,9 +2561,9 @@ func TestDeleteObject_AttemptsEveryStageThenFails(t *testing.T) {
 			if tc.failMeta {
 				meta.err = errors.New("objects table down")
 			}
-			svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+			svc, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 			svc.SetObjectMetadataDeleter(meta)
-			svc.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+			f.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
 				stages = append(stages, collection)
 				if collection == tc.failOn {
 					return errors.New("qdrant down")
@@ -2541,12 +2590,13 @@ func TestDeleteObject_AttemptsEveryStageThenFails(t *testing.T) {
 // endpoint is idempotent, and a retry after a partial failure must be able to
 // succeed once the remaining stages are clean.
 func TestDeleteObject_IdempotentRetryAfterPartialFailure(t *testing.T) {
+	t.Parallel()
 	meta := &fakeObjectMetaDeleter{}
-	svc := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	svc, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	svc.SetObjectMetadataDeleter(meta)
 
 	failing := true
-	svc.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
+	f.deleteFromCollectionFn = func(_ context.Context, collection string, _ []*qdrant.PointId) error {
 		if failing && collection == "ns_objects_dense" {
 			return errors.New("qdrant down")
 		}
@@ -2566,9 +2616,10 @@ func TestDeleteObject_IdempotentRetryAfterPartialFailure(t *testing.T) {
 // arm via the HasID backfill — not an implicit 0 that caps dense-only
 // candidates at (1-alpha) forever.
 func TestHybridRecommend_BackfillsMissingArmScores(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if ids := hasIDNums(filter); len(ids) > 0 {
 			// Backfill call for the dense-only candidate: its real sparse
 			// score is high — it merely fell outside sparse top-K.
@@ -2586,7 +2637,7 @@ func TestHybridRecommend_BackfillsMissingArmScores(t *testing.T) {
 			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if ids := hasIDNums(filter); len(ids) > 0 {
 			// obj-sparse has no dense vector: backfill legitimately finds nothing.
 			return nil, nil
@@ -2612,9 +2663,10 @@ func TestHybridRecommend_BackfillsMissingArmScores(t *testing.T) {
 }
 
 func TestHybridRecommend_BackfillFailureDegradesToZeroFill(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			return nil, errors.New("qdrant blip")
 		}
@@ -2622,7 +2674,7 @@ func TestHybridRecommend_BackfillFailureDegradesToZeroFill(t *testing.T) {
 			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			return nil, errors.New("qdrant blip")
 		}
@@ -2650,9 +2702,10 @@ func TestHybridRecommend_BackfillFailureDegradesToZeroFill(t *testing.T) {
 // suppressed ordering for the full TTL, the very thing the cache gate exists
 // to prevent.
 func TestHybridRecommend_BackfillFailureMarksDegraded(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			return nil, errors.New("qdrant blip")
 		}
@@ -2660,7 +2713,7 @@ func TestHybridRecommend_BackfillFailureMarksDegraded(t *testing.T) {
 			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			return nil, nil
 		}
@@ -2684,14 +2737,15 @@ func TestHybridRecommend_BackfillFailureMarksDegraded(t *testing.T) {
 // should shed it, and the result is neither the healthy blend nor the
 // documented zero-fill degradation.
 func TestHybridRecommend_SkipsBackfillForFailedArm(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
 	sparseCalls := 0
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		sparseCalls++
 		return nil, errors.New("qdrant down")
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			return nil, nil
 		}
@@ -2714,10 +2768,11 @@ func TestHybridRecommend_SkipsBackfillForFailedArm(t *testing.T) {
 // Letting it win the first-seen-wins lookup would swap the object's true
 // creation time for cron's fallback (last interaction), inflating freshness.
 func TestHybridRecommend_BackfillDoesNotOverrideCreatedAt(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	old := qdrant.NewValueString(time.Now().UTC().AddDate(-2, 0, 0).Format(time.RFC3339))
 	fresh := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			// Cron's sparse payload carries the last interaction time, not
 			// the object's real creation time.
@@ -2727,7 +2782,7 @@ func TestHybridRecommend_BackfillDoesNotOverrideCreatedAt(t *testing.T) {
 		}
 		return nil, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, filter *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		if len(hasIDNums(filter)) > 0 {
 			return nil, nil
 		}
@@ -2749,6 +2804,7 @@ func TestHybridRecommend_BackfillDoesNotOverrideCreatedAt(t *testing.T) {
 }
 
 func TestPointIDsMissingFrom(t *testing.T) {
+	t.Parallel()
 	pt := func(num uint64, obj string) *qdrant.ScoredPoint {
 		return &qdrant.ScoredPoint{Id: qdrant.NewIDNum(num), Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString(obj)}}
 	}
@@ -2768,14 +2824,15 @@ func TestPointIDsMissingFrom(t *testing.T) {
 // shares the blend, so it must share that reading too — otherwise the same
 // outage returns differently-scaled scores from the two endpoints.
 func TestHybridRecommend_FailedArmGivesSurvivorFullWeight(t *testing.T) {
-	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	now := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Id: qdrant.NewIDNum(1), Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-sparse"), "created_at": now}},
 		}, nil
 	}
-	s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return nil, errors.New("dense down")
 	}
 
@@ -2794,24 +2851,25 @@ func TestHybridRecommend_FailedArmGivesSurvivorFullWeight(t *testing.T) {
 // merely whether the field is populated. A fallback that reported scored=true
 // would reintroduce the ambiguity the flag was added to remove.
 func TestScoredTracksTheServingPath(t *testing.T) {
+	t.Parallel()
 	newService := func() *Service {
 		repo := &fakeRepo{count: 3, popularItems: []string{"pop-db-1", "pop-db-2"}}
-		s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
-		s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+		f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 			return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 		}
-		s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 			return []*qdrant.ScoredPoint{
 				{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 				{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-2")}},
 			}, nil
 		}
-		s.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 			return []*qdrant.ScoredPoint{
 				{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 			}, nil
 		}
-		s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 			return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}, {ObjectID: "pop-2", Score: 9}}, nil
 		}
 		return s
@@ -2896,17 +2954,18 @@ func TestScoredTracksTheServingPath(t *testing.T) {
 // match the label would throw away a real verdict and re-create the ambiguity
 // the flag exists to remove.
 func TestHybridCold_DegradedCFPassThroughKeepsRealScores(t *testing.T) {
+	t.Parallel()
 	repo := &fakeRepo{count: 3, popularErr: errors.New("popular unavailable")}
-	s := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
-	s.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
-	s.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
 		return []*qdrant.ScoredPoint{
 			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, errors.New("redis unavailable")
 	}
 

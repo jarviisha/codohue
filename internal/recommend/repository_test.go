@@ -229,16 +229,15 @@ func TestRepositoryGetAuthoredObjects_Truncates(t *testing.T) {
 	const ns = "rec_test_authored_cap"
 	cleanupCatalogNS(t, db, ns)
 
-	orig := authoredObjectsCap
-	authoredObjectsCap = 2
-	t.Cleanup(func() { authoredObjectsCap = orig })
+	repo := NewRepository(db)
+	repo.authoredObjectsCap = 2
 
 	now := time.Now()
 	for i, id := range []string{"a", "b", "c"} {
 		seedAuthoredItem(t, db, ns, id, "u1", now.Add(-time.Duration(i)*time.Minute))
 	}
 
-	got, truncated, err := NewRepository(db).GetAuthoredObjects(context.Background(), ns, "u1")
+	got, truncated, err := repo.GetAuthoredObjects(context.Background(), ns, "u1")
 	if err != nil {
 		t.Fatalf("GetAuthoredObjects: %v", err)
 	}

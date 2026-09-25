@@ -12,9 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc/codes"
-	grpcstatus "google.golang.org/grpc/status"
-
 	"github.com/jarviisha/codohue/internal/core/idmap"
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
@@ -115,7 +112,6 @@ type Service struct {
 	repo        recommendRepo
 	nsConfigSvc recommendNsConfig
 	idmapSvc    recommendIDMapper
-	qdrant      *qdrant.Client
 	lifecycle   interface {
 		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
 	}
@@ -123,24 +119,15 @@ type Service struct {
 	// optional; object metadata cleanup is skipped when nil
 	objectMeta objectMetadataDeleter
 
-	// injectable for testing — wired to real implementations in NewService
-	getCacheFn               func(ctx context.Context, key string) (string, error)
-	setCacheFn               func(ctx context.Context, key, value string, ttl time.Duration)
-	getTrendingFn            func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error)
-	fetchSubjectVecFn        func(ctx context.Context, ns string, numID uint64) (*qdrant.SparseVector, error)
-	fetchSubjectDenseVecFn   func(ctx context.Context, ns string, numID uint64) ([]float32, error)
-	searchObjectsFn          func(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
-	searchObjectsDenseFn     func(ctx context.Context, namespace string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
-	deleteFromCollectionFn   func(ctx context.Context, collection string, ids []*qdrant.PointId) error
-	ensureDenseCollectionsFn func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error
-	qdrantGetFn              func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
-	qdrantSearchFn           func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error)
-	qdrantQueryFn            func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error)
-	qdrantUpsertFn           func(ctx context.Context, points *qdrant.UpsertPoints) error
-	qdrantDeleteFn           func(ctx context.Context, points *qdrant.DeletePoints) error
+	// infrastructure collaborators (see store.go); production adapters are
+	// wired by NewService, tests fake them via newServiceWithDeps.
+	vectors  vectorStore
+	cache    recommendationCache
+	trending trendingSource
 }
 
-// NewService creates a new Service with all required dependencies.
+// NewService creates a new Service with all required dependencies, wiring the
+// production Qdrant and Redis adapters.
 func NewService(
 	repo *Repository,
 	nsConfigSvc recommendNsConfig,
@@ -148,57 +135,29 @@ func NewService(
 	qdrantClient *qdrant.Client,
 	redisClient *goredis.Client,
 ) *Service {
-	s := &Service{
+	redis := &redisStore{client: redisClient}
+	return newServiceWithDeps(repo, nsConfigSvc, idmapSvc,
+		&qdrantVectorStore{client: qdrantClient}, redis, redis)
+}
+
+// newServiceWithDeps is the explicitly-supported dependency constructor: the
+// single seam through which tests substitute the infrastructure collaborators.
+func newServiceWithDeps(
+	repo recommendRepo,
+	nsConfigSvc recommendNsConfig,
+	idmapSvc recommendIDMapper,
+	vectors vectorStore,
+	cache recommendationCache,
+	trending trendingSource,
+) *Service {
+	return &Service{
 		repo:        repo,
 		nsConfigSvc: nsConfigSvc,
 		idmapSvc:    idmapSvc,
-		qdrant:      qdrantClient,
+		vectors:     vectors,
+		cache:       cache,
+		trending:    trending,
 	}
-	s.getCacheFn = func(ctx context.Context, key string) (string, error) {
-		return redisClient.Get(ctx, key).Result()
-	}
-	s.setCacheFn = func(ctx context.Context, key, value string, ttl time.Duration) {
-		redisClient.Set(ctx, key, value, ttl) //nolint:errcheck // cache set is best-effort, failure is non-fatal
-	}
-	s.getTrendingFn = func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
-		return infraredis.GetTrending(ctx, redisClient, ns, generation, offset, limit)
-	}
-	s.fetchSubjectVecFn = s.fetchSubjectVector
-	s.fetchSubjectDenseVecFn = s.fetchSubjectDenseVector
-	s.searchObjectsFn = s.searchObjects
-	s.searchObjectsDenseFn = s.searchObjectsDense
-	s.deleteFromCollectionFn = s.deleteFromCollection
-	s.qdrantGetFn = func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-		return qdrantClient.Get(ctx, points)
-	}
-	s.qdrantSearchFn = func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error) {
-		resp, err := qdrantClient.GetPointsClient().Search(ctx, points)
-		if err != nil {
-			return nil, fmt.Errorf("qdrant search: %w", err)
-		}
-		return resp.GetResult(), nil
-	}
-	s.qdrantQueryFn = func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error) {
-		return qdrantClient.Query(ctx, points)
-	}
-	s.qdrantUpsertFn = func(ctx context.Context, points *qdrant.UpsertPoints) error {
-		_, err := qdrantClient.Upsert(ctx, points)
-		if err != nil {
-			return fmt.Errorf("qdrant upsert: %w", err)
-		}
-		return nil
-	}
-	s.qdrantDeleteFn = func(ctx context.Context, points *qdrant.DeletePoints) error {
-		_, err := qdrantClient.Delete(ctx, points)
-		if err != nil {
-			return fmt.Errorf("qdrant delete: %w", err)
-		}
-		return nil
-	}
-	s.ensureDenseCollectionsFn = func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
-		return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, inc, dim, distance)
-	}
-	return s
 }
 
 // SetObjectMetadataDeleter wires the objects domain in so DeleteObject can
@@ -285,7 +244,7 @@ func (s *Service) storeEmbeddingActive(ctx context.Context, ns, entityID, entity
 	if !ok {
 		inc = nslifecycle.ConfigIncarnation(ns, cfg)
 	}
-	if err := s.ensureDenseCollectionsFn(ctx, inc, dim, distance); err != nil {
+	if err := s.vectors.EnsureDenseCollections(ctx, inc, dim, distance); err != nil {
 		return fmt.Errorf("ensure dense collections: %w", err)
 	}
 
@@ -317,25 +276,7 @@ func (s *Service) storeEmbeddingActive(ctx context.Context, ns, entityID, entity
 		payload["created_at"] = qdrant.NewValueString(createdAt.UTC().Format(time.RFC3339))
 	}
 
-	err = s.qdrantUpsertFn(ctx, &qdrant.UpsertPoints{
-		CollectionName: collection,
-		Points: []*qdrant.PointStruct{
-			{
-				Id: qdrant.NewIDNum(numID),
-				Vectors: &qdrant.Vectors{
-					VectorsOptions: &qdrant.Vectors_Vectors{
-						Vectors: &qdrant.NamedVectors{
-							Vectors: map[string]*qdrant.Vector{
-								denseVectorName: qdrant.NewVectorDense(vector),
-							},
-						},
-					},
-				},
-				Payload: payload,
-			},
-		},
-	})
-	if err != nil {
+	if err := s.vectors.UpsertDensePoint(ctx, collection, numID, vector, payload); err != nil {
 		return fmt.Errorf("upsert dense vector: %w", err)
 	}
 	return nil
@@ -363,7 +304,7 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	}
 
 	cacheKey := recCacheKey(req.Namespace, namespaceGeneration(cfg), req.SubjectID, maxResults, req.Offset)
-	if cached, err := s.getCacheFn(ctx, cacheKey); err == nil {
+	if cached, err := s.cache.Get(ctx, cacheKey); err == nil {
 		var resp Response
 		if json.Unmarshal([]byte(cached), &resp) == nil &&
 			resp.Namespace == req.Namespace && resp.SubjectID == req.SubjectID {
@@ -383,7 +324,7 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	// warm subject for the full TTL.
 	if !req.degraded {
 		if b, err := json.Marshal(resp); err == nil {
-			s.setCacheFn(ctx, cacheKey, string(b), recCacheTTL)
+			s.cache.Set(ctx, cacheKey, string(b), recCacheTTL)
 		}
 	}
 	return resp, nil
@@ -415,7 +356,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	}
 
 	physicalNamespace := qdrantPhysicalNamespace(req.Namespace, cfg)
-	subjectVec, err := s.fetchSubjectVecFn(ctx, physicalNamespace, subjectNumID)
+	subjectVec, err := s.vectors.FetchSubjectVector(ctx, physicalNamespace, subjectNumID)
 	if err != nil || subjectVec == nil {
 		slog.Error("fetch subject vector failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		// err != nil is an infra failure; a nil vector without error just
@@ -445,7 +386,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	// against vectors recomputed in the same batch. To reduce staleness, decrease
 	// CODOHUE_BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
 	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
-		denseVec, err := s.fetchSubjectDenseVecFn(ctx, physicalNamespace, subjectNumID)
+		denseVec, err := s.vectors.FetchSubjectDenseVector(ctx, physicalNamespace, subjectNumID)
 		if err == nil && denseVec != nil {
 			return s.hybridRecommend(ctx, req, limit, cfg, subjectVec, denseVec, seenFilter)
 		}
@@ -461,7 +402,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 
 	// Over-fetch enough to cover offset + limit after reranking.
 	fetchLimit := uint64((req.Offset + limit) * cfOverFetchFactor)
-	results, err := s.searchObjectsFn(ctx, physicalNamespace, subjectVec, seenFilter, fetchLimit)
+	results, err := s.vectors.SearchObjects(ctx, physicalNamespace, subjectVec, seenFilter, fetchLimit)
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		req.degraded = true
@@ -509,7 +450,7 @@ func (s *Service) hybridRecommend(
 
 	// Sparse retrieval.
 	sparseOK := true
-	sparseResults, err := s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec, seenFilter, sparseTopK)
+	sparseResults, err := s.vectors.SearchObjects(ctx, physicalNamespace, subjectSparseVec, seenFilter, sparseTopK)
 	if err != nil {
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
@@ -519,7 +460,7 @@ func (s *Service) hybridRecommend(
 
 	// Dense retrieval.
 	denseOK := true
-	denseResults, err := s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec, seenFilter, denseTopK)
+	denseResults, err := s.vectors.SearchObjectsDense(ctx, physicalNamespace, subjectDenseVec, seenFilter, denseTopK)
 	if err != nil {
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
@@ -568,7 +509,7 @@ func (s *Service) hybridRecommend(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			sparseExtra, sparseErr = s.searchObjectsFn(ctx, physicalNamespace, subjectSparseVec,
+			sparseExtra, sparseErr = s.vectors.SearchObjects(ctx, physicalNamespace, subjectSparseVec,
 				hasIDFilter(sparseMissing), uint64(len(sparseMissing)))
 		}()
 	}
@@ -576,7 +517,7 @@ func (s *Service) hybridRecommend(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			denseExtra, denseErr = s.searchObjectsDenseFn(ctx, physicalNamespace, subjectDenseVec,
+			denseExtra, denseErr = s.vectors.SearchObjectsDense(ctx, physicalNamespace, subjectDenseVec,
 				hasIDFilter(denseMissing), uint64(len(denseMissing)))
 		}()
 	}
@@ -644,45 +585,6 @@ func (s *Service) hybridRecommend(
 		Total:       total,
 		GeneratedAt: time.Now().UTC(),
 	}, nil
-}
-
-// fetchSubjectDenseVector retrieves the dense embedding for a subject from {ns}_subjects_dense.
-func (s *Service) fetchSubjectDenseVector(ctx context.Context, ns string, numericID uint64) ([]float32, error) {
-	results, err := s.qdrantGetFn(ctx, &qdrant.GetPoints{
-		CollectionName: ns + "_subjects_dense",
-		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
-		WithVectors:    qdrant.NewWithVectorsInclude(denseVectorName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get subject dense vector: %w", err)
-	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-	vec := results[0].GetVectors().GetVectors().GetVectors()[denseVectorName]
-	if vec == nil {
-		return nil, nil
-	}
-	return vec.GetDense().GetData(), nil
-}
-
-// searchObjectsDense queries {ns}_objects_dense using a dense vector.
-func (s *Service) searchObjectsDense(ctx context.Context, ns string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
-	collection := ns + "_objects_dense"
-	start := time.Now()
-	results, err := s.qdrantQueryFn(ctx, &qdrant.QueryPoints{
-		CollectionName: collection,
-		Query:          qdrant.NewQueryDense(queryVec),
-		Using:          qdrant.PtrOf(denseVectorName),
-		Filter:         filter,
-		Limit:          qdrant.PtrOf(topK),
-		WithPayload:    qdrant.NewWithPayload(true),
-	})
-	metrics.QdrantQueryDuration.WithLabelValues(ns, collection).Observe(time.Since(start).Seconds())
-	if err != nil {
-		return nil, fmt.Errorf("query dense objects from qdrant: %w", err)
-	}
-	return results, nil
 }
 
 // extractScores builds an objectID → raw score map from Qdrant results.
@@ -985,7 +887,7 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int)
 		actualWindow = cfg.TrendingWindow
 	}
 
-	entries, err := s.getTrendingFn(ctx, ns, namespaceGeneration(cfg), offset, limit)
+	entries, err := s.trending.GetTrending(ctx, ns, namespaceGeneration(cfg), offset, limit)
 	if err != nil {
 		slog.Error("get trending from redis", "namespace", ns, "error", err)
 		entries = nil
@@ -1026,7 +928,7 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	}
 
 	generation := namespaceGeneration(cfg)
-	entries, err := s.getTrendingFn(ctx, req.Namespace, generation, fetchOffset, fetchLimit)
+	entries, err := s.trending.GetTrending(ctx, req.Namespace, generation, fetchOffset, fetchLimit)
 	if err != nil {
 		slog.Error("get trending failed, serving popular", "namespace", req.Namespace, "error", err)
 		req.degraded = true
@@ -1037,7 +939,7 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	if !hasTrending && fetchOffset > 0 {
 		// Empty page at a non-zero offset: distinguish "past the end of
 		// trending" from "no trending data" by probing rank 0.
-		if probe, probeErr := s.getTrendingFn(ctx, req.Namespace, generation, 0, 1); probeErr == nil && len(probe) > 0 {
+		if probe, probeErr := s.trending.GetTrending(ctx, req.Namespace, generation, 0, 1); probeErr == nil && len(probe) > 0 {
 			hasTrending = true
 		}
 	}
@@ -1125,46 +1027,6 @@ func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, 
 	}, nil
 }
 
-func (s *Service) fetchSubjectVector(ctx context.Context, ns string, numericID uint64) (*qdrant.SparseVector, error) {
-	results, err := s.qdrantGetFn(ctx, &qdrant.GetPoints{
-		CollectionName: ns + "_subjects",
-		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
-		WithVectors:    qdrant.NewWithVectorsInclude(sparseVectorName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("get subject vector from qdrant: %w", err)
-	}
-	if len(results) == 0 {
-		return nil, nil
-	}
-
-	vecOutput := results[0].GetVectors().GetVectors().GetVectors()[sparseVectorName]
-	if vecOutput == nil {
-		return nil, nil
-	}
-	return vecOutput.GetSparse(), nil
-}
-
-func (s *Service) searchObjects(ctx context.Context, ns string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error) {
-	collection := ns + "_objects"
-	timer := metrics.QdrantQueryDuration.WithLabelValues(ns, collection)
-	start := time.Now()
-	results, err := s.qdrantSearchFn(ctx, &qdrant.SearchPoints{
-		CollectionName: collection,
-		Vector:         queryVec.Values,
-		SparseIndices:  &qdrant.SparseIndices{Data: queryVec.Indices},
-		VectorName:     qdrant.PtrOf(sparseVectorName),
-		Filter:         filter,
-		Limit:          topK,
-		WithPayload:    qdrant.NewWithPayload(true),
-	})
-	timer.Observe(time.Since(start).Seconds())
-	if err != nil {
-		return nil, fmt.Errorf("query objects from qdrant: %w", err)
-	}
-	return results, nil
-}
-
 // buildSeenItemsFilter builds the MustNot point-id filter applied to every
 // object search. Both exclusion reasons — already seen, and (when
 // exclude_authored is on) authored by the requester — collapse into a single
@@ -1217,7 +1079,7 @@ func (s *Service) authoredObjectSet(ctx context.Context, req *Request, cfg *name
 	}
 	if truncated {
 		slog.Warn("exclude authored: hit the cap, older authored objects may still be recommended",
-			"namespace", req.Namespace, "subject_id", req.SubjectID, "cap", authoredObjectsCap)
+			"namespace", req.Namespace, "subject_id", req.SubjectID, "cap", defaultAuthoredObjectsCap)
 	}
 	if len(authored) == 0 {
 		return nil
@@ -1458,7 +1320,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	}
 
 	physicalNamespace := qdrantPhysicalNamespace(ns, cfg)
-	sparseVec, err := s.fetchSubjectVecFn(ctx, physicalNamespace, subjectNumID)
+	sparseVec, err := s.vectors.FetchSubjectVector(ctx, physicalNamespace, subjectNumID)
 	if err != nil {
 		slog.Error("rank: fetch subject sparse vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 		sparseVec = nil
@@ -1469,7 +1331,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	// the cron tick.
 	var denseVec []float32
 	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
-		denseVec, err = s.fetchSubjectDenseVecFn(ctx, physicalNamespace, subjectNumID)
+		denseVec, err = s.vectors.FetchSubjectDenseVector(ctx, physicalNamespace, subjectNumID)
 		if err != nil {
 			slog.Error("rank: fetch subject dense vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			denseVec = nil
@@ -1529,7 +1391,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	var sparseResults, denseResults []*qdrant.ScoredPoint
 	sparseOK, denseOK := false, false
 	if sparseVec != nil {
-		sparseResults, err = s.searchObjectsFn(ctx, physicalNamespace, sparseVec, filter, uint64(len(ids)))
+		sparseResults, err = s.vectors.SearchObjects(ctx, physicalNamespace, sparseVec, filter, uint64(len(ids)))
 		if err != nil {
 			slog.Error("rank: sparse search failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			sparseResults = nil
@@ -1538,7 +1400,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 		}
 	}
 	if denseVec != nil {
-		denseResults, err = s.searchObjectsDenseFn(ctx, physicalNamespace, denseVec, filter, uint64(len(ids)))
+		denseResults, err = s.vectors.SearchObjectsDense(ctx, physicalNamespace, denseVec, filter, uint64(len(ids)))
 		if err != nil {
 			slog.Error("rank: dense search failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 			denseResults = nil
@@ -1649,13 +1511,13 @@ func (s *Service) deleteObjectActive(ctx context.Context, ns, objectID string, i
 	if lookupErr == nil && found {
 		pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}
 
-		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(inc, infraqdrant.CollectionObjects), pointIDs); err != nil {
+		if err := s.vectors.DeleteFromCollection(ctx, infraqdrant.CollectionName(inc, infraqdrant.CollectionObjects), pointIDs); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 
-		// Dense collection is optional; deleteFromCollection treats NotFound as
+		// Dense collection is optional; DeleteFromCollection treats NotFound as
 		// success, while every other failure must remain visible and retryable.
-		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(inc, infraqdrant.CollectionObjectsDense), pointIDs); err != nil {
+		if err := s.vectors.DeleteFromCollection(ctx, infraqdrant.CollectionName(inc, infraqdrant.CollectionObjectsDense), pointIDs); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
@@ -1673,28 +1535,6 @@ func (s *Service) deleteObjectActive(ctx context.Context, ns, objectID string, i
 	}
 
 	return cleanupErr
-}
-
-func (s *Service) deleteFromCollection(ctx context.Context, collection string, ids []*qdrant.PointId) error {
-	err := s.qdrantDeleteFn(ctx, &qdrant.DeletePoints{
-		CollectionName: collection,
-		Points: &qdrant.PointsSelector{
-			PointsSelectorOneOf: &qdrant.PointsSelector_Points{
-				Points: &qdrant.PointsIdsList{
-					Ids: ids,
-				},
-			},
-		},
-	})
-	if err != nil {
-		// Treat a missing collection as a successful no-op: the object never had a vector
-		// there (e.g. the cron job hasn't run yet), so there is nothing to delete.
-		if grpcstatus.Code(err) == codes.NotFound {
-			return nil
-		}
-		return fmt.Errorf("delete from %q: %w", collection, err)
-	}
-	return nil
 }
 
 // recCacheKey builds the per-subject cache key under the namespace-generation

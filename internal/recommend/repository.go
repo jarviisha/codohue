@@ -8,29 +8,31 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// recommendDB is the narrow pgx surface the repository consumes; satisfied by
+// *pgxpool.Pool in production and by an in-package fake in unit tests.
+type recommendDB interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Repository queries events and popular items from PostgreSQL for the recommendation service.
 type Repository struct {
-	db         *pgxpool.Pool
-	queryFn    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
+	db recommendDB
+
+	// authoredObjectsCap bounds the exclusion list a single request can
+	// build; see defaultAuthoredObjectsCap. An instance field, not a
+	// package var, so tests can lower it without racing each other.
+	authoredObjectsCap int
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{
-		db: db,
-		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-			return db.Query(ctx, sql, args...)
-		},
-		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
-			return db.QueryRow(ctx, sql, args...)
-		},
-	}
+	return &Repository{db: db, authoredObjectsCap: defaultAuthoredObjectsCap}
 }
 
 // GetSeenItems returns the distinct object IDs the subject interacted with in the last seenItemsDays days.
 func (r *Repository) GetSeenItems(ctx context.Context, namespace, subjectID string, seenItemsDays int) ([]string, error) {
-	rows, err := r.queryFn(ctx, `
+	rows, err := r.db.Query(ctx, `
 		SELECT DISTINCT object_id FROM events
 		WHERE subject_id  = $1
 		  AND namespace   = $2
@@ -56,18 +58,16 @@ func (r *Repository) GetSeenItems(ctx context.Context, namespace, subjectID stri
 	return items, nil
 }
 
-// authoredObjectsCap bounds the exclusion list a single request can build.
-// The list is materialised into a Qdrant MustNot filter, so it costs one
-// point id per row on every query — a prolific author would otherwise send a
-// six-figure filter. Callers are expected to report truncation rather than
-// silently under-filter.
-// Declared as a var, not a const, so tests can lower it and exercise the
-// truncation branch without inserting five thousand rows.
-var authoredObjectsCap = 5000
+// defaultAuthoredObjectsCap bounds the exclusion list a single request can
+// build. The list is materialised into a Qdrant MustNot filter, so it costs
+// one point id per row on every query — a prolific author would otherwise
+// send a six-figure filter. Callers are expected to report truncation rather
+// than silently under-filter.
+const defaultAuthoredObjectsCap = 5000
 
 // GetAuthoredObjects returns the object ids the subject authored, newest
-// first, capped at authoredObjectsCap. The second return value reports
-// whether the cap truncated the result.
+// first, capped at the repository's authored-objects cap. The second return
+// value reports whether the cap truncated the result.
 //
 // Reads the objects table (migration 021), which is independent of
 // dense_source — attribution works the same under item2vec, svd, byoe and
@@ -75,13 +75,13 @@ var authoredObjectsCap = 5000
 // recent objects (the ones most likely to surface in recommendations) are the
 // ones that get excluded.
 func (r *Repository) GetAuthoredObjects(ctx context.Context, namespace, subjectID string) (objectIDs []string, truncated bool, err error) {
-	rows, err := r.queryFn(ctx, `
+	rows, err := r.db.Query(ctx, `
 		SELECT object_id FROM objects
 		WHERE namespace         = $1
 		  AND author_subject_id = $2
 		ORDER BY created_at DESC
 		LIMIT $3`,
-		namespace, subjectID, authoredObjectsCap+1,
+		namespace, subjectID, r.authoredObjectsCap+1,
 	)
 	if err != nil {
 		return nil, false, fmt.Errorf("query authored objects: %w", err)
@@ -101,15 +101,15 @@ func (r *Repository) GetAuthoredObjects(ctx context.Context, namespace, subjectI
 	}
 
 	// One extra row was requested purely to detect truncation.
-	if len(items) > authoredObjectsCap {
-		return items[:authoredObjectsCap], true, nil
+	if len(items) > r.authoredObjectsCap {
+		return items[:r.authoredObjectsCap], true, nil
 	}
 	return items, false, nil
 }
 
 // GetPopularItems returns the top items by interaction weight in the last 7 days.
 func (r *Repository) GetPopularItems(ctx context.Context, namespace string, limit int) ([]string, error) {
-	rows, err := r.queryFn(ctx, `
+	rows, err := r.db.Query(ctx, `
 		SELECT object_id FROM (
 			SELECT object_id, SUM(weight) AS popularity_score
 			FROM events
@@ -143,7 +143,7 @@ func (r *Repository) GetPopularItems(ctx context.Context, namespace string, limi
 // CountInteractions returns the total number of interactions for a subject in the namespace.
 func (r *Repository) CountInteractions(ctx context.Context, namespace, subjectID string) (int, error) {
 	var count int
-	err := r.queryRowFn(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT COUNT(*) FROM events
 		WHERE subject_id = $1 AND namespace = $2`,
 		subjectID, namespace,

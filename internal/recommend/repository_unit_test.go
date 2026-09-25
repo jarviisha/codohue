@@ -51,7 +51,28 @@ type fakeRow struct {
 
 func (f fakeRow) Scan(dest ...any) error { return f.scanFn(dest...) }
 
+// fakeQuerier implements recommendDB over per-call funcs.
+type fakeQuerier struct {
+	query    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	queryRow func(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func (f *fakeQuerier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	return f.query(ctx, sql, args...)
+}
+
+func (f *fakeQuerier) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return f.queryRow(ctx, sql, args...)
+}
+
+func repoWithRows(rows pgx.Rows, err error) *Repository {
+	return &Repository{db: &fakeQuerier{
+		query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, err },
+	}}
+}
+
 func TestNewRepository(t *testing.T) {
+	t.Parallel()
 	repo := NewRepository(nil)
 	if repo == nil {
 		t.Fatal("expected repository")
@@ -59,35 +80,35 @@ func TestNewRepository(t *testing.T) {
 }
 
 func TestRepositoryGetSeenItems_QueryError(t *testing.T) {
-	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
-			return nil, errors.New("query failed")
-		},
-	}
+	t.Parallel()
+	repo := repoWithRows(nil, errors.New("query failed"))
 	if _, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryGetSeenItems_ScanError(t *testing.T) {
+	t.Parallel()
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, scanErr: errors.New("scan failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
+	repo := repoWithRows(rows, nil)
 	if _, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryGetSeenItems_RowsError(t *testing.T) {
+	t.Parallel()
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, rowsErr: errors.New("rows failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
+	repo := repoWithRows(rows, nil)
 	if _, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryGetSeenItems_Success(t *testing.T) {
+	t.Parallel()
 	rows := &fakeRows{items: [][]any{{"obj-1"}, {"obj-2"}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
+	repo := repoWithRows(rows, nil)
 	items, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -101,35 +122,35 @@ func TestRepositoryGetSeenItems_Success(t *testing.T) {
 }
 
 func TestRepositoryGetPopularItems_QueryError(t *testing.T) {
-	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
-			return nil, errors.New("query failed")
-		},
-	}
+	t.Parallel()
+	repo := repoWithRows(nil, errors.New("query failed"))
 	if _, err := repo.GetPopularItems(context.Background(), "ns", 10); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryGetPopularItems_ScanError(t *testing.T) {
+	t.Parallel()
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, scanErr: errors.New("scan failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
+	repo := repoWithRows(rows, nil)
 	if _, err := repo.GetPopularItems(context.Background(), "ns", 10); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryGetPopularItems_RowsError(t *testing.T) {
+	t.Parallel()
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, rowsErr: errors.New("rows failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
+	repo := repoWithRows(rows, nil)
 	if _, err := repo.GetPopularItems(context.Background(), "ns", 10); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryGetPopularItems_Success(t *testing.T) {
+	t.Parallel()
 	rows := &fakeRows{items: [][]any{{"obj-1"}, {"obj-2"}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
+	repo := repoWithRows(rows, nil)
 	items, err := repo.GetPopularItems(context.Background(), "ns", 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -140,19 +161,21 @@ func TestRepositoryGetPopularItems_Success(t *testing.T) {
 }
 
 func TestRepositoryCountInteractions_QueryError(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	t.Parallel()
+	repo := &Repository{db: &fakeQuerier{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("scan failed") }}
 		},
-	}
+	}}
 	if _, err := repo.CountInteractions(context.Background(), "ns", "u1"); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestRepositoryCountInteractions_Success(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	t.Parallel()
+	repo := &Repository{db: &fakeQuerier{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				ptr, ok := dest[0].(*int)
 				if !ok {
@@ -162,7 +185,7 @@ func TestRepositoryCountInteractions_Success(t *testing.T) {
 				return nil
 			}}
 		},
-	}
+	}}
 	count, err := repo.CountInteractions(context.Background(), "ns", "u1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

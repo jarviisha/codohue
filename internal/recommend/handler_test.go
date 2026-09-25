@@ -92,7 +92,8 @@ func decodeErrorResponse(t *testing.T, rec *httptest.ResponseRecorder) httpapi.E
 // ─── GET /v1/namespaces/{ns}/subjects/{id}/recommendations ──────────────────
 
 func TestNewHandler(t *testing.T) {
-	svc := &Service{}
+	t.Parallel()
+	svc, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	h := NewHandler(svc)
 	if h == nil || h.service != svc {
 		t.Fatal("expected handler to be initialized with provided service")
@@ -100,6 +101,7 @@ func TestNewHandler(t *testing.T) {
 }
 
 func TestGetSubjectRecommendations_MissingParams(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 
 	for _, params := range []map[string]string{
@@ -121,6 +123,7 @@ func TestGetSubjectRecommendations_MissingParams(t *testing.T) {
 }
 
 func TestGetSubjectRecommendations_InvalidLimit(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	for _, q := range []string{"limit=abc", "limit=0", "limit=-1"} {
 		req := newChiRequest(http.MethodGet,
@@ -135,6 +138,7 @@ func TestGetSubjectRecommendations_InvalidLimit(t *testing.T) {
 }
 
 func TestGetSubjectRecommendations_InvalidOffset(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := newChiRequest(http.MethodGet,
 		"/v1/namespaces/ns/subjects/u1/recommendations?offset=-1",
@@ -147,6 +151,7 @@ func TestGetSubjectRecommendations_InvalidOffset(t *testing.T) {
 }
 
 func TestGetSubjectRecommendations_Success(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{
 		recommendResp: &Response{
 			SubjectID: "u1", Namespace: "ns",
@@ -181,6 +186,7 @@ func TestGetSubjectRecommendations_Success(t *testing.T) {
 }
 
 func TestGetSubjectRecommendations_ServiceError(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{recommendErr: errors.New("db error")}}
 	req := newChiRequest(http.MethodGet,
 		"/v1/namespaces/ns/subjects/u1/recommendations",
@@ -195,6 +201,7 @@ func TestGetSubjectRecommendations_ServiceError(t *testing.T) {
 // ─── POST /v1/namespaces/{ns}/rankings ─────────────────────────────────────
 
 func TestRank_MissingNamespacePath(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPost,
 		"/v1/namespaces//rankings", strings.NewReader(`{"subject_id":"u1","candidates":["p1"]}`))
@@ -206,6 +213,7 @@ func TestRank_MissingNamespacePath(t *testing.T) {
 }
 
 func TestRank_MissingSubjectID(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{}}
 	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
 		map[string]string{"ns": "ns"}, `{"candidates":["p1"]}`)
@@ -217,6 +225,7 @@ func TestRank_MissingSubjectID(t *testing.T) {
 }
 
 func TestRank_InvalidBody(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
 		map[string]string{"ns": "ns"}, "not json")
@@ -228,6 +237,7 @@ func TestRank_InvalidBody(t *testing.T) {
 }
 
 func TestRank_EmptyCandidates(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{}}
 	req := newChiRequest(http.MethodPost, "/v1/namespaces/ns/rankings",
 		map[string]string{"ns": "ns"}, `{"subject_id":"u1","candidates":[]}`)
@@ -239,6 +249,7 @@ func TestRank_EmptyCandidates(t *testing.T) {
 }
 
 func TestRank_TooManyCandidates(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{}}
 	candidates := make([]string, maxCandidates+1)
 	for i := range candidates {
@@ -262,6 +273,7 @@ func TestRank_TooManyCandidates(t *testing.T) {
 }
 
 func TestRank_Success(t *testing.T) {
+	t.Parallel()
 	fake := &fakeSvc{
 		rankResp: &RankResponse{
 			SubjectID: "u1", Namespace: "ns",
@@ -303,6 +315,7 @@ func TestRank_Success(t *testing.T) {
 // the single source of truth, so a stray "namespace" is rejected as an unknown
 // field rather than silently ignored.
 func TestRank_BodyNamespaceRejected(t *testing.T) {
+	t.Parallel()
 	fake := &fakeSvc{}
 	h := &Handler{service: fake}
 
@@ -321,6 +334,7 @@ func TestRank_BodyNamespaceRejected(t *testing.T) {
 }
 
 func TestRank_ServiceError(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{rankErr: errors.New("qdrant error")}}
 	body, err := json.Marshal(RankRequest{SubjectID: "u1", Candidates: []string{"p1"}})
 	if err != nil {
@@ -339,6 +353,7 @@ func TestRank_ServiceError(t *testing.T) {
 // ─── GET /v1/namespaces/{ns}/trending ──────────────────────────────────────
 
 func TestGetTrending_MissingNs(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet,
 		"/v1/namespaces//trending", http.NoBody)
@@ -350,6 +365,7 @@ func TestGetTrending_MissingNs(t *testing.T) {
 }
 
 func TestGetTrending_InvalidLimit(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := newChiRequest(http.MethodGet, "/v1/namespaces/ns/trending?limit=0",
 		map[string]string{"ns": "ns"}, "")
@@ -361,6 +377,7 @@ func TestGetTrending_InvalidLimit(t *testing.T) {
 }
 
 func TestGetTrending_InvalidOffset(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := newChiRequest(http.MethodGet, "/v1/namespaces/ns/trending?offset=-1",
 		map[string]string{"ns": "ns"}, "")
@@ -372,6 +389,7 @@ func TestGetTrending_InvalidOffset(t *testing.T) {
 }
 
 func TestGetTrending_Success(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{
 		trendingResp: &TrendingResponse{
 			Namespace:   "ns",
@@ -400,6 +418,7 @@ func TestGetTrending_Success(t *testing.T) {
 // ─── PUT /v1/namespaces/{ns}/{objects|subjects}/{id}/embedding ───────────
 
 func TestStoreEmbedding_MissingVector(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	for _, body := range []string{"", "not-json", `{"vector":[]}`} {
 		req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
@@ -413,6 +432,7 @@ func TestStoreEmbedding_MissingVector(t *testing.T) {
 }
 
 func TestStoreEmbedding_MissingURLParams(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut,
 		"/v1/namespaces/ns/objects//embedding", strings.NewReader(`{"vector":[0.1]}`))
@@ -424,6 +444,7 @@ func TestStoreEmbedding_MissingURLParams(t *testing.T) {
 }
 
 func TestStoreEmbedding_DimMismatch_Returns400(t *testing.T) {
+	t.Parallel()
 	h := &Handler{
 		service: &fakeSvc{storeErr: fmt.Errorf("embedding dimension mismatch: got 128, want 64")},
 	}
@@ -437,6 +458,7 @@ func TestStoreEmbedding_DimMismatch_Returns400(t *testing.T) {
 }
 
 func TestStoreEmbedding_ServiceError_Returns500(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{storeErr: errors.New("qdrant error")}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
@@ -452,6 +474,7 @@ func TestStoreEmbedding_ServiceError_Returns500(t *testing.T) {
 // Subject embeddings are NOT guarded — the spec keeps subject vectors
 // flowing through the cron mean-pool path.
 func TestStoreObjectEmbedding_CatalogActive_Returns409(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{storeErr: ErrCatalogActive}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
@@ -471,6 +494,7 @@ func TestStoreObjectEmbedding_CatalogActive_Returns409(t *testing.T) {
 // to 409 (the handler does not distinguish), but the service-level guard
 // only fires for entityType == "object" — see service_test below.
 func TestStoreSubjectEmbedding_CatalogActiveAtServiceLayerWouldStill409(t *testing.T) {
+	t.Parallel()
 	// Synthetic test: if any service surfaces ErrCatalogActive, the handler
 	// uniformly renders 409. The spec only guards the OBJECT path; this test
 	// pins handler behaviour, not service contract.
@@ -485,6 +509,7 @@ func TestStoreSubjectEmbedding_CatalogActiveAtServiceLayerWouldStill409(t *testi
 }
 
 func TestStoreObjectEmbeddingHandler_Success(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2,0.3]}`)
@@ -496,6 +521,7 @@ func TestStoreObjectEmbeddingHandler_Success(t *testing.T) {
 }
 
 func TestStoreSubjectEmbeddingHandler_Success(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/subjects/sub1/embedding",
 		map[string]string{"ns": "ns", "id": "sub1"}, `{"vector":[0.1,0.2,0.3]}`)
@@ -507,6 +533,7 @@ func TestStoreSubjectEmbeddingHandler_Success(t *testing.T) {
 }
 
 func TestStoreSubjectEmbeddingHandler_ServiceError(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{storeErr: errors.New("qdrant error")}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/subjects/sub1/embedding",
 		map[string]string{"ns": "ns", "id": "sub1"}, `{"vector":[0.1,0.2]}`)
@@ -520,6 +547,7 @@ func TestStoreSubjectEmbeddingHandler_ServiceError(t *testing.T) {
 // ─── DELETE /v1/namespaces/{ns}/objects/{id} ──────────────────────────────
 
 func TestDeleteObject_MissingParams(t *testing.T) {
+	t.Parallel()
 	h := &Handler{}
 	req := httptest.NewRequestWithContext(context.Background(), http.MethodDelete,
 		"/v1/namespaces/ns/objects/", http.NoBody)
@@ -531,6 +559,7 @@ func TestDeleteObject_MissingParams(t *testing.T) {
 }
 
 func TestDeleteObject_Success(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{}}
 	req := newChiRequest(http.MethodDelete, "/v1/namespaces/ns/objects/post_1",
 		map[string]string{"ns": "ns", "id": "post_1"}, "")
@@ -542,6 +571,7 @@ func TestDeleteObject_Success(t *testing.T) {
 }
 
 func TestDeleteObject_ServiceError(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{deleteErr: errors.New("qdrant error")}}
 	req := newChiRequest(http.MethodDelete, "/v1/namespaces/ns/objects/post_1",
 		map[string]string{"ns": "ns", "id": "post_1"}, "")
@@ -555,6 +585,7 @@ func TestDeleteObject_ServiceError(t *testing.T) {
 // ─── misc ─────────────────────────────────────────────────────────────────────
 
 func TestIsDimMismatch(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		err  error
 		want bool
@@ -590,6 +621,7 @@ func (readCloser) Close() error { return nil }
 // so a client can tell "your timestamp is wrong" apart from "your vector is
 // wrong" without parsing prose.
 func TestStoreEmbedding_FutureObjectCreatedAt_Returns400WithItsOwnCode(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{storeErr: fmt.Errorf("%w: object_created_at is more than five minutes in the future", ErrInvalidObjectCreatedAt)}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2],"object_created_at":"2999-01-01T00:00:00Z"}`)
@@ -607,6 +639,7 @@ func TestStoreEmbedding_FutureObjectCreatedAt_Returns400WithItsOwnCode(t *testin
 
 // A non-finite vector keeps its own code — the two 400s must not collapse.
 func TestStoreEmbedding_NonFiniteVector_KeepsInvalidEmbeddingCode(t *testing.T) {
+	t.Parallel()
 	h := &Handler{service: &fakeSvc{storeErr: fmt.Errorf("%w: vector contains non-finite values", ErrInvalidEmbedding)}}
 	req := newChiRequest(http.MethodPut, "/v1/namespaces/ns/objects/obj1/embedding",
 		map[string]string{"ns": "ns", "id": "obj1"}, `{"vector":[0.1,0.2]}`)
@@ -627,6 +660,7 @@ func TestStoreEmbedding_NonFiniteVector_KeepsInvalidEmbeddingCode(t *testing.T) 
 // reach the service with the same id. Before decoding at the boundary the
 // escaped spelling was an unknown subject and fell back to popular items.
 func TestGetSubjectRecommendations_EscapedSubjectIDReachesSameSubject(t *testing.T) {
+	t.Parallel()
 	const want = "did:plc:i4juv47rkmi6as6ut7g2ojgq"
 
 	for _, target := range []string{
@@ -658,6 +692,7 @@ func TestGetSubjectRecommendations_EscapedSubjectIDReachesSameSubject(t *testing
 // id is escaped must address the same object as the literal spelling, or a
 // client deletes nothing and writes a vector onto a phantom id.
 func TestMutationRoutes_EscapedObjectIDReachesSameObject(t *testing.T) {
+	t.Parallel()
 	const want = "at://did:plc:abc/app.bsky.feed.post/3k"
 	escaped := "at%3A%2F%2Fdid%3Aplc%3Aabc%2Fapp.bsky.feed.post%2F3k"
 

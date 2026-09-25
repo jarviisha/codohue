@@ -7,6 +7,7 @@ import (
 )
 
 func TestFreshnessMultiplierIsFiniteAndClamped(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
 	for name, createdAt := range map[string]time.Time{
 		"past":    now.Add(-24 * time.Hour),
@@ -24,6 +25,7 @@ func TestFreshnessMultiplierIsFiniteAndClamped(t *testing.T) {
 }
 
 func TestClampUnitRejectsNonFiniteValues(t *testing.T) {
+	t.Parallel()
 	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), -1} {
 		if got := clampUnit(value); got != 0 {
 			t.Fatalf("clampUnit(%v)=%v", value, got)
@@ -39,6 +41,7 @@ func TestClampUnitRejectsNonFiniteValues(t *testing.T) {
 // Validation rejects those at the boundary, but scoring must stay correct for
 // rows already stored before that rule existed.
 func TestNonNegativeAgeDays(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name      string
@@ -64,6 +67,7 @@ func TestNonNegativeAgeDays(t *testing.T) {
 // value is ~740k days old, and e^(-γ·740000) underflows to 0 rather than
 // producing NaN.
 func TestFreshnessMultiplier_MalformedTimestampsStayFinite(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name      string
@@ -93,6 +97,7 @@ func TestFreshnessMultiplier_MalformedTimestampsStayFinite(t *testing.T) {
 // encoding/json cannot represent NaN or ±Inf, so a single leaked value fails
 // the whole response, not just that item.
 func TestFiniteScore_RejectsUnserializableValues(t *testing.T) {
+	t.Parallel()
 	for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
 		if finiteScore(value) {
 			t.Errorf("finiteScore(%v) must be false — encoding/json cannot marshal it", value)
