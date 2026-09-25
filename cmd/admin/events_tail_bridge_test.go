@@ -12,7 +12,7 @@ import (
 )
 
 func TestEventsTailBridge_HandleRepublishesAndTracks(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	tracker := admin.NewEventRateTracker()
 	bridge := newEventsTailBridge(nil, bus, tracker)
@@ -47,7 +47,7 @@ func TestEventsTailBridge_HandleRepublishesAndTracks(t *testing.T) {
 }
 
 func TestEventsTailBridge_DropsBadPayload(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	bridge := newEventsTailBridge(nil, bus, admin.NewEventRateTracker())
 

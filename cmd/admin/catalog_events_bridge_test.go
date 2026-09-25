@@ -11,7 +11,7 @@ import (
 )
 
 func TestCatalogBridgeRepublishesGoodPayload(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{"catalog.item_state_changed"}})
 	defer cancel()
@@ -43,7 +43,7 @@ func TestCatalogBridgeRepublishesGoodPayload(t *testing.T) {
 }
 
 func TestCatalogBridgeDropsMalformedPayload(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{})
 	defer cancel()
@@ -63,7 +63,7 @@ func TestCatalogBridgeDropsMalformedPayload(t *testing.T) {
 }
 
 func TestCatalogBridgeRoutesBacklogSnapshot(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{"catalog.backlog_snapshot"}})
 	defer cancel()
@@ -89,7 +89,7 @@ func TestCatalogBridgeRoutesBacklogSnapshot(t *testing.T) {
 }
 
 func TestCatalogBridgeRoutesDeadLetterGrew(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{"catalog.dead_letter_grew"}})
 	defer cancel()
@@ -112,7 +112,7 @@ func TestCatalogBridgeRoutesDeadLetterGrew(t *testing.T) {
 }
 
 func TestCatalogBridgeIgnoresUnknownChannel(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{})
 	defer cancel()

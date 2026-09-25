@@ -26,7 +26,7 @@ func drain(t *testing.T, ch <-chan eventbus.Event, n int) []eventbus.Event {
 }
 
 func TestObserverAdapterPublishesEveryCallback(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 
 	ch, cancel := bus.Subscribe(eventbus.Filter{EntityID: "42"})
@@ -61,7 +61,7 @@ func TestObserverAdapterPublishesEveryCallback(t *testing.T) {
 }
 
 func TestObserverAdapterCancelledPublishesCancelledKind(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 
 	ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{"batch_run.cancelled"}})
@@ -84,7 +84,7 @@ func TestObserverAdapterCancelledPublishesCancelledKind(t *testing.T) {
 }
 
 func TestObserverAdapterFilterByNamespaceIsolatesEvents(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 
 	prodCh, cancelProd := bus.Subscribe(eventbus.Filter{Namespace: "prod"})

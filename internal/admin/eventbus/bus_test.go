@@ -10,7 +10,7 @@ import (
 )
 
 func TestPublishFanOutToAllSubscribers(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	const n = 3
@@ -40,7 +40,7 @@ func TestPublishFanOutToAllSubscribers(t *testing.T) {
 }
 
 func TestPublishStampsAtIfZero(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	ch, cancel := b.Subscribe(Filter{})
@@ -61,7 +61,7 @@ func TestPublishStampsAtIfZero(t *testing.T) {
 }
 
 func TestPublishPreservesExplicitAt(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	ch, cancel := b.Subscribe(Filter{})
@@ -81,7 +81,7 @@ func TestPublishPreservesExplicitAt(t *testing.T) {
 }
 
 func TestFilterByNamespace(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	prodCh, cancelProd := b.Subscribe(Filter{Namespace: "prod"})
@@ -109,7 +109,7 @@ func TestFilterByNamespace(t *testing.T) {
 }
 
 func TestFilterByKinds(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	ch, cancel := b.Subscribe(Filter{Kinds: []string{"batch_run.started", "batch_run.completed"}})
@@ -139,7 +139,7 @@ func TestFilterByKinds(t *testing.T) {
 }
 
 func TestFilterByEntityID(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	ch, cancel := b.Subscribe(Filter{EntityID: "run-42"})
@@ -164,7 +164,7 @@ func TestFilterByEntityID(t *testing.T) {
 }
 
 func TestCancelClosesChannelAndIsIdempotent(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	defer b.Close()
 
 	ch, cancel := b.Subscribe(Filter{})
@@ -185,19 +185,19 @@ func TestCancelClosesChannelAndIsIdempotent(t *testing.T) {
 }
 
 func TestCloseIsIdempotent(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	b.Close()
 	b.Close()
 }
 
 func TestPublishAfterCloseIsNoop(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	b.Close()
 	b.Publish(context.Background(), Event{Kind: "test"}) // must not panic
 }
 
 func TestSubscribeAfterCloseReturnsClosedChannel(t *testing.T) {
-	b := NewBus()
+	b := NewBus(Config{})
 	b.Close()
 
 	ch, cancel := b.Subscribe(Filter{})
@@ -214,10 +214,10 @@ func TestSubscribeAfterCloseReturnsClosedChannel(t *testing.T) {
 
 func TestDropOnSlowSubscriberFiresCallback(t *testing.T) {
 	var dropped atomic.Int64
-	b := NewBus(
-		WithBufferSize(2),
-		WithDropCallback(func(Event) { dropped.Add(1) }),
-	)
+	b := NewBus(Config{
+		BufferSize: 2,
+		OnDrop:     func(Event) { dropped.Add(1) },
+	})
 	defer b.Close()
 
 	ch, cancel := b.Subscribe(Filter{})
@@ -251,11 +251,11 @@ loop:
 func TestPublishCallbackFiresPerEvent(t *testing.T) {
 	var publishedKinds []string
 	var mu sync.Mutex
-	b := NewBus(WithPublishCallback(func(kind string) {
+	b := NewBus(Config{OnPublish: func(kind string) {
 		mu.Lock()
 		defer mu.Unlock()
 		publishedKinds = append(publishedKinds, kind)
-	}))
+	}})
 	defer b.Close()
 
 	b.Publish(context.Background(), Event{Kind: "a"})
@@ -271,7 +271,7 @@ func TestPublishCallbackFiresPerEvent(t *testing.T) {
 
 func TestPublishAfterCloseDoesNotFirePublishCallback(t *testing.T) {
 	var fires atomic.Int64
-	b := NewBus(WithPublishCallback(func(string) { fires.Add(1) }))
+	b := NewBus(Config{OnPublish: func(string) { fires.Add(1) }})
 	b.Close()
 	b.Publish(context.Background(), Event{Kind: "x"})
 	if got := fires.Load(); got != 0 {
@@ -281,10 +281,10 @@ func TestPublishAfterCloseDoesNotFirePublishCallback(t *testing.T) {
 
 func TestSubscribeAndUnsubscribeCallbacksTrackGauge(t *testing.T) {
 	var gauge atomic.Int64
-	b := NewBus(
-		WithSubscribeCallback(func() { gauge.Add(1) }),
-		WithUnsubscribeCallback(func() { gauge.Add(-1) }),
-	)
+	b := NewBus(Config{
+		OnSubscribe:   func() { gauge.Add(1) },
+		OnUnsubscribe: func() { gauge.Add(-1) },
+	})
 	defer b.Close()
 
 	_, cancel1 := b.Subscribe(Filter{})
@@ -307,7 +307,7 @@ func TestSubscribeAndUnsubscribeCallbacksTrackGauge(t *testing.T) {
 
 func TestCloseFiresUnsubscribeForEverySubscriber(t *testing.T) {
 	var unsubs atomic.Int64
-	b := NewBus(WithUnsubscribeCallback(func() { unsubs.Add(1) }))
+	b := NewBus(Config{OnUnsubscribe: func() { unsubs.Add(1) }})
 
 	const n = 5
 	for i := 0; i < n; i++ {
@@ -330,7 +330,7 @@ func TestConcurrentFanOut(t *testing.T) {
 		nSubs   = 100
 		nEvents = 10_000
 	)
-	b := NewBus(WithBufferSize(16_384))
+	b := NewBus(Config{BufferSize: 16_384})
 	defer b.Close()
 
 	var wg sync.WaitGroup

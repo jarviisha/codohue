@@ -49,7 +49,7 @@ func TestSSEStress_100Clients_1kEventsPerSec(t *testing.T) {
 		coverageBudget = 0.95
 	)
 
-	bus := eventbus.NewBus(eventbus.WithBufferSize(busBufferSize))
+	bus := eventbus.NewBus(eventbus.Config{BufferSize: busBufferSize})
 	defer bus.Close()
 
 	appCtx, appCancel := context.WithCancel(context.Background())

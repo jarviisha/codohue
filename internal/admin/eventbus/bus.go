@@ -58,70 +58,46 @@ type subscription struct {
 	ch     chan Event
 }
 
-// Option configures a Bus.
-type Option func(*Bus)
-
-// WithBufferSize sets the per-subscriber channel buffer. Must be > 0; ignored otherwise.
-// Default 1024.
-func WithBufferSize(n int) Option {
-	return func(b *Bus) {
-		if n > 0 {
-			b.bufferSize = n
-		}
-	}
-}
-
-// WithDropCallback registers a callback invoked when an event is dropped from
-// a slow subscriber's buffer. Runs synchronously in the publish path — keep
-// it cheap (e.g. increment a Prometheus counter).
-func WithDropCallback(fn func(Event)) Option {
-	return func(b *Bus) {
-		b.onDrop = fn
-	}
-}
-
-// WithPublishCallback registers a callback invoked once per Publish call,
-// after the fan-out completes. Receives the event kind so a Prometheus
-// counter can label by kind without rebuilding the event surface in the
-// caller. Runs synchronously — keep it cheap.
-func WithPublishCallback(fn func(kind string)) Option {
-	return func(b *Bus) {
-		b.onPublish = fn
-	}
-}
-
-// WithSubscribeCallback registers a callback invoked every time a subscriber
-// attaches. Pair with WithUnsubscribeCallback to maintain a live subscriber
-// gauge.
-func WithSubscribeCallback(fn func()) Option {
-	return func(b *Bus) {
-		b.onSubscribe = fn
-	}
-}
-
-// WithUnsubscribeCallback registers a callback invoked every time a
-// subscriber detaches (cancel func called OR Close fans out closures).
-func WithUnsubscribeCallback(fn func()) Option {
-	return func(b *Bus) {
-		b.onUnsubscribe = fn
-	}
+// Config configures a Bus. The zero value is valid. All callbacks are
+// optional and run synchronously in the bus's hot paths — keep them cheap
+// (e.g. increment a Prometheus counter).
+type Config struct {
+	// BufferSize is the per-subscriber channel buffer. Must be > 0; ignored
+	// otherwise. Default 1024.
+	BufferSize int
+	// OnDrop is invoked when an event is dropped from a slow subscriber's
+	// buffer.
+	OnDrop func(Event)
+	// OnPublish is invoked once per Publish call, after the fan-out
+	// completes. Receives the event kind so a Prometheus counter can label
+	// by kind without rebuilding the event surface in the caller.
+	OnPublish func(kind string)
+	// OnSubscribe is invoked every time a subscriber attaches. Pair with
+	// OnUnsubscribe to maintain a live subscriber gauge.
+	OnSubscribe func()
+	// OnUnsubscribe is invoked every time a subscriber detaches (cancel
+	// func called OR Close fans out closures).
+	OnUnsubscribe func()
 }
 
 // NewBus constructs a bus ready for Publish/Subscribe.
-func NewBus(opts ...Option) *Bus {
-	b := &Bus{
-		subscribers: make(map[*subscription]struct{}),
-		bufferSize:  1024,
+func NewBus(cfg Config) *Bus {
+	if cfg.BufferSize <= 0 {
+		cfg.BufferSize = 1024
 	}
-	for _, opt := range opts {
-		opt(b)
+	return &Bus{
+		subscribers:   make(map[*subscription]struct{}),
+		bufferSize:    cfg.BufferSize,
+		onDrop:        cfg.OnDrop,
+		onPublish:     cfg.OnPublish,
+		onSubscribe:   cfg.OnSubscribe,
+		onUnsubscribe: cfg.OnUnsubscribe,
 	}
-	return b
 }
 
 // Publish fans an event out to every subscriber whose filter matches. Slow
 // subscribers drop their oldest event rather than block the publish path; the
-// WithDropCallback hook fires once per drop.
+// Config.OnDrop callback fires once per drop.
 //
 // Publish holds an RLock for the duration of the fan-out so concurrent
 // Subscribe/cancel/Close cannot close a channel while a send is in flight.

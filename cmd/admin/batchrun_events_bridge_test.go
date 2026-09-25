@@ -26,7 +26,7 @@ func receive(t *testing.T, ch <-chan eventbus.Event) eventbus.Event {
 // observer lived inside cmd/admin. The bridge is what carries those runs
 // across the process boundary.
 func TestBatchRunBridgeRepublishesPhaseCompleted(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{
 		EntityID: "7",
@@ -62,7 +62,7 @@ func TestBatchRunBridgeRepublishesTerminalKinds(t *testing.T) {
 		{`{"kind":"cancelled","run_id":9,"namespace":"prod"}`, "batch_run.cancelled"},
 		{`{"kind":"started","run_id":9,"namespace":"prod","trigger_source":"cron"}`, "batch_run.started"},
 	} {
-		bus := eventbus.NewBus()
+		bus := eventbus.NewBus(eventbus.Config{})
 		ch, cancel := bus.Subscribe(eventbus.Filter{Kinds: []string{tc.wantKind}})
 
 		newBatchRunEventsBridge(nil, bus).handle(context.Background(), &goredis.Message{Payload: tc.payload})
@@ -77,7 +77,7 @@ func TestBatchRunBridgeRepublishesTerminalKinds(t *testing.T) {
 }
 
 func TestBatchRunBridgeDropsMalformedAndUnknown(t *testing.T) {
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	ch, cancel := bus.Subscribe(eventbus.Filter{})
 	defer cancel()

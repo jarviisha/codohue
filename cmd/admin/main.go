@@ -126,23 +126,23 @@ func run() error {
 	// Hook the bus's optional callbacks into the admin self-observability
 	// collectors so Grafana can chart publish rate, subscriber gauge, and
 	// backpressure drops without poking into bus internals.
-	bus := eventbus.NewBus(
-		eventbus.WithPublishCallback(func(kind string) {
+	bus := eventbus.NewBus(eventbus.Config{
+		OnPublish: func(kind string) {
 			metrics.AdminEventbusPublishTotal.WithLabelValues(kind).Inc()
-		}),
-		eventbus.WithSubscribeCallback(func() {
+		},
+		OnSubscribe: func() {
 			metrics.AdminEventbusSubscribersActive.Inc()
-		}),
-		eventbus.WithUnsubscribeCallback(func() {
+		},
+		OnUnsubscribe: func() {
 			metrics.AdminEventbusSubscribersActive.Dec()
-		}),
-		eventbus.WithDropCallback(func(e eventbus.Event) {
+		},
+		OnDrop: func(e eventbus.Event) {
 			// Backpressure drops don't carry the receiving stream name —
 			// we attribute by the event kind's prefix so dashboards can
 			// still slice (ops/batch_run/catalog).
 			metrics.AdminSSEDroppedTotal.WithLabelValues(streamLabelForKind(e.Kind), "backpressure").Inc()
-		}),
-	)
+		},
+	})
 	defer bus.Close()
 	// Runs publish to Redis so every admin replica — and streams for runs
 	// started by cron — see them. Without Redis we fall back to the

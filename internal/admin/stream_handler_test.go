@@ -40,7 +40,7 @@ func TestStreamBatchRunReturns204WhenTerminal(t *testing.T) {
 		},
 	}
 	h := newTestHandler(svc)
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
@@ -56,7 +56,7 @@ func TestStreamBatchRunReturns204WhenTerminal(t *testing.T) {
 
 func TestStreamBatchRunReturns404WhenRunMissing(t *testing.T) {
 	h := newTestHandler(&fakeSvc{batchRunDetail: nil})
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
@@ -77,7 +77,7 @@ func TestStreamBatchRunEmitsEventsAndClosesOnTerminal(t *testing.T) {
 		},
 	}
 	h := newTestHandler(svc)
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
@@ -150,7 +150,7 @@ func TestStreamCatalogReturns503WhenBusNotWired(t *testing.T) {
 
 func TestStreamCatalogReturns400WhenNsMissing(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
@@ -165,7 +165,7 @@ func TestStreamCatalogReturns400WhenNsMissing(t *testing.T) {
 
 func TestStreamCatalogForwardsItemStateChanged(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
@@ -221,7 +221,7 @@ func TestStreamCatalogForwardsItemStateChanged(t *testing.T) {
 
 func TestStreamOpsForwardsRunLifecycleEvents(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
@@ -259,7 +259,7 @@ func TestStreamOpsForwardsRunLifecycleEvents(t *testing.T) {
 // after every finished run.
 func TestStreamOpsStaysOpenAfterTerminalEvent(t *testing.T) {
 	h := newTestHandler(&fakeSvc{})
-	bus := eventbus.NewBus()
+	bus := eventbus.NewBus(eventbus.Config{})
 	defer bus.Close()
 	h.SetEventBus(bus)
 
