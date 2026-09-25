@@ -253,10 +253,7 @@ func (s *RecoverySweeper) publish(ctx context.Context, ns string, generation int
 }
 
 func embedStreamName(ns string, generation int64) string {
-	if generation < 1 {
-		generation = 1
-	}
-	return nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, ns, generation)
+	return nslifecycle.NewIncarnation(ns, generation).MustPhysicalName(nslifecycle.KindEmbedStream)
 }
 
 func isMissingStreamErr(err error) bool {

@@ -89,7 +89,7 @@ type Service struct {
 
 	qdrantClient   *qdrant.Client
 	qdrantUpsertFn func(ctx context.Context, points *qdrant.UpsertPoints) error
-	ensureCollFn   func(ctx context.Context, ns string, dim uint64, distance string) error
+	ensureCollFn   func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error
 
 	clock func() time.Time
 
@@ -161,8 +161,8 @@ func NewService(
 		}
 		return nil
 	}
-	s.ensureCollFn = func(ctx context.Context, ns string, dim uint64, distance string) error {
-		return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, ns, dim, distance)
+	s.ensureCollFn = func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+		return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, inc, dim, distance)
 	}
 	return s
 }
@@ -282,7 +282,7 @@ func (s *Service) processLoadedItem(ctx context.Context, item *PendingItem) (Pro
 	}
 
 	embeddedAt := s.clock().UTC()
-	if err := s.upsertVector(ctx, item, resolveGeneration(ctx, item.Namespace, cfg), pointID, vec, strategy, embeddedAt); err != nil {
+	if err := s.upsertVector(ctx, item, resolveIncarnation(ctx, item.Namespace, cfg), pointID, vec, strategy, embeddedAt); err != nil {
 		// The collection may have been dropped (namespace wipe + recreate):
 		// invalidate the ensure cache so the next attempt re-creates it
 		// instead of dead-lettering every item until a process restart.
@@ -490,7 +490,8 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	if distance == "" {
 		distance = "cosine"
 	}
-	physicalNamespace := nslifecycle.QdrantNamespace(ns, resolveGeneration(ctx, ns, cfg))
+	inc := resolveIncarnation(ctx, ns, cfg)
+	physicalNamespace := inc.QdrantNamespace()
 	key := fmt.Sprintf("%s|%d|%s", physicalNamespace, dim, distance)
 
 	s.ensuredMu.Lock()
@@ -500,7 +501,7 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	}
 	s.ensuredMu.Unlock()
 
-	if err := s.ensureCollFn(ctx, physicalNamespace, dim, distance); err != nil {
+	if err := s.ensureCollFn(ctx, inc, dim, distance); err != nil {
 		return err
 	}
 
@@ -510,19 +511,15 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	return nil
 }
 
-// resolveGeneration returns the generation writes must address: the lease is
-// authoritative when present, otherwise the namespace config's current
+// resolveIncarnation returns the incarnation writes must address: the lease
+// is authoritative when present, otherwise the namespace config's current
 // generation. Never defaults to 1 just because the lease is missing — that
 // would resurrect a deleted incarnation's collection.
-func resolveGeneration(ctx context.Context, ns string, cfg *namespace.Config) int64 {
-	generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
-	if !ok {
-		generation = cfg.Generation
+func resolveIncarnation(ctx context.Context, ns string, cfg *namespace.Config) nslifecycle.Incarnation {
+	if inc, ok := nslifecycle.LeaseIncarnation(ctx, ns); ok {
+		return inc
 	}
-	if generation < 1 {
-		generation = 1
-	}
-	return generation
+	return nslifecycle.ConfigIncarnation(ns, cfg)
 }
 
 // invalidateEnsured drops every ensure-cache entry for the namespace so the
@@ -541,8 +538,8 @@ func (s *Service) invalidateEnsured(ns string) {
 // payload conventions per data-model.md §4. created_at (the catalog item's
 // creation time) is what the recommend service's γ-freshness rerank reads —
 // without it, catalog-embedded items would never decay.
-func (s *Service) upsertVector(ctx context.Context, item *PendingItem, generation int64, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
-	collection := infraqdrant.CollectionName(item.Namespace, generation, infraqdrant.CollectionObjectsDense)
+func (s *Service) upsertVector(ctx context.Context, item *PendingItem, inc nslifecycle.Incarnation, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
+	collection := infraqdrant.CollectionName(inc, infraqdrant.CollectionObjectsDense)
 
 	payload := map[string]*qdrant.Value{
 		"object_id":        qdrant.NewValueString(item.ObjectID),

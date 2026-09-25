@@ -13,9 +13,9 @@ import (
 // missing lease is an error: silently defaulting to generation 1 would
 // resurrect the collection of a deleted incarnation.
 func collectionForContext(ctx context.Context, namespace string, kind infraqdrant.CollectionKind) (string, error) {
-	generation, ok := nslifecycle.LeaseGeneration(ctx, namespace)
+	inc, ok := nslifecycle.LeaseIncarnation(ctx, namespace)
 	if !ok {
 		return "", fmt.Errorf("%s collection for %q: %w", kind, namespace, nslifecycle.ErrLeaseRequired)
 	}
-	return infraqdrant.CollectionName(namespace, generation, kind), nil
+	return infraqdrant.CollectionName(inc, kind), nil
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	qdrantpb "github.com/qdrant/go-client/qdrant"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 func TestResolveDenseDistance(t *testing.T) {
@@ -69,7 +71,7 @@ func TestEnsureCollections_CheckExistsError(t *testing.T) {
 		return false, errors.New("exists failed")
 	}
 
-	if err := EnsureCollections(context.Background(), nil, "ns"); err == nil {
+	if err := EnsureCollections(context.Background(), nil, nslifecycle.NewIncarnation("ns", 1)); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
@@ -90,7 +92,7 @@ func TestEnsureCollections_CreatesMissingCollections(t *testing.T) {
 		return nil
 	}
 
-	if err := EnsureCollections(context.Background(), nil, "ns"); err != nil {
+	if err := EnsureCollections(context.Background(), nil, nslifecycle.NewIncarnation("ns", 1)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(created) != 2 {
@@ -112,7 +114,7 @@ func TestEnsureDenseCollections_CreateError(t *testing.T) {
 		return errors.New("create failed")
 	}
 
-	if err := EnsureDenseCollections(context.Background(), nil, "ns", 64, "dot"); err == nil {
+	if err := EnsureDenseCollections(context.Background(), nil, nslifecycle.NewIncarnation("ns", 1), 64, "dot"); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }

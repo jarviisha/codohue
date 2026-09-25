@@ -124,21 +124,20 @@ type Service struct {
 	objectMeta objectMetadataDeleter
 
 	// injectable for testing — wired to real implementations in NewService
-	getCacheFn                            func(ctx context.Context, key string) (string, error)
-	setCacheFn                            func(ctx context.Context, key, value string, ttl time.Duration)
-	getTrendingFn                         func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error)
-	fetchSubjectVecFn                     func(ctx context.Context, ns string, numID uint64) (*qdrant.SparseVector, error)
-	fetchSubjectDenseVecFn                func(ctx context.Context, ns string, numID uint64) ([]float32, error)
-	searchObjectsFn                       func(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
-	searchObjectsDenseFn                  func(ctx context.Context, namespace string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
-	deleteFromCollectionFn                func(ctx context.Context, collection string, ids []*qdrant.PointId) error
-	ensureDenseCollectionsFn              func(ctx context.Context, ns string, dim uint64, distance string) error
-	ensureDenseCollectionsForGenerationFn func(ctx context.Context, ns string, generation int64, dim uint64, distance string) error
-	qdrantGetFn                           func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
-	qdrantSearchFn                        func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error)
-	qdrantQueryFn                         func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error)
-	qdrantUpsertFn                        func(ctx context.Context, points *qdrant.UpsertPoints) error
-	qdrantDeleteFn                        func(ctx context.Context, points *qdrant.DeletePoints) error
+	getCacheFn               func(ctx context.Context, key string) (string, error)
+	setCacheFn               func(ctx context.Context, key, value string, ttl time.Duration)
+	getTrendingFn            func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error)
+	fetchSubjectVecFn        func(ctx context.Context, ns string, numID uint64) (*qdrant.SparseVector, error)
+	fetchSubjectDenseVecFn   func(ctx context.Context, ns string, numID uint64) ([]float32, error)
+	searchObjectsFn          func(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
+	searchObjectsDenseFn     func(ctx context.Context, namespace string, queryVec []float32, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
+	deleteFromCollectionFn   func(ctx context.Context, collection string, ids []*qdrant.PointId) error
+	ensureDenseCollectionsFn func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error
+	qdrantGetFn              func(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
+	qdrantSearchFn           func(ctx context.Context, points *qdrant.SearchPoints) ([]*qdrant.ScoredPoint, error)
+	qdrantQueryFn            func(ctx context.Context, points *qdrant.QueryPoints) ([]*qdrant.ScoredPoint, error)
+	qdrantUpsertFn           func(ctx context.Context, points *qdrant.UpsertPoints) error
+	qdrantDeleteFn           func(ctx context.Context, points *qdrant.DeletePoints) error
 }
 
 // NewService creates a new Service with all required dependencies.
@@ -196,11 +195,8 @@ func NewService(
 		}
 		return nil
 	}
-	s.ensureDenseCollectionsFn = func(ctx context.Context, ns string, dim uint64, distance string) error {
-		return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, ns, dim, distance)
-	}
-	s.ensureDenseCollectionsForGenerationFn = func(ctx context.Context, ns string, generation int64, dim uint64, distance string) error {
-		return infraqdrant.EnsureDenseCollectionsForGeneration(ctx, qdrantClient, ns, generation, dim, distance)
+	s.ensureDenseCollectionsFn = func(ctx context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+		return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, inc, dim, distance)
 	}
 	return s
 }
@@ -283,18 +279,14 @@ func (s *Service) storeEmbeddingActive(ctx context.Context, ns, entityID, entity
 			distance = cfg.DenseDistance
 		}
 	}
-	generation := int64(1)
-	if cfg != nil && cfg.Generation > 0 {
-		generation = cfg.Generation
+	// This is a write path: the lease is the authority on which incarnation
+	// to address; config covers the lifecycle-less (test) construction.
+	inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
+	if !ok {
+		inc = nslifecycle.ConfigIncarnation(ns, cfg)
 	}
-	var ensureErr error
-	if s.ensureDenseCollectionsForGenerationFn != nil {
-		ensureErr = s.ensureDenseCollectionsForGenerationFn(ctx, ns, generation, dim, distance)
-	} else {
-		ensureErr = s.ensureDenseCollectionsFn(ctx, ns, dim, distance)
-	}
-	if ensureErr != nil {
-		return fmt.Errorf("ensure dense collections: %w", ensureErr)
+	if err := s.ensureDenseCollectionsFn(ctx, inc, dim, distance); err != nil {
+		return fmt.Errorf("ensure dense collections: %w", err)
 	}
 
 	// Resolve collection name.
@@ -302,7 +294,7 @@ func (s *Service) storeEmbeddingActive(ctx context.Context, ns, entityID, entity
 	if entityType == "object" {
 		kind = infraqdrant.CollectionObjectsDense
 	}
-	collection := infraqdrant.CollectionName(ns, generation, kind)
+	collection := infraqdrant.CollectionName(inc, kind)
 	idKey := entityType + "_id"
 
 	// Get or create numeric ID.
@@ -1635,13 +1627,13 @@ func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
 	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, lifecycle *nslifecycle.NamespaceLifecycle) error {
-			return s.deleteObjectActive(leased, ns, objectID, lifecycle.Generation)
+			return s.deleteObjectActive(leased, ns, objectID, nslifecycle.NewIncarnation(ns, lifecycle.Generation))
 		})
 	}
-	return s.deleteObjectActive(ctx, ns, objectID, 1)
+	return s.deleteObjectActive(ctx, ns, objectID, nslifecycle.NewIncarnation(ns, 1))
 }
 
-func (s *Service) deleteObjectActive(ctx context.Context, ns, objectID string, generation int64) error {
+func (s *Service) deleteObjectActive(ctx context.Context, ns, objectID string, inc nslifecycle.Incarnation) error {
 	// Lookup, not GetOrCreate: deleting a never-ingested object must be an
 	// idempotent no-op on the vector store, not a write that mints a mapping
 	// for it. A missing mapping only means there are no Qdrant points — the
@@ -1657,13 +1649,13 @@ func (s *Service) deleteObjectActive(ctx context.Context, ns, objectID string, g
 	if lookupErr == nil && found {
 		pointIDs := []*qdrant.PointId{qdrant.NewIDNum(numID)}
 
-		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(ns, generation, infraqdrant.CollectionObjects), pointIDs); err != nil {
+		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(inc, infraqdrant.CollectionObjects), pointIDs); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 
 		// Dense collection is optional; deleteFromCollection treats NotFound as
 		// success, while every other failure must remain visible and retryable.
-		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(ns, generation, infraqdrant.CollectionObjectsDense), pointIDs); err != nil {
+		if err := s.deleteFromCollectionFn(ctx, infraqdrant.CollectionName(inc, infraqdrant.CollectionObjectsDense), pointIDs); err != nil {
 			cleanupErr = errors.Join(cleanupErr, err)
 		}
 	}
@@ -1718,17 +1710,14 @@ func recCacheKey(ns string, generation int64, subjectID string, limit, offset in
 }
 
 func namespaceGeneration(cfg *namespace.Config) int64 {
-	if cfg == nil || cfg.Generation < 1 {
-		return 1
-	}
-	return cfg.Generation
+	return nslifecycle.ConfigIncarnation("", cfg).Generation()
 }
 
 // The physical-name rules live in nslifecycle so the serving path and the
 // writers that created those keys cannot disagree about which generation a
 // name belongs to.
 func qdrantPhysicalNamespace(ns string, cfg *namespace.Config) string {
-	return nslifecycle.QdrantNamespace(ns, namespaceGeneration(cfg))
+	return nslifecycle.ConfigIncarnation(ns, cfg).QdrantNamespace()
 }
 
 // mergeExclusions unions two exclusion sets, returning nil when both are

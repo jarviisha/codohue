@@ -22,18 +22,15 @@ const (
 	CollectionObjectsDense  CollectionKind = "objects_dense"
 )
 
-// CollectionName resolves a Qdrant collection for one lifecycle generation.
-func CollectionName(namespace string, generation int64, kind CollectionKind) string {
-	if generation < 1 {
-		generation = 1
-	}
+// CollectionName resolves a Qdrant collection for one namespace incarnation.
+func CollectionName(inc nslifecycle.Incarnation, kind CollectionKind) string {
 	physicalKind := map[CollectionKind]nslifecycle.PhysicalKind{
 		CollectionSubjects:      nslifecycle.KindSubjects,
 		CollectionObjects:       nslifecycle.KindObjects,
 		CollectionSubjectsDense: nslifecycle.KindSubjectsDense,
 		CollectionObjectsDense:  nslifecycle.KindObjectsDense,
 	}[kind]
-	return nslifecycle.MustPhysicalName(physicalKind, namespace, generation)
+	return inc.MustPhysicalName(physicalKind)
 }
 
 var (
@@ -45,17 +42,12 @@ var (
 	}
 )
 
-// EnsureCollections creates the {namespace}_subjects and {namespace}_objects sparse
-// collections if they do not exist. Called at the start of each batch run before
-// upserting sparse CF vectors.
-func EnsureCollections(ctx context.Context, client *qdrant.Client, namespace string) error {
-	return EnsureCollectionsForGeneration(ctx, client, namespace, 1)
-}
-
-// EnsureCollectionsForGeneration creates sparse collections for a lifecycle.
-func EnsureCollectionsForGeneration(ctx context.Context, client *qdrant.Client, namespace string, generation int64) error {
+// EnsureCollections creates the incarnation's subjects and objects sparse
+// collections if they do not exist. Called at the start of each batch run
+// before upserting sparse CF vectors.
+func EnsureCollections(ctx context.Context, client *qdrant.Client, inc nslifecycle.Incarnation) error {
 	for _, kind := range []CollectionKind{CollectionSubjects, CollectionObjects} {
-		name := CollectionName(namespace, generation, kind)
+		name := CollectionName(inc, kind)
 		exists, err := collectionExistsFn(ctx, client, name)
 		if err != nil {
 			return fmt.Errorf("check collection %q: %w", name, err)
@@ -70,20 +62,14 @@ func EnsureCollectionsForGeneration(ctx context.Context, client *qdrant.Client, 
 	return nil
 }
 
-// EnsureDenseCollections creates the {namespace}_objects_dense and
-// {namespace}_subjects_dense collections if they do not exist.
-// embeddingDim is the vector dimension (e.g. 64). distance must be "cosine" or "dot".
-// Called by the compute cron job before upserting dense vectors (Phase 4+).
-func EnsureDenseCollections(ctx context.Context, client *qdrant.Client, namespace string, embeddingDim uint64, distance string) error {
-	return EnsureDenseCollectionsForGeneration(ctx, client, namespace, 1, embeddingDim, distance)
-}
-
-// EnsureDenseCollectionsForGeneration creates dense collections for a lifecycle.
-func EnsureDenseCollectionsForGeneration(ctx context.Context, client *qdrant.Client, namespace string, generation int64, embeddingDim uint64, distance string) error {
+// EnsureDenseCollections creates the incarnation's objects_dense and
+// subjects_dense collections if they do not exist. embeddingDim is the vector
+// dimension (e.g. 64). distance must be "cosine" or "dot".
+func EnsureDenseCollections(ctx context.Context, client *qdrant.Client, inc nslifecycle.Incarnation, embeddingDim uint64, distance string) error {
 	dist := resolveDenseDistance(distance)
 
 	for _, kind := range []CollectionKind{CollectionObjectsDense, CollectionSubjectsDense} {
-		name := CollectionName(namespace, generation, kind)
+		name := CollectionName(inc, kind)
 		exists, err := collectionExistsFn(ctx, client, name)
 		if err != nil {
 			return fmt.Errorf("check collection %q: %w", name, err)

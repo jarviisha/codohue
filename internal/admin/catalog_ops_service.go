@@ -70,10 +70,7 @@ func (q *qdrantClientPointDeleter) DeletePoint(ctx context.Context, collection s
 // definition in internal/catalog so we keep the on-the-wire format aligned
 // across packages without a forbidden cross-domain import.
 func catalogStreamName(ns string, generation int64) string {
-	if generation < 1 {
-		generation = 1
-	}
-	return nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, ns, generation)
+	return nslifecycle.NewIncarnation(ns, generation).MustPhysicalName(nslifecycle.KindEmbedStream)
 }
 
 // publishCatalogEnqueue writes one XADD to catalog:embed:{ns}. The payload
@@ -378,7 +375,7 @@ func (s *Service) DeleteCatalogItem(ctx context.Context, namespace string, id in
 }
 
 func (s *Service) deleteCatalogItemGeneration(ctx context.Context, namespace string, generation, id int64) error {
-	generation = normalizeGeneration(generation)
+	inc := nslifecycle.NewIncarnation(namespace, generation)
 	item, err := s.repo.GetCatalogItem(ctx, namespace, id)
 	if err != nil {
 		return fmt.Errorf("get catalog item for delete: %w", err)
@@ -393,7 +390,7 @@ func (s *Service) deleteCatalogItemGeneration(ctx context.Context, namespace str
 			return fmt.Errorf("lookup numeric object id: %w", lookupErr)
 		}
 		if ok {
-			collection := nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, namespace, generation)
+			collection := inc.MustPhysicalName(nslifecycle.KindObjectsDense)
 			if deleteErr := s.qdrantDeleter.DeletePoint(ctx, collection, numID); deleteErr != nil {
 				return fmt.Errorf("delete qdrant point: %w", deleteErr)
 			}

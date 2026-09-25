@@ -189,7 +189,7 @@ func (s *repairEvidenceSource) Evidence(ctx context.Context, namespace string) (
 		DenseCollections: map[string]bool{},
 	}
 	for _, spec := range collectionKinds {
-		collection := infraqdrant.CollectionName(namespace, generation, spec.kind)
+		collection := infraqdrant.CollectionName(nslifecycle.NewIncarnation(namespace, generation), spec.kind)
 		points, err := infraqdrant.InventoryCollection(ctx, s.qdrant, collection, spec.idField)
 		if err != nil {
 			// A collection that does not exist yet is not evidence of a

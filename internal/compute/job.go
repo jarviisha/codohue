@@ -134,18 +134,18 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		finalizeOrphansFn: repo.FinalizeOrphanRuns,
 		hasAnyEventsFn:    repo.HasAnyEvents,
 		ensureCollectionsFn: func(ctx context.Context, ns string) error {
-			generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+			inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
 			if !ok {
 				return fmt.Errorf("ensure collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
 			}
-			return infraqdrant.EnsureCollectionsForGeneration(ctx, qdrantClient, ns, generation)
+			return infraqdrant.EnsureCollections(ctx, qdrantClient, inc)
 		},
 		ensureDenseCollectionsFn: func(ctx context.Context, ns string, dim uint64, distance string) error {
-			generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+			inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
 			if !ok {
 				return fmt.Errorf("ensure dense collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
 			}
-			return infraqdrant.EnsureDenseCollectionsForGeneration(ctx, qdrantClient, ns, generation, dim, distance)
+			return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, inc, dim, distance)
 		},
 		upsertItemDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
 			return UpsertItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs, createdAt)

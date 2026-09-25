@@ -35,10 +35,7 @@ type TrendingEntry struct {
 // trendingKey is the single key rule for a namespace's trending sorted set:
 // writer and reader both derive it from the raw namespace plus generation.
 func trendingKey(namespace string, generation int64) string {
-	if generation < 1 {
-		generation = 1
-	}
-	return nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation)
+	return nslifecycle.NewIncarnation(namespace, generation).MustPhysicalName(nslifecycle.KindTrending)
 }
 
 // StoreTrending atomically replaces the trending sorted set for the

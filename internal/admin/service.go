@@ -564,16 +564,16 @@ func (s *Service) GetQdrant(ctx context.Context, namespace string) (*QdrantInspe
 }
 
 func (s *Service) getQdrantGeneration(ctx context.Context, namespace string, generation int64) *QdrantInspectResponse {
-	generation = normalizeGeneration(generation)
+	inc := nslifecycle.NewIncarnation(namespace, generation)
 	stats := s.collectionStatsFn
 	if stats == nil {
 		stats = s.qdrantCollection
 	}
 	return &QdrantInspectResponse{
-		Subjects:      stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindSubjects, namespace, generation)),
-		Objects:       stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindObjects, namespace, generation)),
-		SubjectsDense: stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindSubjectsDense, namespace, generation)),
-		ObjectsDense:  stats(ctx, nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, namespace, generation)),
+		Subjects:      stats(ctx, inc.MustPhysicalName(nslifecycle.KindSubjects)),
+		Objects:       stats(ctx, inc.MustPhysicalName(nslifecycle.KindObjects)),
+		SubjectsDense: stats(ctx, inc.MustPhysicalName(nslifecycle.KindSubjectsDense)),
+		ObjectsDense:  stats(ctx, inc.MustPhysicalName(nslifecycle.KindObjectsDense)),
 	}
 }
 
@@ -582,17 +582,10 @@ func (s *Service) namespaceGeneration(ctx context.Context, namespace string) (in
 	if err != nil {
 		return 0, fmt.Errorf("get namespace generation: %w", err)
 	}
-	if cfg == nil || cfg.Generation < 1 {
+	if cfg == nil {
 		return 1, nil
 	}
-	return cfg.Generation, nil
-}
-
-func normalizeGeneration(generation int64) int64 {
-	if generation < 1 {
-		return 1
-	}
-	return generation
+	return nslifecycle.NewIncarnation(namespace, cfg.Generation).Generation(), nil
 }
 
 func (s *Service) qdrantCollection(ctx context.Context, name string) QdrantCollection {
@@ -707,7 +700,7 @@ func (s *Service) sparseNNZ(ctx context.Context, namespace string, generation in
 		return -1
 	}
 	results, err := s.qdrantReader.Get(ctx, &qdrant.GetPoints{
-		CollectionName: nslifecycle.MustPhysicalName(nslifecycle.KindSubjects, namespace, normalizeGeneration(generation)),
+		CollectionName: nslifecycle.NewIncarnation(namespace, generation).MustPhysicalName(nslifecycle.KindSubjects),
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude("sparse_interactions"),
 	})

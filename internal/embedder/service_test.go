@@ -158,7 +158,7 @@ func newSvc(t *testing.T, opts ...func(*Service)) (*Service, *fakeRepo, *fakeNSC
 		*upserts = append(*upserts, upsertCall{collection: p.CollectionName, points: p.Points})
 		return nil
 	}
-	svc.ensureCollFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+	svc.ensureCollFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 
 	for _, opt := range opts {
 		opt(svc)
@@ -423,7 +423,7 @@ func TestServiceProcessItem_IDMapError_Failed(t *testing.T) {
 func TestServiceProcessItem_EnsureCollectionsError_Failed(t *testing.T) {
 	svc, repo, _, _, _, _ := newSvc(t)
 	repo.markInFlightAttempt = 1
-	svc.ensureCollFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	svc.ensureCollFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
 		return errors.New("ensure failed")
 	}
 
@@ -466,7 +466,7 @@ func TestServiceProcessItem_EnsureCollectionsCachedAcrossCalls(t *testing.T) {
 	repo.markInFlightAttempt = 1
 
 	ensureCalls := 0
-	svc.ensureCollFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	svc.ensureCollFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
 		ensureCalls++
 		return nil
 	}

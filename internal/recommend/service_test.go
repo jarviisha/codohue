@@ -185,7 +185,7 @@ func newTestService(repo recommendRepo, ns recommendNsConfig, idmap recommendIDM
 		return nil
 	}
 	// EnsureDenseCollections is a no-op by default; tests that reach qdrant get an error.
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
 		return errors.New("qdrant error")
 	}
 	return s
@@ -584,7 +584,7 @@ func TestStoreSubjectEmbedding_CatalogEnabled_NotGuarded(t *testing.T) {
 			CatalogStrategyVersion: "v1",
 		},
 	}, idmap)
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 	called := false
 	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
 		called = true
@@ -608,9 +608,9 @@ func TestStoreEmbedding_Success(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 3, DenseDistance: "dot"},
 	}, idmap)
-	s.ensureDenseCollectionsFn = func(_ context.Context, ns string, dim uint64, distance string) error {
-		if ns != "ns" || dim != 3 || distance != "dot" {
-			t.Fatalf("unexpected ensure args ns=%s dim=%d distance=%s", ns, dim, distance)
+	s.ensureDenseCollectionsFn = func(_ context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+		if inc.Namespace() != "ns" || inc.Generation() != 1 || dim != 3 || distance != "dot" {
+			t.Fatalf("unexpected ensure args inc=%v dim=%d distance=%s", inc, dim, distance)
 		}
 		return nil
 	}
@@ -636,9 +636,9 @@ func TestStoreSubjectEmbedding_Success(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, idmap)
-	s.ensureDenseCollectionsFn = func(_ context.Context, ns string, dim uint64, distance string) error {
-		if ns != "ns" || dim != 2 || distance != "cosine" {
-			t.Fatalf("unexpected ensure args ns=%s dim=%d distance=%s", ns, dim, distance)
+	s.ensureDenseCollectionsFn = func(_ context.Context, inc nslifecycle.Incarnation, dim uint64, distance string) error {
+		if inc.Namespace() != "ns" || inc.Generation() != 1 || dim != 2 || distance != "cosine" {
+			t.Fatalf("unexpected ensure args inc=%v dim=%d distance=%s", inc, dim, distance)
 		}
 		return nil
 	}
@@ -661,7 +661,7 @@ func TestStoreEmbedding_EnsureDenseCollectionsError(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{
 		cfg: &namespace.Config{EmbeddingDim: 2},
 	}, newFakeIDMapper())
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error {
 		return errors.New("ensure failed")
 	}
 
@@ -2130,7 +2130,7 @@ func TestStoreObjectEmbedding_WritesCreatedAtPayload(t *testing.T) {
 		payload = points.Points[0].Payload
 		return nil
 	}
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	if err := s.StoreObjectEmbedding(context.Background(), "ns", "obj-1", []float32{1, 2}, &created); err != nil {
@@ -2327,7 +2327,7 @@ func TestDeleteObject_InactiveNamespaceTouchesNothing(t *testing.T) {
 // applies, and an inactive namespace must not accept one.
 func TestStoreEmbedding_RunsUnderLifecycleLease(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
-	s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+	s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 	s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error { return nil }
 	lifecycle := &fakeLifecycleWriter{generation: 3}
 	s.SetLifecycleWriter(lifecycle)
@@ -2371,7 +2371,7 @@ func TestStoreObjectEmbedding_FutureCreatedAtRejectedAtTheSameBoundaryAsEvents(t
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestService(&fakeRepo{}, &fakeNsConfig{cfg: &namespace.Config{Namespace: "ns", EmbeddingDim: 2, DenseSource: "byoe"}}, newFakeIDMapper())
 			var upserted bool
-			s.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error { return nil }
+			s.ensureDenseCollectionsFn = func(_ context.Context, _ nslifecycle.Incarnation, _ uint64, _ string) error { return nil }
 			s.qdrantUpsertFn = func(_ context.Context, _ *qdrant.UpsertPoints) error {
 				upserted = true
 				return nil

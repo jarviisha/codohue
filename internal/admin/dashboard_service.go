@@ -214,11 +214,7 @@ func (s *Service) denseDowngradeAlerts(ctx context.Context, namespaces []Namespa
 		if !hybridConfigured {
 			continue
 		}
-		generation := ns.Generation
-		if generation < 1 {
-			generation = 1
-		}
-		collection := nslifecycle.MustPhysicalName(nslifecycle.KindSubjectsDense, ns.Namespace, generation)
+		collection := nslifecycle.NewIncarnation(ns.Namespace, ns.Generation).MustPhysicalName(nslifecycle.KindSubjectsDense)
 		stat := s.collectionStatsFn(ctx, collection)
 		if stat.Exists && stat.PointsCount > 0 {
 			continue
@@ -303,7 +299,7 @@ func (s *Service) namespaceBacklog(ctx context.Context, namespace string, genera
 	if s.catalogBacklog == nil {
 		return CatalogBacklog{}
 	}
-	backlog, err := s.catalogBacklog.Read(ctx, namespace, normalizeGeneration(generation))
+	backlog, err := s.catalogBacklog.Read(ctx, namespace, nslifecycle.NewIncarnation(namespace, generation).Generation())
 	if err != nil {
 		slog.WarnContext(ctx, "dashboard: catalog backlog read failed",
 			slog.String("namespace", namespace), slog.String("error", err.Error()))
@@ -318,7 +314,7 @@ func (s *Service) trendingTTLSec(ctx context.Context, namespace string, generati
 	if s.redisClient == nil {
 		return -2
 	}
-	key := nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, normalizeGeneration(generation))
+	key := nslifecycle.NewIncarnation(namespace, generation).MustPhysicalName(nslifecycle.KindTrending)
 	d, err := s.redisClient.TTL(ctx, key).Result()
 	if err != nil {
 		return -2

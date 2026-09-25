@@ -423,10 +423,7 @@ func (s *Service) ListObjectsPage(ctx context.Context, ns string, changedSince *
 func streamName(ns string) string { return "catalog:embed:" + ns }
 
 func generationStreamName(ns string, generation int64) string {
-	if generation < 1 {
-		generation = 1
-	}
-	return nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, ns, generation)
+	return nslifecycle.NewIncarnation(ns, generation).MustPhysicalName(nslifecycle.KindEmbedStream)
 }
 
 func (s *Service) publish(ctx context.Context, ns string, item *Item, cfg *namespace.Config) error {

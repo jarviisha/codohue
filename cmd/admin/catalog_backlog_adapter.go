@@ -52,9 +52,7 @@ func backlogRedisClient(client *goredis.Client) catalogBacklogRedis {
 // optional: when nil or unavailable the stream_len count stays at zero so
 // the admin panel still renders the Postgres-side state breakdown.
 func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string, generation int64) (admin.CatalogBacklog, error) {
-	if generation < 1 {
-		generation = 1
-	}
+	inc := nslifecycle.NewIncarnation(namespace, generation)
 	counts, err := a.counter.CountCatalogItemStates(ctx, namespace)
 	if err != nil {
 		return admin.CatalogBacklog{}, fmt.Errorf("count catalog item states: %w", err)
@@ -69,7 +67,7 @@ func (a *catalogBacklogAdapter) Read(ctx context.Context, namespace string, gene
 	}
 
 	if a.redis != nil {
-		stream := nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation)
+		stream := inc.MustPhysicalName(nslifecycle.KindEmbedStream)
 
 		n, err := a.redis.XLen(ctx, stream).Result()
 		switch {

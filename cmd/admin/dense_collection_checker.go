@@ -20,11 +20,9 @@ type denseCollectionChecker struct {
 // DenseCollectionsExist reports whether either dense collection exists for
 // the namespace.
 func (c *denseCollectionChecker) DenseCollectionsExist(ctx context.Context, namespace string, generation int64) (bool, error) {
-	if generation < 1 {
-		generation = 1
-	}
+	inc := nslifecycle.NewIncarnation(namespace, generation)
 	for _, kind := range []nslifecycle.PhysicalKind{nslifecycle.KindObjectsDense, nslifecycle.KindSubjectsDense} {
-		name := nslifecycle.MustPhysicalName(kind, namespace, generation)
+		name := inc.MustPhysicalName(kind)
 		exists, err := c.client.CollectionExists(ctx, name)
 		if err != nil {
 			return false, fmt.Errorf("collection exists %s: %w", name, err)

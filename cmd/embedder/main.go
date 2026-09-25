@@ -315,12 +315,8 @@ func embedRetentionSpecs(configs []*namespace.Config) []infraredis.StreamSpec {
 		if cfg == nil || cfg.Namespace == "" {
 			continue
 		}
-		generation := cfg.Generation
-		if generation < 1 {
-			generation = 1
-		}
 		specs = append(specs, infraredis.StreamSpec{
-			Name: nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, cfg.Namespace, generation), Kind: "embed", Namespace: cfg.Namespace,
+			Name: nslifecycle.ConfigIncarnation(cfg.Namespace, cfg).MustPhysicalName(nslifecycle.KindEmbedStream), Kind: "embed", Namespace: cfg.Namespace,
 			ExpectedGroups: []string{"embedder"},
 		})
 	}

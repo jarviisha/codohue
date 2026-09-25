@@ -264,10 +264,7 @@ func buildRepairService(ctx context.Context) (*idmap.RepairService, func(), erro
 		if err != nil {
 			return 0, fmt.Errorf("load config for %q: %w", namespace, err)
 		}
-		if nsCfg == nil || nsCfg.Generation < 1 {
-			return 1, nil
-		}
-		return nsCfg.Generation, nil
+		return nslifecycle.ConfigIncarnation(namespace, nsCfg).Generation(), nil
 	}
 	evidence := &repairEvidenceSource{
 		repo:       repairRepo,

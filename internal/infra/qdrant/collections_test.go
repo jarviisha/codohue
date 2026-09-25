@@ -1,6 +1,10 @@
 package qdrant
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+)
 
 func TestCollectionNameIsGenerationAware(t *testing.T) {
 	for _, tc := range []struct {
@@ -12,10 +16,10 @@ func TestCollectionNameIsGenerationAware(t *testing.T) {
 		{CollectionSubjectsDense, "feed_subjects_dense", "feed_g3_subjects_dense"},
 		{CollectionObjectsDense, "feed_objects_dense", "feed_g3_objects_dense"},
 	} {
-		if got := CollectionName("feed", 1, tc.kind); got != tc.legacy {
+		if got := CollectionName(nslifecycle.NewIncarnation("feed", 1), tc.kind); got != tc.legacy {
 			t.Errorf("legacy %s = %q", tc.kind, got)
 		}
-		if got := CollectionName("feed", 3, tc.kind); got != tc.qualified {
+		if got := CollectionName(nslifecycle.NewIncarnation("feed", 3), tc.kind); got != tc.qualified {
 			t.Errorf("qualified %s = %q", tc.kind, got)
 		}
 	}
