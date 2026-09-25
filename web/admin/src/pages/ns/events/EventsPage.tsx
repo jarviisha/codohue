@@ -36,7 +36,6 @@ import {
   type EventsSummaryWindow,
 } from '@/services/events'
 import { useServerStream } from '@/services/stream'
-import PageContainer from '@/components/PageContainer'
 import QueryFeedback from '@/components/QueryFeedback'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
@@ -120,7 +119,7 @@ export default function EventsPage() {
     eventsStreamPath(ns, { action: action || undefined, subjectId: subjectId || undefined }) ?? ''
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack
           gap={4}
@@ -194,7 +193,7 @@ export default function EventsPage() {
           />
         )}
       </Dialog>
-    </PageContainer>
+    </>
   )
 }
 
@@ -589,7 +588,7 @@ function SummarySidebar({ namespace }: { namespace: string }) {
 
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="flex-1 min-w-30">
+    <Card className="flex-1 min-w-32">
       <Stack gap={6}>
         <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
         <span className="text-primary text-xl font-semibold tabular-nums">{value}</span>

@@ -14,7 +14,6 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import {
   useSubjectProfile,
   useSubjectRecommendations,
@@ -48,7 +47,7 @@ export default function SubjectInspectorPage() {
   if (!ns || !id) return null
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
           <Stack gap={1}>
@@ -159,7 +158,7 @@ export default function SubjectInspectorPage() {
           )}
         </Stack>
       </Stack>
-    </PageContainer>
+    </>
   )
 }
 

@@ -6,6 +6,7 @@ import {
   Banner,
   Button,
   Heading,
+  Layout,
   Link,
   Selector,
   Skeleton,
@@ -16,7 +17,6 @@ import {
   TextArea,
   TextInput,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import PageHeader from '@/components/shell/PageHeader'
 import DirtyFormGuard from '@/components/shell/DirtyFormGuard'
 import CatalogStrategyFields from '@/components/CatalogStrategyFields'
@@ -132,9 +132,9 @@ function Settings({ ns }: { ns: string }) {
   const data = query.data
   if (!data)
     return (
-      <PageContainer>
+      <Layout height="auto" contentWidth={1152}>
         {query.isLoading ? (
-          <Skeleton className="h-48 w-full" />
+          <Skeleton height={192} />
         ) : (
           <Banner
             status="error"
@@ -142,7 +142,7 @@ function Settings({ ns }: { ns: string }) {
             description={query.error?.message}
           />
         )}
-      </PageContainer>
+      </Layout>
     )
   const local = edits[group]
   const current =
@@ -227,7 +227,7 @@ function Settings({ ns }: { ns: string }) {
   }
   const hasErrors = Object.keys(current.errors).length > 0 || !!current.failure
   return (
-    <PageContainer size="lg">
+    <Layout height="auto" contentWidth={1152}>
       <PageHeader>
         <Stack gap={1}>
           <Heading level={1}>Settings · {ns}</Heading>
@@ -443,7 +443,7 @@ function Settings({ ns }: { ns: string }) {
           </Stack>
         )}
       </Stack>
-    </PageContainer>
+    </Layout>
   )
 }
 

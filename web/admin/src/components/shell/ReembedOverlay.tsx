@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, Stack } from '@astryxdesign/core'
+import { Badge, Button, ProgressBar, Stack } from '@astryxdesign/core'
 import { useServerStream } from '@/services/stream'
 import NamespaceTag from '@/components/NamespaceTag'
 
@@ -145,12 +145,12 @@ function ProgressChip({ run }: { run: RunningReembed }) {
           )}
         </Stack>
         {hasProgress && (
-          <div className="h-1 w-40 bg-muted rounded overflow-hidden">
-            <div
-              className="h-full bg-accent-bg transition-all duration-300"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+          <ProgressBar
+            label={`Re-embed #${run.id} progress`}
+            value={run.processed!}
+            max={run.total!}
+            isLabelHidden
+          />
         )}
       </Stack>
     </Link>

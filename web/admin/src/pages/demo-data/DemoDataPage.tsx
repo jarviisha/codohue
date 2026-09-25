@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Banner, Button, Card, Stack } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
+import { Banner, Button, Card, Layout, Stack } from '@astryxdesign/core'
 import {
   useClearDemoData,
   useSeedDemoData,
@@ -23,7 +22,7 @@ export default function DemoDataPage() {
   const clear = useClearDemoData()
 
   return (
-    <PageContainer size="md">
+    <Layout height="auto" contentWidth={896}>
       <PageHeader>
         <Stack gap={1}>
           <h1 className="text-primary text-xl font-semibold">Demo data</h1>
@@ -56,7 +55,7 @@ export default function DemoDataPage() {
           onRun={() => clear.mutate()}
         />
       </Stack>
-    </PageContainer>
+    </Layout>
   )
 }
 

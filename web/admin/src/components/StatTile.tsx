@@ -20,7 +20,7 @@ export default function StatTile({
   hint?: string
 }) {
   return (
-    <Card className="flex-1 min-w-35">
+    <Card className="flex-1 min-w-36">
       <Stack gap={6}>
         <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
         <Stack gap={4} direction="horizontal" align="center">

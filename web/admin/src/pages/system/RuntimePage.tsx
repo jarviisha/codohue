@@ -1,6 +1,7 @@
 import {
   Banner,
   Heading,
+  Layout,
   Skeleton,
   Stack,
   Table,
@@ -12,7 +13,6 @@ import {
   Token,
   proportional,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import PageHeader from '@/components/shell/PageHeader'
 import QueryFeedback from '@/components/QueryFeedback'
 import { useRuntime } from '@/services/runtime'
@@ -20,7 +20,7 @@ import { useRuntime } from '@/services/runtime'
 export default function RuntimePage() {
   const runtime = useRuntime()
   return (
-    <PageContainer size="lg">
+    <Layout height="auto" contentWidth={1152}>
       <PageHeader>
         <Stack gap={2}>
           <h1 className="text-primary text-xl font-semibold">System runtime</h1>
@@ -37,7 +37,7 @@ export default function RuntimePage() {
         />
         <QueryFeedback query={runtime} label="Runtime reports" />
         {runtime.isLoading ? (
-          <Skeleton className="h-48 w-full" />
+          <Skeleton height={192} />
         ) : (
           runtime.data && (
             <>
@@ -98,6 +98,6 @@ export default function RuntimePage() {
           )
         )}
       </Stack>
-    </PageContainer>
+    </Layout>
   )
 }

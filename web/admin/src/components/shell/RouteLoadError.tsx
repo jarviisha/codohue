@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Banner, Button, Stack } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
+import { Banner, Button, Layout, Stack } from '@astryxdesign/core'
 
 /**
  * RouteLoadError reports a page that could not be downloaded — the failure
@@ -25,7 +24,7 @@ export default function RouteLoadError({ error }: { error?: unknown }) {
         : 'The page could not be downloaded.'
 
   return (
-    <PageContainer size="md" className="py-8">
+    <Layout height="auto" contentWidth={896} className="py-8">
       <Stack gap={6}>
         <Banner
           status="error"
@@ -37,6 +36,6 @@ export default function RouteLoadError({ error }: { error?: unknown }) {
           <Button onClick={() => window.location.reload()} label="Reload page" />
         </Stack>
       </Stack>
-    </PageContainer>
+    </Layout>
   )
 }

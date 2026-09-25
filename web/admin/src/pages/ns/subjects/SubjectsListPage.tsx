@@ -17,7 +17,6 @@ import {
 import QueryFeedback from '@/components/QueryFeedback'
 import ListSearch from '@/components/ListSearch'
 import { readPage } from '@/services/operatorUx'
-import PageContainer from '@/components/PageContainer'
 import { useSubjectsList, type SubjectSort } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
 
@@ -66,7 +65,7 @@ export default function SubjectsListPage() {
   if (!ns) return null
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={1}>
           <h1 className="text-primary text-xl font-semibold">Subjects</h1>
@@ -106,7 +105,7 @@ export default function SubjectsListPage() {
         </Stack>
 
         <QueryFeedback query={subjects} label="Subjects" />
-        {subjects.isLoading && <Skeleton className="h-48 w-full" />}
+        {subjects.isLoading && <Skeleton height={192} />}
 
         {subjects.data && subjects.data.items.length === 0 && (
           <EmptyState
@@ -173,6 +172,6 @@ export default function SubjectsListPage() {
           </Stack>
         )}
       </Stack>
-    </PageContainer>
+    </>
   )
 }

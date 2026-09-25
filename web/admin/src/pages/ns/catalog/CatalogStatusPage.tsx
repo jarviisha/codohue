@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   EmptyState,
+  ProgressBar,
   Skeleton,
   Stack,
   Table,
@@ -15,7 +16,6 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import {
   useBulkRedriveDeadletter,
   useCatalogBacklogHistory,
@@ -123,22 +123,16 @@ export default function CatalogStatusPage() {
   if (!ns) return null
 
   if (config.isLoading) {
-    return (
-      <PageContainer size="full">
-        <Skeleton className="h-48 w-full" />
-      </PageContainer>
-    )
+    return <Skeleton height={192} />
   }
 
   if (config.isError) {
     return (
-      <PageContainer size="full">
-        <Banner
-          status="error"
-          title="Could not load catalog config"
-          description={config.error?.message ?? 'unknown error'}
-        />
-      </PageContainer>
+      <Banner
+        status="error"
+        title="Could not load catalog config"
+        description={config.error?.message ?? 'unknown error'}
+      />
     )
   }
 
@@ -146,7 +140,7 @@ export default function CatalogStatusPage() {
 
   if (!data || !data.catalog.enabled) {
     return (
-      <PageContainer size="full">
+      <>
         <PageHeader>
           <Stack
             gap={4}
@@ -171,7 +165,7 @@ export default function CatalogStatusPage() {
           title="Catalog auto-embedding is off"
           description="Enable it in the namespace config to start ingesting raw content for embedding."
         />
-      </PageContainer>
+      </>
     )
   }
 
@@ -189,7 +183,7 @@ export default function CatalogStatusPage() {
   const reembedRunning = reembedStatus?.status === 'running'
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack
           gap={4}
@@ -418,7 +412,7 @@ export default function CatalogStatusPage() {
           />
         </Stack>
       </Stack>
-    </PageContainer>
+    </>
   )
 }
 
@@ -435,12 +429,12 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
           updated {new Date(progress.at).toLocaleTimeString()}
         </span>
       </Stack>
-      <div className="h-1 w-full bg-muted rounded overflow-hidden">
-        <div
-          className="h-full bg-accent-bg transition-all duration-300"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
+      <ProgressBar
+        label="Re-embed progress"
+        value={progress.processed}
+        max={total}
+        isLabelHidden
+      />
     </Stack>
   )
 }

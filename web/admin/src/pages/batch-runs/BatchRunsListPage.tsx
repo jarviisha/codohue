@@ -15,7 +15,6 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import {
   kindBadgeVariant,
   runningBadgeProps,
@@ -65,7 +64,7 @@ export default function BatchRunsListPage() {
   }))
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={1}>
           <h1 className="text-primary text-xl font-semibold">Batch runs</h1>
@@ -135,7 +134,7 @@ export default function BatchRunsListPage() {
                 )}
               </Stack>
 
-              {list.isLoading && <Skeleton className="h-48 w-full" />}
+              {list.isLoading && <Skeleton height={192} />}
 
               {list.isError && (
                 <Banner status="error" title="Failed to load batch runs" description={list.error?.message ?? ''} />
@@ -215,7 +214,7 @@ export default function BatchRunsListPage() {
           )}
         </Stack>
       </Stack>
-    </PageContainer>
+    </>
   )
 }
 

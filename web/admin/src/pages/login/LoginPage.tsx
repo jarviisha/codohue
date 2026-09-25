@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
-import { Banner, Button, Card, Stack, Text, TextInput } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
+import { Banner, Button, Card, Layout, Stack, Text, TextInput } from '@astryxdesign/core'
 import { useLogin, useSession } from '@/services/auth'
 
 export default function LoginPage() {
@@ -27,7 +26,7 @@ export default function LoginPage() {
   }
 
   return (
-    <PageContainer size="sm" padding={6} className="py-16">
+    <Layout height="auto" contentWidth={640} className="px-6 py-16">
       <Card>
         <Stack gap={1}>
           <Text weight="semibold">codohue admin</Text>
@@ -57,6 +56,6 @@ export default function LoginPage() {
             </Stack>
           </form>
       </Card>
-    </PageContainer>
+    </Layout>
   )
 }

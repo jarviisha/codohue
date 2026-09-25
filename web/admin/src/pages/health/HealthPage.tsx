@@ -1,6 +1,5 @@
-import { Token, Skeleton, Stack, Text } from '@astryxdesign/core'
+import { Layout, Token, Skeleton, Stack, Text } from '@astryxdesign/core'
 import QueryFeedback from '@/components/QueryFeedback'
-import PageContainer from '@/components/PageContainer'
 import { useHealth, type ComponentStatus } from '@/services/health'
 import PageHeader from '@/components/shell/PageHeader'
 
@@ -38,20 +37,20 @@ export default function HealthPage() {
 
   if (health.isLoading) {
     return (
-      <PageContainer size="md">
-        <Skeleton className="h-48 w-full" />
-      </PageContainer>
+      <Layout height="auto" contentWidth={896}>
+        <Skeleton height={192} />
+      </Layout>
     )
   }
 
   if (!health.data) {
     return (
-      <PageContainer size="md">
+      <Layout height="auto" contentWidth={896}>
         <PageHeader>
           <h1>Service health</h1>
         </PageHeader>
         <QueryFeedback query={health} label="Service health" />
-      </PageContainer>
+      </Layout>
     )
   }
 
@@ -59,7 +58,7 @@ export default function HealthPage() {
   const overall = data.status?.trim() || 'unknown'
 
   return (
-    <PageContainer size="md">
+    <Layout height="auto" contentWidth={896}>
       <PageHeader>
         <Stack gap={1}>
           <h1 className="text-primary text-xl font-semibold">Service health</h1>
@@ -90,6 +89,6 @@ export default function HealthPage() {
           })}
         </Stack>
       </Stack>
-    </PageContainer>
+    </Layout>
   )
 }

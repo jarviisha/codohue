@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Badge,
   Banner,
+  Layout,
   Skeleton,
   Stack,
   Table,
@@ -12,7 +13,6 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import { useOverview, type NamespaceOverview, type NamespaceStatus } from '@/services/overview'
 import { useBatchRunStats } from '@/services/batchRuns'
 import { useMetricsSummary, sumRates } from '@/services/metrics'
@@ -65,21 +65,21 @@ export default function FleetOverviewPage() {
 
   if (overview.isLoading) {
     return (
-      <PageContainer size="lg">
-        <Skeleton className="h-48 w-full" />
-      </PageContainer>
+      <Layout height="auto" contentWidth={1152}>
+        <Skeleton height={192} />
+      </Layout>
     )
   }
 
   if (overview.isError) {
     return (
-      <PageContainer size="lg">
+      <Layout height="auto" contentWidth={1152}>
         <Banner
           status="error"
           title="Could not load fleet overview"
           description={overview.error?.message ?? 'unknown error'}
         />
-      </PageContainer>
+      </Layout>
     )
   }
 
@@ -92,7 +92,7 @@ export default function FleetOverviewPage() {
   }))
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
           <Stack gap={1}>
@@ -139,7 +139,7 @@ export default function FleetOverviewPage() {
             </p>
           </Stack>
           {stats.isLoading ? (
-            <Skeleton className="h-48 w-full" />
+            <Skeleton height={192} />
           ) : seriesData.length === 0 ? (
             <p className="text-secondary text-sm">No completed runs in the last 24h.</p>
           ) : (
@@ -161,7 +161,7 @@ export default function FleetOverviewPage() {
           <NamespacesTable namespaces={data.namespaces} />
         </Stack>
       </Stack>
-    </PageContainer>
+    </>
   )
 }
 

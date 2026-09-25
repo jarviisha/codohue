@@ -13,7 +13,6 @@ import {
   TableHeaderCell,
   TableRow,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import { useNamespaces } from '@/services/namespaces'
 import PageHeader from '@/components/shell/PageHeader'
 import CreateNamespaceDialog from '@/pages/namespaces/CreateNamespaceDialog'
@@ -40,7 +39,7 @@ export default function NamespacesListPage() {
   }
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
           <Stack gap={1}>
@@ -56,7 +55,7 @@ export default function NamespacesListPage() {
       <CreateNamespaceDialog open={createOpen} onOpenChange={setCreateOpen} />
 
       <Stack gap={6}>
-        {q.isLoading && <Skeleton className="h-48 w-full" />}
+        {q.isLoading && <Skeleton height={192} />}
 
         {q.isError && (
           <Banner status="error" title="Failed to load namespaces" description={q.error?.message ?? ''} />
@@ -120,6 +119,6 @@ export default function NamespacesListPage() {
             </Table>
         )}
       </Stack>
-    </PageContainer>
+    </>
   )
 }

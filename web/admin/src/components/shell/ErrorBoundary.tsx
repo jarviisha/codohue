@@ -1,6 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
-import { Banner, Button, Stack } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
+import { Banner, Button, Layout, Stack } from '@astryxdesign/core'
 
 type Props = {
   children: ReactNode
@@ -52,7 +51,7 @@ export default class RouteErrorBoundary extends Component<Props, State> {
     if (!this.state.error) return this.props.children
 
     return (
-      <PageContainer size="md" className="py-8">
+      <Layout height="auto" contentWidth={896} className="py-8">
         <Stack gap={6}>
           <Banner
             status="error"
@@ -74,7 +73,7 @@ export default class RouteErrorBoundary extends Component<Props, State> {
             <Button onClick={this.handleReload} label="Reload page" />
           </Stack>
         </Stack>
-      </PageContainer>
+      </Layout>
     )
   }
 }

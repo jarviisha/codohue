@@ -1,6 +1,5 @@
 import { useLocation } from 'react-router-dom'
-import { Button, EmptyState, Stack } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
+import { Button, EmptyState, Layout, Stack } from '@astryxdesign/core'
 import PageHeader from '@/components/shell/PageHeader'
 
 /**
@@ -16,7 +15,7 @@ export default function NotFoundPage() {
   const location = useLocation()
 
   return (
-    <PageContainer size="md">
+    <Layout height="auto" contentWidth={896}>
       <PageHeader>
         <Stack gap={1}>
           <h1 className="text-primary text-xl font-semibold">Not found</h1>
@@ -34,6 +33,6 @@ export default function NotFoundPage() {
           <Button href="/namespaces" variant="ghost"  size="sm" label="Namespaces" />
         </Stack>
       </Stack>
-    </PageContainer>
+    </Layout>
   )
 }

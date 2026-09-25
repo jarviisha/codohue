@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useReducer } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, Banner, Button, Skeleton, Stack } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import {
   kindBadgeVariant,
   runningBadgeProps,
@@ -126,23 +125,17 @@ export default function BatchRunDetailPage() {
   useServerStream(streamURL, streamHandlers, { enabled: streamURL != null })
 
   if (detail.isLoading) {
-    return (
-      <PageContainer size="full">
-        <Skeleton className="h-48 w-full" />
-      </PageContainer>
-    )
+    return <Skeleton height={192} />
   }
   if (detail.isError) {
     return (
-      <PageContainer size="full">
-        <Banner status="error" title="Failed to load run" description={detail.error?.message ?? ''} />
-      </PageContainer>
+      <Banner status="error" title="Failed to load run" description={detail.error?.message ?? ''} />
     )
   }
   const run = detail.data!
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
           <Stack gap={1}>
@@ -221,7 +214,7 @@ export default function BatchRunDetailPage() {
           <LogLineViewer lines={state.log} follow={!state.completed} />
         </Stack>
       </Stack>
-    </PageContainer>
+    </>
   )
 }
 

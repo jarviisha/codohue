@@ -1,6 +1,5 @@
 import { Navigate, useLocation } from 'react-router-dom'
-import { Banner, Button, Skeleton, Stack } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
+import { Banner, Button, Layout, Skeleton, Stack } from '@astryxdesign/core'
 import { useSession } from '@/services/auth'
 import { isAuthError } from '@/services/http'
 import type { ReactNode } from 'react'
@@ -33,7 +32,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       return <Navigate to={`/login?next=${encodeURIComponent(target)}`} replace />
     }
     return (
-      <PageContainer size="sm" padding={6}>
+      <Layout height="auto" contentWidth={640} className="p-6">
         <Stack gap={6}>
           <Banner
             status="error"
@@ -42,7 +41,7 @@ export function AuthGuard({ children }: { children: ReactNode }) {
           />
           <Button onClick={() => session.refetch()} isDisabled={session.isFetching} label={session.isFetching ? 'Retrying…' : 'Retry'} />
         </Stack>
-      </PageContainer>
+      </Layout>
     )
   }
   return <>{children}</>

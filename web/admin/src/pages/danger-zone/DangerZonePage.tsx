@@ -11,7 +11,6 @@ import {
   Stack,
   TextInput,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import { useResetApp, type ResetAppResponse } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 
@@ -27,7 +26,7 @@ export default function DangerZonePage() {
   const [resetResult, setResetResult] = useState<ResetAppResponse | null>(null)
 
   return (
-    <PageContainer size="md">
+    <Layout height="auto" contentWidth={896}>
       <PageHeader>
         <Stack gap={1}>
           <h1 className="text-primary text-xl font-semibold">Danger zone</h1>
@@ -73,7 +72,7 @@ export default function DangerZonePage() {
           setResetOpen(false)
         }}
       />
-    </PageContainer>
+    </Layout>
   )
 }
 

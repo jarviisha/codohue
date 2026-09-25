@@ -20,7 +20,6 @@ import {
   TableRow,
   TextInput,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import { useNamespaceDashboard } from '@/services/namespaces'
 import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
@@ -36,35 +35,27 @@ export default function NamespaceOverviewPage() {
   if (!ns) return null
 
   if (q.isLoading) {
-    return (
-      <PageContainer size="full">
-        <Skeleton className="h-48 w-full" />
-      </PageContainer>
-    )
+    return <Skeleton height={192} />
   }
 
   if (q.isError) {
     return (
-      <PageContainer size="full">
-        <Banner
-          status="error"
-          title="Could not load namespace"
-          description={q.error?.message ?? 'unknown error'}
-        />
-      </PageContainer>
+      <Banner
+        status="error"
+        title="Could not load namespace"
+        description={q.error?.message ?? 'unknown error'}
+      />
     )
   }
 
   const data = q.data
   if (!data) {
     return (
-      <PageContainer size="full">
-        <Banner
-          status="warning"
-          title="Empty namespace response"
-          description="Backend returned no data for this namespace — verify the admin binary is on the latest commit."
-        />
-      </PageContainer>
+      <Banner
+        status="warning"
+        title="Empty namespace response"
+        description="Backend returned no data for this namespace — verify the admin binary is on the latest commit."
+      />
     )
   }
 
@@ -79,7 +70,7 @@ export default function NamespaceOverviewPage() {
   const config = data.config
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full" wrap="wrap">
           <Stack gap={1}>
@@ -205,7 +196,7 @@ export default function NamespaceOverviewPage() {
           navigate('/namespaces')
         }}
       />
-    </PageContainer>
+    </>
   )
 }
 
@@ -297,7 +288,7 @@ function DeleteNamespaceForm({
 
 function Tile({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <Card className="flex-1 min-w-35">
+    <Card className="flex-1 min-w-36">
         <Stack gap={6}>
           <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
           <Stack gap={4} direction="horizontal" align="center">

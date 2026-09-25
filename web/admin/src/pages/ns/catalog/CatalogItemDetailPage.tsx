@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Banner, Button, Card, Skeleton, Stack, Token } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import {
   CATALOG_STATE_COLOR,
   useCatalogItem,
@@ -24,38 +23,30 @@ export default function CatalogItemDetailPage() {
   if (!ns) return null
 
   if (q.isLoading) {
-    return (
-      <PageContainer size="full">
-        <Skeleton className="h-48 w-full" />
-      </PageContainer>
-    )
+    return <Skeleton height={192} />
   }
 
   if (q.isError) {
     return (
-      <PageContainer size="full">
-        <Banner status="error" title="Failed to load item" description={q.error?.message ?? ''} />
-      </PageContainer>
+      <Banner status="error" title="Failed to load item" description={q.error?.message ?? ''} />
     )
   }
 
   const item = q.data
   if (!item) {
     return (
-      <PageContainer size="full">
-        <Banner
-          status="warning"
-          title="Item not found"
-          description="It may have been deleted or never existed."
-        />
-      </PageContainer>
+      <Banner
+        status="warning"
+        title="Item not found"
+        description="It may have been deleted or never existed."
+      />
     )
   }
 
   const canRedrive = item.state === 'failed' || item.state === 'dead_letter'
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
           <Stack gap={1}>
@@ -189,7 +180,7 @@ export default function CatalogItemDetailPage() {
           })
         }
       />
-    </PageContainer>
+    </>
   )
 }
 

@@ -20,7 +20,6 @@ import {
 import QueryFeedback from '@/components/QueryFeedback'
 import ListSearch from '@/components/ListSearch'
 import { readPage } from '@/services/operatorUx'
-import PageContainer from '@/components/PageContainer'
 import {
   CATALOG_STATE_COLOR,
   useCatalogItems,
@@ -81,7 +80,7 @@ export default function CatalogItemsPage() {
   if (!ns) return null
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={4} direction="horizontal" align="center" justify="between" className="w-full">
           <Stack gap={1}>
@@ -144,7 +143,7 @@ export default function CatalogItemsPage() {
         )}
 
         <QueryFeedback query={items} label="Catalog items" />
-        {items.isLoading && <Skeleton className="h-48 w-full" />}
+        {items.isLoading && <Skeleton height={192} />}
 
         {items.data && items.data.items.length === 0 && (
           <EmptyState
@@ -231,7 +230,7 @@ export default function CatalogItemsPage() {
           })
         }}
       />
-    </PageContainer>
+    </>
   )
 }
 

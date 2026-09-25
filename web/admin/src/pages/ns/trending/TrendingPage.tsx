@@ -13,7 +13,6 @@ import {
   TableRow,
   Token,
 } from '@astryxdesign/core'
-import PageContainer from '@/components/PageContainer'
 import QueryFeedback from '@/components/QueryFeedback'
 import { readPage } from '@/services/operatorUx'
 import { useTrending } from '@/services/trending'
@@ -41,7 +40,7 @@ export default function TrendingPage() {
   }
 
   return (
-    <PageContainer size="full">
+    <>
       <PageHeader>
         <Stack gap={2}>
           <h1 className="text-primary text-xl font-semibold">Trending</h1>
@@ -86,7 +85,7 @@ export default function TrendingPage() {
         <QueryFeedback query={trending} label="Trending" />
 
         {trending.isLoading ? (
-          <Skeleton className="h-60 w-full" />
+          <Skeleton height={240} />
         ) : data ? (
           <Stack gap={4}>
             {data.items.length === 0 ? (
@@ -153,6 +152,6 @@ export default function TrendingPage() {
           </Stack>
         ) : null}
       </Stack>
-    </PageContainer>
+    </>
   )
 }
