@@ -291,20 +291,27 @@ function LiveTail({
 
   /**
    * flush applies everything collected since the last tick as a single update.
-   * The paused counter rides along so a paused tail receiving traffic is also
-   * one render per tick rather than one per event.
+   * It is also where pause takes effect: arrivals already waiting on the timer
+   * when the operator pauses go to the pending buffer, because prepending them
+   * to a paused table would shift scrollback offsets under the reader.
    */
   const flush = useCallback(() => {
     flushTimerRef.current = null
-    setPendingCount(pendingRef.current.length)
 
     const arrivals = arrivalsRef.current
-    if (arrivals.length === 0) return
-    arrivalsRef.current = []
-    // Arrivals are collected oldest-first; the tail reads newest-first.
-    const incoming = arrivals.reverse()
-    setEvents((prev) => [...incoming, ...prev].slice(0, TAIL_CAP))
-    flashAll(incoming)
+    if (arrivals.length > 0) {
+      arrivalsRef.current = []
+      // Arrivals are collected oldest-first; the tail reads newest-first.
+      const incoming = arrivals.reverse()
+      if (pausedRef.current) {
+        pendingRef.current = [...incoming, ...pendingRef.current].slice(0, TAIL_CAP)
+      } else {
+        setEvents((prev) => [...incoming, ...prev].slice(0, TAIL_CAP))
+        flashAll(incoming)
+      }
+    }
+
+    setPendingCount(pendingRef.current.length)
   }, [flashAll])
 
   const scheduleFlush = useCallback(() => {
@@ -327,12 +334,7 @@ function LiveTail({
 
   const { connected } = useServerStream(streamUrl || null, {
     event: (data: unknown) => {
-      const e = data as EventStreamMessage
-      if (pausedRef.current) {
-        pendingRef.current = [e, ...pendingRef.current].slice(0, TAIL_CAP)
-      } else {
-        arrivalsRef.current.push(e)
-      }
+      arrivalsRef.current.push(data as EventStreamMessage)
       scheduleFlush()
     },
     dropped: (data: unknown) => {

@@ -222,6 +222,35 @@ try {
   )
 
   // ---------------------------------------------------------------------
+  // Pause wins the race against the flush timer: arrivals collected in the
+  // ≤100ms before the click buffer instead of landing in the paused table.
+  // Emitting and clicking in one synchronous task guarantees the flush timer
+  // has not fired in between.
+  // ---------------------------------------------------------------------
+  const topBeforeRace = await page
+    .locator('table[aria-label="Live events"] tbody tr')
+    .first()
+    .innerText()
+  await page.evaluate(() => {
+    window.__emit(30)
+    const pause = [...document.querySelectorAll('button')].find(
+      (b) => b.textContent.trim() === 'Pause',
+    )
+    if (!pause) throw new Error('Pause button not found')
+    pause.click()
+  })
+  await settle()
+  await page.getByRole('button', { name: 'Resume (30)', exact: true }).waitFor()
+  const topAfterRace = await page
+    .locator('table[aria-label="Live events"] tbody tr')
+    .first()
+    .innerText()
+  assert.equal(topAfterRace, topBeforeRace, 'in-flight arrivals must not move a paused table')
+  await page.getByRole('button', { name: /^Resume/ }).click()
+  await settle()
+  console.log('PASS pausing mid-tick buffers in-flight arrivals instead of shifting the paused table')
+
+  // ---------------------------------------------------------------------
   // Pause buffers, resume flushes — without a timer per buffered row.
   // ---------------------------------------------------------------------
   await page.getByRole('button', { name: 'Pause', exact: true }).click()
