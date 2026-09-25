@@ -57,15 +57,17 @@ await context.route('**/api/**', async (route) => {
  * fetched without a navigation.
  */
 let chunkMode = 'pass'
+/** Which page module `chunkMode` applies to. */
+let chunkTarget = 'RuntimePage-'
 const chunkRequests = []
 await context.route('**/assets/*.js', async (route) => {
   const file = new URL(route.request().url()).pathname.split('/').pop()
   chunkRequests.push(file)
-  if (chunkMode === 'hold' && file.startsWith('RuntimePage-')) {
+  if (chunkMode === 'hold' && file.startsWith(chunkTarget)) {
     await new Promise((resolve) => setTimeout(resolve, HOLD_MS))
     return route.continue()
   }
-  if (chunkMode === 'fail' && file.startsWith('RuntimePage-')) {
+  if (chunkMode === 'fail' && file.startsWith(chunkTarget)) {
     return route.abort('failed')
   }
   return route.continue()
@@ -76,6 +78,37 @@ const sidebar = () => page.getByRole('navigation', { name: 'Main navigation', ex
 const runtimeLink = () => sidebar().getByRole('link', { name: 'System runtime', exact: true })
 
 try {
+  // ---------------------------------------------------------------------
+  // A cold visit paints the shell first. Route-level `lazy` resolves the
+  // entered route's module before that route renders, which is what makes the
+  // download part of the navigation — and is also what will blank the whole
+  // page if the hydrate fallback sits on the root route instead of the child.
+  // ---------------------------------------------------------------------
+  chunkMode = 'hold'
+  chunkTarget = 'HealthPage-'
+  const coldStartedAt = Date.now()
+  const coldLoad = goto('/health')
+  // The shell must be up well before the held page module lands.
+  await sidebar().getByRole('link', { name: 'System runtime', exact: true }).waitFor()
+  const shellAt = Date.now() - coldStartedAt
+  assert.equal(
+    await page.getByRole('heading', { name: 'Service health', exact: true }).count(),
+    0,
+    'the entered page must still be waiting while the shell is already painted',
+  )
+  await coldLoad
+  await page.getByRole('heading', { name: 'Service health', exact: true }).waitFor()
+  const coldReadyAt = Date.now() - coldStartedAt
+  assert.ok(
+    shellAt < coldReadyAt,
+    `shell painted at ${shellAt}ms, page at ${coldReadyAt}ms — the shell must not wait on the page module`,
+  )
+  console.log(
+    `PASS a cold visit paints the shell at ${shellAt}ms while the entered page module is held until ${coldReadyAt}ms`,
+  )
+  chunkMode = 'pass'
+  chunkTarget = 'RuntimePage-'
+
   // ---------------------------------------------------------------------
   // A held destination chunk must produce prompt, accessible pending state.
   // ---------------------------------------------------------------------

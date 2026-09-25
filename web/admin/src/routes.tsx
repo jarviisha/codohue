@@ -24,6 +24,7 @@ type PreloadHandle = { preload: PageLoader }
 type PageRoute = {
   lazy: () => Promise<{ Component: ComponentType }>
   errorElement: ReactNode
+  hydrateFallbackElement: ReactNode
   handle: PreloadHandle
 }
 
@@ -58,6 +59,13 @@ function page(load: PageLoader): PageRoute {
       }
     },
     errorElement: <RouteErrorElement />,
+    // Partial hydration: on a cold visit the entered route's module is
+    // resolved before its own first render, and this is what the router draws
+    // in the meantime. Because it sits on the *child* route rather than the
+    // root, the shell above it — top bar, sidebar, breadcrumbs — still paints
+    // immediately and only the content area waits. Hanging it on the root
+    // instead blanked the whole page for the length of the download.
+    hydrateFallbackElement: <Skeleton height={192} className="m-6" />,
     handle: { preload: load } satisfies PreloadHandle,
   }
 }
@@ -74,11 +82,6 @@ export const routes: RouteObject[] = [
         <AppShellLayout />
       </AuthGuard>
     ),
-    // On a cold visit the entered route's module is resolved before the first
-    // render, so there is no shell yet to hang a spinner off. Without this the
-    // router renders nothing for that window — a blank page where the old
-    // Suspense fallback used to draw a skeleton.
-    hydrateFallbackElement: <Skeleton height="100vh" />,
     children: [
       { index: true, ...page(() => import('@/pages/fleet/FleetOverviewPage')) },
       { path: 'health', ...page(() => import('@/pages/health/HealthPage')) },
