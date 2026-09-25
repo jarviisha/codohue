@@ -14,6 +14,15 @@ export type CatalogItemState =
   | 'dead_letter'
   | string
 
+/** Maps a catalog item state to its Astryx Token color. Fall back to 'gray'. */
+export const CATALOG_STATE_COLOR: Record<string, 'gray' | 'green' | 'orange' | 'red' | 'blue'> = {
+  pending: 'gray',
+  in_flight: 'blue',
+  embedded: 'green',
+  failed: 'orange',
+  dead_letter: 'red',
+}
+
 export type CatalogBacklog = {
   pending: number
   in_flight: number

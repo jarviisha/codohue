@@ -3,6 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, Banner, Button, Skeleton, Stack } from '@astryxdesign/core'
 import PageContainer from '@/components/PageContainer'
 import {
+  kindBadgeVariant,
+  runningBadgeProps,
   useBatchRunDetail,
   useCancelBatchRun,
   useRetryBatchRun,
@@ -146,7 +148,7 @@ export default function BatchRunDetailPage() {
           <Stack gap={1}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Run #{run.id}</h1>
-              <Badge variant={run.kind === 'reembed' ? 'purple' : 'neutral'} label={run.kind} />
+              <Badge variant={kindBadgeVariant(run.kind)} label={run.kind} />
               <RunStateBadge state={state} run={run} />
             </Stack>
             <MetaLine
@@ -268,9 +270,7 @@ function PhaseRow({ phase }: { phase: PhaseEntry }) {
 
 function RunStateBadge({ state, run }: { state: LocalState; run: BatchRunDetail }) {
   if (!state.completed) {
-    return (
-      <Badge variant={run.cancel_requested ? 'warning' : 'info'} label={run.cancel_requested ? 'cancelling' : 'running'} />
-    )
+    return <Badge {...runningBadgeProps(run.cancel_requested)} />
   }
   if (state.cancelled) return <Badge variant="neutral" label="cancelled" />
   if (run.success) return <Badge variant="success" label="ok" />

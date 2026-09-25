@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Badge, Banner, Button, Card, Skeleton, Stack } from '@astryxdesign/core'
+import { Banner, Button, Card, Skeleton, Stack, Token } from '@astryxdesign/core'
 import PageContainer from '@/components/PageContainer'
 import {
+  CATALOG_STATE_COLOR,
   useCatalogItem,
   useDeleteCatalogItem,
   useRedriveCatalogItem,
@@ -10,14 +11,6 @@ import {
 import MetaLine from '@/components/MetaLine'
 import PageHeader from '@/components/shell/PageHeader'
 import ConfirmDialog from '@/components/ConfirmDialog'
-
-const STATE_VARIANT: Record<string, 'neutral' | 'success' | 'warning' | 'error' | 'info'> = {
-  pending: 'neutral',
-  in_flight: 'info',
-  embedded: 'success',
-  failed: 'warning',
-  dead_letter: 'error',
-}
 
 export default function CatalogItemDetailPage() {
   const { ns, id } = useParams<{ ns: string; id: string }>()
@@ -68,7 +61,7 @@ export default function CatalogItemDetailPage() {
           <Stack gap={1}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">{item.object_id}</h1>
-              <Badge variant={STATE_VARIANT[item.state] ?? 'neutral'} label={item.state} />
+              <Token color={CATALOG_STATE_COLOR[item.state] ?? 'gray'} label={item.state} />
               {item.strategy_id && (
                 <span className="text-secondary text-xs">
                   {item.strategy_id}@{item.strategy_version}

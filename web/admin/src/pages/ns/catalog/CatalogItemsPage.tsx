@@ -22,6 +22,7 @@ import ListSearch from '@/components/ListSearch'
 import { readPage } from '@/services/operatorUx'
 import PageContainer from '@/components/PageContainer'
 import {
+  CATALOG_STATE_COLOR,
   useCatalogItems,
   useDeleteCatalogItem,
   useRedriveCatalogItem,
@@ -40,14 +41,6 @@ const STATE_OPTIONS: Array<{ value: CatalogItemState | ''; label: string }> = [
   { value: 'failed', label: 'failed' },
   { value: 'dead_letter', label: 'dead-letter' },
 ]
-
-const STATE_VARIANT: Record<string, 'gray' | 'green' | 'orange' | 'red' | 'blue'> = {
-  pending: 'gray',
-  in_flight: 'blue',
-  embedded: 'green',
-  failed: 'orange',
-  dead_letter: 'red',
-}
 
 export default function CatalogItemsPage() {
   const { ns } = useParams<{ ns: string }>()
@@ -283,7 +276,7 @@ function ItemRow({
         )}
       </TableCell>
       <TableCell>
-        <Token color={STATE_VARIANT[item.state] ?? 'gray'} label={item.state} />
+        <Token color={CATALOG_STATE_COLOR[item.state] ?? 'gray'} label={item.state} />
       </TableCell>
       <TableCell className="text-right tabular-nums">{item.attempt_count}</TableCell>
       <TableCell className="text-secondary text-xs">

@@ -14,6 +14,14 @@ export type UseServerStreamResult = {
   lastPingAt: number | null
 }
 
+/** Badge props for the SSE connection indicator shown in page headers. */
+export function streamBadgeProps(connected: boolean) {
+  return {
+    variant: connected ? ('success' as const) : ('neutral' as const),
+    label: `stream ${connected ? 'connected' : 'offline'}`,
+  }
+}
+
 /**
  * useServerStream subscribes to a Server-Sent Events endpoint and routes named
  * events to handler callbacks. `ping` events are tracked separately as a

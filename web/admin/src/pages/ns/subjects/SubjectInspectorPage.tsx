@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
-  Badge,
   Banner,
   Button,
   Card,
@@ -24,6 +23,7 @@ import {
 } from '@/services/subjects'
 import PageHeader from '@/components/shell/PageHeader'
 import MetaLine from '@/components/MetaLine'
+import StatTile from '@/components/StatTile'
 
 /**
  * SubjectInspectorPage is the operator's "why did user X get rec Y?" answer.
@@ -192,42 +192,21 @@ function SubjectProfileCard({
   }
 
   const indexed = sparseNNZ != null && sparseNNZ >= 0
-  const tiles: Array<{ label: string; value: string; badge?: { variant: 'success' | 'warning' | 'neutral'; label: string } }> = [
-    {
-      label: 'Interactions',
-      value: (interactionCount ?? 0).toLocaleString(),
-    },
-    {
-      label: 'Sparse vector NNZ',
-      value: sparseNNZ == null ? '—' : sparseNNZ < 0 ? 'not indexed' : sparseNNZ.toLocaleString(),
-      badge: indexed
-        ? { variant: 'success', label: 'in Qdrant' }
-        : { variant: 'warning', label: 'cold' },
-    },
-    {
-      label: 'Seen items',
-      value: `${seenItems.length.toLocaleString()}${seenItemsDays != null ? ` (last ${seenItemsDays}d)` : ''}`,
-    },
-  ]
 
   return (
     <Stack gap={6}>
       <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
-        {tiles.map((t) => (
-          <Card key={t.label} className="flex-1 min-w-40">
-              <Stack gap={6}>
-                <span className="text-secondary text-xs uppercase tracking-wide">
-                  {t.label}
-                </span>
-                <Stack gap={4} direction="horizontal" align="center">
-                  <span className="text-primary text-xl font-semibold tabular-nums">
-                    {t.value}
-                  </span>
-                  {t.badge && <Badge variant={t.badge.variant} label={t.badge.label} />}
-                </Stack>
-              </Stack>
-          </Card>
-        ))}
+        <StatTile label="Interactions" value={(interactionCount ?? 0).toLocaleString()} />
+        <StatTile
+          label="Sparse vector NNZ"
+          value={sparseNNZ == null ? '—' : sparseNNZ < 0 ? 'not indexed' : sparseNNZ.toLocaleString()}
+          tone={indexed ? 'success' : 'warning'}
+          hint={indexed ? 'in Qdrant' : 'cold'}
+        />
+        <StatTile
+          label="Seen items"
+          value={`${seenItems.length.toLocaleString()}${seenItemsDays != null ? ` (last ${seenItemsDays}d)` : ''}`}
+        />
       </Stack>
 
       {seenItems.length > 0 && (

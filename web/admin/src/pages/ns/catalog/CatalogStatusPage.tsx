@@ -24,10 +24,11 @@ import {
   useTriggerReEmbed,
   type CatalogBacklog,
 } from '@/services/catalog'
-import { useServerStream } from '@/services/stream'
+import { streamBadgeProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import MetaLine from '@/components/MetaLine'
+import StatTile from '@/components/StatTile'
 
 const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
 type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
@@ -201,10 +202,7 @@ export default function CatalogStatusPage() {
           <Stack gap={6}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Catalog</h1>
-              <Badge
-                variant={streamConnected ? 'success' : 'neutral'}
-                label={`stream ${streamConnected ? 'connected' : 'offline'}`}
-              />
+              <Badge {...streamBadgeProps(streamConnected)} />
               {streamEvents > 0 && (
                 <span className="text-secondary text-xs tabular-nums">
                   {streamEvents} live event{streamEvents === 1 ? '' : 's'}
@@ -448,49 +446,30 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
 }
 
 function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
-  const tiles: Array<{
-    label: string
-    value: number
-    tone: 'neutral' | 'warning' | 'error'
-    hint?: string
-  }> = [
-    { label: 'Pending', value: backlog.pending, tone: 'neutral' },
-    { label: 'In flight', value: backlog.in_flight, tone: 'neutral' },
-    {
-      label: 'Failed',
-      value: backlog.failed,
-      tone: backlog.failed > 0 ? 'warning' : 'neutral',
-    },
-    {
-      label: 'Dead-letter',
-      value: backlog.dead_letter,
-      tone: backlog.dead_letter > 0 ? 'error' : 'neutral',
-    },
-    { label: 'Embedded', value: backlog.embedded, tone: 'neutral' },
-    { label: 'Stream length', value: backlog.stream_len, tone: 'neutral', hint: 'XLEN' },
-    {
-      label: 'Consumer lag',
-      value: backlog.consumer_lag,
-      tone: backlog.consumer_lag > 1000 ? 'warning' : 'neutral',
-      hint: 'PEL',
-    },
-  ]
   return (
     <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
-      {tiles.map((t) => (
-        <Card key={t.label} className="flex-1 min-w-35">
-          <Stack gap={6}>
-            <span className="text-secondary text-xs uppercase tracking-wide">{t.label}</span>
-            <Stack gap={4} direction="horizontal" align="center">
-              <span className="text-primary text-xl font-semibold tabular-nums">
-                {t.value.toLocaleString()}
-              </span>
-              {t.tone !== 'neutral' && <Badge variant={t.tone} label="!" />}
-              {t.hint && <span className="text-secondary text-xs">{t.hint}</span>}
-            </Stack>
-          </Stack>
-        </Card>
-      ))}
+      <StatTile label="Pending" value={backlog.pending} />
+      <StatTile label="In flight" value={backlog.in_flight} />
+      <StatTile
+        label="Failed"
+        value={backlog.failed}
+        tone="warning"
+        hint={backlog.failed > 0 ? 'attention' : undefined}
+      />
+      <StatTile
+        label="Dead-letter"
+        value={backlog.dead_letter}
+        tone="error"
+        hint={backlog.dead_letter > 0 ? 'stuck' : undefined}
+      />
+      <StatTile label="Embedded" value={backlog.embedded} />
+      <StatTile label="Stream length (XLEN)" value={backlog.stream_len} />
+      <StatTile
+        label="Consumer lag (PEL)"
+        value={backlog.consumer_lag}
+        tone="warning"
+        hint={backlog.consumer_lag > 1000 ? 'high' : undefined}
+      />
     </Stack>
   )
 }

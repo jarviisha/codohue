@@ -3,7 +3,6 @@ import { Link, useParams } from 'react-router-dom'
 import {
   Badge,
   Banner,
-  Card,
   EmptyState,
   Pagination,
   Selector,
@@ -17,12 +16,19 @@ import {
   TableRow,
 } from '@astryxdesign/core'
 import PageContainer from '@/components/PageContainer'
-import { useBatchRuns, useBatchRunStats, type BatchRunsFilter } from '@/services/batchRuns'
+import {
+  kindBadgeVariant,
+  runningBadgeProps,
+  useBatchRuns,
+  useBatchRunStats,
+  type BatchRunsFilter,
+} from '@/services/batchRuns'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
+import StatTile from '@/components/StatTile'
 
 const PAGE_SIZE = 25
 
@@ -177,7 +183,7 @@ export default function BatchRunsListPage() {
                             </TableCell>
                           )}
                           <TableCell>
-                            <Badge variant={r.kind === 'reembed' ? 'purple' : 'neutral'} label={r.kind} />
+                            <Badge variant={kindBadgeVariant(r.kind)} label={r.kind} />
                           </TableCell>
                           <TableCell className="text-secondary text-sm">{r.trigger_source}</TableCell>
                           <TableCell className="text-secondary text-sm">
@@ -214,25 +220,22 @@ export default function BatchRunsListPage() {
 }
 
 function StatsRow({ stats }: { stats?: { total: number; running: number; ok: number; failed: number } }) {
-  const tiles = [
-    { label: 'Total', value: stats?.total ?? 0, tone: 'neutral' as const },
-    { label: 'Running', value: stats?.running ?? 0, tone: stats?.running ? ('warning' as const) : ('neutral' as const) },
-    { label: 'OK', value: stats?.ok ?? 0, tone: 'success' as const },
-    { label: 'Failed', value: stats?.failed ?? 0, tone: stats?.failed ? ('error' as const) : ('neutral' as const) },
-  ]
   return (
     <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
-      {tiles.map((t) => (
-        <Card key={t.label} className="flex-1 min-w-35">
-            <Stack gap={6}>
-              <span className="text-secondary text-xs uppercase tracking-wide">{t.label}</span>
-              <Stack gap={4} direction="horizontal" align="center">
-                <span className="text-primary text-xl font-semibold tabular-nums">{t.value}</span>
-                <Badge variant={t.tone} label={t.tone} />
-              </Stack>
-            </Stack>
-        </Card>
-      ))}
+      <StatTile label="Total" value={stats?.total ?? 0} />
+      <StatTile
+        label="Running"
+        value={stats?.running ?? 0}
+        tone="warning"
+        hint={stats?.running ? 'active' : undefined}
+      />
+      <StatTile label="OK" value={stats?.ok ?? 0} />
+      <StatTile
+        label="Failed"
+        value={stats?.failed ?? 0}
+        tone="error"
+        hint={stats?.failed ? 'attention' : undefined}
+      />
     </Stack>
   )
 }
@@ -243,7 +246,7 @@ function RunStatusBadge({
   run: { completed_at: string | null; success: boolean; cancel_requested: boolean; error_message: string | null }
 }) {
   if (run.completed_at == null) {
-    return <Badge variant={run.cancel_requested ? 'warning' : 'info'} label={run.cancel_requested ? 'cancelling' : 'running'} />
+    return <Badge {...runningBadgeProps(run.cancel_requested)} />
   }
   if (run.error_message === 'operator_cancelled') {
     return <Badge variant="neutral" label="cancelled" />

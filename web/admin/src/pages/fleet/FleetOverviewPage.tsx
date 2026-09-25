@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import {
   Badge,
   Banner,
-  Card,
   Skeleton,
   Stack,
   Table,
@@ -17,12 +16,13 @@ import PageContainer from '@/components/PageContainer'
 import { useOverview, type NamespaceOverview, type NamespaceStatus } from '@/services/overview'
 import { useBatchRunStats } from '@/services/batchRuns'
 import { useMetricsSummary, sumRates } from '@/services/metrics'
-import { useServerStream } from '@/services/stream'
+import { streamBadgeProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
+import StatTile from '@/components/StatTile'
 
 const STATUS_BADGE: Record<NamespaceStatus, { variant: 'success' | 'warning' | 'error' | 'neutral'; label: string }> = {
   active: { variant: 'success', label: 'active' },
@@ -100,7 +100,7 @@ export default function FleetOverviewPage() {
             <MetaLine
               items={[
                 `${data.namespaces.length} namespace${data.namespaces.length === 1 ? '' : 's'}`,
-                <Badge variant={streamConnected ? 'success' : 'neutral'} label={`stream ${streamConnected ? 'connected' : 'offline'}`} />,
+                <Badge {...streamBadgeProps(streamConnected)} />,
               ]}
             />
           </Stack>
@@ -171,49 +171,36 @@ function SummaryRow({ data }: { data: ReturnType<typeof useOverview>['data'] }) 
   const metrics = useMetricsSummary()
   if (!data) return null
   const ingestPerSec = sumRates(metrics.data?.ingest.events_per_sec_1m)
-  const tiles = [
-    {
-      label: 'Health',
-      value: data.health.status,
-      tone: data.health.status === 'ok' ? 'success' : 'error',
-    },
-    {
-      label: 'Ingest events/s',
-      value: ingestPerSec.toFixed(1),
-      tone: ingestPerSec > 0 ? 'success' : 'neutral',
-    },
-    {
-      label: 'Cron heartbeat',
-      value: data.cron_heartbeat.ok
-        ? `${data.cron_heartbeat.lag_seconds}s ago`
-        : 'no signal',
-      tone: data.cron_heartbeat.ok ? 'success' : 'warning',
-    },
-    {
-      label: 'Embedder',
-      value: data.embedder_heartbeat.ok ? 'ok' : 'silent',
-      tone: data.embedder_heartbeat.ok ? 'success' : 'warning',
-    },
-    {
-      label: 'Alerts',
-      value: data.alerts.length,
-      tone: data.alerts.length === 0 ? 'success' : 'warning',
-    },
-  ] as const
-
   return (
     <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
-      {tiles.map((t) => (
-        <Card key={t.label} className="flex-1 min-w-35">
-            <Stack gap={6}>
-              <span className="text-secondary text-xs uppercase tracking-wide">{t.label}</span>
-              <Stack gap={4} direction="horizontal" align="center">
-                <span className="text-primary text-xl font-semibold tabular-nums">{t.value}</span>
-                <Badge variant={t.tone} label={t.tone} />
-              </Stack>
-            </Stack>
-        </Card>
-      ))}
+      <StatTile
+        label="Health"
+        value={data.health.status}
+        tone={data.health.status === 'ok' ? 'success' : 'error'}
+      />
+      <StatTile
+        label="Ingest events/s"
+        value={ingestPerSec.toFixed(1)}
+        tone={ingestPerSec > 0 ? 'success' : 'neutral'}
+        hint={ingestPerSec > 0 ? 'live' : 'idle'}
+      />
+      <StatTile
+        label="Cron heartbeat"
+        value={data.cron_heartbeat.ok ? `${data.cron_heartbeat.lag_seconds}s ago` : 'no signal'}
+        tone={data.cron_heartbeat.ok ? 'success' : 'warning'}
+        hint={data.cron_heartbeat.ok ? 'healthy' : 'stalled'}
+      />
+      <StatTile
+        label="Embedder"
+        value={data.embedder_heartbeat.ok ? 'ok' : 'silent'}
+        tone={data.embedder_heartbeat.ok ? 'success' : 'warning'}
+      />
+      <StatTile
+        label="Alerts"
+        value={data.alerts.length}
+        tone={data.alerts.length === 0 ? 'success' : 'warning'}
+        hint={data.alerts.length === 0 ? 'clear' : 'attention'}
+      />
     </Stack>
   )
 }
