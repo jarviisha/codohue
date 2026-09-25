@@ -7,8 +7,16 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// querier is the subset of pgxpool.Pool the repository uses. Production
+// passes the pool; tests pass a fake.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 // Repository performs catalog_items state-transition writes on behalf of
 // the embedder worker. It deliberately exposes a small surface — load and
@@ -16,26 +24,13 @@ import (
 // repository, because the constitution forbids cross-domain imports
 // between internal/catalog and internal/embedder.
 type Repository struct {
-	db         *pgxpool.Pool
-	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
-	execFn     func(ctx context.Context, sql string, args ...any) (int64, error)
+	db querier
 }
 
-// NewRepository creates a new Repository with the given PostgreSQL connection pool.
-func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{
-		db: db,
-		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
-			return db.QueryRow(ctx, sql, args...)
-		},
-		execFn: func(ctx context.Context, sql string, args ...any) (int64, error) {
-			tag, err := db.Exec(ctx, sql, args...)
-			if err != nil {
-				return 0, fmt.Errorf("exec: %w", err)
-			}
-			return tag.RowsAffected(), nil
-		},
-	}
+// NewRepository creates a new Repository with the given PostgreSQL handle
+// (a *pgxpool.Pool in production).
+func NewRepository(db querier) *Repository {
+	return &Repository{db: db}
 }
 
 // LoadByID reads the catalog_items row identified by id, returning the
@@ -48,7 +43,7 @@ func (r *Repository) LoadByID(ctx context.Context, id int64) (*PendingItem, erro
 		strategyID string
 		strategyV  string
 	)
-	err := r.queryRowFn(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT id, namespace, object_id, state, content, content_hash,
 		       COALESCE(strategy_id, ''), COALESCE(strategy_version, ''),
 		       attempt_count, created_at
@@ -77,7 +72,7 @@ func (r *Repository) LoadByID(ctx context.Context, id int64) (*PendingItem, erro
 // whether to bail to dead_letter once attempts exceed max.
 func (r *Repository) MarkInFlight(ctx context.Context, id int64) (int, error) {
 	var newAttempt int
-	err := r.queryRowFn(ctx, `
+	err := r.db.QueryRow(ctx, `
 		UPDATE catalog_items
 		SET state = 'in_flight',
 		    attempt_count = attempt_count + 1,
@@ -107,7 +102,7 @@ func (r *Repository) MarkInFlight(ctx context.Context, id int64) (int, error) {
 // being overwritten with a stale vector's bookkeeping. Returns ErrStaleItem
 // in that case (or when the row is gone).
 func (r *Repository) MarkEmbedded(ctx context.Context, id int64, strategyID, strategyVersion string, embeddedAt time.Time, contentHash []byte) error {
-	rowsAffected, err := r.execFn(ctx, `
+	tag, err := r.db.Exec(ctx, `
 		UPDATE catalog_items
 		SET state = 'embedded',
 		    strategy_id = $2,
@@ -122,7 +117,7 @@ func (r *Repository) MarkEmbedded(ctx context.Context, id int64, strategyID, str
 	if err != nil {
 		return fmt.Errorf("mark embedded %d: %w", id, err)
 	}
-	if rowsAffected == 0 {
+	if tag.RowsAffected() == 0 {
 		return ErrStaleItem
 	}
 	return nil
@@ -132,7 +127,7 @@ func (r *Repository) MarkEmbedded(ctx context.Context, id int64, strategyID, str
 // 'failed' and last_error is updated. attempt_count is NOT touched here —
 // MarkInFlight already incremented it before processing began.
 func (r *Repository) MarkFailed(ctx context.Context, id int64, lastError string) error {
-	rowsAffected, err := r.execFn(ctx, `
+	tag, err := r.db.Exec(ctx, `
 		UPDATE catalog_items
 		SET state = 'failed',
 		    last_error = $2,
@@ -143,7 +138,7 @@ func (r *Repository) MarkFailed(ctx context.Context, id int64, lastError string)
 	if err != nil {
 		return fmt.Errorf("mark failed %d: %w", id, err)
 	}
-	if rowsAffected == 0 {
+	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
 	}
 	return nil
@@ -153,7 +148,7 @@ func (r *Repository) MarkFailed(ctx context.Context, id int64, lastError string)
 // 'dead_letter' and last_error is updated. The operator must explicitly
 // re-drive (admin endpoint) to retry a dead-lettered item.
 func (r *Repository) MarkDeadLetter(ctx context.Context, id int64, lastError string) error {
-	rowsAffected, err := r.execFn(ctx, `
+	tag, err := r.db.Exec(ctx, `
 		UPDATE catalog_items
 		SET state = 'dead_letter',
 		    last_error = $2,
@@ -164,7 +159,7 @@ func (r *Repository) MarkDeadLetter(ctx context.Context, id int64, lastError str
 	if err != nil {
 		return fmt.Errorf("mark dead_letter %d: %w", id, err)
 	}
-	if rowsAffected == 0 {
+	if tag.RowsAffected() == 0 {
 		return ErrItemNotFound
 	}
 	return nil
@@ -298,7 +293,7 @@ func (r *Repository) InsertBacklogSample(
 	sampledAt time.Time,
 	pending, inFlight, failed, deadLetter, streamLen int,
 ) error {
-	if _, err := r.execFn(ctx, `
+	if _, err := r.db.Exec(ctx, `
 		INSERT INTO catalog_backlog_samples
 		    (namespace, sampled_at, pending, in_flight, failed, dead_letter, stream_len)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -314,7 +309,7 @@ func (r *Repository) InsertBacklogSample(
 // duplicate snapshots when no field changed since last tick (BUILD_PLAN §8
 // "Sampler skip rule" — keeps the table from bloating during idle hours).
 func (r *Repository) LatestBacklogSample(ctx context.Context, namespace string) (counts BacklogStateCounts, streamLen int, found bool, err error) {
-	row := r.queryRowFn(ctx, `
+	row := r.db.QueryRow(ctx, `
 		SELECT pending, in_flight, failed, dead_letter, stream_len
 		FROM catalog_backlog_samples
 		WHERE namespace = $1

@@ -5,31 +5,25 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// querier is the subset of pgxpool.Pool (and pgx.Tx) the repository uses.
+// Production passes the pool or an open transaction; tests pass a fake.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 // Repository reads and writes the objects table in PostgreSQL.
 type Repository struct {
-	db         *pgxpool.Pool
-	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
-	execFn     func(ctx context.Context, sql string, args ...any) error
+	db querier
 }
 
-// NewRepository creates a new Repository with the given connection pool.
-func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{
-		db: db,
-		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
-			return db.QueryRow(ctx, sql, args...)
-		},
-		execFn: func(ctx context.Context, sql string, args ...any) error {
-			_, err := db.Exec(ctx, sql, args...)
-			if err != nil {
-				return fmt.Errorf("exec objects statement: %w", err)
-			}
-			return nil
-		},
-	}
+// NewRepository creates a new Repository with the given PostgreSQL handle
+// (a *pgxpool.Pool in production).
+func NewRepository(db querier) *Repository {
+	return &Repository{db: db}
 }
 
 // NewRepositoryTx returns a Repository bound to an open transaction, so a
@@ -38,17 +32,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 // package stays the only writer of the objects table; what changes is which
 // connection the statement runs on.
 func NewRepositoryTx(tx pgx.Tx) *Repository {
-	return &Repository{
-		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
-			return tx.QueryRow(ctx, sql, args...)
-		},
-		execFn: func(ctx context.Context, sql string, args ...any) error {
-			if _, err := tx.Exec(ctx, sql, args...); err != nil {
-				return fmt.Errorf("exec objects statement: %w", err)
-			}
-			return nil
-		},
-	}
+	return &Repository{db: tx}
 }
 
 // Upsert creates or updates the metadata row for (namespace, object_id).
@@ -56,7 +40,7 @@ func NewRepositoryTx(tx pgx.Tx) *Repository {
 // cleared.
 func (r *Repository) Upsert(ctx context.Context, namespace, objectID, authorSubjectID string) (*Object, error) {
 	var obj Object
-	err := r.queryRowFn(ctx, `
+	err := r.db.QueryRow(ctx, `
 		INSERT INTO objects (namespace, object_id, author_subject_id, created_at, updated_at)
 		VALUES ($1, $2, NULLIF($3, ''), NOW(), NOW())
 		ON CONFLICT (namespace, object_id) DO UPDATE
@@ -74,7 +58,7 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, authorSubj
 // Get returns the metadata row, or (nil, nil) when the object has none.
 func (r *Repository) Get(ctx context.Context, namespace, objectID string) (*Object, error) {
 	var obj Object
-	err := r.queryRowFn(ctx, `
+	err := r.db.QueryRow(ctx, `
 		SELECT namespace, object_id, COALESCE(author_subject_id, ''), created_at, updated_at
 		FROM objects
 		WHERE namespace = $1 AND object_id = $2`,
@@ -92,7 +76,7 @@ func (r *Repository) Get(ctx context.Context, namespace, objectID string) (*Obje
 // Delete removes the metadata row. Idempotent — deleting an object that was
 // never attributed is not an error.
 func (r *Repository) Delete(ctx context.Context, namespace, objectID string) error {
-	if err := r.execFn(ctx,
+	if _, err := r.db.Exec(ctx,
 		`DELETE FROM objects WHERE namespace = $1 AND object_id = $2`,
 		namespace, objectID,
 	); err != nil {

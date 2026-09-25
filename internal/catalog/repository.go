@@ -10,20 +10,31 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// rowQuerier is the subset of pgxpool.Pool (and pgx.Tx) the single-row reads
+// and writes run on; tests substitute a fake.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Repository writes catalog_items rows in PostgreSQL.
 type Repository struct {
-	db         *pgxpool.Pool
-	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
+	// db is the full pool, needed for multi-row queries and to open the
+	// UpsertWithAttribution transaction. It is nil when the repository is
+	// scoped to a transaction or to a test fake via newRepositoryWithQuerier.
+	db *pgxpool.Pool
+	q  rowQuerier
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{
-		db: db,
-		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
-			return db.QueryRow(ctx, sql, args...)
-		},
-	}
+	return &Repository{db: db, q: db}
+}
+
+// newRepositoryWithQuerier scopes the repository to a bare row querier: the
+// open transaction inside UpsertWithAttribution, or a fake in unit tests.
+// Methods needing the full pool are not usable on such a repository.
+func newRepositoryWithQuerier(q rowQuerier) *Repository {
+	return &Repository{q: q}
 }
 
 // ObjectRow is one row of the reconciliation read.
@@ -39,7 +50,7 @@ type ObjectRow struct {
 // "everything".
 func (r *Repository) ListObjects(ctx context.Context, namespace string, changedSince *time.Time, limit, offset int, cursor *objectCursor) ([]ObjectRow, int, error) {
 	var total int
-	err := r.queryRowFn(ctx, `
+	err := r.q.QueryRow(ctx, `
 		SELECT COUNT(*) FROM catalog_items
 		WHERE namespace = $1 AND ($2::timestamptz IS NULL OR updated_at > $2)`,
 		namespace, changedSince,
@@ -126,9 +137,7 @@ func (r *Repository) UpsertWithAttribution(
 
 	var result *UpsertResult
 	if err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
-		txRepo := &Repository{queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
-			return tx.QueryRow(ctx, sql, args...)
-		}}
+		txRepo := newRepositoryWithQuerier(tx)
 		var err error
 		result, err = txRepo.Upsert(ctx, namespace, objectID, content, contentHash, metadata)
 		if err != nil {
@@ -174,7 +183,7 @@ func (r *Repository) Upsert(ctx context.Context, namespace, objectID, content st
 	// CTE pre-reads the existing content_hash so we can decide whether the
 	// upsert needs to publish to the stream. If the row is fresh,
 	// existing.content_hash is NULL and needs_publish is true.
-	err = r.queryRowFn(ctx, `
+	err = r.q.QueryRow(ctx, `
 		WITH existing AS (
 			SELECT content_hash FROM catalog_items
 			WHERE namespace = $1 AND object_id = $2

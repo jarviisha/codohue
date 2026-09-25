@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
@@ -16,6 +17,25 @@ type fakeRow struct {
 }
 
 func (f fakeRow) Scan(dest ...any) error { return f.scanFn(dest...) }
+
+// fakeDB fakes the querier collaborator; ops a test leaves unset panic when
+// called, which fails the test just as the old nil function fields did.
+type fakeDB struct {
+	queryRow func(ctx context.Context, sql string, args ...any) pgx.Row
+	exec     func(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return f.queryRow(ctx, sql, args...)
+}
+
+func (f *fakeDB) Query(context.Context, string, ...any) (pgx.Rows, error) {
+	panic("Query not faked")
+}
+
+func (f *fakeDB) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return f.exec(ctx, sql, args...)
+}
 
 func setInt64(dest any, v int64) error {
 	ptr, ok := dest.(*int64)
@@ -60,8 +80,8 @@ func TestNewRepository(t *testing.T) {
 }
 
 func TestRepositoryLoadByID_Success(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	repo := NewRepository(&fakeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				if err := setInt64(dest[0], 7); err != nil {
 					return err
@@ -90,7 +110,7 @@ func TestRepositoryLoadByID_Success(t *testing.T) {
 				return setInt(dest[8], 2)
 			}}
 		},
-	}
+	})
 	item, err := repo.LoadByID(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("LoadByID: %v", err)
@@ -110,11 +130,11 @@ func TestRepositoryLoadByID_Success(t *testing.T) {
 }
 
 func TestRepositoryLoadByID_NotFound(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	repo := NewRepository(&fakeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
-	}
+	})
 	_, err := repo.LoadByID(context.Background(), 7)
 	if !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected ErrItemNotFound, got %v", err)
@@ -122,11 +142,11 @@ func TestRepositoryLoadByID_NotFound(t *testing.T) {
 }
 
 func TestRepositoryLoadByID_QueryError(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	repo := NewRepository(&fakeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("db down") }}
 		},
-	}
+	})
 	_, err := repo.LoadByID(context.Background(), 7)
 	if err == nil || errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected wrapped DB error, got %v", err)
@@ -134,13 +154,13 @@ func TestRepositoryLoadByID_QueryError(t *testing.T) {
 }
 
 func TestRepositoryMarkInFlight_Success(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	repo := NewRepository(&fakeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return setInt(dest[0], 3)
 			}}
 		},
-	}
+	})
 	got, err := repo.MarkInFlight(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("MarkInFlight: %v", err)
@@ -151,11 +171,11 @@ func TestRepositoryMarkInFlight_Success(t *testing.T) {
 }
 
 func TestRepositoryMarkInFlight_NotFound(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	repo := NewRepository(&fakeDB{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
-	}
+	})
 	_, err := repo.MarkInFlight(context.Background(), 7)
 	if !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected ErrItemNotFound, got %v", err)
@@ -164,36 +184,36 @@ func TestRepositoryMarkInFlight_NotFound(t *testing.T) {
 
 func TestRepositoryMarkEmbedded_Success(t *testing.T) {
 	called := false
-	repo := &Repository{
-		execFn: func(_ context.Context, _ string, args ...any) (int64, error) {
+	repo := NewRepository(&fakeDB{
+		exec: func(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 			called = true
 			if args[0].(int64) != 7 {
-				return 0, errors.New("wrong id")
+				return pgconn.CommandTag{}, errors.New("wrong id")
 			}
 			if args[1].(string) != "internal-hashing-ngrams" {
-				return 0, errors.New("wrong strategy_id")
+				return pgconn.CommandTag{}, errors.New("wrong strategy_id")
 			}
 			if args[2].(string) != "v1" {
-				return 0, errors.New("wrong strategy_version")
+				return pgconn.CommandTag{}, errors.New("wrong strategy_version")
 			}
-			return 1, nil
+			return pgconn.NewCommandTag("UPDATE 1"), nil
 		},
-	}
+	})
 	err := repo.MarkEmbedded(context.Background(), 7, "internal-hashing-ngrams", "v1", time.Now(), []byte("h1"))
 	if err != nil {
 		t.Fatalf("MarkEmbedded: %v", err)
 	}
 	if !called {
-		t.Fatal("execFn not called")
+		t.Fatal("exec not called")
 	}
 }
 
 func TestRepositoryMarkEmbedded_ZeroRowsReturnsStaleSentinel(t *testing.T) {
-	repo := &Repository{
-		execFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
-			return 0, nil
+	repo := NewRepository(&fakeDB{
+		exec: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
 		},
-	}
+	})
 	err := repo.MarkEmbedded(context.Background(), 7, "x", "v1", time.Now(), []byte("h1"))
 	if !errors.Is(err, ErrStaleItem) {
 		t.Fatalf("expected ErrStaleItem, got %v", err)
@@ -201,11 +221,11 @@ func TestRepositoryMarkEmbedded_ZeroRowsReturnsStaleSentinel(t *testing.T) {
 }
 
 func TestRepositoryMarkFailed_PropagatesDBError(t *testing.T) {
-	repo := &Repository{
-		execFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
-			return 0, errors.New("db down")
+	repo := NewRepository(&fakeDB{
+		exec: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.CommandTag{}, errors.New("db down")
 		},
-	}
+	})
 	err := repo.MarkFailed(context.Background(), 7, "boom")
 	if err == nil || errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected wrapped DB error, got %v", err)
@@ -213,14 +233,14 @@ func TestRepositoryMarkFailed_PropagatesDBError(t *testing.T) {
 }
 
 func TestRepositoryMarkDeadLetter_Success(t *testing.T) {
-	repo := &Repository{
-		execFn: func(_ context.Context, _ string, args ...any) (int64, error) {
+	repo := NewRepository(&fakeDB{
+		exec: func(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
 			if args[1].(string) != "max attempts exhausted" {
-				return 0, errors.New("wrong last_error")
+				return pgconn.CommandTag{}, errors.New("wrong last_error")
 			}
-			return 1, nil
+			return pgconn.NewCommandTag("UPDATE 1"), nil
 		},
-	}
+	})
 	err := repo.MarkDeadLetter(context.Background(), 7, "max attempts exhausted")
 	if err != nil {
 		t.Fatalf("MarkDeadLetter: %v", err)
@@ -228,11 +248,11 @@ func TestRepositoryMarkDeadLetter_Success(t *testing.T) {
 }
 
 func TestRepositoryMarkDeadLetter_NotFoundReturnsSentinel(t *testing.T) {
-	repo := &Repository{
-		execFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
-			return 0, nil
+	repo := NewRepository(&fakeDB{
+		exec: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+			return pgconn.NewCommandTag("UPDATE 0"), nil
 		},
-	}
+	})
 	err := repo.MarkDeadLetter(context.Background(), 7, "boom")
 	if !errors.Is(err, ErrItemNotFound) {
 		t.Fatalf("expected ErrItemNotFound, got %v", err)

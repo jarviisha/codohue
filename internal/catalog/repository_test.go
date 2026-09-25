@@ -18,6 +18,13 @@ type fakeRow struct {
 
 func (f fakeRow) Scan(dest ...any) error { return f.scanFn(dest...) }
 
+// queryRowFunc adapts a function to the rowQuerier collaborator.
+type queryRowFunc func(ctx context.Context, sql string, args ...any) pgx.Row
+
+func (f queryRowFunc) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return f(ctx, sql, args...)
+}
+
 func setString(dest any, v string) error {
 	ptr, ok := dest.(*string)
 	if !ok {
@@ -168,11 +175,9 @@ func TestContentHash_DifferentContentDiffers(t *testing.T) {
 }
 
 func TestRepositoryUpsert_QueryError(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
+	}))
 	_, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", ContentHash("hello"), nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -182,13 +187,11 @@ func TestRepositoryUpsert_QueryError(t *testing.T) {
 func TestRepositoryUpsert_FreshInsertNeedsPublish(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello world")
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
-			}}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(dest ...any) error {
+			return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
+		}}
+	}))
 	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello world", hash, nil)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -207,13 +210,11 @@ func TestRepositoryUpsert_FreshInsertNeedsPublish(t *testing.T) {
 func TestRepositoryUpsert_IdempotentSameContent(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello world")
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "embedded", false, now)
-			}}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(dest ...any) error {
+			return fillScanRow(dest, hash, []byte("{}"), "embedded", false, now)
+		}}
+	}))
 	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello world", hash, nil)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -229,13 +230,11 @@ func TestRepositoryUpsert_IdempotentSameContent(t *testing.T) {
 func TestRepositoryUpsert_NewContentResetsState(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("brand new content")
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
-			}}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(dest ...any) error {
+			return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
+		}}
+	}))
 	res, err := repo.Upsert(context.Background(), "ns", "obj1", "brand new content", hash, nil)
 	if err != nil {
 		t.Fatalf("Upsert: %v", err)
@@ -256,14 +255,12 @@ func TestRepositoryUpsert_MetadataRoundTrip(t *testing.T) {
 	hash := ContentHash("hello")
 	meta := []byte(`{"lang":"vi","tags":"news"}`)
 	var gotArgs []any
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, args ...any) pgx.Row {
-			gotArgs = args
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, meta, "pending", true, now)
-			}}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, args ...any) pgx.Row {
+		gotArgs = args
+		return fakeRow{scanFn: func(dest ...any) error {
+			return fillScanRow(dest, hash, meta, "pending", true, now)
+		}}
+	}))
 	res, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash,
 		map[string]any{"lang": "vi", "tags": "news"})
 	if err != nil {
@@ -281,13 +278,11 @@ func TestRepositoryUpsert_MetadataRoundTrip(t *testing.T) {
 func TestRepositoryUpsert_MalformedMetadataReturnsError(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello")
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("not-json"), "pending", true, now)
-			}}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(dest ...any) error {
+			return fillScanRow(dest, hash, []byte("not-json"), "pending", true, now)
+		}}
+	}))
 	_, err := repo.Upsert(context.Background(), "ns", "obj1", "hello", hash, nil)
 	if err == nil {
 		t.Fatal("expected error on malformed metadata")
@@ -471,13 +466,11 @@ func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
 // dropped and the caller had no way to learn it never happened.
 
 func upsertRepoWithHash(hash []byte, now time.Time) *Repository {
-	return &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(dest ...any) error {
-				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
-			}}
-		},
-	}
+	return newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(dest ...any) error {
+			return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
+		}}
+	}))
 }
 
 // Absence means "unspecified", not "clear it": a re-ingest that carries no
@@ -532,11 +525,9 @@ func TestUpsertWithAttribution_HookFailureFailsTheCall(t *testing.T) {
 // A content write that never landed has nothing to attribute, so the hook must
 // not run and the original error must surface.
 func TestUpsertWithAttribution_ContentFailureSkipsTheHook(t *testing.T) {
-	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
-		},
-	}
+	repo := newRepositoryWithQuerier(queryRowFunc(func(_ context.Context, _ string, _ ...any) pgx.Row {
+		return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
+	}))
 
 	called := 0
 	_, err := repo.UpsertWithAttribution(context.Background(), "ns", "obj1", "hello", ContentHash("hello"), nil,

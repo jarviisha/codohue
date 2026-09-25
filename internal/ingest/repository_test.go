@@ -7,8 +7,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// fakeInsertRow and fakeRowQuerier fake the rowQuerier collaborator.
+type fakeInsertRow struct{ err error }
+
+func (f fakeInsertRow) Scan(...any) error { return f.err }
+
+type fakeRowQuerier struct{ row pgx.Row }
+
+func (f fakeRowQuerier) QueryRow(context.Context, string, ...any) pgx.Row { return f.row }
 
 func TestNewRepository(t *testing.T) {
 	repo := NewRepository(nil)
@@ -18,11 +28,7 @@ func TestNewRepository(t *testing.T) {
 }
 
 func TestRepositoryInsert_ExecError(t *testing.T) {
-	repo := &Repository{
-		insertFn: func(_ context.Context, _ string, _ ...any) (int64, error) {
-			return 0, errors.New("exec failed")
-		},
-	}
+	repo := NewRepository(fakeRowQuerier{row: fakeInsertRow{err: errors.New("exec failed")}})
 
 	err := repo.Insert(context.Background(), &Event{})
 	if err == nil {

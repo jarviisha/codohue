@@ -36,6 +36,15 @@ type catalogIngestor interface {
 	IngestStreamItem(ctx context.Context, item *codohuetypes.CatalogStreamItem) error
 }
 
+// catalogStreamClient is the subset of go-redis stream operations the
+// catalog worker uses. Production passes *redis.Client; tests pass a fake.
+type catalogStreamClient interface {
+	XGroupCreateMkStream(ctx context.Context, stream, group, start string) *redis.StatusCmd
+	XReadGroup(ctx context.Context, args *redis.XReadGroupArgs) *redis.XStreamSliceCmd
+	XAutoClaim(ctx context.Context, args *redis.XAutoClaimArgs) *redis.XAutoClaimCmd
+	XAck(ctx context.Context, stream, group string, ids ...string) *redis.IntCmd
+}
+
 // CatalogWorker consumes catalog content from the durable client-facing
 // stream (codohuetypes.CatalogStreamName) and hands it to the catalog domain,
 // which persists catalog_items and feeds the embedder pipeline exactly as the
@@ -44,14 +53,11 @@ type catalogIngestor interface {
 // idempotent — re-ingesting unchanged content is a no-op upsert behind the
 // content-hash short-circuit.
 type CatalogWorker struct {
-	service       catalogIngestor
-	lifecycle     lifecycleEvaluator
-	consumer      string
-	createGroupFn func(ctx context.Context, stream, group, start string) error
-	readGroupFn   func(ctx context.Context, args *redis.XReadGroupArgs) ([]redis.XStream, error)
-	autoClaimFn   func(ctx context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error)
-	ackFn         func(ctx context.Context, stream, group string, ids ...string) error
-	reapCursor    string
+	redis      catalogStreamClient
+	service    catalogIngestor
+	lifecycle  lifecycleEvaluator
+	consumer   string
+	reapCursor string
 }
 
 // SetLifecycleEvaluator enables durable generation enforcement.
@@ -59,30 +65,15 @@ func (w *CatalogWorker) SetLifecycleEvaluator(evaluator lifecycleEvaluator) { w.
 
 // NewCatalogWorker creates a CatalogWorker consuming as the given consumer
 // name (empty falls back to the same default as the event worker).
-func NewCatalogWorker(redisClient *redis.Client, service catalogIngestor, consumer string) *CatalogWorker {
+func NewCatalogWorker(redisClient catalogStreamClient, service catalogIngestor, consumer string) *CatalogWorker {
 	if consumer == "" {
 		consumer = defaultConsumerName
 	}
 	return &CatalogWorker{
+		redis:      redisClient,
 		service:    service,
 		consumer:   consumer,
 		reapCursor: "0-0",
-		createGroupFn: func(ctx context.Context, stream, group, start string) error {
-			return redisClient.XGroupCreateMkStream(ctx, stream, group, start).Err()
-		},
-		readGroupFn: func(ctx context.Context, args *redis.XReadGroupArgs) ([]redis.XStream, error) {
-			return redisClient.XReadGroup(ctx, args).Result()
-		},
-		autoClaimFn: func(ctx context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
-			msgs, next, err := redisClient.XAutoClaim(ctx, args).Result()
-			if err != nil {
-				return nil, "", fmt.Errorf("xautoclaim: %w", err)
-			}
-			return msgs, next, nil
-		},
-		ackFn: func(ctx context.Context, stream, group string, ids ...string) error {
-			return redisClient.XAck(ctx, stream, group, ids...).Err()
-		},
 	}
 }
 
@@ -114,9 +105,19 @@ func (w *CatalogWorker) streamConsumer() *infraredis.StreamConsumer {
 		ReapCount: reapBatchSize, ReapPageBudget: reapPageBudget,
 		ReadBackoffMin: readErrBackoffMin, ReadBackoffMax: readErrBackoffMax,
 	}, infraredis.StreamConsumerFuncs{
-		CreateGroup: w.createGroupFn,
-		ReadGroup:   w.readGroupFn,
-		AutoClaim:   w.autoClaimFn,
+		CreateGroup: func(ctx context.Context, stream, group, start string) error {
+			return w.redis.XGroupCreateMkStream(ctx, stream, group, start).Err()
+		},
+		ReadGroup: func(ctx context.Context, args *redis.XReadGroupArgs) ([]redis.XStream, error) {
+			return w.redis.XReadGroup(ctx, args).Result()
+		},
+		AutoClaim: func(ctx context.Context, args *redis.XAutoClaimArgs) ([]redis.XMessage, string, error) {
+			msgs, next, err := w.redis.XAutoClaim(ctx, args).Result()
+			if err != nil {
+				return nil, "", fmt.Errorf("xautoclaim: %w", err)
+			}
+			return msgs, next, nil
+		},
 	}, w.handleMessage, infraredis.StreamConsumerObserver{
 		ReadError: func(_ context.Context, err error) { slog.Warn("catalog ingest xreadgroup failed", "error", err) },
 		RecreateError: func(_ context.Context, err error) {
@@ -177,7 +178,7 @@ func (w *CatalogWorker) handleMessage(ctx context.Context, msg redis.XMessage) {
 }
 
 func (w *CatalogWorker) ack(ctx context.Context, id string) {
-	if err := w.ackFn(ctx, codohuetypes.CatalogStreamName, catalogConsumerGroup, id); err != nil {
+	if err := w.redis.XAck(ctx, codohuetypes.CatalogStreamName, catalogConsumerGroup, id).Err(); err != nil {
 		slog.Warn("catalog ingest xack failed", "entry_id", id, "error", err)
 	}
 }
