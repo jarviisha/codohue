@@ -3,6 +3,7 @@ package compute
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -243,7 +244,7 @@ func TestRunPhase2Dense_CatalogNoEmbeddingsYet(t *testing.T) {
 	}
 
 	items, subjects, err := job.runPhase2Dense(context.Background(), "ns1",
-		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, &LogCapture{})
+		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -264,7 +265,7 @@ func TestRunPhase2Dense_CatalogFetchError(t *testing.T) {
 	}
 
 	_, _, err := job.runPhase2Dense(context.Background(), "ns1",
-		&namespace.Config{DenseSource: "catalog"}, &LogCapture{})
+		&namespace.Config{DenseSource: "catalog"}, slog.New(&LogCapture{}))
 	if err == nil {
 		t.Fatal("expected error when the item vector fetch fails")
 	}
@@ -401,7 +402,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 		DenseSource:   "item2vec",
 		EmbeddingDim:  8,
 		DenseDistance: "dot",
-	}, nil)
+	}, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -442,7 +443,7 @@ func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
 		DenseSource:   "svd",
 		EmbeddingDim:  4,
 		DenseDistance: "dot",
-	}, nil)
+	}, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -467,7 +468,7 @@ func TestRunPhase2Dense_NoEvents_SkipsUpserts(t *testing.T) {
 		return nil
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec"}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec"}, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -482,7 +483,7 @@ func TestRunPhase2Dense_EnsureDenseCollectionsFailure(t *testing.T) {
 		return errors.New("ensure failed")
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec"}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec"}, slog.New(&LogCapture{}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -506,7 +507,7 @@ func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
 		return errors.New("item upsert failed")
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 8}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 8}, slog.New(&LogCapture{}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -530,7 +531,7 @@ func TestRunPhase2Dense_SubjectUpsertFailure(t *testing.T) {
 		return errors.New("subject upsert failed")
 	}
 
-	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 8}, nil)
+	_, _, err := job.runPhase2Dense(context.Background(), "ns1", &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 8}, slog.New(&LogCapture{}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -552,7 +553,7 @@ func TestRunPhase3Trending_UsesDefaults(t *testing.T) {
 		return nil
 	}
 
-	_, err := job.runPhase3Trending(context.Background(), "ns1", nil, nil)
+	_, err := job.runPhase3Trending(context.Background(), "ns1", nil, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -590,7 +591,7 @@ func TestRunPhase3Trending_UsesConfigOverrides(t *testing.T) {
 		LambdaTrending: 0.2,
 		TrendingTTL:    120,
 		ActionWeights:  map[string]float64{"purchase": 9},
-	}, nil)
+	}, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -611,7 +612,7 @@ func TestRunPhase3Trending_StoreFailure(t *testing.T) {
 		return errors.New("redis failed")
 	}
 
-	_, err := job.runPhase3Trending(context.Background(), "ns1", nil, nil)
+	_, err := job.runPhase3Trending(context.Background(), "ns1", nil, slog.New(&LogCapture{}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -977,7 +978,7 @@ func TestRunPhase2Dense_EmptyWindowClearsOnlyWhatThisRunOwns(t *testing.T) {
 			}
 
 			if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
-				&namespace.Config{DenseSource: tc.denseSource, EmbeddingDim: 2}, &LogCapture{}); err != nil {
+				&namespace.Config{DenseSource: tc.denseSource, EmbeddingDim: 2}, slog.New(&LogCapture{})); err != nil {
 				t.Fatalf("runPhase2Dense: %v", err)
 			}
 			if itemCleared != tc.wantItemCleared {
@@ -1001,7 +1002,7 @@ func TestRunPhase2Dense_CatalogEmptyWindowPreservesEmbedderVectors(t *testing.T)
 	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
 
 	if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
-		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, &LogCapture{}); err != nil {
+		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, slog.New(&LogCapture{})); err != nil {
 		t.Fatalf("runPhase2Dense: %v", err)
 	}
 }
@@ -1054,7 +1055,7 @@ func TestRunPhase1_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
 	svc := &fakeRecomputer{}
 	job.service = svc
 
-	subjects, objects, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{})
+	subjects, objects, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, slog.New(&LogCapture{}))
 	if err != nil {
 		t.Fatalf("runPhase1: %v", err)
 	}
@@ -1084,7 +1085,7 @@ func TestRunPhase1_ExpiredEventsStillReachTheSweep(t *testing.T) {
 	svc := &fakeRecomputer{}
 	job.service = svc
 
-	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{}); err != nil {
+	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, slog.New(&LogCapture{})); err != nil {
 		t.Fatalf("runPhase1: %v", err)
 	}
 	if !ensured || !svc.called {
@@ -1100,7 +1101,7 @@ func TestRunPhase1_EventLookupFailureIsNotTreatedAsQuiet(t *testing.T) {
 		return false, errors.New("connection refused")
 	}
 
-	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, &LogCapture{}); err == nil {
+	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, slog.New(&LogCapture{})); err == nil {
 		t.Fatal("runPhase1 returned nil error when the event lookup failed")
 	}
 }
@@ -1124,7 +1125,7 @@ func TestRunPhase2Dense_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
 	}
 
 	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
-	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, &LogCapture{}); err != nil {
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, slog.New(&LogCapture{})); err != nil {
 		t.Fatalf("runPhase2Dense: %v", err)
 	}
 	if ensured {
@@ -1149,7 +1150,7 @@ func TestRunPhase2Dense_ExpiredEventsStillClearDenseState(t *testing.T) {
 	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
 
 	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
-	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, &LogCapture{}); err != nil {
+	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, slog.New(&LogCapture{})); err != nil {
 		t.Fatalf("runPhase2Dense: %v", err)
 	}
 	if !cleared {

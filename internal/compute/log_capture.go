@@ -1,8 +1,10 @@
 package compute
 
 import (
+	"context"
+	"log/slog"
+	"strings"
 	"sync"
-	"time"
 )
 
 // LogEntry is a single captured log line from a batch run.
@@ -12,18 +14,20 @@ type LogEntry struct {
 	Msg   string `json:"msg"`
 }
 
-// LogCapture accumulates structured log entries during a batch run.
-// It is safe for concurrent use. An optional onEntry callback fires after the
-// entry is appended — used by the admin SSE stream to forward log lines in
-// real time without coupling capture to the event bus.
+// LogCapture is a slog.Handler that accumulates structured log entries during
+// a batch run. It is safe for concurrent use. An optional onEntry callback
+// fires after the entry is appended — used by the admin SSE stream to forward
+// log lines in real time without coupling capture to the event bus.
 type LogCapture struct {
 	mu      sync.Mutex
 	entries []LogEntry
 	onEntry func(LogEntry)
 }
 
+var _ slog.Handler = (*LogCapture)(nil)
+
 // SetOnEntry registers a callback invoked after every captured entry. Pass
-// nil to clear. Safe to call before any Info/Warn/Error.
+// nil to clear. Safe to call before any logging.
 func (c *LogCapture) SetOnEntry(fn func(LogEntry)) {
 	if c == nil {
 		return
@@ -33,23 +37,27 @@ func (c *LogCapture) SetOnEntry(fn func(LogEntry)) {
 	c.onEntry = fn
 }
 
-// Info records an informational log entry.
-func (c *LogCapture) Info(msg string) { c.add("info", msg) }
+// Enabled implements slog.Handler; every level is captured.
+func (c *LogCapture) Enabled(context.Context, slog.Level) bool { return true }
 
-// Warn records a warning log entry.
-func (c *LogCapture) Warn(msg string) { c.add("warn", msg) }
+// WithAttrs implements slog.Handler. LogEntry has no attribute fields, so the
+// handler is returned unchanged.
+func (c *LogCapture) WithAttrs([]slog.Attr) slog.Handler { return c }
 
-// Error records an error log entry.
-func (c *LogCapture) Error(msg string) { c.add("error", msg) }
+// WithGroup implements slog.Handler. LogEntry has no group fields, so the
+// handler is returned unchanged.
+func (c *LogCapture) WithGroup(string) slog.Handler { return c }
 
-func (c *LogCapture) add(level, msg string) {
+// Handle implements slog.Handler: it appends a LogEntry and fires the onEntry
+// callback after the append, outside the lock.
+func (c *LogCapture) Handle(_ context.Context, r slog.Record) error {
 	if c == nil {
-		return
+		return nil
 	}
 	entry := LogEntry{
-		Ts:    time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
-		Level: level,
-		Msg:   msg,
+		Ts:    r.Time.UTC().Format("2006-01-02T15:04:05.000Z"),
+		Level: strings.ToLower(r.Level.String()),
+		Msg:   r.Message,
 	}
 	c.mu.Lock()
 	c.entries = append(c.entries, entry)
@@ -58,6 +66,7 @@ func (c *LogCapture) add(level, msg string) {
 	if cb != nil {
 		cb(entry)
 	}
+	return nil
 }
 
 // Entries returns a snapshot of all captured entries.

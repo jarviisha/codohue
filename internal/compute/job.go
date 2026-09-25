@@ -375,6 +375,7 @@ func (j *Job) LockAllNamespaces(ctx context.Context) (release func(), err error)
 func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, logID int64) {
 	nsStart := time.Now()
 	capture := &LogCapture{}
+	log := slog.New(capture)
 
 	if logID == 0 && j.batchLog != nil {
 		var err error
@@ -399,28 +400,28 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 	cfg, err := j.nsConfigSvc.Get(ctx, ns)
 	if err != nil {
 		slog.Error("get ns config failed", "namespace", ns, "error", err)
-		capture.Error(fmt.Sprintf("config load failed: %v", err))
+		log.Error(fmt.Sprintf("config load failed: %v", err))
 		runErr = err
 	} else if cfg != nil {
-		capture.Info(fmt.Sprintf("config loaded — dense_source: %s, lambda: %.3f", cfg.DenseSource, cfg.Lambda))
+		log.Info(fmt.Sprintf("config loaded — dense_source: %s, lambda: %.3f", cfg.DenseSource, cfg.Lambda))
 	}
 
 	if runErr == nil {
-		phases.Phase1 = j.executePhase(ctx, logID, ns, 1, "sparse CF", capture, func() (int, int, error) {
-			return j.runPhase1(ctx, ns, cfg, capture)
+		phases.Phase1 = j.executePhase(ctx, logID, ns, 1, "sparse CF", log, func() (int, int, error) {
+			return j.runPhase1(ctx, ns, cfg, log)
 		})
 		if !phases.Phase1.OK {
 			runErr = errors.New(phases.Phase1.Error)
 		}
 	}
 
-	if runErr == nil && j.checkCancelBetweenPhases(ctx, logID, 1, capture) {
+	if runErr == nil && j.checkCancelBetweenPhases(ctx, logID, 1, log) {
 		cancelled = true
 	}
 
 	if !cancelled && runErr == nil && cfg != nil && phase2Runs(cfg.DenseSource) {
-		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseSource), capture, func() (int, int, error) {
-			return j.runPhase2Dense(ctx, ns, cfg, capture)
+		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseSource), log, func() (int, int, error) {
+			return j.runPhase2Dense(ctx, ns, cfg, log)
 		})
 		// Dense and trending are independent, so phase 3 still runs after a
 		// dense failure. The aggregate run must nevertheless report failure:
@@ -429,16 +430,16 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 			runErr = errors.New(phases.Phase2.Error)
 		}
 	} else if !cancelled && cfg != nil {
-		capture.Info(fmt.Sprintf("phase 2 · dense skipped (dense_source: %s)", cfg.DenseSource))
+		log.Info(fmt.Sprintf("phase 2 · dense skipped (dense_source: %s)", cfg.DenseSource))
 	}
 
-	if !cancelled && j.checkCancelBetweenPhases(ctx, logID, 2, capture) {
+	if !cancelled && j.checkCancelBetweenPhases(ctx, logID, 2, log) {
 		cancelled = true
 	}
 
 	if !cancelled && j.redis != nil {
-		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", capture, func() (int, error) {
-			return j.runPhase3Trending(ctx, ns, cfg, capture)
+		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", log, func() (int, error) {
+			return j.runPhase3Trending(ctx, ns, cfg, log)
 		})
 		// Unlike phase 2 (dense is an optional surface), a failed trending
 		// phase folds into the run status — an all-green run list must mean
@@ -447,7 +448,7 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 			runErr = errors.New(phases.Phase3.Error)
 		}
 	} else if !cancelled {
-		capture.Info("phase 3 · trending skipped (no Redis)")
+		log.Info("phase 3 · trending skipped (no Redis)")
 	}
 
 	subjects := 0
@@ -461,12 +462,12 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 	switch {
 	case cancelled:
 		errMsg = operatorCancelledMessage
-		capture.Warn(fmt.Sprintf("run cancelled by operator after %dms", totalMs))
+		log.Warn(fmt.Sprintf("run cancelled by operator after %dms", totalMs))
 	case runErr != nil:
 		errMsg = runErr.Error()
-		capture.Error(fmt.Sprintf("run failed in %dms: %v", totalMs, runErr))
+		log.Error(fmt.Sprintf("run failed in %dms: %v", totalMs, runErr))
 	default:
-		capture.Info(fmt.Sprintf("run complete in %dms", totalMs))
+		log.Info(fmt.Sprintf("run complete in %dms", totalMs))
 	}
 
 	if j.batchLog != nil && logID > 0 {
@@ -495,9 +496,9 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 
 // executePhase wraps a two-count phase (subjects/objects or items/subjects)
 // with start/complete observer notifications, timing, and structured logging.
-func (j *Job) executePhase(ctx context.Context, runID int64, ns string, phase int, label string, capture *LogCapture, run func() (int, int, error)) *PhaseResult {
+func (j *Job) executePhase(ctx context.Context, runID int64, ns string, phase int, label string, log *slog.Logger, run func() (int, int, error)) *PhaseResult {
 	_ = ctx
-	capture.Info(fmt.Sprintf("phase %d · %s starting", phase, label))
+	log.Info(fmt.Sprintf("phase %d · %s starting", phase, label))
 	if j.observer != nil && runID > 0 {
 		j.observer.OnPhaseStarted(runID, ns, phase)
 	}
@@ -507,10 +508,10 @@ func (j *Job) executePhase(ctx context.Context, runID int64, ns string, phase in
 	p := PhaseResult{OK: err == nil, DurationMs: durMs, Count1: c1, Count2: c2}
 	if err != nil {
 		slog.Error("phase failed", "phase", phase, "namespace", ns, "error", err)
-		capture.Error(fmt.Sprintf("phase %d · %s failed (%dms): %v", phase, label, durMs, err))
+		log.Error(fmt.Sprintf("phase %d · %s failed (%dms): %v", phase, label, durMs, err))
 		p.Error = err.Error()
 	} else {
-		capture.Info(fmt.Sprintf("phase %d · %s done (%dms) — %d / %d", phase, label, durMs, c1, c2))
+		log.Info(fmt.Sprintf("phase %d · %s done (%dms) — %d / %d", phase, label, durMs, c1, c2))
 	}
 	if j.observer != nil && runID > 0 {
 		j.observer.OnPhaseCompleted(runID, ns, phase, p)
@@ -519,9 +520,9 @@ func (j *Job) executePhase(ctx context.Context, runID int64, ns string, phase in
 }
 
 // executePhase1Arg is the single-count variant used by phase 3 (trending).
-func (j *Job) executePhase1Arg(ctx context.Context, runID int64, ns string, phase int, label string, capture *LogCapture, run func() (int, error)) *PhaseResult {
+func (j *Job) executePhase1Arg(ctx context.Context, runID int64, ns string, phase int, label string, log *slog.Logger, run func() (int, error)) *PhaseResult {
 	_ = ctx
-	capture.Info(fmt.Sprintf("phase %d · %s starting", phase, label))
+	log.Info(fmt.Sprintf("phase %d · %s starting", phase, label))
 	if j.observer != nil && runID > 0 {
 		j.observer.OnPhaseStarted(runID, ns, phase)
 	}
@@ -531,10 +532,10 @@ func (j *Job) executePhase1Arg(ctx context.Context, runID int64, ns string, phas
 	p := PhaseResult{OK: err == nil, DurationMs: durMs, Count1: c1}
 	if err != nil {
 		slog.Error("phase failed", "phase", phase, "namespace", ns, "error", err)
-		capture.Error(fmt.Sprintf("phase %d · %s failed (%dms): %v", phase, label, durMs, err))
+		log.Error(fmt.Sprintf("phase %d · %s failed (%dms): %v", phase, label, durMs, err))
 		p.Error = err.Error()
 	} else {
-		capture.Info(fmt.Sprintf("phase %d · %s done (%dms) — items: %d", phase, label, durMs, c1))
+		log.Info(fmt.Sprintf("phase %d · %s done (%dms) — items: %d", phase, label, durMs, c1))
 	}
 	if j.observer != nil && runID > 0 {
 		j.observer.OnPhaseCompleted(runID, ns, phase, p)
@@ -545,7 +546,7 @@ func (j *Job) executePhase1Arg(ctx context.Context, runID int64, ns string, phas
 // checkCancelBetweenPhases polls cancel_requested between phases. Returns
 // true when the operator has asked to stop; the caller skips the remaining
 // phases and finalizes the row as cancelled.
-func (j *Job) checkCancelBetweenPhases(ctx context.Context, runID int64, afterPhase int, capture *LogCapture) bool {
+func (j *Job) checkCancelBetweenPhases(ctx context.Context, runID int64, afterPhase int, log *slog.Logger) bool {
 	if j.batchLog == nil || runID == 0 {
 		return false
 	}
@@ -555,14 +556,14 @@ func (j *Job) checkCancelBetweenPhases(ctx context.Context, runID int64, afterPh
 		return false
 	}
 	if requested {
-		capture.Warn(fmt.Sprintf("cancel requested after phase %d — stopping", afterPhase))
+		log.Warn(fmt.Sprintf("cancel requested after phase %d — stopping", afterPhase))
 	}
 	return requested
 }
 
 // runPhase1 recomputes CF sparse vectors for a namespace.
 // Returns the number of subjects and objects upserted to Qdrant.
-func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (subjects, objects int, err error) {
+func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, log *slog.Logger) (subjects, objects int, err error) {
 	start := time.Now()
 
 	// Every configured namespace is enumerated, including quiet ones, so that a
@@ -576,14 +577,14 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, c
 		return 0, 0, fmt.Errorf("check namespace events: %w", err)
 	}
 	if !seen {
-		capture.Info("namespace has never received an event — no collections to create or sweep")
+		log.Info("namespace has never received an event — no collections to create or sweep")
 		return 0, 0, nil
 	}
 
 	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
 		return 0, 0, fmt.Errorf("ensure collections: %w", err)
 	}
-	capture.Info("Qdrant collections ensured")
+	log.Info("Qdrant collections ensured")
 
 	lambda := defaultLambda
 	if cfg != nil && cfg.Lambda > 0 {
@@ -601,7 +602,7 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, c
 		"objects", objects,
 		"duration_ms", time.Since(start).Milliseconds(),
 	)
-	capture.Info(fmt.Sprintf("sparse vectors computed — subjects: %d, objects: %d, lambda: %.3f", subjects, objects, lambda))
+	log.Info(fmt.Sprintf("sparse vectors computed — subjects: %d, objects: %d, lambda: %.3f", subjects, objects, lambda))
 	return subjects, objects, nil
 }
 
@@ -642,7 +643,7 @@ func phase2Runs(denseSource string) bool {
 // For corpora beyond ~500K events, consider: (a) increasing CODOHUE_BATCH_INTERVAL_MINUTES so
 // fewer retrains happen per hour, (b) switching dense_source to "svd" (cheaper full
 // retrain), or (c) switching to "byoe" and maintaining embeddings externally.
-func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items, subjectCount int, err error) {
+func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Config, log *slog.Logger) (items, subjectCount int, err error) {
 	start := time.Now()
 
 	// Same rule as phase 1: a namespace that has never received an event has no
@@ -654,7 +655,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		return 0, 0, fmt.Errorf("check namespace events: %w", err)
 	}
 	if !seen {
-		capture.Info("namespace has never received an event — no dense collections to create or clear")
+		log.Info("namespace has never received an event — no dense collections to create or clear")
 		return 0, 0, nil
 	}
 
@@ -687,10 +688,10 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 			}
 		}
 		slog.Info("phase 2: no events, cleared compute-owned dense state", "namespace", ns)
-		capture.Info("no events — compute-owned dense state cleared")
+		log.Info("no events — compute-owned dense state cleared")
 		return 0, 0, nil
 	}
-	capture.Info(fmt.Sprintf("fetched %d events for embedding", len(events)))
+	log.Info(fmt.Sprintf("fetched %d events for embedding", len(events)))
 
 	// trained is false when the item vectors came from cmd/embedder rather than
 	// from this run — in that case they must not be written back.
@@ -702,7 +703,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		if len(events) > item2vecLargeEventThreshold {
 			slog.Warn("phase 2 item2vec: large event corpus — full retrain may be slow; consider increasing CODOHUE_BATCH_INTERVAL_MINUTES or switching to SVD",
 				"namespace", ns, "events", len(events), "threshold", item2vecLargeEventThreshold)
-			capture.Warn(fmt.Sprintf("large corpus (%d events) — item2vec retrain may be slow", len(events)))
+			log.Warn(fmt.Sprintf("large corpus (%d events) — item2vec retrain may be slow", len(events)))
 		}
 		seqs := BuildInteractionSequences(events)
 		i2vCfg := Item2VecConfig{Dim: embeddingDim, Window: 5, MinCount: 5, Epochs: 10, NegSamples: 5}
@@ -728,19 +729,19 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		if err != nil {
 			return 0, 0, fmt.Errorf("fetch catalog item dense vectors: %w", err)
 		}
-		capture.Info(fmt.Sprintf("loaded %d/%d interacted item vectors from catalog embeddings",
+		log.Info(fmt.Sprintf("loaded %d/%d interacted item vectors from catalog embeddings",
 			len(itemVecs), len(interacted)))
 	}
 
 	if len(itemVecs) == 0 {
 		if trained {
 			slog.Warn("phase 2: no item vectors produced", "namespace", ns, "strategy", cfg.DenseSource)
-			capture.Warn("no item vectors produced")
+			log.Warn("no item vectors produced")
 		} else {
 			// Every interacted object is still pending/failed in the embedder,
 			// so there is nothing to pool from yet.
 			slog.Warn("phase 2: no catalog item vectors available yet", "namespace", ns)
-			capture.Warn("no catalog embeddings for interacted items yet — subject vectors unchanged")
+			log.Warn("no catalog embeddings for interacted items yet — subject vectors unchanged")
 		}
 		if trained && j.cleanupItemDenseFn != nil {
 			if _, err := j.cleanupItemDenseFn(ctx, ns, nil); err != nil {
@@ -756,7 +757,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	}
 
 	if trained {
-		capture.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
+		log.Info(fmt.Sprintf("trained %d item vectors (dim: %d)", len(itemVecs), embeddingDim))
 		// created_at mirrors phase 1's sparse payload rule (explicit
 		// object_created_at, else newest occurred_at) so the γ-freshness
 		// rerank decays dense-only items the same way as sparse ones.
@@ -772,9 +773,9 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		}
 	}
 	if trained {
-		capture.Info(fmt.Sprintf("upserted %d item + %d subject vectors to Qdrant", len(itemVecs), len(subjectVecs)))
+		log.Info(fmt.Sprintf("upserted %d item + %d subject vectors to Qdrant", len(itemVecs), len(subjectVecs)))
 	} else {
-		capture.Info(fmt.Sprintf("upserted %d subject vectors to Qdrant (item vectors owned by embedder)", len(subjectVecs)))
+		log.Info(fmt.Sprintf("upserted %d subject vectors to Qdrant (item vectors owned by embedder)", len(subjectVecs)))
 	}
 
 	// Sweep out points this full retrain no longer produced. Only when this
@@ -787,14 +788,14 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 			if n, err := j.cleanupItemDenseFn(ctx, ns, mapKeys(itemVecs)); err != nil {
 				slog.Warn("stale item dense cleanup failed", "namespace", ns, "error", err)
 			} else if n > 0 {
-				capture.Info(fmt.Sprintf("removed %d stale item dense vectors", n))
+				log.Info(fmt.Sprintf("removed %d stale item dense vectors", n))
 			}
 		}
 		if j.cleanupSubjectDenseFn != nil {
 			if n, err := j.cleanupSubjectDenseFn(ctx, ns, mapKeys(subjectVecs)); err != nil {
 				slog.Warn("stale subject dense cleanup failed", "namespace", ns, "error", err)
 			} else if n > 0 {
-				capture.Info(fmt.Sprintf("removed %d stale subject dense vectors", n))
+				log.Info(fmt.Sprintf("removed %d stale subject dense vectors", n))
 			}
 		}
 	}
@@ -811,7 +812,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 
 // runPhase3Trending computes trending scores for a namespace and caches them in Redis.
 // Returns the number of trending items computed.
-func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.Config, capture *LogCapture) (items int, err error) {
+func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.Config, log *slog.Logger) (items int, err error) {
 	start := time.Now()
 
 	windowHours := 24
@@ -841,14 +842,14 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.C
 			return 0, fmt.Errorf("clear trending: %w", err)
 		}
 		slog.Info("phase 3 trending: no events in window; stale state cleared", "namespace", ns, "window_hours", windowHours)
-		capture.Info(fmt.Sprintf("no events in %dh window — stale trending cleared", windowHours))
+		log.Info(fmt.Sprintf("no events in %dh window — stale trending cleared", windowHours))
 		return 0, nil
 	}
-	capture.Info(fmt.Sprintf("scoring %d events in %dh window (λ: %.3f)", len(events), windowHours, lambdaTrending))
+	log.Info(fmt.Sprintf("scoring %d events in %dh window (λ: %.3f)", len(events), windowHours, lambdaTrending))
 
 	scores := TrendingScores(events, actionWeights, lambdaTrending, windowHours)
 	if len(scores) == 0 {
-		capture.Warn("no trending scores produced")
+		log.Warn("no trending scores produced")
 		return 0, nil
 	}
 
@@ -856,7 +857,7 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.C
 	if err := j.storeTrendingFn(ctx, ns, scores, ttl); err != nil {
 		return 0, fmt.Errorf("store trending: %w", err)
 	}
-	capture.Info(fmt.Sprintf("stored %d trending items to Redis (TTL: %ds)", len(scores), ttlSeconds))
+	log.Info(fmt.Sprintf("stored %d trending items to Redis (TTL: %ds)", len(scores), ttlSeconds))
 
 	metrics.TrendingItemsTotal.WithLabelValues(ns).Set(float64(len(scores)))
 	slog.Info("phase 3 trending complete",
