@@ -299,22 +299,48 @@ func (f *fakeRepo) LookupNumericObjectID(_ context.Context, _, _ string) (numeri
 	return f.numericObjectID, f.numericObjectFound, f.numericObjectErr
 }
 
-// ─── fake stream publisher ────────────────────────────────────────────────────
+// ─── fake redis ───────────────────────────────────────────────────────────────
 
-type fakeStreamPublisher struct {
-	calls []goredis.XAddArgs
-	err   error
+// fakeRedis implements redisCommands. XAdd and Del record their arguments;
+// the read methods return the configured values.
+type fakeRedis struct {
+	calls    []goredis.XAddArgs // recorded XAdd args
+	err      error              // returned by XAdd
+	getVal   string
+	getErr   error
+	ttl      time.Duration
+	ttlErr   error
+	existsN  int64
+	scanKeys []string // returned by every Scan
+	deleted  []string // accumulated Del keys
 }
 
-func (f *fakeStreamPublisher) XAdd(_ context.Context, args *goredis.XAddArgs) *goredis.StringCmd {
-	cmd := goredis.NewStringCmd(context.Background())
+func (f *fakeRedis) XAdd(_ context.Context, args *goredis.XAddArgs) *goredis.StringCmd {
 	if args != nil {
 		f.calls = append(f.calls, *args)
 	}
-	if f.err != nil {
-		cmd.SetErr(f.err)
-	}
-	return cmd
+	return goredis.NewStringResult("1-1", f.err)
+}
+
+func (f *fakeRedis) Get(_ context.Context, _ string) *goredis.StringCmd {
+	return goredis.NewStringResult(f.getVal, f.getErr)
+}
+
+func (f *fakeRedis) TTL(_ context.Context, _ string) *goredis.DurationCmd {
+	return goredis.NewDurationResult(f.ttl, f.ttlErr)
+}
+
+func (f *fakeRedis) Exists(_ context.Context, _ ...string) *goredis.IntCmd {
+	return goredis.NewIntResult(f.existsN, nil)
+}
+
+func (f *fakeRedis) Del(_ context.Context, keys ...string) *goredis.IntCmd {
+	f.deleted = append(f.deleted, keys...)
+	return goredis.NewIntResult(int64(len(keys)), nil)
+}
+
+func (f *fakeRedis) Scan(_ context.Context, _ uint64, _ string, _ int64) *goredis.ScanCmd {
+	return goredis.NewScanCmdResult(f.scanKeys, 0, nil)
 }
 
 // ─── fake catalog strategy picker ─────────────────────────────────────────────
@@ -343,13 +369,49 @@ type fakeQdrantDeleter struct {
 	err error
 }
 
-type fakeQdrantReader struct {
-	calls []*qdrant.GetPoints
+// fakeQdrant implements qdrantOps. counts maps collection name → point count
+// for collections that exist; lookups and deletions are recorded.
+type fakeQdrant struct {
+	counts      map[string]uint64
+	existsCalls []string
+	getCalls    []*qdrant.GetPoints
+	getResults  []*qdrant.RetrievedPoint
+	getErr      error
+	deleted     []string
+	deleteErr   error
 }
 
-func (f *fakeQdrantReader) Get(_ context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-	f.calls = append(f.calls, points)
-	return nil, nil
+func (f *fakeQdrant) CollectionExists(_ context.Context, name string) (bool, error) {
+	f.existsCalls = append(f.existsCalls, name)
+	_, ok := f.counts[name]
+	return ok, nil
+}
+
+func (f *fakeQdrant) GetCollectionInfo(_ context.Context, name string) (*qdrant.CollectionInfo, error) {
+	n := f.counts[name]
+	return &qdrant.CollectionInfo{PointsCount: &n}, nil
+}
+
+func (f *fakeQdrant) ListCollections(_ context.Context) ([]string, error) {
+	names := make([]string, 0, len(f.counts))
+	for name := range f.counts {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func (f *fakeQdrant) DeleteCollection(_ context.Context, name string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.deleted = append(f.deleted, name)
+	delete(f.counts, name)
+	return nil
+}
+
+func (f *fakeQdrant) Get(_ context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	f.getCalls = append(f.getCalls, points)
+	return f.getResults, f.getErr
 }
 
 func (f *fakeQdrantDeleter) DeletePoint(_ context.Context, collection string, id uint64) error {
@@ -471,10 +533,10 @@ func TestCreateDemoData_PublishesCatalogItemsWithIDs(t *testing.T) {
 		},
 		listItemsTotal: 2,
 	}
-	pub := &fakeStreamPublisher{}
+	pub := &fakeRedis{}
 	svc := newTestService(repo, "", "")
 	svc.SetCatalogConfigurator(&fakeCatalogConfig{})
-	svc.SetStreamPublisher(pub)
+	svc.redis = pub
 
 	resp, err := svc.CreateDemoData(context.Background())
 	if err != nil {
@@ -708,32 +770,36 @@ func TestGetSubjectProfile_UsesCurrentGenerationCollection(t *testing.T) {
 			NumericID: &numID,
 		},
 	}
-	reader := &fakeQdrantReader{}
+	reader := &fakeQdrant{}
 	svc := newTestService(repo, "", "")
-	svc.qdrantReader = reader
+	svc.qdrant = reader
 
 	if _, err := svc.GetSubjectProfile(context.Background(), "ns1", "user-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(reader.calls) != 1 || reader.calls[0].CollectionName != "ns1_g3_subjects" {
-		t.Fatalf("qdrant reads = %+v, want ns1_g3_subjects", reader.calls)
+	if len(reader.getCalls) != 1 || reader.getCalls[0].CollectionName != "ns1_g3_subjects" {
+		t.Fatalf("qdrant reads = %+v, want ns1_g3_subjects", reader.getCalls)
 	}
 }
 
 func TestGetQdrant_UsesCurrentGenerationCollections(t *testing.T) {
 	svc := newTestService(&fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1", Generation: 2}}, "", "")
-	var names []string
-	svc.collectionStatsFn = func(_ context.Context, name string) QdrantCollection {
-		names = append(names, name)
-		return QdrantCollection{}
-	}
+	q := &fakeQdrant{counts: map[string]uint64{"ns1_g2_subjects": 7}}
+	svc.qdrant = q
 
-	if _, err := svc.GetQdrant(context.Background(), "ns1"); err != nil {
+	resp, err := svc.GetQdrant(context.Background(), "ns1")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	want := []string{"ns1_g2_subjects", "ns1_g2_objects", "ns1_g2_subjects_dense", "ns1_g2_objects_dense"}
-	if fmt.Sprint(names) != fmt.Sprint(want) {
-		t.Fatalf("collections = %v, want %v", names, want)
+	if fmt.Sprint(q.existsCalls) != fmt.Sprint(want) {
+		t.Fatalf("collections = %v, want %v", q.existsCalls, want)
+	}
+	if !resp.Subjects.Exists || resp.Subjects.PointsCount != 7 {
+		t.Fatalf("subjects stat = %+v, want exists with 7 points", resp.Subjects)
+	}
+	if resp.Objects.Exists {
+		t.Fatalf("objects stat = %+v, want missing collection reported as absent", resp.Objects)
 	}
 }
 
@@ -822,6 +888,43 @@ func TestGetTrending_WithTTL(t *testing.T) {
 	// With nil redisClient, TTL should be -2 (key missing sentinel)
 	if resp.CacheTTLSec != -2 {
 		t.Errorf("expected cache_ttl_sec=-2 when redis unavailable, got %d", resp.CacheTTLSec)
+	}
+}
+
+// TestClearNamespaceGeneration_CleansRedisAndQdrant drives the namespace wipe
+// through the redis/qdrant collaborators: generation-qualified keys and the
+// scanned recommendation cache are deleted, and only this namespace's existing
+// collections are dropped.
+func TestClearNamespaceGeneration_CleansRedisAndQdrant(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, "", "")
+	r := &fakeRedis{scanKeys: []string{"cache-key-1"}}
+	q := &fakeQdrant{counts: map[string]uint64{
+		nslifecycle.MustPhysicalName(nslifecycle.KindSubjects, "ns1", 2):     1,
+		nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, "ns1", 2): 2,
+		"other_app_collection": 3,
+	}}
+	svc.redis = r
+	svc.qdrant = q
+
+	if _, err := svc.clearNamespaceEverywhereGeneration(context.Background(), "ns1", 2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantRedis := []string{
+		nslifecycle.MustPhysicalName(nslifecycle.KindTrending, "ns1", 2),
+		nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, "ns1", 2),
+		"cache-key-1",
+	}
+	if fmt.Sprint(r.deleted) != fmt.Sprint(wantRedis) {
+		t.Fatalf("redis deleted = %v, want %v", r.deleted, wantRedis)
+	}
+
+	wantQdrant := []string{
+		nslifecycle.MustPhysicalName(nslifecycle.KindSubjects, "ns1", 2),
+		nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, "ns1", 2),
+	}
+	if fmt.Sprint(q.deleted) != fmt.Sprint(wantQdrant) {
+		t.Fatalf("qdrant deleted = %v, want %v", q.deleted, wantQdrant)
 	}
 }
 

@@ -139,12 +139,18 @@ type lifecycleCoordinator interface {
 	ListNonDeleted(context.Context) ([]*nslifecycle.NamespaceLifecycle, error)
 }
 
-// streamPublisher abstracts the Redis Streams write used by the catalog
-// re-embed and redrive paths. The concrete *goredis.Client implements this
-// interface; tests inject a fake. Defined here (not in catalog_ops_service.go)
-// so the Service struct can declare it as a field.
-type streamPublisher interface {
+// redisCommands is the narrow Redis surface the admin service consumes:
+// catalog embed-stream publishes, heartbeat/TTL probes, and namespace key
+// cleanup. The concrete *goredis.Client satisfies it directly; tests inject
+// a fake. A nil field means Redis is unavailable and the service degrades
+// (TTLs report missing, heartbeats report unknown, cleanup skips Redis).
+type redisCommands interface {
 	XAdd(ctx context.Context, args *goredis.XAddArgs) *goredis.StringCmd
+	Get(ctx context.Context, key string) *goredis.StringCmd
+	TTL(ctx context.Context, key string) *goredis.DurationCmd
+	Exists(ctx context.Context, keys ...string) *goredis.IntCmd
+	Del(ctx context.Context, keys ...string) *goredis.IntCmd
+	Scan(ctx context.Context, cursor uint64, match string, count int64) *goredis.ScanCmd
 }
 
 // catalogStrategyPicker exposes the active (strategy_id, strategy_version) for
@@ -161,7 +167,17 @@ type qdrantPointDeleter interface {
 	DeletePoint(ctx context.Context, collection string, numericID uint64) error
 }
 
-type qdrantPointReader interface {
+// qdrantOps is the narrow Qdrant surface the admin service consumes:
+// collection stats for the inspect/overview endpoints, point reads for
+// vector previews and sparse NNZ, and collection cleanup for namespace
+// deletion. The concrete *qdrant.Client satisfies it directly; tests inject
+// a fake. A nil field means Qdrant is unavailable and the service degrades
+// (stats report missing, NNZ reports -1, cleanup skips Qdrant).
+type qdrantOps interface {
+	CollectionExists(ctx context.Context, name string) (bool, error)
+	GetCollectionInfo(ctx context.Context, name string) (*qdrant.CollectionInfo, error)
+	ListCollections(ctx context.Context) ([]string, error)
+	DeleteCollection(ctx context.Context, name string) error
 	Get(ctx context.Context, points *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
 }
 
@@ -171,26 +187,19 @@ type Service struct {
 	apiURL             string
 	apiKey             string
 	observabilityToken string
-	redisClient        *goredis.Client
-	qdrantClient       *qdrant.Client
+	redis              redisCommands
+	qdrant             qdrantOps
 	httpClient         *http.Client
 	job                batchRunner
 	nsConfigSvc        nsConfigUpserter
 	catalogConfig      nsCatalogConfigurator
 	catalogBacklog     catalogBacklogReader
 	catalogPicker      catalogStrategyPicker
-	streamPublisher    streamPublisher
 	qdrantDeleter      qdrantPointDeleter
-	qdrantReader       qdrantPointReader
 	eventRate          eventRateReader
 	lifecycle          lifecycleCoordinator
 	nowFn              func() time.Time
 	runningReembed     sync.Map // keyed by namespace name; serializes re-embed triggers
-
-	// collectionStatsFn backs the overview's dense-downgrade alert; wired to
-	// qdrantCollection in NewService, replaceable in tests (the concrete
-	// qdrant.Client cannot be faked).
-	collectionStatsFn func(ctx context.Context, name string) QdrantCollection
 }
 
 // SetLifecycleCoordinator enables durable generation fencing for destructive
@@ -199,27 +208,28 @@ func (s *Service) SetLifecycleCoordinator(coordinator lifecycleCoordinator) {
 	s.lifecycle = coordinator
 }
 
-// NewService creates a new Service.
+// NewService creates a new Service. The concrete clients are mapped onto the
+// narrow redisCommands/qdrantOps collaborators here; a nil client leaves the
+// collaborator nil so the corresponding features degrade gracefully. The
+// explicit nil checks matter: assigning a nil *goredis.Client to an interface
+// field would make it non-nil and every call would panic.
 func NewService(repo adminRepo, apiURL, apiKey string, redisClient *goredis.Client, qdrantClient *qdrant.Client, job batchRunner, nsConfigSvc nsConfigUpserter) *Service {
 	s := &Service{
-		repo:         repo,
-		apiURL:       apiURL,
-		apiKey:       apiKey,
-		redisClient:  redisClient,
-		qdrantClient: qdrantClient,
-		httpClient:   &http.Client{Timeout: 10 * time.Second},
-		job:          job,
-		nsConfigSvc:  nsConfigSvc,
-		nowFn:        time.Now,
+		repo:        repo,
+		apiURL:      apiURL,
+		apiKey:      apiKey,
+		httpClient:  &http.Client{Timeout: 10 * time.Second},
+		job:         job,
+		nsConfigSvc: nsConfigSvc,
+		nowFn:       time.Now,
 	}
 	if redisClient != nil {
-		s.streamPublisher = redisClient
+		s.redis = redisClient
 	}
 	if qdrantClient != nil {
+		s.qdrant = qdrantClient
 		s.qdrantDeleter = newQdrantClientPointDeleter(qdrantClient)
-		s.qdrantReader = qdrantClient
 	}
-	s.collectionStatsFn = s.qdrantCollection
 	return s
 }
 
@@ -250,19 +260,6 @@ func (s *Service) SetCatalogStrategyPicker(p catalogStrategyPicker) {
 // when nil, ingest rates (fleet events/min, /metrics/summary) surface as zero.
 func (s *Service) SetEventRateTracker(t eventRateReader) {
 	s.eventRate = t
-}
-
-// SetStreamPublisher overrides the default Redis-backed XAdd publisher.
-// Used by tests to inject a fake; production wiring leaves this as the
-// default redisClient.
-func (s *Service) SetStreamPublisher(p streamPublisher) {
-	s.streamPublisher = p
-}
-
-// SetQdrantPointDeleter overrides the default Qdrant client adapter used by
-// the DeleteCatalogItem path. Tests inject a fake.
-func (s *Service) SetQdrantPointDeleter(d qdrantPointDeleter) {
-	s.qdrantDeleter = d
 }
 
 // SetNowFn overrides the wall clock used to stamp catalog re-embed batch
@@ -565,15 +562,11 @@ func (s *Service) GetQdrant(ctx context.Context, namespace string) (*QdrantInspe
 
 func (s *Service) getQdrantGeneration(ctx context.Context, namespace string, generation int64) *QdrantInspectResponse {
 	inc := nslifecycle.NewIncarnation(namespace, generation)
-	stats := s.collectionStatsFn
-	if stats == nil {
-		stats = s.qdrantCollection
-	}
 	return &QdrantInspectResponse{
-		Subjects:      stats(ctx, inc.MustPhysicalName(nslifecycle.KindSubjects)),
-		Objects:       stats(ctx, inc.MustPhysicalName(nslifecycle.KindObjects)),
-		SubjectsDense: stats(ctx, inc.MustPhysicalName(nslifecycle.KindSubjectsDense)),
-		ObjectsDense:  stats(ctx, inc.MustPhysicalName(nslifecycle.KindObjectsDense)),
+		Subjects:      s.qdrantCollection(ctx, inc.MustPhysicalName(nslifecycle.KindSubjects)),
+		Objects:       s.qdrantCollection(ctx, inc.MustPhysicalName(nslifecycle.KindObjects)),
+		SubjectsDense: s.qdrantCollection(ctx, inc.MustPhysicalName(nslifecycle.KindSubjectsDense)),
+		ObjectsDense:  s.qdrantCollection(ctx, inc.MustPhysicalName(nslifecycle.KindObjectsDense)),
 	}
 }
 
@@ -590,15 +583,15 @@ func (s *Service) namespaceGeneration(ctx context.Context, namespace string) (in
 
 func (s *Service) qdrantCollection(ctx context.Context, name string) QdrantCollection {
 	stat := QdrantCollection{}
-	if s.qdrantClient == nil {
+	if s.qdrant == nil {
 		return stat
 	}
-	exists, err := s.qdrantClient.CollectionExists(ctx, name)
+	exists, err := s.qdrant.CollectionExists(ctx, name)
 	if err != nil || !exists {
 		return stat
 	}
 	stat.Exists = true
-	if info, err := s.qdrantClient.GetCollectionInfo(ctx, name); err == nil {
+	if info, err := s.qdrant.GetCollectionInfo(ctx, name); err == nil {
 		stat.PointsCount = info.GetPointsCount()
 	}
 	return stat
@@ -696,10 +689,10 @@ func (s *Service) GetSubjectProfile(ctx context.Context, namespace, subjectID st
 }
 
 func (s *Service) sparseNNZ(ctx context.Context, namespace string, generation int64, numericID uint64) int {
-	if s.qdrantReader == nil {
+	if s.qdrant == nil {
 		return -1
 	}
-	results, err := s.qdrantReader.Get(ctx, &qdrant.GetPoints{
+	results, err := s.qdrant.Get(ctx, &qdrant.GetPoints{
 		CollectionName: nslifecycle.NewIncarnation(namespace, generation).MustPhysicalName(nslifecycle.KindSubjects),
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude("sparse_interactions"),
@@ -759,17 +752,8 @@ func (s *Service) GetTrending(ctx context.Context, namespace string, limit, offs
 		return nil, fmt.Errorf("decode trending response: %w", err)
 	}
 
-	// Get Redis TTL for the trending key.
-	// d.Seconds() must be used for both positive and negative durations:
-	// time.Duration(-2)*time.Second gives int(d)==-2000000000 (nanoseconds), not -2.
-	ttl := -2
-	if s.redisClient != nil {
-		key := nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation)
-		d, err := s.redisClient.TTL(ctx, key).Result()
-		if err == nil {
-			ttl = int(d.Seconds())
-		}
-	}
+	// Get Redis TTL for the trending key; -2 = key missing (or no Redis).
+	ttl := s.trendingTTLSec(ctx, namespace, generation)
 
 	items := make([]TrendingAdminEntry, len(raw.Items))
 	for i, it := range raw.Items {
@@ -943,7 +927,7 @@ func (s *Service) CreateDemoData(ctx context.Context) (*DemoDatasetResponse, err
 		// running cmd/embedder picks them up the same way a data-plane
 		// ingest would. Publish failures are non-fatal — rows remain in
 		// state='pending' and can be picked up later (e.g. via re-embed).
-		if s.streamPublisher != nil {
+		if s.redis != nil {
 			items, _, err := s.repo.ListCatalogItems(ctx, demoNamespace, "pending", len(demoCatalogDataset), 0, "", "")
 			if err != nil {
 				return nil, fmt.Errorf("list seeded demo catalog items: %w", err)
@@ -1107,12 +1091,12 @@ func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
 			if truncateErr != nil {
 				return fail(fmt.Errorf("truncate postgres data: %w", truncateErr))
 			}
-			if s.redisClient != nil {
+			if s.redis != nil {
 				if err := s.flushAllNamespaceRedis(locked); err != nil {
 					return fail(fmt.Errorf("flush redis: %w", err))
 				}
 			}
-			if s.qdrantClient != nil {
+			if s.qdrant != nil {
 				if err := s.flushAllNamespaceQdrant(locked); err != nil {
 					return fail(fmt.Errorf("flush qdrant: %w", err))
 				}
@@ -1166,13 +1150,13 @@ func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
 		return nil, fmt.Errorf("truncate postgres data: %w", err)
 	}
 
-	if s.redisClient != nil {
+	if s.redis != nil {
 		if err := s.flushAllNamespaceRedis(ctx); err != nil {
 			return nil, fmt.Errorf("flush redis: %w", err)
 		}
 	}
 
-	if s.qdrantClient != nil {
+	if s.qdrant != nil {
 		if err := s.flushAllNamespaceQdrant(ctx); err != nil {
 			return nil, fmt.Errorf("flush qdrant: %w", err)
 		}
@@ -1190,13 +1174,13 @@ func (s *Service) ResetApp(ctx context.Context) (*ResetAppResponse, error) {
 // longer has a config row.
 func (s *Service) flushAllNamespaceRedis(ctx context.Context) error {
 	for _, pattern := range []string{"trending:*", "catalog:embed:*", "rec:*"} {
-		iter := s.redisClient.Scan(ctx, 0, pattern, 500).Iterator()
+		iter := s.redis.Scan(ctx, 0, pattern, 500).Iterator()
 		batch := make([]string, 0, 500)
 		flush := func() error {
 			if len(batch) == 0 {
 				return nil
 			}
-			if err := s.redisClient.Del(ctx, batch...).Err(); err != nil {
+			if err := s.redis.Del(ctx, batch...).Err(); err != nil {
 				return fmt.Errorf("delete redis keys for %q: %w", pattern, err)
 			}
 			batch = batch[:0]
@@ -1232,14 +1216,14 @@ var qdrantCollectionSuffixes = []string{
 }
 
 func (s *Service) flushAllNamespaceQdrant(ctx context.Context) error {
-	collections, err := s.qdrantClient.ListCollections(ctx)
+	collections, err := s.qdrant.ListCollections(ctx)
 	if err != nil {
 		return fmt.Errorf("list collections: %w", err)
 	}
 	for _, name := range collections {
 		for _, suffix := range qdrantCollectionSuffixes {
 			if strings.HasSuffix(name, suffix) {
-				if err := s.qdrantClient.DeleteCollection(ctx, name); err != nil {
+				if err := s.qdrant.DeleteCollection(ctx, name); err != nil {
 					return fmt.Errorf("delete collection %q: %w", name, err)
 				}
 				break
@@ -1262,13 +1246,13 @@ func (s *Service) clearNamespaceEverywhereGeneration(ctx context.Context, namesp
 		return 0, fmt.Errorf("clear postgres data for %q: %w", namespace, err)
 	}
 
-	if s.redisClient != nil {
+	if s.redis != nil {
 		if err := s.clearNamespaceRedisGeneration(ctx, namespace, generation); err != nil {
 			return 0, fmt.Errorf("clear redis data for %q: %w", namespace, err)
 		}
 	}
 
-	if s.qdrantClient != nil {
+	if s.qdrant != nil {
 		if err := s.clearNamespaceQdrantGeneration(ctx, namespace, generation); err != nil {
 			return 0, fmt.Errorf("clear qdrant data for %q: %w", namespace, err)
 		}
@@ -1282,7 +1266,7 @@ func (s *Service) clearNamespaceRedisGeneration(ctx context.Context, namespace s
 		nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation),
 	}
 	cachePrefix := nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, namespace, generation)
-	iter := s.redisClient.Scan(ctx, 0, cachePrefix+":*", 100).Iterator()
+	iter := s.redis.Scan(ctx, 0, cachePrefix+":*", 100).Iterator()
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
 	}
@@ -1292,7 +1276,7 @@ func (s *Service) clearNamespaceRedisGeneration(ctx context.Context, namespace s
 	if len(keys) == 0 {
 		return nil
 	}
-	if err := s.redisClient.Del(ctx, keys...).Err(); err != nil {
+	if err := s.redis.Del(ctx, keys...).Err(); err != nil {
 		return fmt.Errorf("delete redis keys: %w", err)
 	}
 	return nil
@@ -1306,14 +1290,14 @@ func (s *Service) clearNamespaceQdrantGeneration(ctx context.Context, namespace 
 		nslifecycle.KindObjectsDense,
 	} {
 		collection := nslifecycle.MustPhysicalName(kind, namespace, generation)
-		exists, err := s.qdrantClient.CollectionExists(ctx, collection)
+		exists, err := s.qdrant.CollectionExists(ctx, collection)
 		if err != nil {
 			return fmt.Errorf("check collection %q: %w", collection, err)
 		}
 		if !exists {
 			continue
 		}
-		if err := s.qdrantClient.DeleteCollection(ctx, collection); err != nil {
+		if err := s.qdrant.DeleteCollection(ctx, collection); err != nil {
 			return fmt.Errorf("delete collection %q: %w", collection, err)
 		}
 	}
@@ -1326,17 +1310,17 @@ func (s *Service) verifyNamespaceAbsent(ctx context.Context, namespace string, g
 	} else if cfg != nil {
 		return fmt.Errorf("verify postgres cleanup for %q: namespace config remains", namespace)
 	}
-	if s.redisClient != nil {
+	if s.redis != nil {
 		streamKeys := []string{
 			nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation),
 			nslifecycle.MustPhysicalName(nslifecycle.KindEmbedStream, namespace, generation),
 		}
-		remaining, err := s.redisClient.Exists(ctx, streamKeys...).Result()
+		remaining, err := s.redis.Exists(ctx, streamKeys...).Result()
 		if err != nil {
 			return fmt.Errorf("verify redis cleanup for %q: %w", namespace, err)
 		}
 		cachePrefix := nslifecycle.MustPhysicalName(nslifecycle.KindRecommendationCache, namespace, generation)
-		iter := s.redisClient.Scan(ctx, 0, cachePrefix+":*", 1).Iterator()
+		iter := s.redis.Scan(ctx, 0, cachePrefix+":*", 1).Iterator()
 		cacheFound := iter.Next(ctx)
 		if err := iter.Err(); err != nil {
 			return fmt.Errorf("verify recommendation cache cleanup for %q: %w", namespace, err)
@@ -1345,10 +1329,10 @@ func (s *Service) verifyNamespaceAbsent(ctx context.Context, namespace string, g
 			return fmt.Errorf("verify redis cleanup for %q: generation %d keys remain", namespace, generation)
 		}
 	}
-	if s.qdrantClient != nil {
+	if s.qdrant != nil {
 		for _, kind := range []nslifecycle.PhysicalKind{nslifecycle.KindSubjects, nslifecycle.KindObjects, nslifecycle.KindSubjectsDense, nslifecycle.KindObjectsDense} {
 			collection := nslifecycle.MustPhysicalName(kind, namespace, generation)
-			exists, err := s.qdrantClient.CollectionExists(ctx, collection)
+			exists, err := s.qdrant.CollectionExists(ctx, collection)
 			if err != nil {
 				return fmt.Errorf("verify qdrant collection %q: %w", collection, err)
 			}

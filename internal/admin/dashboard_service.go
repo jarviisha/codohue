@@ -204,9 +204,6 @@ func deriveNamespaceStatus(lastRuns map[string]BatchRunLog, eventCounts map[stri
 // of BYOE namespaces that never push subject vectors). The recommend path
 // logs the per-request warning; this is the operator-facing fleet view.
 func (s *Service) denseDowngradeAlerts(ctx context.Context, namespaces []NamespaceConfig) []Alert {
-	if s.collectionStatsFn == nil {
-		return nil
-	}
 	var alerts []Alert
 	for _, ns := range namespaces {
 		hybridConfigured := ns.Alpha > 0 && ns.Alpha < 1 &&
@@ -215,7 +212,7 @@ func (s *Service) denseDowngradeAlerts(ctx context.Context, namespaces []Namespa
 			continue
 		}
 		collection := nslifecycle.NewIncarnation(ns.Namespace, ns.Generation).MustPhysicalName(nslifecycle.KindSubjectsDense)
-		stat := s.collectionStatsFn(ctx, collection)
+		stat := s.qdrantCollection(ctx, collection)
 		if stat.Exists && stat.PointsCount > 0 {
 			continue
 		}
@@ -273,10 +270,10 @@ const embedderHeartbeatKey = "codohue:embedder:heartbeat"
 // old hardcoded "true", which claimed a healthy embedder even when the
 // process was down. With no Redis wired we cannot know, so we do not claim to.
 func (s *Service) embedderHeartbeat(ctx context.Context) EmbedderHeartbeat {
-	if s.redisClient == nil {
+	if s.redis == nil {
 		return EmbedderHeartbeat{OK: false}
 	}
-	raw, err := s.redisClient.Get(ctx, embedderHeartbeatKey).Result()
+	raw, err := s.redis.Get(ctx, embedderHeartbeatKey).Result()
 	if err != nil || raw == "" {
 		return EmbedderHeartbeat{OK: false}
 	}
@@ -311,11 +308,11 @@ func (s *Service) namespaceBacklog(ctx context.Context, namespace string, genera
 // trendingTTLSec probes the remaining TTL of the namespace's trending ZSET.
 // Redis TTL semantics carry through: -2 = key missing, -1 = no expiry.
 func (s *Service) trendingTTLSec(ctx context.Context, namespace string, generation int64) int {
-	if s.redisClient == nil {
+	if s.redis == nil {
 		return -2
 	}
 	key := nslifecycle.NewIncarnation(namespace, generation).MustPhysicalName(nslifecycle.KindTrending)
-	d, err := s.redisClient.TTL(ctx, key).Result()
+	d, err := s.redis.TTL(ctx, key).Result()
 	if err != nil {
 		return -2
 	}

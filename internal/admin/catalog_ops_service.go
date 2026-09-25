@@ -77,7 +77,7 @@ func catalogStreamName(ns string, generation int64) string {
 // matches what internal/catalog publishes on first ingest so the embedder
 // worker decodes both with the same code path.
 func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, generation int64, target CatalogReembedTarget, strategyID, strategyVersion string) error {
-	if s.streamPublisher == nil {
+	if s.redis == nil {
 		return errors.New("admin: stream publisher not wired")
 	}
 	args := &goredis.XAddArgs{
@@ -92,7 +92,7 @@ func (s *Service) publishCatalogEnqueue(ctx context.Context, ns string, generati
 			"enqueued_at":          s.nowFn().UTC().Format(time.RFC3339Nano),
 		},
 	}
-	if err := s.streamPublisher.XAdd(ctx, args).Err(); err != nil {
+	if err := s.redis.XAdd(ctx, args).Err(); err != nil {
 		return fmt.Errorf("xadd %s: %w", args.Stream, err)
 	}
 	return nil
@@ -220,7 +220,7 @@ func (s *Service) GetCatalogItem(ctx context.Context, namespace string, id int64
 }
 
 func (s *Service) attachCatalogVector(ctx context.Context, item *CatalogItemDetail) {
-	if s.qdrantReader == nil {
+	if s.qdrant == nil {
 		return
 	}
 	numericID, ok, err := s.repo.LookupNumericObjectID(ctx, item.Namespace, item.ObjectID)
@@ -245,7 +245,7 @@ func (s *Service) attachCatalogVector(ctx context.Context, item *CatalogItemDeta
 		return
 	}
 	collection := nslifecycle.MustPhysicalName(nslifecycle.KindObjectsDense, item.Namespace, generation)
-	results, err := s.qdrantReader.Get(ctx, &qdrant.GetPoints{
+	results, err := s.qdrant.Get(ctx, &qdrant.GetPoints{
 		CollectionName: collection,
 		Ids:            []*qdrant.PointId{qdrant.NewIDNum(numericID)},
 		WithVectors:    qdrant.NewWithVectorsInclude("dense_interactions"),

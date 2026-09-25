@@ -9,16 +9,16 @@ import (
 	"time"
 )
 
-// withCatalogPlumbing wires the most common test rig: fakeRepo + fake stream
-// publisher + fake strategy picker + fake qdrant deleter, all returned for
-// assertions. Tests pass enabled=false to exercise 404 paths.
-func withCatalogPlumbing(t *testing.T, repo *fakeRepo, picker *fakeStrategyPicker) (*Service, *fakeStreamPublisher, *fakeQdrantDeleter) {
+// withCatalogPlumbing wires the most common test rig: fakeRepo + fake redis
+// (stream publisher) + fake strategy picker + fake qdrant deleter, all
+// returned for assertions. Tests pass enabled=false to exercise 404 paths.
+func withCatalogPlumbing(t *testing.T, repo *fakeRepo, picker *fakeStrategyPicker) (*Service, *fakeRedis, *fakeQdrantDeleter) {
 	t.Helper()
 	svc := newTestService(repo, "", "")
-	pub := &fakeStreamPublisher{}
+	pub := &fakeRedis{}
 	del := &fakeQdrantDeleter{}
-	svc.SetStreamPublisher(pub)
-	svc.SetQdrantPointDeleter(del)
+	svc.redis = pub
+	svc.qdrantDeleter = del
 	if picker != nil {
 		svc.SetCatalogStrategyPicker(picker)
 	}
@@ -420,15 +420,15 @@ func TestGetCatalogItem_UsesCurrentGenerationCollection(t *testing.T) {
 		numericObjectID:    123,
 		numericObjectFound: true,
 	}
-	reader := &fakeQdrantReader{}
+	reader := &fakeQdrant{}
 	svc, _, _ := withCatalogPlumbing(t, repo, nil)
-	svc.qdrantReader = reader
+	svc.qdrant = reader
 
 	if _, err := svc.GetCatalogItem(context.Background(), "ns", 7); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(reader.calls) != 1 || reader.calls[0].CollectionName != "ns_g4_objects_dense" {
-		t.Fatalf("qdrant reads = %+v, want ns_g4_objects_dense", reader.calls)
+	if len(reader.getCalls) != 1 || reader.getCalls[0].CollectionName != "ns_g4_objects_dense" {
+		t.Fatalf("qdrant reads = %+v, want ns_g4_objects_dense", reader.getCalls)
 	}
 }
 

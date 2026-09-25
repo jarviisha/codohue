@@ -183,10 +183,7 @@ func TestDenseDowngradeAlerts(t *testing.T) {
 		"hybrid-empty_g2_subjects_dense": 0,
 		"hybrid-ok_subjects_dense":       42,
 	}
-	s := &Service{collectionStatsFn: func(_ context.Context, name string) QdrantCollection {
-		n, ok := counts[name]
-		return QdrantCollection{Exists: ok, PointsCount: n}
-	}}
+	s := &Service{qdrant: &fakeQdrant{counts: counts}}
 
 	namespaces := []NamespaceConfig{
 		{Namespace: "hybrid-empty", Generation: 2, Alpha: 0.5, DenseSource: "byoe"}, // configured hybrid, no vectors → alert
@@ -209,5 +206,38 @@ func TestDenseDowngradeAlerts(t *testing.T) {
 	}
 	if !got["hybrid-empty"] || !got["missing-coll"] {
 		t.Fatalf("wrong namespaces flagged: %+v", alerts)
+	}
+}
+
+func TestEmbedderHeartbeat_FromRedis(t *testing.T) {
+	stamp := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+	svc := newTestService(&fakeRepo{}, "", "")
+	svc.redis = &fakeRedis{getVal: stamp.Format(time.RFC3339) + "|replica-1"}
+
+	hb := svc.embedderHeartbeat(context.Background())
+	if !hb.OK {
+		t.Fatal("expected OK heartbeat when the redis key is set")
+	}
+	if hb.LastSeenAt == nil || !hb.LastSeenAt.Equal(stamp) {
+		t.Fatalf("LastSeenAt = %v, want %v", hb.LastSeenAt, stamp)
+	}
+
+	svc.redis = &fakeRedis{getErr: errors.New("redis down")}
+	if hb := svc.embedderHeartbeat(context.Background()); hb.OK {
+		t.Fatal("expected not-OK heartbeat when the redis read fails")
+	}
+}
+
+func TestTrendingTTLSec_FromRedis(t *testing.T) {
+	svc := newTestService(&fakeRepo{}, "", "")
+
+	svc.redis = &fakeRedis{ttl: 90 * time.Second}
+	if got := svc.trendingTTLSec(context.Background(), "ns1", 2); got != 90 {
+		t.Fatalf("ttl = %d, want 90", got)
+	}
+
+	svc.redis = &fakeRedis{ttlErr: errors.New("redis down")}
+	if got := svc.trendingTTLSec(context.Background(), "ns1", 2); got != -2 {
+		t.Fatalf("ttl on error = %d, want -2", got)
 	}
 }
