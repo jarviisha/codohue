@@ -141,7 +141,7 @@ func (s *Service) Ingest(ctx context.Context, ns string, req *IngestRequest) (*I
 		return nil, ErrEmptyContent
 	}
 
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if s.lifecycle != nil {
 		var item *Item
 		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			var ingestErr error

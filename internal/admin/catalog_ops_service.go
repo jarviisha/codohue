@@ -365,7 +365,7 @@ func (s *Service) BulkRedriveDeadletter(ctx context.Context, namespace string) (
 // the catalog row. Keeping the durable row until external cleanup succeeds
 // makes a transient Qdrant failure retryable.
 func (s *Service) DeleteCatalogItem(ctx context.Context, namespace string, id int64) error {
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, current *nslifecycle.NamespaceLifecycle) error {
 			return s.deleteCatalogItemGeneration(leased, namespace, current.Generation, id)
 		})

@@ -45,7 +45,7 @@ func (s *Service) Upsert(ctx context.Context, namespace, objectID string, req *U
 		return nil, fmt.Errorf("%w: request body is required", ErrInvalidRequest)
 	}
 
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+	if s.lifecycle != nil {
 		var object *Object
 		err := s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			var writeErr error
@@ -76,7 +76,7 @@ func (s *Service) SetAuthor(ctx context.Context, namespace, objectID, authorSubj
 		// not "clear it".
 		return nil
 	}
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			return s.setAuthorActive(leased, namespace, objectID, author)
 		})
@@ -99,7 +99,7 @@ func (s *Service) SetAuthorWithRepo(ctx context.Context, repo objectsRepository,
 		}
 		return nil
 	}
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			return write(leased)
 		})
@@ -121,7 +121,7 @@ func (s *Service) Get(ctx context.Context, namespace, objectID string) (*Object,
 
 // Delete removes an object's metadata.
 func (s *Service) Delete(ctx context.Context, namespace, objectID string) error {
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, namespace) != nil {
+	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			return s.repo.Delete(leased, namespace, objectID)
 		})

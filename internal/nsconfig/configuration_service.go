@@ -105,7 +105,7 @@ func (s *Service) PatchConfiguration(ctx context.Context, ns string, req *namesp
 		return nil, err
 	}
 	var err error
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if s.lifecycle != nil {
 		err = s.lifecycle.WithWriter(ctx, ns, change)
 	} else {
 		err = change(ctx, nil)

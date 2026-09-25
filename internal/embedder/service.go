@@ -181,7 +181,7 @@ func (s *Service) ProcessItem(ctx context.Context, catalogItemID int64) (Process
 	if err != nil {
 		return OutcomeFailed, fmt.Errorf("load catalog item: %w", err)
 	}
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, item.Namespace) != nil {
+	if s.lifecycle != nil {
 		var outcome ProcessOutcome
 		err := s.lifecycle.WithWriter(ctx, item.Namespace, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			var processErr error

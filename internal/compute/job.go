@@ -245,7 +245,7 @@ func (j *Job) runOnce(ctx context.Context) {
 // without running the remaining phases. Mid-phase cancel is intentionally
 // unsupported — see BUILD_PLAN §9.2.
 func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) error {
-	if j.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if j.lifecycle != nil {
 		return j.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			return j.runNamespaceWithComputeLock(leased, ns, triggerSource)
 		})
@@ -273,7 +273,7 @@ func (j *Job) runNamespaceWithComputeLock(ctx context.Context, ns string, trigge
 // without aborting the run. Returns the run id for the Location header.
 // The lock is held for exactly the run's lifetime; timeout bounds the run.
 func (j *Job) StartNamespaceRun(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, timeout time.Duration) (int64, error) {
-	if j.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if j.lifecycle != nil {
 		type startResult struct {
 			id  int64
 			err error

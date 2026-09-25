@@ -98,7 +98,7 @@ func (s *Service) Process(ctx context.Context, payload *EventPayload) (int64, er
 		return 0, fmt.Errorf("%w: object_created_at %s is in the future", ErrInvalidObjectCreatedAt, payload.ObjectCreatedAt.Format(time.RFC3339))
 	}
 
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, payload.Namespace) != nil {
+	if s.lifecycle != nil {
 		var id int64
 		err := s.lifecycle.WithWriter(ctx, payload.Namespace, func(leased context.Context, lifecycle *nslifecycle.NamespaceLifecycle) error {
 			payload.NamespaceGeneration = lifecycle.Generation

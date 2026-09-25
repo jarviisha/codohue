@@ -131,6 +131,11 @@ type fakeLifecycleWriter struct {
 }
 
 func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, namespace string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	// Mirror the real WithWriter: an inherited lease is reused without a new
+	// acquisition, so calls counts acquisitions only.
+	if generation, ok := nslifecycle.LeaseGeneration(ctx, namespace); ok {
+		return fn(ctx, &nslifecycle.NamespaceLifecycle{Namespace: namespace, Generation: generation, State: nslifecycle.StateActive})
+	}
 	f.calls++
 	if f.err != nil {
 		return f.err

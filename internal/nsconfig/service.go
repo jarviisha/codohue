@@ -90,9 +90,14 @@ func (s *Service) Upsert(ctx context.Context, ns string, req *UpsertRequest) (*U
 	if err := s.guardEmbeddingDimChange(ctx, ns, req); err != nil {
 		return nil, err
 	}
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
-		if _, err := s.lifecycle.Activate(ctx, ns); err != nil {
-			return nil, err
+	if s.lifecycle != nil {
+		// Activate acquires the exclusive lock pair, so it must not run when
+		// the caller already holds a lease; the write itself goes through
+		// WithWriter either way, which reuses an inherited lease.
+		if nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+			if _, err := s.lifecycle.Activate(ctx, ns); err != nil {
+				return nil, err
+			}
 		}
 		var response *UpsertResponse
 		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
@@ -176,7 +181,7 @@ func (s *Service) upsertActive(ctx context.Context, ns string, req *UpsertReques
 // previously required manual SQL or a full namespace wipe.
 // Returns ErrNamespaceNotFound when the namespace does not exist.
 func (s *Service) RotateAPIKey(ctx context.Context, ns string) (*RotateAPIKeyResponse, error) {
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if s.lifecycle != nil {
 		var response *RotateAPIKeyResponse
 		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			var rotateErr error
@@ -308,7 +313,7 @@ func (s *Service) UpdateCatalogConfig(ctx context.Context, ns string, req *Updat
 	// Upsert already holds the lease when it calls this for a one-request
 	// catalog provisioning, so the guard below reuses it instead of
 	// re-acquiring; the standalone admin catalog endpoint takes its own.
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if s.lifecycle != nil {
 		var updated *namespace.Config
 		err := s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			var updateErr error

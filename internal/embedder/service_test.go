@@ -602,6 +602,11 @@ type recordingLifecycleWriter struct {
 }
 
 func (f *recordingLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func(context.Context, *nslifecycle.NamespaceLifecycle) error) error {
+	// Mirror the real WithWriter: an inherited lease is reused without a new
+	// acquisition, so calls counts acquisitions only.
+	if generation, ok := nslifecycle.LeaseGeneration(ctx, ns); ok {
+		return fn(ctx, &nslifecycle.NamespaceLifecycle{Namespace: ns, Generation: generation, State: nslifecycle.StateActive})
+	}
 	f.calls++
 	if f.err != nil {
 		return f.err

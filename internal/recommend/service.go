@@ -241,7 +241,7 @@ func (s *Service) storeEmbedding(ctx context.Context, ns, entityID, entityType s
 	if createdAt != nil && createdAt.After(time.Now().UTC().Add(maxObjectCreatedAtSkew)) {
 		return fmt.Errorf("%w: object_created_at is more than five minutes in the future", ErrInvalidObjectCreatedAt)
 	}
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
 			return s.storeEmbeddingActive(leased, ns, entityID, entityType, vector, createdAt)
 		})
@@ -1633,7 +1633,7 @@ func (s *Service) rankFallback(req *RankRequest, ns string) *RankResponse {
 // recCacheTTL (5 minutes) after deletion, since the cache is keyed by subject rather than
 // by individual objects.
 func (s *Service) DeleteObject(ctx context.Context, ns, objectID string) error {
-	if s.lifecycle != nil && nslifecycle.RequireNamespaceLease(ctx, ns) != nil {
+	if s.lifecycle != nil {
 		return s.lifecycle.WithWriter(ctx, ns, func(leased context.Context, lifecycle *nslifecycle.NamespaceLifecycle) error {
 			return s.deleteObjectActive(leased, ns, objectID, lifecycle.Generation)
 		})
