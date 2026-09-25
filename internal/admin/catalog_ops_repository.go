@@ -342,25 +342,6 @@ func (r *Repository) CountCatalogItemStates(ctx context.Context, namespace strin
 	return out, nil
 }
 
-// CountEmbeddedAtVersion reports how many catalog_items are in state='embedded'
-// at the target strategy_version. Used by the watcher to record progress on
-// the batch_run_logs row when it completes.
-func (r *Repository) CountEmbeddedAtVersion(ctx context.Context, namespace, targetStrategyID, targetStrategyVersion string) (int, error) {
-	var n int
-	err := r.db.QueryRow(ctx, `
-		SELECT COUNT(*)
-		FROM catalog_items
-		WHERE namespace = $1
-		  AND state = 'embedded'
-		  AND (strategy_id, strategy_version) = ($2, $3)`,
-		namespace, targetStrategyID, targetStrategyVersion,
-	).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("count embedded items at version: %w", err)
-	}
-	return n, nil
-}
-
 // CatalogReembedTarget is a (id, object_id) pair returned by the stale-item
 // query. The orchestration service iterates these to publish XADD entries.
 type CatalogReembedTarget struct {
