@@ -18,8 +18,8 @@ type Incarnation struct {
 // NewIncarnation builds an Incarnation from a raw generation, which may come
 // from an unvalidated source; anything below 1 addresses generation 1, the
 // unqualified legacy names.
-func NewIncarnation(namespace string, generation int64) Incarnation {
-	return Incarnation{namespace: namespace, generation: generation}
+func NewIncarnation(ns string, generation int64) Incarnation {
+	return Incarnation{namespace: ns, generation: generation}
 }
 
 // ConfigIncarnation resolves the incarnation a read path should address from
@@ -35,12 +35,12 @@ func ConfigIncarnation(ns string, cfg *namespace.Config) Incarnation {
 // LeaseIncarnation returns the incarnation carried by the namespace
 // lifecycle lease — the authority write paths must address. Read-only
 // callers without a lease should use ConfigIncarnation instead.
-func LeaseIncarnation(ctx context.Context, namespace string) (Incarnation, bool) {
-	generation, ok := LeaseGeneration(ctx, namespace)
+func LeaseIncarnation(ctx context.Context, ns string) (Incarnation, bool) {
+	generation, ok := LeaseGeneration(ctx, ns)
 	if !ok {
 		return Incarnation{}, false
 	}
-	return Incarnation{namespace: namespace, generation: generation}, true
+	return Incarnation{namespace: ns, generation: generation}, true
 }
 
 // Namespace returns the raw (logical) namespace name.
