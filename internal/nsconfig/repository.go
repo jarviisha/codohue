@@ -98,7 +98,7 @@ func (r *Repository) UpsertWithCatalog(ctx context.Context, ns string, req *Upse
 					return ErrProvisionConflict
 				}
 				if err != nil {
-					return err
+					return fmt.Errorf("read provision hash: %w", err)
 				}
 				if stored != desiredHash || bcrypt.CompareHashAndPassword([]byte(existing.APIKeyHash), []byte(req.ProvisionAPIKey)) != nil {
 					return ErrProvisionConflict

@@ -47,7 +47,7 @@ func (r *Repository) ReadConfiguration(ctx context.Context, ns string) (*namespa
 		return nil, &namespace.ConfigurationError{Status: 404, Code: "not_found", Message: "Namespace is not active or does not exist"}
 	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read configuration row: %w", err)
 	}
 	var values map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &values); err != nil {
@@ -80,7 +80,7 @@ func (r *Repository) ChangeConfiguration(ctx context.Context, ns string, req *na
 			return &namespace.ConfigurationError{Status: 404, Code: "not_found", Message: "Namespace does not exist"}
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("lock configuration row: %w", err)
 		}
 		current, err := tx.ReadConfiguration(ctx, ns)
 		if err != nil {
