@@ -42,6 +42,12 @@ The sidebar shows only the active namespace’s destinations while inside a
 namespace. “All namespaces” returns to global navigation; the top-bar namespace
 switcher remains available.
 
+The Events live tail retains 1000 events but renders only a window of 60.
+Arrivals are batched on a 100 ms timer and flash expiry is one sweeping
+interval, so a burst costs a handful of renders and timers rather than one of
+each per event. Stepping back through retained history pauses the tail, because
+the window is an offset into a buffer that live append keeps shifting.
+
 Catalog and Subjects apply text searches explicitly and keep applied filters,
 sorting and pagination in the URL. Configuration preserves drafts when a newer
 server snapshot arrives. Each tab saves independently with generation and group

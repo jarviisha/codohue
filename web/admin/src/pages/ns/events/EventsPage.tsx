@@ -41,8 +41,23 @@ import QueryFeedback from '@/components/QueryFeedback'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 
+/** Events kept in memory for scrollback. Not the number rendered. */
 const TAIL_CAP = 1000
+/**
+ * Rows committed to the DOM at once. Roughly a tall viewport plus overscan.
+ * The cap is what keeps a populated tail off the main thread: rendering the
+ * full 1000-row history took hundreds of milliseconds and starved input.
+ */
+const WINDOW_SIZE = 60
 const FLASH_MS = 1500
+/**
+ * Arrivals are collected for this long and applied as one update. At any
+ * ingest rate the tail costs at most ~10 renders per second instead of one
+ * per event.
+ */
+const FLUSH_MS = 100
+/** How often expired flashes are swept. One timer for the whole table. */
+const FLASH_SWEEP_MS = 250
 const WINDOWS: EventsSummaryWindow[] = ['1m', '5m', '1h']
 
 /**
@@ -184,10 +199,28 @@ export default function EventsPage() {
 }
 
 /**
- * LiveTail subscribes to the events SSE stream and renders a 1000-row ring
+ * LiveTail subscribes to the events SSE stream and presents a 1000-event ring
  * buffer, newest first. Pausing buffers arrivals; resuming flushes them. New
  * rows flash briefly. A `dropped` frame from the server (client fell behind)
  * raises a warning banner.
+ *
+ * Three things here are deliberately bounded, because the naive version of
+ * each was enough to block the main thread on a busy namespace and make the
+ * whole console — sidebar included — feel unresponsive:
+ *
+ *   - **Rendered rows.** The buffer holds TAIL_CAP events; only WINDOW_SIZE of
+ *     them are ever in the DOM. Committing all 1000 cost hundreds of
+ *     milliseconds of layout per update.
+ *   - **Updates.** Arrivals land in a ref and are applied on a FLUSH_MS timer,
+ *     so a burst of 1000 events is a handful of renders rather than 1000.
+ *   - **Timers.** Flash expiry is one sweeping interval over a Map of
+ *     deadlines, not a setTimeout per row. Resuming from a full pause used to
+ *     schedule up to 1000 timers at once.
+ *
+ * Looking back through history pauses the tail. The window is an offset into
+ * the buffer, and the buffer shifts under it whenever an event arrives, so
+ * scrollback and live append cannot both be true without the rows moving under
+ * the operator mid-read. This is the same bargain a terminal makes.
  */
 function LiveTail({
   namespace,
@@ -203,39 +236,106 @@ function LiveTail({
   const [flashIds, setFlashIds] = useState<Set<number>>(() => new Set())
   const [droppedCount, setDroppedCount] = useState(0)
   const [pendingCount, setPendingCount] = useState(0)
+  // Offset of the rendered window into `events`. 0 is the newest page, which
+  // is the only position a live tail occupies.
+  const [windowStart, setWindowStart] = useState(0)
 
   const pausedRef = useRef(paused)
   useEffect(() => {
     pausedRef.current = paused
   }, [paused])
-  const pendingRef = useRef<EventSummary[]>([])
 
-  const flash = useCallback((id: number) => {
-    setFlashIds((prev) => {
-      const next = new Set(prev)
-      next.add(id)
-      return next
-    })
-    window.setTimeout(() => {
-      setFlashIds((prev) => {
-        if (!prev.has(id)) return prev
-        const next = new Set(prev)
-        next.delete(id)
-        return next
-      })
-    }, FLASH_MS)
+  // Buffered while paused, applied on resume.
+  const pendingRef = useRef<EventSummary[]>([])
+  // Arrived since the last flush, applied on the flush timer.
+  const arrivalsRef = useRef<EventSummary[]>([])
+  const flushTimerRef = useRef<number | null>(null)
+  // id → timestamp the flash expires. One sweep drains it.
+  const flashExpiryRef = useRef<Map<number, number>>(new Map())
+  const flashSweepRef = useRef<number | null>(null)
+
+  /**
+   * startFlashSweep runs at most one interval for the whole table. It prunes
+   * expired ids and stops itself once nothing is flashing, so an idle tail
+   * holds no timers.
+   */
+  const startFlashSweep = useCallback(() => {
+    if (flashSweepRef.current != null) return
+    flashSweepRef.current = window.setInterval(() => {
+      const now = Date.now()
+      let changed = false
+      for (const [id, expiresAt] of flashExpiryRef.current) {
+        if (expiresAt <= now) {
+          flashExpiryRef.current.delete(id)
+          changed = true
+        }
+      }
+      if (changed) setFlashIds(new Set(flashExpiryRef.current.keys()))
+      if (flashExpiryRef.current.size === 0 && flashSweepRef.current != null) {
+        window.clearInterval(flashSweepRef.current)
+        flashSweepRef.current = null
+      }
+    }, FLASH_SWEEP_MS)
   }, [])
+
+  const flashAll = useCallback(
+    (incoming: EventSummary[]) => {
+      if (incoming.length === 0) return
+      const expiresAt = Date.now() + FLASH_MS
+      for (const e of incoming) flashExpiryRef.current.set(e.id, expiresAt)
+      setFlashIds(new Set(flashExpiryRef.current.keys()))
+      startFlashSweep()
+    },
+    [startFlashSweep],
+  )
+
+  /**
+   * flush applies everything collected since the last tick as a single update.
+   * It is also where pause takes effect: arrivals already waiting on the timer
+   * when the operator pauses go to the pending buffer, because prepending them
+   * to a paused table would shift scrollback offsets under the reader.
+   */
+  const flush = useCallback(() => {
+    flushTimerRef.current = null
+
+    const arrivals = arrivalsRef.current
+    if (arrivals.length > 0) {
+      arrivalsRef.current = []
+      // Arrivals are collected oldest-first; the tail reads newest-first.
+      const incoming = arrivals.reverse()
+      if (pausedRef.current) {
+        pendingRef.current = [...incoming, ...pendingRef.current].slice(0, TAIL_CAP)
+      } else {
+        setEvents((prev) => [...incoming, ...prev].slice(0, TAIL_CAP))
+        flashAll(incoming)
+      }
+    }
+
+    setPendingCount(pendingRef.current.length)
+  }, [flashAll])
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimerRef.current != null) return
+    flushTimerRef.current = window.setTimeout(flush, FLUSH_MS)
+  }, [flush])
+
+  // The component is keyed by stream URL, so a filter change remounts it and
+  // this cleanup is what stops the previous filter's timers. Route unmount
+  // takes the same path.
+  useEffect(
+    () => () => {
+      if (flushTimerRef.current != null) window.clearTimeout(flushTimerRef.current)
+      if (flashSweepRef.current != null) window.clearInterval(flashSweepRef.current)
+      flushTimerRef.current = null
+      flashSweepRef.current = null
+    },
+    [],
+  )
 
   const { connected } = useServerStream(streamUrl || null, {
     event: (data: unknown) => {
-      const e = data as EventStreamMessage
-      if (pausedRef.current) {
-        pendingRef.current = [e, ...pendingRef.current].slice(0, TAIL_CAP)
-        setPendingCount(pendingRef.current.length)
-        return
-      }
-      flash(e.id)
-      setEvents((prev) => [e, ...prev].slice(0, TAIL_CAP))
+      arrivalsRef.current.push(data as EventStreamMessage)
+      scheduleFlush()
     },
     dropped: (data: unknown) => {
       const d = data as { count?: number }
@@ -243,16 +343,40 @@ function LiveTail({
     },
   })
 
+  const maxWindowStart = Math.max(0, Math.floor((events.length - 1) / WINDOW_SIZE) * WINDOW_SIZE)
+  // A live tail is pinned to the newest page; only a paused one can wander.
+  const start = paused ? Math.min(windowStart, maxWindowStart) : 0
+  const visible = events.slice(start, start + WINDOW_SIZE)
+  const hasScrollback = events.length > WINDOW_SIZE
+
+  const pause = () => {
+    setPaused(true)
+    pausedRef.current = true
+  }
+
   const resume = () => {
     const buffered = pendingRef.current
     pendingRef.current = []
     setPendingCount(0)
     setPaused(false)
+    pausedRef.current = false
+    // Resuming returns to the newest page; the offsets below it no longer mean
+    // what they meant before the buffered events were prepended.
+    setWindowStart(0)
     if (buffered.length > 0) {
-      buffered.forEach((e) => flash(e.id))
       setEvents((prev) => [...buffered, ...prev].slice(0, TAIL_CAP))
+      flashAll(buffered)
     }
   }
+
+  const showOlder = () => {
+    // Scrollback and live append cannot coexist without rows moving under the
+    // reader, so stepping back pauses.
+    if (!paused) pause()
+    setWindowStart((current) => Math.min(current + WINDOW_SIZE, maxWindowStart))
+  }
+
+  const showNewer = () => setWindowStart((current) => Math.max(current - WINDOW_SIZE, 0))
 
   return (
     <Stack gap={6}>
@@ -264,7 +388,7 @@ function LiveTail({
         <Button
           size="sm"
           variant="secondary"
-          onClick={() => (paused ? resume() : setPaused(true))}
+          onClick={() => (paused ? resume() : pause())}
           label={paused ? `Resume${pendingCount > 0 ? ` (${pendingCount})` : ''}` : 'Pause'}
         />
       </Stack>
@@ -288,25 +412,85 @@ function LiveTail({
           actions={<Button size="sm" onClick={onInject} label="Inject test event" />}
         />
       ) : (
-        <TailTable namespace={namespace} items={events} flashIds={flashIds} />
+        <>
+          <TailTable
+            namespace={namespace}
+            items={visible}
+            flashIds={flashIds}
+            rowIndexStart={start + 1}
+            totalRows={events.length}
+          />
+          {hasScrollback && (
+            <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
+              {/*
+                A live region, but only one that changes when the operator
+                changes something. The retained count climbs on every flush
+                until the buffer fills, so including it while the tail is live
+                queued a polite announcement roughly ten times a second and
+                crowded out everything else a screen reader had to say. While
+                live the position is fixed at the newest page, so this string
+                is constant; the total stays available on the table's
+                aria-rowcount, and appears here as soon as the tail is paused
+                and the count has stopped moving.
+              */}
+              <span className="text-secondary text-sm" role="status" aria-live="polite">
+                {paused
+                  ? `Showing ${start + 1}–${start + visible.length} of ${events.length} retained`
+                  : `Showing the newest ${visible.length} — live, newest first`}
+              </span>
+              <Stack gap={2} direction="horizontal" align="center">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={showNewer}
+                  isDisabled={start === 0}
+                  label="Newer"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={showOlder}
+                  isDisabled={start >= maxWindowStart}
+                  label={paused ? 'Older' : 'Older (pauses tail)'}
+                />
+              </Stack>
+            </Stack>
+          )}
+        </>
       )}
     </Stack>
   )
 }
 
+/**
+ * TailTable renders one window of the buffer.
+ *
+ * `items` is a slice, not the whole history, so the table carries the ARIA
+ * bookkeeping that makes a windowed view legible to assistive tech:
+ * aria-rowcount is the full retained count and each row's aria-rowindex is its
+ * position in that count, not in the slice. Without them a screen reader
+ * announces "row 3 of 60" for an event that is actually the 543rd retained.
+ *
+ * The header occupies row 1, so body rows start at rowIndexStart + 1.
+ */
 function TailTable({
   namespace,
   items,
   flashIds,
+  rowIndexStart,
+  totalRows,
 }: {
   namespace: string
   items: EventSummary[]
   flashIds: Set<number>
+  rowIndexStart: number
+  totalRows: number
 }) {
   return (
     <Stack className="min-w-0">
       <Table
         aria-label="Live events"
+        aria-rowcount={totalRows + 1}
         columns={['Occurred', 'Subject', 'Object', 'Action', 'Weight'].map((key) => ({
           key,
           header: key,
@@ -314,7 +498,7 @@ function TailTable({
         }))}
       >
         <TableHeader>
-          <TableRow>
+          <TableRow aria-rowindex={1}>
             <TableHeaderCell>Occurred</TableHeaderCell>
             <TableHeaderCell>Subject</TableHeaderCell>
             <TableHeaderCell>Object</TableHeaderCell>
@@ -323,9 +507,10 @@ function TailTable({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((e) => (
+          {items.map((e, i) => (
             <TableRow
               key={e.id}
+              aria-rowindex={rowIndexStart + i + 1}
               className={
                 flashIds.has(e.id)
                   ? 'bg-accent-muted motion-safe:transition-colors'
