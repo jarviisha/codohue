@@ -420,10 +420,21 @@ function LiveTail({
           />
           {hasScrollback && (
             <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
+              {/*
+                A live region, but only one that changes when the operator
+                changes something. The retained count climbs on every flush
+                until the buffer fills, so including it while the tail is live
+                queued a polite announcement roughly ten times a second and
+                crowded out everything else a screen reader had to say. While
+                live the position is fixed at the newest page, so this string
+                is constant; the total stays available on the table's
+                aria-rowcount, and appears here as soon as the tail is paused
+                and the count has stopped moving.
+              */}
               <span className="text-secondary text-sm" role="status" aria-live="polite">
-                {`Showing ${start + 1}–${start + visible.length} of ${events.length} retained${
-                  paused ? '' : ' — newest first, live'
-                }`}
+                {paused
+                  ? `Showing ${start + 1}–${start + visible.length} of ${events.length} retained`
+                  : `Showing the newest ${visible.length} — live, newest first`}
               </span>
               <Stack gap={2} direction="horizontal" align="center">
                 <Button

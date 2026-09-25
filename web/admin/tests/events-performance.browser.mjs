@@ -179,9 +179,9 @@ try {
   // The whole history is retained and reported, not just what is drawn.
   const table = page.locator('table[aria-label="Live events"]')
   assert.equal(await table.getAttribute('aria-rowcount'), String(BURST + 1))
-  await page.getByText(`Showing 1–${WINDOW_SIZE} of ${BURST} retained — newest first, live`, {
-    exact: true,
-  }).waitFor()
+  await page
+    .getByText(`Showing the newest ${WINDOW_SIZE} — live, newest first`, { exact: true })
+    .waitFor()
 
   // Newest first: the top row is the last event emitted, and its ARIA row
   // index is the first body row.
@@ -277,6 +277,54 @@ try {
   await page.getByRole('button', { name: 'Newer', exact: true }).click()
   await page.getByText(`Showing 1–${WINDOW_SIZE} of ${BURST} retained`, { exact: true }).waitFor()
   console.log('PASS scrollback pauses the tail, stays windowed, and reports position in the full history')
+
+  // ---------------------------------------------------------------------
+  // Live ingest must not talk over a screen reader. The position line is a
+  // polite live region, so anything in it that changes per flush queues an
+  // announcement roughly ten times a second.
+  //
+  // This needs a *filling* buffer, not a full one: once the history is capped
+  // the retained count stops moving and even a bad string goes quiet. So
+  // reload for a fresh tail and stay under TAIL_CAP throughout.
+  // ---------------------------------------------------------------------
+  await page.goto(`${origin}/ns/a/events`)
+  await page.getByText('Waiting for events', { exact: true }).waitFor()
+  await emit(100)
+  await settle()
+  await page.evaluate(() => {
+    window.__announced = []
+    for (const node of document.querySelectorAll('[aria-live]')) {
+      new MutationObserver(() => window.__announced.push(node.textContent.trim())).observe(node, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      })
+    }
+  })
+  // 100 → 500 retained: well inside the cap, so the count is still climbing on
+  // every flush and a count in the live region would announce on each one.
+  for (let i = 0; i < 10; i++) {
+    await emit(40)
+    await page.waitForTimeout(120)
+  }
+  await settle()
+  const retained = await page.evaluate(() => window.__nextId - 1)
+  assert.ok(retained < BURST, `this check must stay under the ${BURST} cap, reached ${retained}`)
+  const announced = await page.evaluate(() => window.__announced)
+  assert.deepEqual(
+    announced,
+    [],
+    `live ingest queued ${announced.length} screen-reader announcements while the buffer filled: ${JSON.stringify(announced.slice(0, 3))}`,
+  )
+
+  // Paused, the same region does announce — position changes are the
+  // operator's own doing and are worth hearing.
+  await page.getByRole('button', { name: 'Pause', exact: true }).click()
+  await page.getByRole('button', { name: 'Older', exact: true }).click()
+  await page.waitForFunction(() => window.__announced.length > 0, null, { timeout: 5_000 })
+  console.log(
+    `PASS a filling tail (${retained} retained) announces nothing while pause and scrollback still announce position changes`,
+  )
 
   // ---------------------------------------------------------------------
   // Row links, filters, and cleanup.
