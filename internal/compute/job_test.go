@@ -143,7 +143,7 @@ type fakeLocks struct {
 	tryLock func(ctx context.Context, ns string) (func(), bool, error)
 }
 
-func (f *fakeLocks) TryLockNamespace(ctx context.Context, ns string) (func(), bool, error) {
+func (f *fakeLocks) TryLockNamespace(ctx context.Context, ns string) (release func(), ok bool, err error) {
 	return f.tryLock(ctx, ns)
 }
 

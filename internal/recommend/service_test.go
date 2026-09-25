@@ -1485,7 +1485,7 @@ func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
 	// and "indexed but zero overlap" were all Score:0 + hybrid_rank.
 
 	// Outcome 1: subject unknown → whole-response no_subject_vector marker.
-	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s, _ := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	resp, err := s.Rank(context.Background(), &RankRequest{SubjectID: "ghost", Candidates: []string{"obj-1"}}, "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1496,7 +1496,7 @@ func TestRank_DistinguishesThreeZeroScoreOutcomes(t *testing.T) {
 
 	// Outcomes 2+3: known subject; obj-zero is indexed with zero overlap
 	// (a real relevance verdict), obj-missing was never indexed.
-	s, f = newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
+	s, f := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
 	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
 		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
 	}
