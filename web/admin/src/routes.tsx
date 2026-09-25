@@ -3,7 +3,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { Skeleton } from '@astryxdesign/core'
 import AppShellLayout from '@/components/shell/AppShellLayout'
 import { AuthGuard } from '@/components/shell/AuthGuard'
-import RouteLoadError, { RouteErrorElement } from '@/components/shell/RouteLoadError'
+import RouteLoadError from '@/components/shell/RouteLoadError'
 
 // Login is bundled directly because every cold visit hits it; the shell's
 // children all defer so a cold visit only ships the shell + the entered route.
@@ -23,7 +23,6 @@ type PreloadHandle = { preload: PageLoader }
  */
 type PageRoute = {
   lazy: () => Promise<{ Component: ComponentType }>
-  errorElement: ReactNode
   hydrateFallbackElement: ReactNode
   handle: PreloadHandle
 }
@@ -49,16 +48,15 @@ function page(load: PageLoader): PageRoute {
       try {
         return { Component: (await load()).default }
       } catch (error) {
-        // A rejected `lazy` does not reach this route's own errorElement —
-        // the route never finishes initializing, so React Router leaves the
-        // outlet empty and the operator gets a blank page under an otherwise
-        // working shell. Resolving to a component that reports the failure
-        // keeps the recovery inside the outlet, where the shell still frames
-        // it. errorElement below still covers render-time route errors.
+        // A rejected `lazy` never reaches an errorElement — the route never
+        // finishes initializing, so React Router leaves the outlet empty and
+        // the operator gets a blank page under an otherwise working shell.
+        // Resolving to a component that reports the failure keeps the
+        // recovery inside the outlet, where the shell still frames it.
+        // Render-time crashes stay with the shell's RouteErrorBoundary.
         return { Component: () => <RouteLoadError error={error} /> }
       }
     },
-    errorElement: <RouteErrorElement />,
     // Partial hydration: on a cold visit the entered route's module is
     // resolved before its own first render, and this is what the router draws
     // in the meantime. Because it sits on the *child* route rather than the

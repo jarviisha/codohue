@@ -1,4 +1,4 @@
-import { useNavigate, useRouteError } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { Banner, Button, Stack } from '@astryxdesign/core'
 import PageContainer from '@/components/PageContainer'
 
@@ -39,14 +39,4 @@ export default function RouteLoadError({ error }: { error?: unknown }) {
       </Stack>
     </PageContainer>
   )
-}
-
-/**
- * RouteErrorElement adapts the same report to React Router's errorElement
- * slot, which supplies the error through context rather than as a prop. It
- * covers route errors other than a failed chunk load; the chunk case is caught
- * inside `lazy` (see routes.tsx) because a rejected loader never reaches here.
- */
-export function RouteErrorElement() {
-  return <RouteLoadError error={useRouteError()} />
 }
