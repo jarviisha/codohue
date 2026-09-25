@@ -29,12 +29,13 @@ const (
 // Lifecycle coordination errors. Callers distinguish them because they map to
 // different HTTP statuses: not-found is 404, not-active and resetting are 409.
 var (
-	ErrNamespaceNotFound   = errors.New("namespace lifecycle not found")
-	ErrNamespaceNotActive  = errors.New("namespace lifecycle is not active")
-	ErrSystemResetting     = errors.New("system lifecycle is resetting")
-	ErrLeaseRequired       = errors.New("matching namespace lifecycle lease is required")
-	ErrLegacyEnvelopesOpen = errors.New("legacy envelopes are still enabled")
-	ErrAdoptionEvidence    = errors.New("producer adoption evidence is required")
+	ErrNamespaceNotFound       = errors.New("namespace lifecycle not found")
+	ErrNamespaceNotActive      = errors.New("namespace lifecycle is not active")
+	ErrSystemResetting         = errors.New("system lifecycle is resetting")
+	ErrLeaseRequired           = errors.New("matching namespace lifecycle lease is required")
+	ErrGlobalExclusiveRequired = errors.New("global exclusive lock is required to derive a namespace lease")
+	ErrLegacyEnvelopesOpen     = errors.New("legacy envelopes are still enabled")
+	ErrAdoptionEvidence        = errors.New("producer adoption evidence is required")
 )
 
 // NamespaceLifecycle is the durable tombstone for a namespace name.

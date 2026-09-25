@@ -27,7 +27,7 @@ func TestRepositoryGetOrCreate_Success(t *testing.T) {
 		},
 	}
 
-	id, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
+	id, err := repo.GetOrCreate(leasedCtx(), "obj-1", "ns", "object")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestRepositoryGetOrCreate_QueryError(t *testing.T) {
 		},
 	}
 
-	_, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
+	_, err := repo.GetOrCreate(leasedCtx(), "obj-1", "ns", "object")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -51,7 +51,6 @@ func TestRepositoryGetOrCreate_QueryError(t *testing.T) {
 
 func TestRepositoryGetOrCreateRequiresLifecycleLeaseButLookupDoesNot(t *testing.T) {
 	repo := &Repository{
-		requireLease: true,
 		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return &fakeRows{rows: [][]any{{"obj-1", int64(42)}}}, nil
 		},
@@ -111,7 +110,7 @@ func TestRepositoryLookup_QueryError(t *testing.T) {
 
 func TestRepositoryLookupBatchIsReadOnlyAndOmitsMissing(t *testing.T) {
 	rows := &fakeRows{rows: [][]any{{"known", int64(7)}}}
-	repo := &Repository{requireLease: true, queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+	repo := &Repository{queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 		if !strings.Contains(sql, "SELECT string_id, numeric_id") || strings.Contains(sql, "INSERT") {
 			t.Fatalf("lookup query is not read-only: %s", sql)
 		}
@@ -142,7 +141,7 @@ func TestRepositoryGetOrCreateBatch_DedupsAndMaps(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"a", int64(1)}, {"b", int64(2)}}}, nil
 		},
 	}
-	out, err := repo.GetOrCreateBatch(context.Background(), []string{"a", "b", "a"}, "ns", "object")
+	out, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a", "b", "a"}, "ns", "object")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,7 +164,7 @@ func TestRepositoryGetOrCreateBatch_ExistingIDsIssueNoWrite(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"a", int64(1)}}}, nil
 		},
 	}
-	if _, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object"); err != nil {
+	if _, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a"}, "ns", "object"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(statements) != 1 {
@@ -187,7 +186,7 @@ func TestRepositoryGetOrCreateBatch_InsertsOnlyMissingIDs(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"a", int64(1)}}}, nil
 		},
 	}
-	out, err := repo.GetOrCreateBatch(context.Background(), []string{"a", "b"}, "ns", "object")
+	out, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a", "b"}, "ns", "object")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -215,7 +214,7 @@ func TestRepositoryGetOrCreateBatch_ResolvesRacedInsert(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"a", int64(9)}}}, nil
 		},
 	}
-	out, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object")
+	out, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a"}, "ns", "object")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -232,7 +231,7 @@ func TestRepositoryGetOrCreate_ExistingIDIssuesNoWrite(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"obj-1", int64(42)}}}, nil
 		},
 	}
-	id, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
+	id, err := repo.GetOrCreate(leasedCtx(), "obj-1", "ns", "object")
 	if err != nil || id != 42 {
 		t.Fatalf("GetOrCreate id=%d err=%v", id, err)
 	}
@@ -258,7 +257,7 @@ func TestRepositoryGetOrCreate_ResolvesRacedInsert(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"obj-1", int64(9)}}}, nil
 		},
 	}
-	id, err := repo.GetOrCreate(context.Background(), "obj-1", "ns", "object")
+	id, err := repo.GetOrCreate(leasedCtx(), "obj-1", "ns", "object")
 	if err != nil || id != 9 {
 		t.Fatalf("raced GetOrCreate id=%d err=%v", id, err)
 	}
@@ -270,7 +269,7 @@ func TestRepositoryGetOrCreateBatch_QueryError(t *testing.T) {
 			return nil, errors.New("db down")
 		},
 	}
-	if _, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object"); err == nil {
+	if _, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a"}, "ns", "object"); err == nil {
 		t.Fatal("expected error")
 	}
 }
@@ -281,7 +280,7 @@ func TestRepositoryGetOrCreateBatch_ScanError(t *testing.T) {
 			return &fakeRows{rows: [][]any{{"a", int64(1)}}, scanErr: errors.New("scan fail")}, nil
 		},
 	}
-	if _, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object"); err == nil {
+	if _, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a"}, "ns", "object"); err == nil {
 		t.Fatal("expected scan error")
 	}
 }
@@ -292,7 +291,7 @@ func TestRepositoryGetOrCreateBatch_RowsError(t *testing.T) {
 			return &fakeRows{rows: [][]any{}, rowsErr: errors.New("rows fail")}, nil
 		},
 	}
-	if _, err := repo.GetOrCreateBatch(context.Background(), []string{"a"}, "ns", "object"); err == nil {
+	if _, err := repo.GetOrCreateBatch(leasedCtx(), []string{"a"}, "ns", "object"); err == nil {
 		t.Fatal("expected rows error")
 	}
 }

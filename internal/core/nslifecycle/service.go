@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -20,6 +21,10 @@ type LockMode string
 const (
 	LockShared    LockMode = "shared"
 	LockExclusive LockMode = "exclusive"
+	// LockGlobalExclusive marks a namespace lease derived from the global
+	// exclusive lock via LeaseFromGlobalExclusive — authority strictly
+	// stronger than a per-namespace lease, made explicit in the mode.
+	LockGlobalExclusive LockMode = "global-exclusive"
 )
 
 // Lock is a held PostgreSQL session advisory lock.
@@ -197,10 +202,41 @@ func LeaseGeneration(ctx context.Context, namespace string) (int64, bool) {
 	return lease.Generation, true
 }
 
-// ContextWithLease carries a lease already held by a transaction/composition
-// adapter. Most callers should use Service.WithWriter instead.
+// ContextWithLease fabricates a namespace lease for test rigs. Production
+// code must obtain leases through Service.WithWriter or, for holders of the
+// global exclusive lock, LeaseFromGlobalExclusive — so this panics outside
+// a test binary rather than let arbitrary code assert authority it may not
+// hold.
 func ContextWithLease(ctx context.Context, namespace string, generation int64, mode LockMode) context.Context {
+	if !testing.Testing() {
+		panic("nslifecycle: ContextWithLease is test-only; use WithWriter or LeaseFromGlobalExclusive")
+	}
 	return context.WithValue(ctx, leaseContextKey{}, leaseValue{Namespace: namespace, Generation: generation, Mode: mode})
+}
+
+type globalExclusiveKey struct{}
+
+// ContextWithGlobalExclusive fabricates the global-exclusive marker for test
+// rigs; the real marker is stamped only by Service.WithGlobalExclusive.
+func ContextWithGlobalExclusive(ctx context.Context) context.Context {
+	if !testing.Testing() {
+		panic("nslifecycle: ContextWithGlobalExclusive is test-only; use Service.WithGlobalExclusive")
+	}
+	return context.WithValue(ctx, globalExclusiveKey{}, struct{}{})
+}
+
+// LeaseFromGlobalExclusive derives a namespace lease from the global
+// exclusive lock ctx already holds. Repair flows freeze the fleet with the
+// global lock and then need per-namespace authority; re-acquiring a real
+// namespace lease would deadlock against the fence they installed (lock
+// order is global before namespace), and the global lock is strictly
+// stronger authority anyway. Callers without the global lock get an error —
+// this is the only non-test way to mint a lease outside WithWriter.
+func LeaseFromGlobalExclusive(ctx context.Context, namespace string, generation int64) (context.Context, error) {
+	if ctx.Value(globalExclusiveKey{}) == nil {
+		return nil, ErrGlobalExclusiveRequired
+	}
+	return context.WithValue(ctx, leaseContextKey{}, leaseValue{Namespace: namespace, Generation: generation, Mode: LockGlobalExclusive}), nil
 }
 
 // Service coordinates durable state with fixed-order advisory locks.
@@ -346,7 +382,9 @@ func (s *Service) WithGlobalExclusive(ctx context.Context, fn func(context.Conte
 	if err != nil {
 		return err
 	}
-	return fn(ctx, system)
+	// Stamp the fence into ctx so LeaseFromGlobalExclusive can prove its
+	// caller really holds the global exclusive lock.
+	return fn(context.WithValue(ctx, globalExclusiveKey{}, struct{}{}), system)
 }
 
 // DisableLegacyEnvelopes permanently closes generation-less work after adoption evidence.

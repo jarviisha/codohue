@@ -15,16 +15,15 @@ import (
 
 // Repository manages the mapping from string IDs to numeric IDs in the id_mappings table.
 type Repository struct {
-	db           *pgxpool.Pool
-	requireLease bool
-	queryRowFn   func(ctx context.Context, sql string, args ...any) pgx.Row
-	queryFn      func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	db         *pgxpool.Pool
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
+	queryFn    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
-		db: db, requireLease: true,
+		db: db,
 		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return db.QueryRow(ctx, sql, args...)
 		},
@@ -121,10 +120,10 @@ func (r *Repository) GetOrCreateBatch(ctx context.Context, stringIDs []string, n
 	if len(stringIDs) == 0 {
 		return map[string]uint64{}, nil
 	}
-	if r.requireLease {
-		if err := nslifecycle.RequireNamespaceLease(ctx, namespace); err != nil {
-			return nil, err
-		}
+	// Minting numeric ids is fenced unconditionally: a mapping written for a
+	// deleted incarnation would resurrect its points' identities.
+	if err := nslifecycle.RequireNamespaceLease(ctx, namespace); err != nil {
+		return nil, err
 	}
 	// Deduplicate before the lookup: callers (e.g. Rank candidates) may
 	// legitimately pass the same id twice, and the miss set is derived from

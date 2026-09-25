@@ -115,15 +115,18 @@ type sparseRebuildAdapter struct {
 // ErrLeaseRequired and takes the whole run down with it. Taking a real
 // namespace lease here is not an option either: the fixed lock order is global
 // before namespace, and the global lease is already held, so acquiring one
-// would deadlock against the fence the repair itself installed. Attaching the
-// lease this way is what nslifecycle.ContextWithLease exists for — the caller
-// already holds strictly stronger authority than the lease it is asserting.
+// would deadlock against the fence the repair itself installed.
+// LeaseFromGlobalExclusive derives the lease from that strictly stronger
+// authority — and refuses if the fence is not actually held.
 func (a *sparseRebuildAdapter) RebuildSparse(ctx context.Context, namespace string) error {
 	generation, err := a.generation(ctx, namespace)
 	if err != nil {
 		return fmt.Errorf("resolve generation for %q: %w", namespace, err)
 	}
-	leased := nslifecycle.ContextWithLease(ctx, namespace, generation, nslifecycle.LockExclusive)
+	leased, err := nslifecycle.LeaseFromGlobalExclusive(ctx, namespace, generation)
+	if err != nil {
+		return fmt.Errorf("derive lease for %q: %w", namespace, err)
+	}
 	if _, _, err := a.svc.RecomputeNamespace(leased, namespace, a.lambda); err != nil {
 		return fmt.Errorf("recompute %q: %w", namespace, err)
 	}

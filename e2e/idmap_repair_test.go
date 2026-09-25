@@ -31,7 +31,7 @@ func TestIdmapRepair_AmbiguousEvidenceMutatesNothing(t *testing.T) {
 	client := newQdrantTestClient(t)
 	collection := namespace + "_objects_dense"
 
-	if err := infraqdrant.EnsureDenseCollections(context.Background(), client, namespace, 128, "cosine"); err != nil {
+	if err := infraqdrant.EnsureDenseCollections(context.Background(), client, nslifecycle.NewIncarnation(namespace, 1), 128, "cosine"); err != nil {
 		t.Fatalf("ensure dense collections: %v", err)
 	}
 
@@ -96,7 +96,7 @@ func TestIdmapRepair_PreservesUnrecomputableVectorsExactly(t *testing.T) {
 	ctx := context.Background()
 	client := newQdrantTestClient(t)
 	collection := namespace + "_objects_dense"
-	if err := infraqdrant.EnsureDenseCollections(ctx, client, namespace, 128, "cosine"); err != nil {
+	if err := infraqdrant.EnsureDenseCollections(ctx, client, nslifecycle.NewIncarnation(namespace, 1), 128, "cosine"); err != nil {
 		t.Fatalf("ensure dense collections: %v", err)
 	}
 

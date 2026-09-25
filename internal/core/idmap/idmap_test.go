@@ -4,6 +4,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
 // Shared test doubles for the ID-map package. The behaviour tests live in
@@ -93,3 +95,9 @@ func (f *fakeRows) Scan(dest ...any) error {
 func (f *fakeRows) Err() error { return f.rowsErr }
 
 func (f *fakeRows) Close() { f.closed = true }
+
+// leasedCtx returns a context carrying a generation-1 lease for "ns" — the
+// mint path refuses to run without one.
+func leasedCtx() context.Context {
+	return nslifecycle.ContextWithLease(context.Background(), "ns", 1, nslifecycle.LockShared)
+}
