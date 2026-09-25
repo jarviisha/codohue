@@ -169,7 +169,7 @@ func TestContentHash_DifferentContentDiffers(t *testing.T) {
 
 func TestRepositoryUpsert_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
 		},
 	}
@@ -183,7 +183,7 @@ func TestRepositoryUpsert_FreshInsertNeedsPublish(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello world")
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
 			}}
@@ -208,7 +208,7 @@ func TestRepositoryUpsert_IdempotentSameContent(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello world")
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, hash, []byte("{}"), "embedded", false, now)
 			}}
@@ -230,7 +230,7 @@ func TestRepositoryUpsert_NewContentResetsState(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("brand new content")
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
 			}}
@@ -257,7 +257,7 @@ func TestRepositoryUpsert_MetadataRoundTrip(t *testing.T) {
 	meta := []byte(`{"lang":"vi","tags":"news"}`)
 	var gotArgs []any
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, args ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, args ...any) pgx.Row {
 			gotArgs = args
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, hash, meta, "pending", true, now)
@@ -282,7 +282,7 @@ func TestRepositoryUpsert_MalformedMetadataReturnsError(t *testing.T) {
 	now := time.Now()
 	hash := ContentHash("hello")
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, hash, []byte("not-json"), "pending", true, now)
 			}}
@@ -472,7 +472,7 @@ func ensureNamespace(t *testing.T, db *pgxpool.Pool, ns string) {
 
 func upsertRepoWithHash(hash []byte, now time.Time) *Repository {
 	return &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return fillScanRow(dest, hash, []byte("{}"), "pending", true, now)
 			}}
@@ -533,7 +533,7 @@ func TestUpsertWithAttribution_HookFailureFailsTheCall(t *testing.T) {
 // not run and the original error must surface.
 func TestUpsertWithAttribution_ContentFailureSkipsTheHook(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("query failed") }}
 		},
 	}

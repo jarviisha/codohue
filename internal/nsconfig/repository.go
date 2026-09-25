@@ -19,16 +19,12 @@ import (
 // ErrProvisionConflict rejects differing provisioning credentials or initial configuration.
 var ErrProvisionConflict = errors.New("namespace provisioning conflicts with existing credentials or desired configuration")
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
 // Repository performs CRUD operations on namespace_configs in PostgreSQL.
 type Repository struct {
 	db         *pgxpool.Pool
 	execFn     func(ctx context.Context, sql string, args ...any) error
 	execTagFn  func(ctx context.Context, sql string, args ...any) (int64, error)
-	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
@@ -49,7 +45,7 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 			}
 			return tag.RowsAffected(), nil
 		},
-		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return db.QueryRow(ctx, sql, args...)
 		},
 	}
@@ -172,7 +168,7 @@ func (r *Repository) withinTx(ctx context.Context, fn func(*Repository) error) e
 				}
 				return tag.RowsAffected(), nil
 			},
-			queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+			queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 				return tx.QueryRow(ctx, sql, args...)
 			},
 		})

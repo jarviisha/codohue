@@ -6,29 +6,23 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jarviisha/codohue/internal/core/batchrun"
 )
 
-type rowsIterator interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-	Close()
-}
-
 // Repository reads events and namespace data from PostgreSQL for the compute job.
 type Repository struct {
 	db      *pgxpool.Pool
-	queryFn func(ctx context.Context, sql string, args ...any) (rowsIterator, error)
+	queryFn func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
 		db: db,
-		queryFn: func(ctx context.Context, sql string, args ...any) (rowsIterator, error) {
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return db.Query(ctx, sql, args...)
 		},
 	}

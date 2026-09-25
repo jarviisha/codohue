@@ -61,7 +61,7 @@ func TestNewRepository(t *testing.T) {
 
 func TestRepositoryLoadByID_Success(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				if err := setInt64(dest[0], 7); err != nil {
 					return err
@@ -111,7 +111,7 @@ func TestRepositoryLoadByID_Success(t *testing.T) {
 
 func TestRepositoryLoadByID_NotFound(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
 	}
@@ -123,7 +123,7 @@ func TestRepositoryLoadByID_NotFound(t *testing.T) {
 
 func TestRepositoryLoadByID_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("db down") }}
 		},
 	}
@@ -135,7 +135,7 @@ func TestRepositoryLoadByID_QueryError(t *testing.T) {
 
 func TestRepositoryMarkInFlight_Success(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				return setInt(dest[0], 3)
 			}}
@@ -152,7 +152,7 @@ func TestRepositoryMarkInFlight_Success(t *testing.T) {
 
 func TestRepositoryMarkInFlight_NotFound(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
 	}

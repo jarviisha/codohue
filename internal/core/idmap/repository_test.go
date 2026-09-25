@@ -22,7 +22,7 @@ func TestNewRepository(t *testing.T) {
 
 func TestRepositoryGetOrCreate_Success(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return &fakeRows{rows: [][]any{{"obj-1", int64(42)}}}, nil
 		},
 	}
@@ -38,7 +38,7 @@ func TestRepositoryGetOrCreate_Success(t *testing.T) {
 
 func TestRepositoryGetOrCreate_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return nil, errors.New("query failed")
 		},
 	}
@@ -52,10 +52,10 @@ func TestRepositoryGetOrCreate_QueryError(t *testing.T) {
 func TestRepositoryGetOrCreateRequiresLifecycleLeaseButLookupDoesNot(t *testing.T) {
 	repo := &Repository{
 		requireLease: true,
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return &fakeRows{rows: [][]any{{"obj-1", int64(42)}}}, nil
 		},
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error { *dest[0].(*int64) = 42; return nil }}
 		},
 	}
@@ -73,7 +73,7 @@ func TestRepositoryGetOrCreateRequiresLifecycleLeaseButLookupDoesNot(t *testing.
 
 func TestRepositoryLookup_Found(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				*dest[0].(*int64) = 42
 				return nil
@@ -88,7 +88,7 @@ func TestRepositoryLookup_Found(t *testing.T) {
 
 func TestRepositoryLookup_NotFound(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return pgx.ErrNoRows }}
 		},
 	}
@@ -100,7 +100,7 @@ func TestRepositoryLookup_NotFound(t *testing.T) {
 
 func TestRepositoryLookup_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("db down") }}
 		},
 	}
@@ -111,7 +111,7 @@ func TestRepositoryLookup_QueryError(t *testing.T) {
 
 func TestRepositoryLookupBatchIsReadOnlyAndOmitsMissing(t *testing.T) {
 	rows := &fakeRows{rows: [][]any{{"known", int64(7)}}}
-	repo := &Repository{requireLease: true, queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+	repo := &Repository{requireLease: true, queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 		if !strings.Contains(sql, "SELECT string_id, numeric_id") || strings.Contains(sql, "INSERT") {
 			t.Fatalf("lookup query is not read-only: %s", sql)
 		}
@@ -137,7 +137,7 @@ func TestRepositoryGetOrCreateBatch_Empty(t *testing.T) {
 func TestRepositoryGetOrCreateBatch_DedupsAndMaps(t *testing.T) {
 	var lookedUp []string
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, args ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, args ...any) (pgx.Rows, error) {
 			lookedUp = args[2].([]string)
 			return &fakeRows{rows: [][]any{{"a", int64(1)}, {"b", int64(2)}}}, nil
 		},
@@ -160,7 +160,7 @@ func TestRepositoryGetOrCreateBatch_DedupsAndMaps(t *testing.T) {
 func TestRepositoryGetOrCreateBatch_ExistingIDsIssueNoWrite(t *testing.T) {
 	var statements []string
 	repo := &Repository{
-		queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			statements = append(statements, sql)
 			return &fakeRows{rows: [][]any{{"a", int64(1)}}}, nil
 		},
@@ -179,7 +179,7 @@ func TestRepositoryGetOrCreateBatch_ExistingIDsIssueNoWrite(t *testing.T) {
 func TestRepositoryGetOrCreateBatch_InsertsOnlyMissingIDs(t *testing.T) {
 	var insertArgs []string
 	repo := &Repository{
-		queryFn: func(_ context.Context, sql string, args ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 			if strings.Contains(sql, "INSERT") {
 				insertArgs = args[0].([]string)
 				return &fakeRows{rows: [][]any{{"b", int64(2)}}}, nil
@@ -204,7 +204,7 @@ func TestRepositoryGetOrCreateBatch_InsertsOnlyMissingIDs(t *testing.T) {
 func TestRepositoryGetOrCreateBatch_ResolvesRacedInsert(t *testing.T) {
 	lookups := 0
 	repo := &Repository{
-		queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			if strings.Contains(sql, "INSERT") {
 				return &fakeRows{rows: [][]any{}}, nil
 			}
@@ -227,7 +227,7 @@ func TestRepositoryGetOrCreateBatch_ResolvesRacedInsert(t *testing.T) {
 func TestRepositoryGetOrCreate_ExistingIDIssuesNoWrite(t *testing.T) {
 	var statements []string
 	repo := &Repository{
-		queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			statements = append(statements, sql)
 			return &fakeRows{rows: [][]any{{"obj-1", int64(42)}}}, nil
 		},
@@ -247,7 +247,7 @@ func TestRepositoryGetOrCreate_ExistingIDIssuesNoWrite(t *testing.T) {
 func TestRepositoryGetOrCreate_ResolvesRacedInsert(t *testing.T) {
 	lookups := 0
 	repo := &Repository{
-		queryFn: func(_ context.Context, sql string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			if strings.Contains(sql, "INSERT") {
 				return &fakeRows{rows: [][]any{}}, nil
 			}
@@ -266,7 +266,7 @@ func TestRepositoryGetOrCreate_ResolvesRacedInsert(t *testing.T) {
 
 func TestRepositoryGetOrCreateBatch_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return nil, errors.New("db down")
 		},
 	}
@@ -277,7 +277,7 @@ func TestRepositoryGetOrCreateBatch_QueryError(t *testing.T) {
 
 func TestRepositoryGetOrCreateBatch_ScanError(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return &fakeRows{rows: [][]any{{"a", int64(1)}}, scanErr: errors.New("scan fail")}, nil
 		},
 	}
@@ -288,7 +288,7 @@ func TestRepositoryGetOrCreateBatch_ScanError(t *testing.T) {
 
 func TestRepositoryGetOrCreateBatch_RowsError(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return &fakeRows{rows: [][]any{}, rowsErr: errors.New("rows fail")}, nil
 		},
 	}

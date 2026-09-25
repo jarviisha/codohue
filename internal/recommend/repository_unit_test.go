@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type fakeRows struct {
+	pgx.Rows // unimplemented methods panic; the repository only uses Next/Scan/Err/Close
+
 	items   [][]any
 	idx     int
 	scanErr error
@@ -56,7 +60,7 @@ func TestNewRepository(t *testing.T) {
 
 func TestRepositoryGetSeenItems_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return nil, errors.New("query failed")
 		},
 	}
@@ -67,7 +71,7 @@ func TestRepositoryGetSeenItems_QueryError(t *testing.T) {
 
 func TestRepositoryGetSeenItems_ScanError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, scanErr: errors.New("scan failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -75,7 +79,7 @@ func TestRepositoryGetSeenItems_ScanError(t *testing.T) {
 
 func TestRepositoryGetSeenItems_RowsError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, rowsErr: errors.New("rows failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -83,7 +87,7 @@ func TestRepositoryGetSeenItems_RowsError(t *testing.T) {
 
 func TestRepositoryGetSeenItems_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"obj-1"}, {"obj-2"}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	items, err := repo.GetSeenItems(context.Background(), "ns", "u1", 30)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -98,7 +102,7 @@ func TestRepositoryGetSeenItems_Success(t *testing.T) {
 
 func TestRepositoryGetPopularItems_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+		queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			return nil, errors.New("query failed")
 		},
 	}
@@ -109,7 +113,7 @@ func TestRepositoryGetPopularItems_QueryError(t *testing.T) {
 
 func TestRepositoryGetPopularItems_ScanError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, scanErr: errors.New("scan failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetPopularItems(context.Background(), "ns", 10); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -117,7 +121,7 @@ func TestRepositoryGetPopularItems_ScanError(t *testing.T) {
 
 func TestRepositoryGetPopularItems_RowsError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"obj-1"}}, rowsErr: errors.New("rows failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetPopularItems(context.Background(), "ns", 10); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -125,7 +129,7 @@ func TestRepositoryGetPopularItems_RowsError(t *testing.T) {
 
 func TestRepositoryGetPopularItems_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"obj-1"}, {"obj-2"}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	items, err := repo.GetPopularItems(context.Background(), "ns", 10)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -137,7 +141,7 @@ func TestRepositoryGetPopularItems_Success(t *testing.T) {
 
 func TestRepositoryCountInteractions_QueryError(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(_ ...any) error { return errors.New("scan failed") }}
 		},
 	}
@@ -148,7 +152,7 @@ func TestRepositoryCountInteractions_QueryError(t *testing.T) {
 
 func TestRepositoryCountInteractions_Success(t *testing.T) {
 	repo := &Repository{
-		queryRowFn: func(_ context.Context, _ string, _ ...any) rowScanner {
+		queryRowFn: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeRow{scanFn: func(dest ...any) error {
 				ptr, ok := dest[0].(*int)
 				if !ok {

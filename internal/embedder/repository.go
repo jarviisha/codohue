@@ -10,10 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
 // Repository performs catalog_items state-transition writes on behalf of
 // the embedder worker. It deliberately exposes a small surface — load and
 // the four state transitions — rather than reusing internal/catalog's
@@ -21,7 +17,7 @@ type rowScanner interface {
 // between internal/catalog and internal/embedder.
 type Repository struct {
 	db         *pgxpool.Pool
-	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
 	execFn     func(ctx context.Context, sql string, args ...any) (int64, error)
 }
 
@@ -29,7 +25,7 @@ type Repository struct {
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
 		db: db,
-		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return db.QueryRow(ctx, sql, args...)
 		},
 		execFn: func(ctx context.Context, sql string, args ...any) (int64, error) {

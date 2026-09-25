@@ -2,6 +2,8 @@ package idmap
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Shared test doubles for the ID-map package. The behaviour tests live in
@@ -66,6 +68,8 @@ func (f *fakeRepo) GetOrCreateBatch(_ context.Context, stringIDs []string, names
 }
 
 type fakeRows struct {
+	pgx.Rows // unimplemented methods panic; the repository only uses Next/Scan/Err/Close
+
 	rows    [][]any // each row: [string_id(string), numeric_id(int64)]
 	idx     int
 	scanErr error

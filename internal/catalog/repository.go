@@ -10,21 +10,17 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
 // Repository writes catalog_items rows in PostgreSQL.
 type Repository struct {
 	db         *pgxpool.Pool
-	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
 		db: db,
-		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return db.QueryRow(ctx, sql, args...)
 		},
 	}
@@ -130,7 +126,7 @@ func (r *Repository) UpsertWithAttribution(
 
 	var result *UpsertResult
 	if err := pgx.BeginFunc(ctx, r.db, func(tx pgx.Tx) error {
-		txRepo := &Repository{queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+		txRepo := &Repository{queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return tx.QueryRow(ctx, sql, args...)
 		}}
 		var err error

@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type fakeRows struct {
+	pgx.Rows // unimplemented methods panic; the repository only uses Next/Scan/Err/Close
+
 	items   [][]any
 	idx     int
 	scanErr error
@@ -75,7 +79,7 @@ func TestNewRepository(t *testing.T) {
 }
 
 func TestRepositoryGetActiveSubjects_QueryError(t *testing.T) {
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 		return nil, errors.New("query failed")
 	}}
 	if _, err := repo.GetActiveSubjects(context.Background(), "ns"); err == nil {
@@ -85,7 +89,7 @@ func TestRepositoryGetActiveSubjects_QueryError(t *testing.T) {
 
 func TestRepositoryGetActiveSubjects_ScanError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1"}}, scanErr: errors.New("scan failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetActiveSubjects(context.Background(), "ns"); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -93,7 +97,7 @@ func TestRepositoryGetActiveSubjects_ScanError(t *testing.T) {
 
 func TestRepositoryGetActiveSubjects_RowsError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1"}}, rowsErr: errors.New("rows failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetActiveSubjects(context.Background(), "ns"); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -101,7 +105,7 @@ func TestRepositoryGetActiveSubjects_RowsError(t *testing.T) {
 
 func TestRepositoryGetActiveSubjects_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1"}, {"u2"}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	got, err := repo.GetActiveSubjects(context.Background(), "ns")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -112,7 +116,7 @@ func TestRepositoryGetActiveSubjects_Success(t *testing.T) {
 }
 
 func TestRepositoryGetSubjectEvents_QueryError(t *testing.T) {
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) {
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 		return nil, errors.New("query failed")
 	}}
 	if _, err := repo.GetSubjectEvents(context.Background(), "ns", "u1"); err == nil {
@@ -122,7 +126,7 @@ func TestRepositoryGetSubjectEvents_QueryError(t *testing.T) {
 
 func TestRepositoryGetSubjectEvents_ScanError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1", "o1", "VIEW", 1.0, int64(10), nil}}, scanErr: errors.New("scan failed")}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	if _, err := repo.GetSubjectEvents(context.Background(), "ns", "u1"); err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -131,7 +135,7 @@ func TestRepositoryGetSubjectEvents_ScanError(t *testing.T) {
 func TestRepositoryGetSubjectEvents_Success(t *testing.T) {
 	created := int64(5)
 	rows := &fakeRows{items: [][]any{{"u1", "o1", "VIEW", 1.0, int64(10), created}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	events, err := repo.GetSubjectEvents(context.Background(), "ns", "u1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -146,7 +150,7 @@ func TestRepositoryGetSubjectEvents_Success(t *testing.T) {
 
 func TestRepositoryGetAllNamespaceEvents_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1", "o1", "VIEW", 1.0, int64(10), nil}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	events, err := repo.GetAllNamespaceEvents(context.Background(), "ns")
 	if err != nil || len(events) != 1 {
 		t.Fatalf("unexpected result events=%+v err=%v", events, err)
@@ -155,7 +159,7 @@ func TestRepositoryGetAllNamespaceEvents_Success(t *testing.T) {
 
 func TestRepositoryGetNamespaceEventsInWindow_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1", "o1", "VIEW", 1.0, int64(10), nil}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	events, err := repo.GetNamespaceEventsInWindow(context.Background(), "ns", 24)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("unexpected result events=%+v err=%v", events, err)
@@ -164,7 +168,7 @@ func TestRepositoryGetNamespaceEventsInWindow_Success(t *testing.T) {
 
 func TestRepositoryGetActiveNamespaces_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"ns1"}, {"ns2"}}}
-	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (rowsIterator, error) { return rows, nil }}
+	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
 	namespaces, err := repo.GetActiveNamespaces(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

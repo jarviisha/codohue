@@ -4,35 +4,25 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-type rowsIterator interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-	Close()
-}
 
 // Repository queries events and popular items from PostgreSQL for the recommendation service.
 type Repository struct {
 	db         *pgxpool.Pool
-	queryFn    func(ctx context.Context, sql string, args ...any) (rowsIterator, error)
-	queryRowFn func(ctx context.Context, sql string, args ...any) rowScanner
+	queryFn    func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	queryRowFn func(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
 		db: db,
-		queryFn: func(ctx context.Context, sql string, args ...any) (rowsIterator, error) {
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			return db.Query(ctx, sql, args...)
 		},
-		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return db.QueryRow(ctx, sql, args...)
 		},
 	}

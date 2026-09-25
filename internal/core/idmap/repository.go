@@ -13,35 +13,22 @@ import (
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
 )
 
-type rowScanner interface {
-	Scan(dest ...any) error
-}
-
-// rowsIterator is the subset of pgx.Rows the multi-row queries use; the seam
-// lets GetOrCreateBatch be unit-tested without a live DB.
-type rowsIterator interface {
-	Next() bool
-	Scan(dest ...any) error
-	Err() error
-	Close()
-}
-
 // Repository manages the mapping from string IDs to numeric IDs in the id_mappings table.
 type Repository struct {
 	db           *pgxpool.Pool
 	requireLease bool
-	queryRowFn   func(ctx context.Context, sql string, args ...any) rowScanner
-	queryFn      func(ctx context.Context, sql string, args ...any) (rowsIterator, error)
+	queryRowFn   func(ctx context.Context, sql string, args ...any) pgx.Row
+	queryFn      func(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 }
 
 // NewRepository creates a new Repository with the given PostgreSQL connection pool.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{
 		db: db, requireLease: true,
-		queryRowFn: func(ctx context.Context, sql string, args ...any) rowScanner {
+		queryRowFn: func(ctx context.Context, sql string, args ...any) pgx.Row {
 			return db.QueryRow(ctx, sql, args...)
 		},
-		queryFn: func(ctx context.Context, sql string, args ...any) (rowsIterator, error) {
+		queryFn: func(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 			// The sole caller (GetOrCreateBatch) defers rows.Close(); this is
 			// byte-identical to internal/compute's queryFn seam, which passes
 			// the same check. sqlclosecheck false-positives on the
