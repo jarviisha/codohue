@@ -975,18 +975,18 @@ func TestHybridRecommend_BlendsSparseAndDense(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &namespace.Config{Alpha: 0.8, Gamma: 0}, &qdrant.SparseVector{}, []float32{1, 2}, nil)
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &namespace.Config{Alpha: 0.8, Gamma: 0}, &qdrant.SparseVector{}, []float32{1, 2}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceHybrid {
-		t.Fatalf("source: got %q want %q", resp.Source, SourceHybrid)
+	if out.source != SourceHybrid {
+		t.Fatalf("source: got %q want %q", out.source, SourceHybrid)
 	}
-	if len(resp.Items) != 3 {
-		t.Fatalf("items length: got %d want 3", len(resp.Items))
+	if len(out.items) != 3 {
+		t.Fatalf("items length: got %d want 3", len(out.items))
 	}
-	if resp.Items[0].ObjectID != "obj-sparse" {
-		t.Fatalf("expected obj-sparse first, got %v", resp.Items)
+	if out.items[0].ObjectID != "obj-sparse" {
+		t.Fatalf("expected obj-sparse first, got %v", out.items)
 	}
 }
 
@@ -1005,12 +1005,12 @@ func TestHybridRecommend_AppliesFreshnessDecay(t *testing.T) {
 		return nil, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 1, Gamma: 0.2}, &qdrant.SparseVector{}, []float32{1}, nil)
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 1, Gamma: 0.2}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Items[0].ObjectID != "fresh" {
-		t.Fatalf("expected fresh item first after decay, got %v", resp.Items)
+	if out.items[0].ObjectID != "fresh" {
+		t.Fatalf("expected fresh item first after decay, got %v", out.items)
 	}
 }
 
@@ -1043,17 +1043,17 @@ func TestHybridRecommend_OrderingFixture(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &namespace.Config{Alpha: 0.6, Gamma: 0.1}, &qdrant.SparseVector{}, []float32{1}, nil)
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &namespace.Config{Alpha: 0.6, Gamma: 0.1}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceHybrid || resp.Total != 4 {
-		t.Fatalf("unexpected response meta: source=%q total=%d", resp.Source, resp.Total)
+	if out.source != SourceHybrid || out.total != 4 {
+		t.Fatalf("unexpected outcome meta: source=%q total=%d", out.source, out.total)
 	}
 	want := []string{"obj-a", "obj-b", "obj-c", "obj-d"}
 	for i, w := range want {
-		if resp.Items[i].ObjectID != w {
-			t.Fatalf("ordering fixture broken at rank %d: got %q want %q (items: %+v)", i+1, resp.Items[i].ObjectID, w, resp.Items)
+		if out.items[i].ObjectID != w {
+			t.Fatalf("ordering fixture broken at rank %d: got %q want %q (items: %+v)", i+1, out.items[i].ObjectID, w, out.items)
 		}
 	}
 }
@@ -1068,12 +1068,12 @@ func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
 		return nil, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 0.5}, &qdrant.SparseVector{}, []float32{1}, nil)
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 0.5}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceFallbackPopular || resp.Items[0].ObjectID != "popular-1" {
-		t.Fatalf("unexpected fallback response: %+v", resp)
+	if out.source != SourceFallbackPopular || out.items[0].ObjectID != "popular-1" {
+		t.Fatalf("unexpected fallback outcome: %+v", out)
 	}
 }
 
@@ -1627,15 +1627,15 @@ func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &namespace.Config{Gamma: 0})
+	out, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 4, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceHybridCold {
-		t.Fatalf("source: got %q want %q", resp.Source, SourceHybridCold)
+	if out.source != SourceHybridCold {
+		t.Fatalf("source: got %q want %q", out.source, SourceHybridCold)
 	}
-	if len(resp.Items) != 4 {
-		t.Fatalf("expected 4 items, got %d", len(resp.Items))
+	if len(out.items) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(out.items))
 	}
 }
 
@@ -1655,12 +1655,12 @@ func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) 
 		return nil, errors.New("redis failed")
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
+	out, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceHybridCold || len(resp.Items) != 1 || resp.Items[0].ObjectID != "cf-1" {
-		t.Fatalf("unexpected response: %+v", resp)
+	if out.source != SourceHybridCold || len(out.items) != 1 || out.items[0].ObjectID != "cf-1" {
+		t.Fatalf("unexpected outcome: %+v", out)
 	}
 }
 
@@ -1671,12 +1671,12 @@ func TestHybridCold_WhenCFEmptyReturnsPopular(t *testing.T) {
 		return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}}, nil
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, nil)
+	out, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0].ObjectID != "pop-1" {
-		t.Fatalf("unexpected response: %+v", resp)
+	if out.source != SourceFallbackPopular || len(out.items) != 1 || out.items[0].ObjectID != "pop-1" {
+		t.Fatalf("unexpected outcome: %+v", out)
 	}
 }
 
@@ -1846,7 +1846,7 @@ func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := svc.fallbackTrending(context.Background(),
+	out, err := svc.fallbackTrending(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1", Offset: 1}, 2,
 		&namespace.Config{ExcludeAuthored: true}, nil)
 	if err != nil {
@@ -1857,8 +1857,8 @@ func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
 		t.Errorf("fetch args = offset %d limit %d, want 0/5", gotOffset, gotLimit)
 	}
 	// Surviving order is t1,t3,t5 → offset 1, limit 2 → t3,t5.
-	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "t3" || resp.Items[1].ObjectID != "t5" {
-		t.Errorf("got %+v, want [t3 t5]", resp.Items)
+	if len(out.items) != 2 || out.items[0].ObjectID != "t3" || out.items[1].ObjectID != "t5" {
+		t.Errorf("got %+v, want [t3 t5]", out.items)
 	}
 }
 
@@ -1870,19 +1870,19 @@ func TestFallbackPopular_ExcludesAuthored(t *testing.T) {
 	}
 	svc, _ := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
-	resp, err := svc.fallbackPopular(context.Background(),
+	out, err := svc.fallbackPopular(context.Background(),
 		&Request{Namespace: "ns", SubjectID: "u1"}, 10,
 		&namespace.Config{ExcludeAuthored: true}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, it := range resp.Items {
+	for _, it := range out.items {
 		if it.ObjectID == "p2" {
-			t.Fatalf("authored object leaked into popular fallback: %+v", resp.Items)
+			t.Fatalf("authored object leaked into popular fallback: %+v", out.items)
 		}
 	}
-	if len(resp.Items) != 2 {
-		t.Errorf("expected 2 items, got %+v", resp.Items)
+	if len(out.items) != 2 {
+		t.Errorf("expected 2 items, got %+v", out.items)
 	}
 }
 
@@ -2003,21 +2003,18 @@ func TestHybridCold_DegradedCFBranchAppliesOffset(t *testing.T) {
 	repo.popularErr = errors.New("db down") // popular path also fails → cf branch
 
 	req := &Request{SubjectID: "u1", Namespace: "ns", Offset: 2}
-	resp, err := s.hybridCold(context.Background(), req, 2, &namespace.Config{Gamma: 0})
+	out, err := s.hybridCold(context.Background(), req, 2, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Offset != 2 || resp.Limit != 2 {
-		t.Errorf("offset/limit: got %d/%d, want 2/2", resp.Offset, resp.Limit)
+	if len(out.items) != 1 || out.items[0].ObjectID != "o3" {
+		t.Fatalf("expected page [o3], got %+v", out.items)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "o3" {
-		t.Fatalf("expected page [o3], got %+v", resp.Items)
+	if out.items[0].Rank != 3 {
+		t.Errorf("rank: got %d, want 3", out.items[0].Rank)
 	}
-	if resp.Items[0].Rank != 3 {
-		t.Errorf("rank: got %d, want 3", resp.Items[0].Rank)
-	}
-	if !req.degraded {
-		t.Error("degraded flag must be set on the trending-error branch")
+	if !out.degraded {
+		t.Error("the outcome must be degraded on the trending-error branch")
 	}
 }
 
@@ -2040,17 +2037,17 @@ func TestHybridCold_EmptyCFBranchAppliesOffset(t *testing.T) {
 	}
 
 	req := &Request{SubjectID: "u1", Namespace: "ns", Offset: 2}
-	resp, err := s.hybridCold(context.Background(), req, 2, &namespace.Config{Gamma: 0})
+	out, err := s.hybridCold(context.Background(), req, 2, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Items) != 1 || resp.Items[0].ObjectID != "t3" {
-		t.Fatalf("expected page [t3], got %+v", resp.Items)
+	if len(out.items) != 1 || out.items[0].ObjectID != "t3" {
+		t.Fatalf("expected page [t3], got %+v", out.items)
 	}
-	if resp.Offset != 2 {
-		t.Errorf("offset: got %d, want 2", resp.Offset)
+	if out.items[0].Rank != 3 {
+		t.Errorf("rank: got %d, want 3", out.items[0].Rank)
 	}
-	if req.degraded {
+	if out.degraded {
 		t.Error("an empty CF result is a data state, not degradation")
 	}
 }
@@ -2071,12 +2068,12 @@ func TestFallbackTrending_PastEndReturnsEmptyPageNotPopular(t *testing.T) {
 		return all[offset:end], nil
 	}
 
-	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Offset: 10}, 5, nil, nil)
+	out, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Offset: 10}, 5, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Items) != 0 {
-		t.Fatalf("paging past the end of trending must return an empty page, got %+v", resp.Items)
+	if len(out.items) != 0 {
+		t.Fatalf("paging past the end of trending must return an empty page, got %+v", out.items)
 	}
 }
 
@@ -2086,12 +2083,15 @@ func TestFallbackTrending_NoTrendingAtAllFallsToPopular(t *testing.T) {
 	s, _ := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	// default getTrendingFn returns empty at every offset
 
-	resp, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 5, nil, nil)
+	out, err := s.fallbackTrending(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 5, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(resp.Items) != 2 {
-		t.Fatalf("expected popular items when trending has no data, got %+v", resp.Items)
+	if len(out.items) != 2 {
+		t.Fatalf("expected popular items when trending has no data, got %+v", out.items)
+	}
+	if out.degraded {
+		t.Error("no trending data is a data state, not degradation — it must stay cacheable")
 	}
 }
 
@@ -2144,17 +2144,17 @@ func TestHybridCold_TrendingShareDropsSeenItems(t *testing.T) {
 		return all[offset:end], nil
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &namespace.Config{Gamma: 0})
+	out, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 3, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	for _, it := range resp.Items {
+	for _, it := range out.items {
 		if it.ObjectID == "t1" {
-			t.Fatalf("seen item t1 must be dropped from the trending share, got %+v", resp.Items)
+			t.Fatalf("seen item t1 must be dropped from the trending share, got %+v", out.items)
 		}
 	}
-	if len(resp.Items) != 2 {
-		t.Fatalf("expected [t2 t3], got %+v", resp.Items)
+	if len(out.items) != 2 {
+		t.Fatalf("expected [t2 t3], got %+v", out.items)
 	}
 }
 
@@ -2647,18 +2647,18 @@ func TestHybridRecommend_BackfillsMissingArmScores(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
 		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// obj-dense = .7*.8 + .3*.9 = .83 beats obj-sparse = .7*.9 = .63. With
 	// the old zero-fill obj-dense capped at .27 and could never rank first.
-	if resp.Items[0].ObjectID != "obj-dense" {
-		t.Fatalf("backfilled dense-only candidate must win: %+v", resp.Items)
+	if out.items[0].ObjectID != "obj-dense" {
+		t.Fatalf("backfilled dense-only candidate must win: %+v", out.items)
 	}
-	if math.Abs(resp.Items[0].Score-0.83) > 1e-6 {
-		t.Fatalf("blend must use the backfilled sparse score: %+v", resp.Items[0])
+	if math.Abs(out.items[0].Score-0.83) > 1e-6 {
+		t.Fatalf("blend must use the backfilled sparse score: %+v", out.items[0])
 	}
 }
 
@@ -2683,17 +2683,17 @@ func TestHybridRecommend_BackfillFailureDegradesToZeroFill(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
 		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("backfill failure must not fail the request: %v", err)
 	}
-	if len(resp.Items) != 2 {
-		t.Fatalf("both candidates must still return: %+v", resp.Items)
+	if len(out.items) != 2 {
+		t.Fatalf("both candidates must still return: %+v", out.items)
 	}
 	// Zero-fill reading: obj-sparse .7*.9=.63, obj-dense .3*.9=.27.
-	if resp.Items[0].ObjectID != "obj-sparse" || math.Abs(resp.Items[1].Score-0.27) > 1e-6 {
-		t.Fatalf("degraded blend must match the zero-fill scores: %+v", resp.Items)
+	if out.items[0].ObjectID != "obj-sparse" || math.Abs(out.items[1].Score-0.27) > 1e-6 {
+		t.Fatalf("degraded blend must match the zero-fill scores: %+v", out.items)
 	}
 }
 
@@ -2722,13 +2722,13 @@ func TestHybridRecommend_BackfillFailureMarksDegraded(t *testing.T) {
 		}, nil
 	}
 
-	req := &Request{SubjectID: "u1", Namespace: "ns"}
-	if _, err := s.hybridRecommend(context.Background(), req, 2,
-		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil); err != nil {
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !req.degraded {
-		t.Fatal("backfill failure must mark the response degraded so it is not cached")
+	if !out.degraded {
+		t.Fatal("backfill failure must mark the outcome degraded so it is not cached")
 	}
 }
 
@@ -2791,15 +2791,15 @@ func TestHybridRecommend_BackfillDoesNotOverrideCreatedAt(t *testing.T) {
 		}, nil
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
 		&namespace.Config{Alpha: 0.7, Gamma: 1.0}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// gamma=1.0 over two years decays to ~0; if the backfilled point's
 	// created_at won, the score would stay at the undecayed 1.0.
-	if resp.Items[0].Score > 0.01 {
-		t.Fatalf("dense payload's created_at must survive backfill, got score %v", resp.Items[0].Score)
+	if out.items[0].Score > 0.01 {
+		t.Fatalf("dense payload's created_at must survive backfill, got score %v", out.items[0].Score)
 	}
 }
 
@@ -2836,13 +2836,13 @@ func TestHybridRecommend_FailedArmGivesSurvivorFullWeight(t *testing.T) {
 		return nil, errors.New("dense down")
 	}
 
-	resp, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2,
 		&namespace.Config{Alpha: 0.7, Gamma: 0}, &qdrant.SparseVector{}, []float32{1}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if math.Abs(resp.Items[0].Score-0.9) > 1e-6 {
-		t.Fatalf("surviving sparse arm must keep full weight (0.9), got %v", resp.Items[0].Score)
+	if math.Abs(out.items[0].Score-0.9) > 1e-6 {
+		t.Fatalf("surviving sparse arm must keep full weight (0.9), got %v", out.items[0].Score)
 	}
 }
 
@@ -2878,64 +2878,73 @@ func TestScoredTracksTheServingPath(t *testing.T) {
 	cfg := &namespace.Config{Gamma: 0}
 	cases := []struct {
 		name       string
-		call       func(*Service, context.Context, *Request) (*Response, error)
+		call       func(*Service, context.Context, *Request) (outcome, error)
 		wantSource string
 		wantScored bool
+		wantScale  scoreScale
 	}{
 		{
 			name: "collaborative filtering scores against the subject vector",
-			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+			call: func(s *Service, c context.Context, r *Request) (outcome, error) {
 				return s.collaborativeFiltering(c, r, 4, cfg)
 			},
 			wantSource: SourceCollaborativeFiltering,
 			wantScored: true,
+			wantScale:  scaleRawFreshness,
 		},
 		{
 			name: "hybrid blends two scored arms into one comparable score",
-			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+			call: func(s *Service, c context.Context, r *Request) (outcome, error) {
 				return s.hybridRecommend(c, r, 4, &namespace.Config{Alpha: 0.7, Gamma: 0},
 					&qdrant.SparseVector{}, []float32{1}, nil)
 			},
 			wantSource: SourceHybrid,
 			wantScored: true,
+			wantScale:  scaleUnitBlend,
 		},
 		{
 			name: "trending ranks the namespace, not the subject",
-			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+			call: func(s *Service, c context.Context, r *Request) (outcome, error) {
 				return s.fallbackTrending(c, r, 4, cfg, nil)
 			},
 			wantSource: SourceFallbackPopular,
 			wantScored: false,
+			wantScale:  scaleUnscored,
 		},
 		{
 			name: "popular ranks the namespace, not the subject",
-			call: func(s *Service, c context.Context, r *Request) (*Response, error) {
+			call: func(s *Service, c context.Context, r *Request) (outcome, error) {
 				return s.fallbackPopular(c, r, 4, cfg, nil)
 			},
 			wantSource: SourceFallbackPopular,
 			wantScored: false,
+			wantScale:  scaleUnscored,
 		},
 		{
 			name:       "cold blend interleaves two scales, so neither survives",
-			call:       func(s *Service, c context.Context, r *Request) (*Response, error) { return s.hybridCold(c, r, 4, cfg) },
+			call:       func(s *Service, c context.Context, r *Request) (outcome, error) { return s.hybridCold(c, r, 4, cfg) },
 			wantSource: SourceHybridCold,
 			wantScored: false,
+			wantScale:  scaleUnscored,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp, err := tc.call(newService(), context.Background(), &Request{SubjectID: "u1", Namespace: "ns"})
+			out, err := tc.call(newService(), context.Background(), &Request{SubjectID: "u1", Namespace: "ns"})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if resp.Source != tc.wantSource {
-				t.Fatalf("source = %q, want %q", resp.Source, tc.wantSource)
+			if out.source != tc.wantSource {
+				t.Fatalf("source = %q, want %q", out.source, tc.wantSource)
 			}
-			if len(resp.Items) == 0 {
+			if out.scale != tc.wantScale {
+				t.Errorf("scale = %d, want %d", out.scale, tc.wantScale)
+			}
+			if len(out.items) == 0 {
 				t.Fatal("no items returned; the case proves nothing")
 			}
-			for i, it := range resp.Items {
+			for i, it := range out.items {
 				if it.Scored != tc.wantScored {
 					t.Errorf("items[%d] (%s): scored = %t, want %t", i, it.ObjectID, it.Scored, tc.wantScored)
 				}
@@ -2969,17 +2978,20 @@ func TestHybridCold_DegradedCFPassThroughKeepsRealScores(t *testing.T) {
 		return nil, errors.New("redis unavailable")
 	}
 
-	resp, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
+	out, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Gamma: 0})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Source != SourceHybridCold || len(resp.Items) != 1 {
-		t.Fatalf("unexpected response: %+v", resp)
+	if out.source != SourceHybridCold || len(out.items) != 1 {
+		t.Fatalf("unexpected outcome: %+v", out)
 	}
-	if !resp.Items[0].Scored {
+	if !out.items[0].Scored {
 		t.Error("pass-through CF item reported unscored; its score is a real verdict")
 	}
-	if resp.Items[0].Score == 0 {
+	if out.items[0].Score == 0 {
 		t.Error("pass-through CF item lost its score")
+	}
+	if out.scale != scaleRawFreshness {
+		t.Error("pass-through must keep the inner CF scale, not adopt the blend's")
 	}
 }

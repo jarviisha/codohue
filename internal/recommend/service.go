@@ -314,15 +314,26 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	}
 	metrics.RedisCacheRequests.WithLabelValues("miss").Inc()
 
-	resp, err := s.doRecommend(ctx, req, maxResults, cfg)
+	out, err := s.doRecommend(ctx, req, maxResults, cfg)
 	if err != nil {
 		return nil, err
 	}
+	resp := &Response{
+		SubjectID:   req.SubjectID,
+		Namespace:   req.Namespace,
+		Items:       out.items,
+		Source:      out.source,
+		Limit:       maxResults,
+		Offset:      req.Offset,
+		Total:       out.total,
+		GeneratedAt: time.Now().UTC(),
+	}
 
-	// A degraded response (fallback caused by an infra error) is served but
-	// never cached: a one-second Qdrant blip must not pin popular items on a
-	// warm subject for the full TTL.
-	if !req.degraded {
+	// The cache decision is made exactly once, here, from the outcome: a
+	// degraded outcome (fallback caused by an infra error) is served but
+	// never cached, so a one-second Qdrant blip does not pin popular items
+	// on a warm subject for the full TTL.
+	if !out.degraded {
 		if b, err := json.Marshal(resp); err == nil {
 			s.cache.Set(ctx, cacheKey, string(b), recCacheTTL)
 		}
@@ -330,29 +341,108 @@ func (s *Service) Recommend(ctx context.Context, req *Request) (*Response, error
 	return resp, nil
 }
 
-func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int, cfg *namespace.Config) (*Response, error) {
-	count, err := s.repo.CountInteractions(ctx, req.Namespace, req.SubjectID)
-	if err != nil {
-		slog.Error("count interactions failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		// A warm subject about to be served the cold-start path — degraded.
-		req.degraded = true
-	}
+// scoreScale documents, internally, what an outcome's Score values mean. It
+// never reaches the wire: the JSON bytes clients see are unchanged.
+type scoreScale int
 
-	if count == 0 {
-		return s.fallbackTrending(ctx, req, maxResults, cfg, nil)
-	}
-	if count < coldStartThreshold {
-		return s.hybridCold(ctx, req, maxResults, cfg)
-	}
-	return s.collaborativeFiltering(ctx, req, maxResults, cfg)
+const (
+	// scaleUnscored is the fallback scale: items carry the literal 0 with
+	// Scored=false because no per-subject relevance verdict exists.
+	scaleUnscored scoreScale = iota
+	// scaleRawFreshness is CF's scale: the raw Qdrant dot product (a cosine
+	// since compute L2-normalizes sparse vectors) times γ-freshness decay,
+	// not bounded to [0, 1] by construction.
+	scaleRawFreshness
+	// scaleUnitBlend is the hybrid scale: the α-blend of unit-normalized
+	// sparse and dense arms times γ-freshness decay, bounded to [0, 1].
+	scaleUnitBlend
+)
+
+// outcome is what one recommendation-ladder rung produces: the served page
+// plus the facts Recommend needs to build the wire Response and decide
+// cacheability. Degradation flows back through this value — never through
+// mutation of the caller's Request.
+type outcome struct {
+	items  []RecommendedItem
+	source string
+	total  int
+	scale  scoreScale
+	// degraded records that this outcome is a fallback caused by an
+	// infrastructure error (Qdrant/Redis/DB unavailable) rather than by the
+	// subject's data state (cold start, empty index). Recommend never caches
+	// a degraded outcome.
+	degraded bool
 }
 
-func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
+// doRecommend is the recommendation ladder; the full rung order is stated
+// here and nowhere else:
+//
+//	count == 0  → fallbackTrending
+//	              (descends to fallbackPopular when Redis fails — degraded —
+//	               or when the namespace has no trending data at all)
+//	count < coldStartThreshold
+//	            → hybridCold, which blends collaborativeFiltering with
+//	              fallbackTrending and serves the surviving share when one
+//	              side fails (degraded)
+//	otherwise   → collaborativeFiltering
+//	              (hands off to hybridRecommend when hybridEligible and the
+//	               subject has a dense vector; any infra failure descends to
+//	               fallbackPopular via descendPopular — degraded)
+//
+// Each rung returns an outcome, never an HTTP-shaped Response; Recommend
+// assembles the wire shape and makes the cache decision from the outcome.
+func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int, cfg *namespace.Config) (outcome, error) {
+	count, err := s.repo.CountInteractions(ctx, req.Namespace, req.SubjectID)
+	// A count failure sends a possibly warm subject down the cold-start
+	// rung — degraded, whatever that rung then serves.
+	degraded := err != nil
+	if err != nil {
+		slog.Error("count interactions failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+	}
+
+	var out outcome
+	switch {
+	case count == 0:
+		out, err = s.fallbackTrending(ctx, req, maxResults, cfg, nil)
+	case count < coldStartThreshold:
+		out, err = s.hybridCold(ctx, req, maxResults, cfg)
+	default:
+		out, err = s.collaborativeFiltering(ctx, req, maxResults, cfg)
+	}
+	if err != nil {
+		return outcome{}, err
+	}
+	out.degraded = out.degraded || degraded
+	return out, nil
+}
+
+// descendPopular is the ladder's one downward edge: every rung that cannot
+// serve falls to fallbackPopular through this call, stating explicitly
+// whether the descent was caused by infrastructure (degraded — the outcome
+// must not be cached) or by data state (cacheable).
+func (s *Service) descendPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}, degraded bool) (outcome, error) {
+	out, err := s.fallbackPopular(ctx, req, limit, cfg, exclude)
+	if err != nil {
+		return outcome{}, err
+	}
+	out.degraded = out.degraded || degraded
+	return out, nil
+}
+
+// hybridEligible is the single hybrid eligibility gate shared by Recommend's
+// CF rung and Rank: the namespace blend must leave dense weight (0 < α < 1)
+// and a dense source must be configured. internal/admin's dashboard carries a
+// display-only variant on its own summary type; that is out of scope here.
+func hybridEligible(cfg *namespace.Config) bool {
+	return cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 &&
+		cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled
+}
+
+func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (outcome, error) {
 	subjectNumID, found, err := s.idmapSvc.LookupSubjectID(ctx, req.SubjectID, req.Namespace)
 	if err != nil || !found {
 		slog.Error("get subject numeric id failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		req.degraded = true
-		return s.fallbackPopular(ctx, req, limit, cfg, nil)
+		return s.descendPopular(ctx, req, limit, cfg, nil, true)
 	}
 
 	physicalNamespace := qdrantPhysicalNamespace(req.Namespace, cfg)
@@ -362,10 +452,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 		// err != nil is an infra failure; a nil vector without error just
 		// means the cron batch has not caught up with this subject yet —
 		// that state is stable for the tick, so caching it is fine.
-		if err != nil {
-			req.degraded = true
-		}
-		return s.fallbackPopular(ctx, req, limit, cfg, nil)
+		return s.descendPopular(ctx, req, limit, cfg, nil, err != nil)
 	}
 
 	seenItemsDays := 30
@@ -385,7 +472,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	// in the dense component. The sparse CF component is unaffected — it queries Qdrant
 	// against vectors recomputed in the same batch. To reduce staleness, decrease
 	// CODOHUE_BATCH_INTERVAL_MINUTES or push subject embeddings via BYOE after each interaction.
-	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
+	if hybridEligible(cfg) {
 		denseVec, err := s.vectors.FetchSubjectDenseVector(ctx, physicalNamespace, subjectNumID)
 		if err == nil && denseVec != nil {
 			return s.hybridRecommend(ctx, req, limit, cfg, subjectVec, denseVec, seenFilter)
@@ -405,29 +492,17 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 	results, err := s.vectors.SearchObjects(ctx, physicalNamespace, subjectVec, seenFilter, fetchLimit)
 	if err != nil {
 		slog.Error("search objects failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-		req.degraded = true
-		return s.fallbackPopular(ctx, req, limit, cfg, nil)
+		return s.descendPopular(ctx, req, limit, cfg, nil, true)
 	}
 
-	gamma := defaultGamma
-	if cfg != nil && cfg.Gamma > 0 {
-		gamma = cfg.Gamma
-	}
-	scored := rerankScored(results, gamma, req.Offset+limit)
-	total := len(scored)
-
-	items := pageItems(scored, req.Offset, limit)
+	scored := rerankScored(results, resolveGamma(cfg), req.Offset+limit)
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceCollaborativeFiltering).Inc()
-	return &Response{
-		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
-		Items:       items,
-		Source:      SourceCollaborativeFiltering,
-		Limit:       limit,
-		Offset:      req.Offset,
-		Total:       total,
-		GeneratedAt: time.Now().UTC(),
+	return outcome{
+		items:  pageItems(scored, req.Offset, limit),
+		source: SourceCollaborativeFiltering,
+		total:  len(scored),
+		scale:  scaleRawFreshness,
 	}, nil
 }
 
@@ -440,9 +515,10 @@ func (s *Service) hybridRecommend(
 	subjectSparseVec *qdrant.SparseVector,
 	subjectDenseVec []float32,
 	seenFilter *qdrant.Filter,
-) (*Response, error) {
+) (outcome, error) {
 	alpha := cfg.Alpha
 	physicalNamespace := qdrantPhysicalNamespace(req.Namespace, cfg)
+	degraded := false
 
 	// Over-fetch enough to cover offset + limit.
 	sparseTopK := uint64((req.Offset + limit) * cfOverFetchFactor)
@@ -455,7 +531,7 @@ func (s *Service) hybridRecommend(
 		slog.Error("hybrid: sparse search failed", "namespace", req.Namespace, "error", err)
 		sparseResults = nil
 		sparseOK = false
-		req.degraded = true
+		degraded = true
 	}
 
 	// Dense retrieval.
@@ -465,11 +541,11 @@ func (s *Service) hybridRecommend(
 		slog.Error("hybrid: dense search failed", "namespace", req.Namespace, "error", err)
 		denseResults = nil
 		denseOK = false
-		req.degraded = true
+		degraded = true
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
-		return s.fallbackPopular(ctx, req, limit, cfg, nil)
+		return s.descendPopular(ctx, req, limit, cfg, nil, degraded)
 	}
 
 	// Each arm's top-K must also be scored by the other arm before blending.
@@ -525,13 +601,13 @@ func (s *Service) hybridRecommend(
 
 	if sparseErr != nil {
 		slog.Warn("hybrid: sparse backfill failed; dense-only candidates keep sparse 0", "namespace", req.Namespace, "error", sparseErr)
-		req.degraded = true
+		degraded = true
 	} else {
 		sparseResults = append(sparseResults, scoresOnly(sparseExtra)...)
 	}
 	if denseErr != nil {
 		slog.Warn("hybrid: dense backfill failed; sparse-only candidates keep dense 0", "namespace", req.Namespace, "error", denseErr)
-		req.degraded = true
+		degraded = true
 	} else {
 		denseResults = append(denseResults, scoresOnly(denseExtra)...)
 	}
@@ -551,19 +627,7 @@ func (s *Service) hybridRecommend(
 
 	candidates := blendHybridScores(sparseResults, denseResults, alpha, resolveGamma(cfg), cfg.DenseDistance, time.Now().UTC())
 
-	total := len(candidates)
-
-	// Apply offset + limit.
-	start := req.Offset
-	if start > len(candidates) {
-		start = len(candidates)
-	}
-	end := start + limit
-	if end > len(candidates) {
-		end = len(candidates)
-	}
-	paged := candidates[start:end]
-
+	paged, start := pageOf(candidates, req.Offset, limit)
 	items := make([]RecommendedItem, len(paged))
 	for i, c := range paged {
 		items[i] = RecommendedItem{
@@ -575,15 +639,12 @@ func (s *Service) hybridRecommend(
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybrid).Inc()
-	return &Response{
-		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
-		Items:       items,
-		Source:      SourceHybrid,
-		Limit:       limit,
-		Offset:      req.Offset,
-		Total:       total,
-		GeneratedAt: time.Now().UTC(),
+	return outcome{
+		items:    items,
+		source:   SourceHybrid,
+		total:    len(candidates),
+		scale:    scaleUnitBlend,
+		degraded: degraded,
 	}, nil
 }
 
@@ -773,7 +834,7 @@ func buildCreatedAtLookup(sets ...[]*qdrant.ScoredPoint) map[string]time.Time {
 	return m
 }
 
-func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (*Response, error) {
+func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *namespace.Config) (outcome, error) {
 	// Over-fetch from both sources to cover offset before blending. The
 	// inner requests page from 0, so every branch below must re-apply the
 	// caller's offset before returning — including the degraded ones.
@@ -803,45 +864,34 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 		}
 	}
 
-	cfResp, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
-	popularResp, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg, seen)
-	req.degraded = req.degraded || innerReq.degraded
+	cfOut, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
+	popOut, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg, seen)
+	// Degradation flows back through the sub-outcomes — no hand-propagation
+	// across a shared request struct.
+	degraded := cfOut.degraded || popOut.degraded
 
 	if popErr != nil && cfErr != nil {
-		return nil, fmt.Errorf("hybrid cold: popular: %w; cf: %v", popErr, cfErr)
+		return outcome{}, fmt.Errorf("hybrid cold: popular: %w; cf: %v", popErr, cfErr)
 	}
 	if popErr != nil {
-		req.degraded = true
-		if cfResp != nil {
-			cfResp.Source = SourceHybridCold
-			paginateResponse(cfResp, req.Offset, limit)
-		}
-		return cfResp, nil
+		// Serve the CF share alone, relabeled: its items keep their real
+		// scores and inner scale (see the pass-through test pinning this).
+		cfOut.source = SourceHybridCold
+		cfOut.items = repageItems(cfOut.items, req.Offset, limit)
+		cfOut.degraded = true
+		return cfOut, nil
 	}
-	if cfErr != nil || len(cfResp.Items) == 0 {
-		if cfErr != nil {
-			req.degraded = true
-		}
-		paginateResponse(popularResp, req.Offset, limit)
-		return popularResp, nil
+	if cfErr != nil || len(cfOut.items) == 0 {
+		popOut.items = repageItems(popOut.items, req.Offset, limit)
+		popOut.degraded = degraded || cfErr != nil
+		return popOut, nil
 	}
 
-	blended := blendItems(itemIDs(popularResp.Items), itemIDs(cfResp.Items), 0.7, overLimit)
-	total := len(blended)
+	blended := blendItems(itemIDs(popOut.items), itemIDs(cfOut.items), 0.7, overLimit)
+	paged, start := pageOf(blended, req.Offset, limit)
 
-	// Apply offset.
-	start := req.Offset
-	if start > len(blended) {
-		start = len(blended)
-	}
-	end := start + limit
-	if end > len(blended) {
-		end = len(blended)
-	}
-	blended = blended[start:end]
-
-	items := make([]RecommendedItem, len(blended))
-	for i, id := range blended {
+	items := make([]RecommendedItem, len(paged))
+	for i, id := range paged {
 		// blendItems interleaves two differently-scaled lists by position, so
 		// the CF score that survived into the blend no longer describes the
 		// item's rank here. Report the ordering without a score rather than a
@@ -850,15 +900,12 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceHybridCold).Inc()
-	return &Response{
-		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
-		Items:       items,
-		Source:      SourceHybridCold,
-		Limit:       limit,
-		Offset:      req.Offset,
-		Total:       total,
-		GeneratedAt: time.Now().UTC(),
+	return outcome{
+		items:    items,
+		source:   SourceHybridCold,
+		total:    len(blended),
+		scale:    scaleUnscored,
+		degraded: degraded,
 	}, nil
 }
 
@@ -917,7 +964,7 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int)
 // differently-ordered list whose items were already served. exclude carries
 // extra object ids to drop (hybridCold passes the subject's seen items);
 // nil is the common case.
-func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}) (*Response, error) {
+func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}) (outcome, error) {
 	// Exclusions (authored and seen) have to happen before paging or the
 	// offset would count rows that are about to be dropped. Fetch from
 	// rank 0 with enough headroom to survive removing every excluded object.
@@ -931,8 +978,7 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	entries, err := s.trending.GetTrending(ctx, req.Namespace, generation, fetchOffset, fetchLimit)
 	if err != nil {
 		slog.Error("get trending failed, serving popular", "namespace", req.Namespace, "error", err)
-		req.degraded = true
-		return s.fallbackPopular(ctx, req, limit, cfg, exclude)
+		return s.descendPopular(ctx, req, limit, cfg, exclude, true)
 	}
 
 	hasTrending := len(entries) > 0
@@ -944,19 +990,13 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 		}
 	}
 	if !hasTrending {
-		return s.fallbackPopular(ctx, req, limit, cfg, exclude)
+		// No trending data at all is a data state, not degradation.
+		return s.descendPopular(ctx, req, limit, cfg, exclude, false)
 	}
 
 	if len(excluded) > 0 {
 		entries = dropAuthoredEntries(entries, excluded)
-		if req.Offset < len(entries) {
-			entries = entries[req.Offset:]
-		} else {
-			entries = nil
-		}
-		if len(entries) > limit {
-			entries = entries[:limit]
-		}
+		entries, _ = pageOf(entries, req.Offset, limit)
 	}
 
 	// entries may be empty here — that is the page that terminates the
@@ -974,56 +1014,38 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 		}
 	}
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
-	return &Response{
-		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
-		Items:       items,
-		Source:      SourceFallbackPopular,
-		Limit:       limit,
-		Offset:      req.Offset,
-		Total:       req.Offset + len(items),
-		GeneratedAt: time.Now().UTC(),
+	return outcome{
+		items:  items,
+		source: SourceFallbackPopular,
+		total:  req.Offset + len(items),
+		scale:  scaleUnscored,
 	}, nil
 }
 
-func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}) (*Response, error) {
+func (s *Service) fallbackPopular(ctx context.Context, req *Request, limit int, cfg *namespace.Config, exclude map[string]struct{}) (outcome, error) {
 	// Fetch enough rows to cover offset + limit so we can slice in-process,
 	// plus headroom for the excluded objects about to be dropped — filtering
 	// has to happen before paging or the offset would count removed rows.
 	excluded := mergeExclusions(s.authoredObjectSet(ctx, req, cfg), exclude)
 	rawItems, err := s.repo.GetPopularItems(ctx, req.Namespace, req.Offset+limit+len(excluded))
 	if err != nil {
-		return nil, fmt.Errorf("get popular items: %w", err)
+		return outcome{}, fmt.Errorf("get popular items: %w", err)
 	}
 	rawItems = dropAuthored(rawItems, excluded)
 	total := len(rawItems)
 
-	// Apply offset.
-	start := req.Offset
-	if start > len(rawItems) {
-		start = len(rawItems)
-	}
-	end := start + limit
-	if end > len(rawItems) {
-		end = len(rawItems)
-	}
-	rawItems = rawItems[start:end]
-
-	items := make([]RecommendedItem, len(rawItems))
-	for i, id := range rawItems {
+	paged, start := pageOf(rawItems, req.Offset, limit)
+	items := make([]RecommendedItem, len(paged))
+	for i, id := range paged {
 		items[i] = RecommendedItem{ObjectID: id, Score: 0, Rank: start + i + 1, Scored: false}
 	}
 
 	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceFallbackPopular).Inc()
-	return &Response{
-		SubjectID:   req.SubjectID,
-		Namespace:   req.Namespace,
-		Items:       items,
-		Source:      SourceFallbackPopular,
-		Limit:       limit,
-		Offset:      req.Offset,
-		Total:       total,
-		GeneratedAt: time.Now().UTC(),
+	return outcome{
+		items:  items,
+		source: SourceFallbackPopular,
+		total:  total,
+		scale:  scaleUnscored,
 	}, nil
 }
 
@@ -1194,20 +1216,20 @@ func rerankScored(points []*qdrant.ScoredPoint, gamma float64, limit int) []scor
 	return scored
 }
 
+// pageOf clamps [offset, offset+limit) to len(s) and returns the page plus
+// its global start index (for 1-based ranks). This is the single
+// paging-clamp implementation; every rung that pages a candidate list goes
+// through it.
+func pageOf[T any](s []T, offset, limit int) (page []T, start int) {
+	start = min(offset, len(s))
+	return s[start:min(start+limit, len(s))], start
+}
+
 // pageItems slices a scored list to [offset : offset+limit] and builds RecommendedItem
 // values with 1-based global rank. The caller is responsible for ensuring that
 // len(scored) reflects the total candidate count before slicing.
 func pageItems(scored []scoredItem, offset, limit int) []RecommendedItem {
-	start := offset
-	if start > len(scored) {
-		start = len(scored)
-	}
-	end := start + limit
-	if end > len(scored) {
-		end = len(scored)
-	}
-	paged := scored[start:end]
-
+	paged, start := pageOf(scored, offset, limit)
 	items := make([]RecommendedItem, len(paged))
 	for i, s := range paged {
 		items[i] = RecommendedItem{
@@ -1220,29 +1242,18 @@ func pageItems(scored []scoredItem, offset, limit int) []RecommendedItem {
 	return items
 }
 
-// paginateResponse re-slices a response whose Items were built from rank 0,
-// applying the caller's offset+limit and rewriting ranks. Used by
-// hybridCold's pass-through branches, whose inner requests always fetch
-// from offset 0 with limit offset+limit.
-func paginateResponse(resp *Response, offset, limit int) {
-	start := offset
-	if start > len(resp.Items) {
-		start = len(resp.Items)
-	}
-	end := start + limit
-	if end > len(resp.Items) {
-		end = len(resp.Items)
-	}
-	paged := resp.Items[start:end]
-
-	items := make([]RecommendedItem, len(paged))
+// repageItems re-slices items built from rank 0, applying the caller's
+// offset+limit and rewriting ranks. Used by hybridCold's pass-through
+// branches, whose inner requests always fetch from offset 0 with limit
+// offset+limit.
+func repageItems(items []RecommendedItem, offset, limit int) []RecommendedItem {
+	paged, start := pageOf(items, offset, limit)
+	out := make([]RecommendedItem, len(paged))
 	for i, it := range paged {
 		it.Rank = start + i + 1
-		items[i] = it
+		out[i] = it
 	}
-	resp.Items = items
-	resp.Offset = offset
-	resp.Limit = limit
+	return out
 }
 
 // itemIDs extracts ObjectID strings from a RecommendedItem slice for use with blendItems.
@@ -1330,7 +1341,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	// path, and shares its staleness caveat: subject dense vectors refresh on
 	// the cron tick.
 	var denseVec []float32
-	if cfg != nil && cfg.Alpha > 0 && cfg.Alpha < 1.0 && cfg.DenseSource != "" && cfg.DenseSource != codohuetypes.DenseSourceDisabled {
+	if hybridEligible(cfg) {
 		denseVec, err = s.vectors.FetchSubjectDenseVector(ctx, physicalNamespace, subjectNumID)
 		if err != nil {
 			slog.Error("rank: fetch subject dense vector failed", "namespace", ns, "subject_id", req.SubjectID, "error", err)
