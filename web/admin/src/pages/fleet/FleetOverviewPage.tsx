@@ -6,17 +6,19 @@ import {
   Layout,
   Skeleton,
   Stack,
+  StatusDot,
   Table,
   TableBody,
   TableCell,
   TableHeader,
   TableHeaderCell,
   TableRow,
+  Token,
 } from '@astryxdesign/core'
 import { useOverview, type NamespaceOverview, type NamespaceStatus } from '@/services/overview'
 import { useBatchRunStats } from '@/services/batchRuns'
 import { useMetricsSummary, sumRates } from '@/services/metrics'
-import { streamBadgeProps, useServerStream } from '@/services/stream'
+import { streamStatusProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
@@ -24,11 +26,11 @@ import MetaLine from '@/components/MetaLine'
 import NamespaceTag from '@/components/NamespaceTag'
 import StatTile from '@/components/StatTile'
 
-const STATUS_BADGE: Record<NamespaceStatus, { variant: 'success' | 'warning' | 'error' | 'neutral'; label: string }> = {
-  active: { variant: 'success', label: 'active' },
-  idle: { variant: 'neutral', label: 'idle' },
-  degraded: { variant: 'error', label: 'degraded' },
-  cold: { variant: 'neutral', label: 'cold' },
+const STATUS_TOKEN: Record<NamespaceStatus, { color: 'green' | 'red' | 'gray'; label: string }> = {
+  active: { color: 'green', label: 'active' },
+  idle: { color: 'gray', label: 'idle' },
+  degraded: { color: 'red', label: 'degraded' },
+  cold: { color: 'gray', label: 'cold' },
 }
 
 export default function FleetOverviewPage() {
@@ -100,7 +102,7 @@ export default function FleetOverviewPage() {
             <MetaLine
               items={[
                 `${data.namespaces.length} namespace${data.namespaces.length === 1 ? '' : 's'}`,
-                <Badge {...streamBadgeProps(streamConnected)} />,
+                <StatusDot {...streamStatusProps(streamConnected)} />,
               ]}
             />
           </Stack>
@@ -108,7 +110,7 @@ export default function FleetOverviewPage() {
             <Stack gap={4} direction="horizontal" align="center">
               <span className="text-secondary text-xs">recent:</span>
               {recentRunEvents.map((e, i) => (
-                <Badge key={`${e}-${i}`} variant="neutral" label={e} />
+                <Token key={`${e}-${i}`} size="sm" color="gray" label={e} />
               ))}
             </Stack>
           )}
@@ -223,7 +225,7 @@ function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
         </TableHeader>
         <TableBody>
           {namespaces.map((ns) => {
-            const status = STATUS_BADGE[ns.status] ?? { variant: 'neutral' as const, label: ns.status }
+            const status = STATUS_TOKEN[ns.status] ?? { color: 'gray' as const, label: ns.status }
             return (
               <TableRow key={ns.namespace}>
                 <TableCell>
@@ -232,7 +234,7 @@ function NamespacesTable({ namespaces }: { namespaces: NamespaceOverview[] }) {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={status.variant} label={status.label} />
+                  <Token color={status.color} label={status.label} />
                 </TableCell>
                 <TableCell>
                   {ns.last_run ? (

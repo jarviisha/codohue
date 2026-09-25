@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  Badge,
   Banner,
   EmptyState,
   Pagination,
@@ -14,10 +13,11 @@ import {
   TableHeader,
   TableHeaderCell,
   TableRow,
+  Token,
 } from '@astryxdesign/core'
 import {
-  kindBadgeVariant,
-  runningBadgeProps,
+  kindTokenColor,
+  runningTokenProps,
   useBatchRuns,
   useBatchRunStats,
   type BatchRunsFilter,
@@ -182,7 +182,7 @@ export default function BatchRunsListPage() {
                             </TableCell>
                           )}
                           <TableCell>
-                            <Badge variant={kindBadgeVariant(r.kind)} label={r.kind} />
+                            <Token color={kindTokenColor(r.kind)} label={r.kind} />
                           </TableCell>
                           <TableCell className="text-secondary text-sm">{r.trigger_source}</TableCell>
                           <TableCell className="text-secondary text-sm">
@@ -195,7 +195,7 @@ export default function BatchRunsListPage() {
                             <PhaseStrip phaseStatus={r.phase_status} />
                           </TableCell>
                           <TableCell>
-                            <RunStatusBadge run={r} />
+                            <RunStateToken run={r} />
                           </TableCell>
                         </TableRow>
                       ))}
@@ -239,19 +239,19 @@ function StatsRow({ stats }: { stats?: { total: number; running: number; ok: num
   )
 }
 
-function RunStatusBadge({
+function RunStateToken({
   run,
 }: {
   run: { completed_at: string | null; success: boolean; cancel_requested: boolean; error_message: string | null }
 }) {
   if (run.completed_at == null) {
-    return <Badge {...runningBadgeProps(run.cancel_requested)} />
+    return <Token {...runningTokenProps(run.cancel_requested)} />
   }
   if (run.error_message === 'operator_cancelled') {
-    return <Badge variant="neutral" label="cancelled" />
+    return <Token color="gray" label="cancelled" />
   }
   if (run.success) {
-    return <Badge variant="success" label="ok" />
+    return <Token color="green" label="ok" />
   }
-  return <Badge variant="error" label="failed" />
+  return <Token color="red" label="failed" />
 }

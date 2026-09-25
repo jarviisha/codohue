@@ -1,17 +1,18 @@
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  Badge,
   Banner,
   Button,
   EmptyState,
   Skeleton,
   Stack,
+  StatusDot,
   Table,
   TableBody,
   TableCell,
   TableHeader,
   TableHeaderCell,
   TableRow,
+  Token,
 } from '@astryxdesign/core'
 import { useNamespaces } from '@/services/namespaces'
 import PageHeader from '@/components/shell/PageHeader'
@@ -91,7 +92,7 @@ export default function NamespacesListPage() {
                       </Link>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="neutral" label={ns.dense_source || '—'} />
+                      <Token color="gray" label={ns.dense_source || '—'} />
                     </TableCell>
                     <TableCell  className="text-right tabular-nums">
                       {ns.embedding_dim}
@@ -99,7 +100,7 @@ export default function NamespacesListPage() {
                     <TableCell>
                       {ns.dense_source === 'catalog' ? (
                         <Stack gap={4} direction="horizontal" align="center">
-                          <Badge variant="success" label="on" />
+                          <StatusDot variant="success" label="catalog on" tooltip="catalog on" />
                           {ns.catalog_strategy_id && (
                             <span className="text-secondary text-xs">
                               {ns.catalog_strategy_id}@{ns.catalog_strategy_version}
@@ -107,7 +108,7 @@ export default function NamespacesListPage() {
                           )}
                         </Stack>
                       ) : (
-                        <Badge variant="neutral" label="off" />
+                        <span className="text-secondary text-sm">off</span>
                       )}
                     </TableCell>
                     <TableCell className="text-secondary text-sm">

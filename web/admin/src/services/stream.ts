@@ -14,11 +14,14 @@ export type UseServerStreamResult = {
   lastPingAt: number | null
 }
 
-/** Badge props for the SSE connection indicator shown in page headers. */
-export function streamBadgeProps(connected: boolean) {
+/** StatusDot props for the SSE connection indicator shown in page headers. */
+export function streamStatusProps(connected: boolean) {
+  const label = `stream ${connected ? 'connected' : 'offline'}`
   return {
     variant: connected ? ('success' as const) : ('neutral' as const),
-    label: `stream ${connected ? 'connected' : 'offline'}`,
+    label,
+    tooltip: label,
+    isPulsing: connected,
   }
 }
 

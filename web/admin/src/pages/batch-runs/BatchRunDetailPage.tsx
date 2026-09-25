@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useReducer } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Badge, Banner, Button, Skeleton, Stack } from '@astryxdesign/core'
+import { Banner, Button, Skeleton, Stack, StatusDot, Token } from '@astryxdesign/core'
 import {
-  kindBadgeVariant,
-  runningBadgeProps,
+  kindTokenColor,
+  runningTokenProps,
   useBatchRunDetail,
   useCancelBatchRun,
   useRetryBatchRun,
@@ -141,8 +141,8 @@ export default function BatchRunDetailPage() {
           <Stack gap={1}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Run #{run.id}</h1>
-              <Badge variant={kindBadgeVariant(run.kind)} label={run.kind} />
-              <RunStateBadge state={state} run={run} />
+              <Token color={kindTokenColor(run.kind)} label={run.kind} />
+              <RunStateToken state={state} run={run} />
             </Stack>
             <MetaLine
               items={[
@@ -233,9 +233,17 @@ function PhaseRow({ phase }: { phase: PhaseEntry }) {
           phase {phase.n}
         </span>
         <span className="text-primary font-medium">{phase.name}</span>
-        {phase.ok === true && <Badge variant="success" label="ok" />}
-        {phase.ok === false && <Badge variant="error" label="fail" />}
-        {phase.ok === null && phase.skipped && <Badge variant="neutral" label="skipped" />}
+        {phase.ok === true && <StatusDot variant="success" label="ok" tooltip="ok" />}
+        {phase.ok === false && (
+          <StatusDot variant="error" label="fail" tooltip={phase.error ? `fail: ${phase.error}` : 'fail'} />
+        )}
+        {phase.ok === null && phase.skipped && (
+          <StatusDot
+            variant="neutral"
+            label={`skipped (${phase.skipped})`}
+            tooltip={`skipped (${phase.skipped})`}
+          />
+        )}
       </Stack>
       <Stack gap={4} direction="horizontal" align="center">
         {phase.subjects != null && (
@@ -261,11 +269,11 @@ function PhaseRow({ phase }: { phase: PhaseEntry }) {
   )
 }
 
-function RunStateBadge({ state, run }: { state: LocalState; run: BatchRunDetail }) {
+function RunStateToken({ state, run }: { state: LocalState; run: BatchRunDetail }) {
   if (!state.completed) {
-    return <Badge {...runningBadgeProps(run.cancel_requested)} />
+    return <Token {...runningTokenProps(run.cancel_requested)} />
   }
-  if (state.cancelled) return <Badge variant="neutral" label="cancelled" />
-  if (run.success) return <Badge variant="success" label="ok" />
-  return <Badge variant="error" label="failed" />
+  if (state.cancelled) return <Token color="gray" label="cancelled" />
+  if (run.success) return <Token color="green" label="ok" />
+  return <Token color="red" label="failed" />
 }

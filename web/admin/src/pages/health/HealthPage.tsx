@@ -1,4 +1,4 @@
-import { Layout, Token, Skeleton, Stack, Text } from '@astryxdesign/core'
+import { Layout, List, ListItem, Skeleton, Stack, StatusDot, Token } from '@astryxdesign/core'
 import QueryFeedback from '@/components/QueryFeedback'
 import { useHealth, type ComponentStatus } from '@/services/health'
 import PageHeader from '@/components/shell/PageHeader'
@@ -18,18 +18,23 @@ const COMPONENTS: Array<{ key: 'postgres' | 'redis' | 'qdrant'; label: string; e
     { key: 'qdrant', label: 'Qdrant', explain: 'Sparse and dense vectors for recommend service.' },
   ]
 
-function statusVariant(s: ComponentStatus): 'green' | 'orange' | 'red' | 'gray' {
-  if (s.startsWith('error:')) return 'red'
+function statusVariant(s: ComponentStatus): 'success' | 'warning' | 'error' | 'neutral' {
+  if (s.startsWith('error')) return 'error'
   switch (s) {
     case 'ok':
-      return 'green'
+      return 'success'
     case 'degraded':
-      return 'orange'
-    case 'error':
-      return 'red'
+      return 'warning'
     default:
-      return 'gray'
+      return 'neutral'
   }
+}
+
+const TOKEN_COLOR: Record<ReturnType<typeof statusVariant>, 'green' | 'orange' | 'red' | 'gray'> = {
+  success: 'green',
+  warning: 'orange',
+  error: 'red',
+  neutral: 'gray',
 }
 
 export default function HealthPage() {
@@ -64,31 +69,33 @@ export default function HealthPage() {
           <h1 className="text-primary text-xl font-semibold">Service health</h1>
           <Stack gap={4} direction="horizontal" align="center">
             <span className="text-secondary text-sm">overall</span>
-            <Token color={statusVariant(overall)} label={overall} />
+            <Token color={TOKEN_COLOR[statusVariant(overall)]} label={overall} />
             <span className="text-secondary text-xs">refreshes every 30 seconds</span>
           </Stack>
         </Stack>
       </PageHeader>
 
       <QueryFeedback query={health} label="Service health" />
-      <Stack gap={6}>
-        <Stack gap={6}>
-          {COMPONENTS.map((c) => {
-            const s = data[c.key]?.trim() || 'unknown'
-            return (
-              <Stack key={c.key} gap={2} className="border-b border-border pb-4">
-                <Stack gap={1}>
-                  <Stack gap={4} direction="horizontal" align="center" justify="between">
-                    <Text weight="semibold">{c.label}</Text>
-                    <Token color={statusVariant(s)} label={s} />
-                  </Stack>
+      <List hasDividers>
+        {COMPONENTS.map((c) => {
+          const s = data[c.key]?.trim() || 'unknown'
+          return (
+            <ListItem
+              key={c.key}
+              label={c.label}
+              description={c.explain}
+              endContent={
+                <Stack gap={2} direction="horizontal" align="center">
+                  <StatusDot variant={statusVariant(s)} label={s} />
+                  <span aria-hidden="true" className="text-secondary text-sm">
+                    {s}
+                  </span>
                 </Stack>
-                <p className="text-secondary text-sm">{c.explain}</p>
-              </Stack>
-            )
-          })}
-        </Stack>
-      </Stack>
+              }
+            />
+          )
+        })}
+      </List>
     </Layout>
   )
 }

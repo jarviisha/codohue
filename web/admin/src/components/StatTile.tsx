@@ -1,10 +1,10 @@
-import { Badge, Card, Stack } from '@astryxdesign/core'
+import { Card, Stack, StatusDot } from '@astryxdesign/core'
 
 type StatTileTone = 'success' | 'warning' | 'error' | 'neutral'
 
 /**
- * StatTile is the shared "label / big number / optional status badge" card
- * used on overview pages. The badge renders only when `hint` carries real
+ * StatTile is the shared "label / big number / optional status dot" card
+ * used on overview pages. The dot renders only when `hint` carries real
  * human-readable status text — the tone name itself is never shown (#51).
  * Numeric values are locale-formatted; pass a string to opt out.
  */
@@ -27,7 +27,14 @@ export default function StatTile({
           <span className="text-primary text-xl font-semibold tabular-nums">
             {typeof value === 'number' ? value.toLocaleString() : value}
           </span>
-          {hint && <Badge variant={tone} label={hint} />}
+          {hint && (
+            <Stack gap={2} direction="horizontal" align="center">
+              <StatusDot variant={tone} label={hint} />
+              <span aria-hidden="true" className="text-secondary text-xs">
+                {hint}
+              </span>
+            </Stack>
+          )}
         </Stack>
       </Stack>
     </Card>

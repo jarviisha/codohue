@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Badge, Button, ProgressBar, Stack } from '@astryxdesign/core'
+import { Button, ProgressBar, Stack, Token } from '@astryxdesign/core'
 import { useServerStream } from '@/services/stream'
 import NamespaceTag from '@/components/NamespaceTag'
 
@@ -103,7 +103,7 @@ export default function ReembedOverlay() {
       <div className="bg-popover border border-border rounded shadow-lg px-4 py-3">
         <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
           <Stack gap={4} direction="horizontal" align="center">
-            <Badge variant="info" label="re-embed" />
+            <Token color="purple" label="re-embed" />
             <span className="text-primary text-sm">
               {runs.length} run{runs.length === 1 ? '' : 's'} in flight
             </span>

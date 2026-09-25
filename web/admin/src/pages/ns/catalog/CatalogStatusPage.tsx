@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
-  Badge,
   Banner,
   Button,
   Card,
@@ -9,12 +8,14 @@ import {
   ProgressBar,
   Skeleton,
   Stack,
+  StatusDot,
   Table,
   TableBody,
   TableCell,
   TableHeader,
   TableHeaderCell,
   TableRow,
+  Token,
 } from '@astryxdesign/core'
 import {
   useBulkRedriveDeadletter,
@@ -24,7 +25,7 @@ import {
   useTriggerReEmbed,
   type CatalogBacklog,
 } from '@/services/catalog'
-import { streamBadgeProps, useServerStream } from '@/services/stream'
+import { streamStatusProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import MetaLine from '@/components/MetaLine'
@@ -196,7 +197,7 @@ export default function CatalogStatusPage() {
           <Stack gap={6}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Catalog</h1>
-              <Badge {...streamBadgeProps(streamConnected)} />
+              <StatusDot {...streamStatusProps(streamConnected)} />
               {streamEvents > 0 && (
                 <span className="text-secondary text-xs tabular-nums">
                   {streamEvents} live event{streamEvents === 1 ? '' : 's'}
@@ -276,7 +277,7 @@ export default function CatalogStatusPage() {
                   <span className="text-secondary text-xs uppercase tracking-wide">
                     Last re-embed
                   </span>
-                  <ReembedStatusBadge status={reembedStatus.status} />
+                  <ReembedStatusToken status={reembedStatus.status} />
                 </Stack>
                 <Link
                   to={`/ns/${encodeURIComponent(ns)}/batch-runs/${reembedStatus.batch_run_id}`}
@@ -468,9 +469,9 @@ function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
   )
 }
 
-function ReembedStatusBadge({ status }: { status: string }) {
-  if (status === 'running') return <Badge variant="info" label="running" />
-  if (status === 'success') return <Badge variant="success" label="ok" />
-  if (status === 'failed') return <Badge variant="error" label="failed" />
-  return <Badge variant="neutral" label={status} />
+function ReembedStatusToken({ status }: { status: string }) {
+  if (status === 'running') return <Token color="blue" label="running" />
+  if (status === 'success') return <Token color="green" label="ok" />
+  if (status === 'failed') return <Token color="red" label="failed" />
+  return <Token color="gray" label={status} />
 }

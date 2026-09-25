@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Selector, Stack, TextInput } from '@astryxdesign/core'
+import { Selector, Stack, TextInput, Token } from '@astryxdesign/core'
 import type { LogLine } from '@/services/batchRuns'
 
 type LogLineViewerProps = {
@@ -16,10 +16,10 @@ type LogLineViewerProps = {
 const LEVEL_FILTERS = ['all', 'info', 'warn', 'error'] as const
 type LevelFilter = (typeof LEVEL_FILTERS)[number]
 
-const LEVEL_BADGE: Record<string, 'success' | 'warning' | 'error' | 'neutral'> = {
-  info: 'neutral',
-  warn: 'warning',
-  error: 'error',
+const LEVEL_TOKEN_COLOR: Record<string, 'gray' | 'orange' | 'red'> = {
+  info: 'gray',
+  warn: 'orange',
+  error: 'red',
 }
 
 export default function LogLineViewer({ lines, follow = true, height = 360 }: LogLineViewerProps) {
@@ -95,7 +95,7 @@ export default function LogLineViewer({ lines, follow = true, height = 360 }: Lo
                   {tsShort(l.ts)}
                 </span>
                 <span className="shrink-0">
-                  <Badge variant={LEVEL_BADGE[l.level] ?? 'neutral'} label={l.level} />
+                  <Token size="sm" color={LEVEL_TOKEN_COLOR[l.level] ?? 'gray'} label={l.level} />
                 </span>
                 <span className="text-primary whitespace-pre-wrap wrap-break-word">{l.msg}</span>
               </li>

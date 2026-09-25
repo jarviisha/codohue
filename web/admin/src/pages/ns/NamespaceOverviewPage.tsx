@@ -1,7 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
-  Badge,
   Banner,
   Button,
   Card,
@@ -19,7 +18,9 @@ import {
   TableHeaderCell,
   TableRow,
   TextInput,
+  Token,
 } from '@astryxdesign/core'
+import { kindTokenColor } from '@/services/batchRuns'
 import { useNamespaceDashboard } from '@/services/namespaces'
 import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
@@ -76,7 +77,7 @@ export default function NamespaceOverviewPage() {
           <Stack gap={1}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Overview</h1>
-              {config?.dense_source === 'catalog' && <Badge variant="success" label="catalog" />}
+              {config?.dense_source === 'catalog' && <Token color="green" label="catalog" />}
             </Stack>
             {config && (
               <MetaLine
@@ -153,7 +154,7 @@ export default function NamespaceOverviewPage() {
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="neutral" label={r.kind} />
+                        <Token color={kindTokenColor(r.kind)} label={r.kind} />
                       </TableCell>
                       <TableCell className="text-secondary text-sm">
                         {new Date(r.started_at).toLocaleString()}

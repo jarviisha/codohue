@@ -101,16 +101,16 @@ export type CreateBatchRunResponse = {
   started_at: string
 }
 
-/** Badge props for a run that has not completed yet. */
-export function runningBadgeProps(cancelRequested: boolean) {
+/** Token props for a run that has not completed yet. */
+export function runningTokenProps(cancelRequested: boolean) {
   return cancelRequested
-    ? { variant: 'warning' as const, label: 'cancelling' }
-    : { variant: 'info' as const, label: 'running' }
+    ? { color: 'orange' as const, label: 'cancelling' }
+    : { color: 'blue' as const, label: 'running' }
 }
 
-/** Badge tone for a run kind — re-embed runs get the purple accent. */
-export function kindBadgeVariant(kind: string) {
-  return kind === 'reembed' ? ('purple' as const) : ('neutral' as const)
+/** Token color for a run kind — re-embed runs get the purple accent. */
+export function kindTokenColor(kind: string) {
+  return kind === 'reembed' ? ('purple' as const) : ('gray' as const)
 }
 
 // ---------------------------------------------------------------------------
