@@ -274,6 +274,11 @@ func SVDEmbeddings(events []*RawEvent, embeddingDim int, lambda float64) (map[st
 // are simply absent from the result — the caller treats that as "no dense
 // signal for that item" rather than an error.
 func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace string, objectIDs []string) (map[string][]float32, error) {
+	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense)
+	if err != nil {
+		return nil, err
+	}
+
 	// Sort for deterministic batching, matching upsertDenseVectors.
 	ids := append([]string(nil), objectIDs...)
 	sort.Strings(ids)
@@ -291,7 +296,7 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 			return nil
 		}
 		points, err := qdrantGetDenseFn(ctx, qdrantClient, &qdrant.GetPoints{
-			CollectionName: collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense),
+			CollectionName: collection,
 			Ids:            batch,
 			WithVectors:    qdrant.NewWithVectorsInclude(denseVectorName),
 		})
@@ -343,12 +348,20 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 // γ-freshness rerank reads this key — without it, items surfaced only by the
 // dense path would never decay while sparse-path items do.
 func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, itemVecs map[string][]float32, createdAt map[string]string) error {
-	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense), namespace, "object", strategy, itemVecs, createdAt)
+	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense)
+	if err != nil {
+		return err
+	}
+	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collection, namespace, "object", strategy, itemVecs, createdAt)
 }
 
 // UpsertSubjectDenseVectors upserts subject dense vectors into {ns}_subjects_dense.
 func UpsertSubjectDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, subjectVecs map[string][]float32) error {
-	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collectionForContext(ctx, namespace, infraqdrant.CollectionSubjectsDense), namespace, "subject", strategy, subjectVecs, nil)
+	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionSubjectsDense)
+	if err != nil {
+		return err
+	}
+	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collection, namespace, "subject", strategy, subjectVecs, nil)
 }
 
 func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, collection, namespace, entityType, strategy string, vecs map[string][]float32, createdAt map[string]string) error {

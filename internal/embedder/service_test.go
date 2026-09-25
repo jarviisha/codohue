@@ -635,6 +635,26 @@ func TestServiceProcessItem_RunsUnderLeaseAndTargetsLeaseGeneration(t *testing.T
 	}
 }
 
+// With no lease held (no lifecycle writer wired), the vector must target the
+// config's generation — never a silent generation-1 fallback, which would
+// write into a deleted incarnation's collection.
+func TestServiceProcessItem_NoLeaseTargetsConfigGeneration(t *testing.T) {
+	svc, repo, nsCfg, _, _, upserts := newSvc(t)
+	repo.markInFlightAttempt = 1
+	nsCfg.cfg.Generation = 3
+
+	out, err := svc.ProcessItem(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("ProcessItem: %v", err)
+	}
+	if out != OutcomeEmbedded {
+		t.Fatalf("outcome: got %v, want OutcomeEmbedded", out)
+	}
+	if len(*upserts) != 1 || (*upserts)[0].collection != "ns_g3_objects_dense" {
+		t.Errorf("collection: got %v, want ns_g3_objects_dense", *upserts)
+	}
+}
+
 // A namespace that is mid-delete must not have its catalog rows mutated: the
 // item state machine and the vector would both outlive the wipe.
 func TestServiceProcessItem_InactiveNamespaceWritesNothing(t *testing.T) {

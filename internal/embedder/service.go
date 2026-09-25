@@ -282,7 +282,7 @@ func (s *Service) processLoadedItem(ctx context.Context, item *PendingItem) (Pro
 	}
 
 	embeddedAt := s.clock().UTC()
-	if err := s.upsertVector(ctx, item, pointID, vec, strategy, embeddedAt); err != nil {
+	if err := s.upsertVector(ctx, item, resolveGeneration(ctx, item.Namespace, cfg), pointID, vec, strategy, embeddedAt); err != nil {
 		// The collection may have been dropped (namespace wipe + recreate):
 		// invalidate the ensure cache so the next attempt re-creates it
 		// instead of dead-lettering every item until a process restart.
@@ -490,14 +490,7 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	if distance == "" {
 		distance = "cosine"
 	}
-	generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
-	if !ok {
-		generation = cfg.Generation
-	}
-	if generation < 1 {
-		generation = 1
-	}
-	physicalNamespace := nslifecycle.QdrantNamespace(ns, generation)
+	physicalNamespace := nslifecycle.QdrantNamespace(ns, resolveGeneration(ctx, ns, cfg))
 	key := fmt.Sprintf("%s|%d|%s", physicalNamespace, dim, distance)
 
 	s.ensuredMu.Lock()
@@ -517,6 +510,21 @@ func (s *Service) ensureNamespaceCollections(ctx context.Context, ns string, cfg
 	return nil
 }
 
+// resolveGeneration returns the generation writes must address: the lease is
+// authoritative when present, otherwise the namespace config's current
+// generation. Never defaults to 1 just because the lease is missing — that
+// would resurrect a deleted incarnation's collection.
+func resolveGeneration(ctx context.Context, ns string, cfg *namespace.Config) int64 {
+	generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+	if !ok {
+		generation = cfg.Generation
+	}
+	if generation < 1 {
+		generation = 1
+	}
+	return generation
+}
+
 // invalidateEnsured drops every ensure-cache entry for the namespace so the
 // next ProcessItem re-runs EnsureDenseCollections.
 func (s *Service) invalidateEnsured(ns string) {
@@ -533,11 +541,7 @@ func (s *Service) invalidateEnsured(ns string) {
 // payload conventions per data-model.md §4. created_at (the catalog item's
 // creation time) is what the recommend service's γ-freshness rerank reads —
 // without it, catalog-embedded items would never decay.
-func (s *Service) upsertVector(ctx context.Context, item *PendingItem, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
-	generation, _ := nslifecycle.LeaseGeneration(ctx, item.Namespace)
-	if generation < 1 {
-		generation = 1
-	}
+func (s *Service) upsertVector(ctx context.Context, item *PendingItem, generation int64, pointID uint64, vec []float32, strategy embedstrategy.Strategy, embeddedAt time.Time) error {
 	collection := infraqdrant.CollectionName(item.Namespace, generation, infraqdrant.CollectionObjectsDense)
 
 	payload := map[string]*qdrant.Value{

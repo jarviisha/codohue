@@ -270,7 +270,7 @@ func TestUpsertItemDenseVectors_Success(t *testing.T) {
 		return nil
 	}
 
-	err := UpsertItemDenseVectors(context.Background(), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
+	err := UpsertItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
 		"obj-1": {0.1, 0.2},
 		"obj-2": {0.3, 0.4},
 	}, map[string]string{"obj-1": "2026-07-01T00:00:00Z"})
@@ -298,7 +298,7 @@ func TestUpsertSubjectDenseVectors_SkipsIDMappingErrors(t *testing.T) {
 		return nil
 	}
 
-	err := UpsertSubjectDenseVectors(context.Background(), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
+	err := UpsertSubjectDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
 		"sub-1":   {0.1, 0.2},
 		"sub-bad": {0.3, 0.4},
 	})
@@ -366,7 +366,7 @@ func TestFetchItemDenseVectors_Success(t *testing.T) {
 		}, nil
 	}
 
-	got, err := FetchItemDenseVectors(context.Background(), nil, idmapSvc, "ns", []string{"obj-2", "obj-1"})
+	got, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", []string{"obj-2", "obj-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestFetchItemDenseVectors_MissingPointsOmitted(t *testing.T) {
 		return []*qdrant.RetrievedPoint{densePoint(7, []float32{0.1, 0.2})}, nil
 	}
 
-	got, err := FetchItemDenseVectors(context.Background(), nil, idmapSvc, "ns", []string{"obj-1", "obj-2"})
+	got, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", []string{"obj-1", "obj-2"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestFetchItemDenseVectors_GetError(t *testing.T) {
 		return nil, errors.New("qdrant down")
 	}
 
-	if _, err := FetchItemDenseVectors(context.Background(), nil, idmapSvc, "ns", []string{"obj-1"}); err == nil {
+	if _, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", []string{"obj-1"}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
@@ -428,7 +428,7 @@ func TestFetchItemDenseVectors_EmptyIsNoOp(t *testing.T) {
 		return nil, nil
 	}
 
-	got, err := FetchItemDenseVectors(context.Background(), nil, idmap.NewService(
+	got, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmap.NewService(
 		&fakeDenseIDRepo{ids: map[string]uint64{}, errs: map[string]error{}}), "ns", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

@@ -82,7 +82,11 @@ func CleanupStaleItemDensePoints(ctx context.Context, client pointScroller, idma
 		}
 		keep[numID] = struct{}{}
 	}
-	return CleanupStalePoints(ctx, client, collectionForContext(ctx, ns, infraqdrant.CollectionObjectsDense), keep)
+	collection, err := collectionForContext(ctx, ns, infraqdrant.CollectionObjectsDense)
+	if err != nil {
+		return 0, err
+	}
+	return CleanupStalePoints(ctx, client, collection, keep)
 }
 
 // CleanupStaleSubjectDensePoints removes {ns}_subjects_dense points for
@@ -96,5 +100,9 @@ func CleanupStaleSubjectDensePoints(ctx context.Context, client pointScroller, i
 		}
 		keep[numID] = struct{}{}
 	}
-	return CleanupStalePoints(ctx, client, collectionForContext(ctx, ns, infraqdrant.CollectionSubjectsDense), keep)
+	collection, err := collectionForContext(ctx, ns, infraqdrant.CollectionSubjectsDense)
+	if err != nil {
+		return 0, err
+	}
+	return CleanupStalePoints(ctx, client, collection, keep)
 }

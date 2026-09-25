@@ -127,7 +127,7 @@ func TestRecomputeNamespace_SweepsStaleCollections(t *testing.T) {
 		return 0, nil
 	}
 
-	if _, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0); err != nil {
+	if _, _, err := svc.RecomputeNamespace(leasedCtx("ns"), "ns", 0); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got, ok := cleaned["ns_subjects"]; !ok || got != 1 {

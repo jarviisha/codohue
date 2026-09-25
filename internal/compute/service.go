@@ -192,16 +192,21 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// points of entities that aged past it, or they keep frozen scores (and
 	// keep matching searches) forever. Best-effort: a failed sweep is stale
 	// data, not a failed run; the next tick retries it.
-	s.cleanupCollection(ctx, collectionForContext(ctx, namespace, infraqdrant.CollectionSubjects), keepSubjects)
-	s.cleanupCollection(ctx, collectionForContext(ctx, namespace, infraqdrant.CollectionObjects), keepObjects)
+	s.cleanupCollection(ctx, namespace, infraqdrant.CollectionSubjects, keepSubjects)
+	s.cleanupCollection(ctx, namespace, infraqdrant.CollectionObjects, keepObjects)
 
 	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(upserted))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", len(objectAccum))
 	return upserted, len(objectAccum), nil
 }
 
-func (s *Service) cleanupCollection(ctx context.Context, collection string, keep map[uint64]struct{}) {
+func (s *Service) cleanupCollection(ctx context.Context, namespace string, kind infraqdrant.CollectionKind, keep map[uint64]struct{}) {
 	if s.cleanupFn == nil {
+		return
+	}
+	collection, err := collectionForContext(ctx, namespace, kind)
+	if err != nil {
+		slog.Warn("stale point cleanup skipped", "namespace", namespace, "error", err)
 		return
 	}
 	n, err := s.cleanupFn(ctx, collection, keep)
@@ -357,8 +362,12 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 }
 
 func (s *Service) upsertSubjectVector(ctx context.Context, namespace string, vec *SubjectVector) error {
-	err := s.upsertFn(ctx, &qdrant.UpsertPoints{
-		CollectionName: collectionForContext(ctx, namespace, infraqdrant.CollectionSubjects),
+	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionSubjects)
+	if err != nil {
+		return err
+	}
+	err = s.upsertFn(ctx, &qdrant.UpsertPoints{
+		CollectionName: collection,
 		Points: []*qdrant.PointStruct{
 			{
 				Id: qdrant.NewIDNum(vec.NumericID),
@@ -385,7 +394,10 @@ func (s *Service) upsertSubjectVector(ctx context.Context, namespace string, vec
 }
 
 func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[string]map[uint64]float32, maxTimes, createdTimes map[string]int64) (map[uint64]struct{}, error) {
-	collectionName := collectionForContext(ctx, namespace, infraqdrant.CollectionObjects)
+	collectionName, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjects)
+	if err != nil {
+		return nil, err
+	}
 	upsertedIDs := make(map[uint64]struct{}, len(accum))
 	var batch []*qdrant.PointStruct
 

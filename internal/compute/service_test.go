@@ -318,7 +318,7 @@ func TestUpsertSubjectVector_SendsExpectedPayload(t *testing.T) {
 		return nil
 	}
 
-	err := svc.upsertSubjectVector(context.Background(), "ns", &SubjectVector{
+	err := svc.upsertSubjectVector(leasedCtx("ns"), "ns", &SubjectVector{
 		SubjectID: "u1",
 		NumericID: 7,
 		Indices:   []uint32{11, 12},
@@ -344,7 +344,7 @@ func TestUpsertSubjectVector_UpsertError(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	err := svc.upsertSubjectVector(context.Background(), "ns", &SubjectVector{SubjectID: "u1", NumericID: 1})
+	err := svc.upsertSubjectVector(leasedCtx("ns"), "ns", &SubjectVector{SubjectID: "u1", NumericID: 1})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -359,7 +359,7 @@ func TestUpsertObjectVectors_UsesExplicitCreatedAt(t *testing.T) {
 		return nil
 	}
 
-	_, err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		map[string]int64{"o1": createdAt.Add(-time.Hour).Unix()},
 		map[string]int64{"o1": createdAt.Unix()},
@@ -388,7 +388,7 @@ func TestUpsertObjectVectors_UsesMaxOccurredAtFallback(t *testing.T) {
 		return nil
 	}
 
-	_, err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		map[string]int64{"o1": maxTime.Unix()},
 		nil,
@@ -406,7 +406,7 @@ func TestUpsertObjectVectors_ObjectIDError(t *testing.T) {
 	idmap.objectErrs["o1"] = context.DeadlineExceeded
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
-	_, err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		nil,
 		nil,
@@ -422,7 +422,7 @@ func TestUpsertObjectVectors_UpsertError(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	_, err := svc.upsertObjectVectors(context.Background(), "ns",
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
 		map[string]map[uint64]float32{"o1": {1: 1.25}},
 		nil,
 		nil,
@@ -454,7 +454,7 @@ func TestRecomputeNamespace_ContinuesOnBuildAndUpsertFailures(t *testing.T) {
 		return nil
 	}
 
-	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	_, _, err := svc.RecomputeNamespace(leasedCtx("ns"), "ns", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestRecomputeNamespace_AllUpsertsFailedReturnsError(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	_, _, err := svc.RecomputeNamespace(leasedCtx("ns"), "ns", 0)
 	if err == nil {
 		t.Fatal("a run where every upsert failed must not report success")
 	}
@@ -532,7 +532,7 @@ func TestRecomputeNamespace_ObjectUpsertFailureReturnsError(t *testing.T) {
 		return nil
 	}
 
-	_, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0)
+	_, _, err := svc.RecomputeNamespace(leasedCtx("ns"), "ns", 0)
 	if err == nil {
 		t.Fatal("a failed object-vector upsert must fail the phase")
 	}
@@ -701,7 +701,7 @@ func TestUpsertObjectVectors_SkipsCooccurrenceEntryPastSparseIndexSpace(t *testi
 	}
 	accum := map[string]map[uint64]float32{"o1": {maxSparseIndex + 1: 1, 5: 2}}
 
-	if _, err := svc.upsertObjectVectors(context.Background(), "ns", accum, nil, nil); err != nil {
+	if _, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", accum, nil, nil); err != nil {
 		t.Fatalf("unrepresentable dimension must not fail the run: %v", err)
 	}
 	idx := got.Points[0].GetVectors().GetVectors().GetVectors()[sparseVectorName].GetSparse().GetIndices()
@@ -749,7 +749,7 @@ func TestUpsertObjectVectors_RowsAreUnitNorm(t *testing.T) {
 		return nil
 	}
 	accum := map[string]map[uint64]float32{"o1": {1: 3, 2: 4}}
-	if _, err := svc.upsertObjectVectors(context.Background(), "ns", accum, nil, nil); err != nil {
+	if _, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", accum, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	vals := got.Points[0].GetVectors().GetVectors().GetVectors()[sparseVectorName].GetSparse().GetValues()
@@ -786,7 +786,7 @@ func TestRecomputeNamespace_ResolvesObjectIDsInBatches(t *testing.T) {
 	idmap := newFakeIDMap()
 	svc := newTestService(repo, idmap)
 
-	if _, _, err := svc.RecomputeNamespace(context.Background(), "ns", 0.05); err != nil {
+	if _, _, err := svc.RecomputeNamespace(leasedCtx("ns"), "ns", 0.05); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if idmap.singleCalls != 0 {

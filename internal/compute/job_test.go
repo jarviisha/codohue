@@ -1156,3 +1156,19 @@ func TestRunPhase2Dense_ExpiredEventsStillClearDenseState(t *testing.T) {
 		t.Error("aged-out namespace did not reach the dense cleanup")
 	}
 }
+
+// The generation-addressed closures wired by NewJob must refuse to run
+// without a lease rather than silently addressing generation 1.
+func TestNewJobGenerationClosuresRequireLease(t *testing.T) {
+	j := NewJob(nil, nil, nil, nil, nil, nil, 1)
+	ctx := context.Background()
+	if err := j.ensureCollectionsFn(ctx, "ns"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Errorf("ensureCollectionsFn: %v", err)
+	}
+	if err := j.ensureDenseCollectionsFn(ctx, "ns", 128, "cosine"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Errorf("ensureDenseCollectionsFn: %v", err)
+	}
+	if err := j.storeTrendingFn(ctx, "ns", nil, time.Minute); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Errorf("storeTrendingFn: %v", err)
+	}
+}

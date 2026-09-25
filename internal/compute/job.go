@@ -134,16 +134,16 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 		finalizeOrphansFn: repo.FinalizeOrphanRuns,
 		hasAnyEventsFn:    repo.HasAnyEvents,
 		ensureCollectionsFn: func(ctx context.Context, ns string) error {
-			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
-			if generation < 1 {
-				generation = 1
+			generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+			if !ok {
+				return fmt.Errorf("ensure collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
 			}
 			return infraqdrant.EnsureCollectionsForGeneration(ctx, qdrantClient, ns, generation)
 		},
 		ensureDenseCollectionsFn: func(ctx context.Context, ns string, dim uint64, distance string) error {
-			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
-			if generation < 1 {
-				generation = 1
+			generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+			if !ok {
+				return fmt.Errorf("ensure dense collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
 			}
 			return infraqdrant.EnsureDenseCollectionsForGeneration(ctx, qdrantClient, ns, generation, dim, distance)
 		},
@@ -163,9 +163,9 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 			return FetchItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, objectIDs)
 		},
 		storeTrendingFn: func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
-			generation, _ := nslifecycle.LeaseGeneration(ctx, ns)
-			if generation < 1 {
-				generation = 1
+			generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+			if !ok {
+				return fmt.Errorf("store trending for %q: %w", ns, nslifecycle.ErrLeaseRequired)
 			}
 			return infraredis.StoreTrendingForGeneration(ctx, redisClient, ns, generation, scores, ttl)
 		},
