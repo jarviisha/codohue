@@ -42,8 +42,43 @@ func (f *fakePipeline) Exec(_ context.Context) ([]goredis.Cmder, error) {
 }
 
 func TestTrendingKey(t *testing.T) {
-	if got := trendingKey("ns"); got != "trending:ns" {
-		t.Fatalf("got %q", got)
+	if got := trendingKey("ns", 1); got != "trending:ns" {
+		t.Fatalf("generation 1: got %q", got)
+	}
+	if got := trendingKey("ns", 0); got != "trending:ns" {
+		t.Fatalf("clamped generation: got %q", got)
+	}
+	if got := trendingKey("ns", 2); got != "trending:ns:g2" {
+		t.Fatalf("generation 2: got %q", got)
+	}
+}
+
+// Writer and reader must address the same key for a generation-qualified
+// namespace — a divergence would serve a recreated namespace the previous
+// incarnation's results.
+func TestTrending_WriterAndReaderAgreeAtGeneration2(t *testing.T) {
+	pipe := &fakePipeline{}
+	origPipe := newPipelineFn
+	origZRev := zRevRangeWithScoresFn
+	t.Cleanup(func() { newPipelineFn = origPipe; zRevRangeWithScoresFn = origZRev })
+	newPipelineFn = func(_ *goredis.Client) trendingPipeline { return pipe }
+	var readKey string
+	zRevRangeWithScoresFn = func(_ context.Context, _ *goredis.Client, key string, _, _ int64) ([]goredis.Z, error) {
+		readKey = key
+		return nil, nil
+	}
+
+	if err := StoreTrending(context.Background(), nil, "ns", 2, map[string]float64{"obj-1": 1}, time.Minute); err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	if _, err := GetTrending(context.Background(), nil, "ns", 2, 0, 10); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if pipe.zaddKey == "" || pipe.zaddKey != readKey {
+		t.Fatalf("writer wrote %q, reader read %q", pipe.zaddKey, readKey)
+	}
+	if readKey != "trending:ns:g2" {
+		t.Fatalf("generation 2 key: got %q", readKey)
 	}
 }
 
@@ -55,7 +90,7 @@ func TestStoreTrending_EmptyScoresClearsStaleKey(t *testing.T) {
 		return pipe
 	}
 
-	if err := StoreTrending(context.Background(), nil, "ns", nil, time.Minute); err != nil {
+	if err := StoreTrending(context.Background(), nil, "ns", 1, nil, time.Minute); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if pipe.delKey != "trending:ns" || pipe.zaddKey != "" || pipe.expireKey != "" {
@@ -69,7 +104,7 @@ func TestStoreTrending_PipelinesCommands(t *testing.T) {
 	t.Cleanup(func() { newPipelineFn = orig })
 	newPipelineFn = func(_ *goredis.Client) trendingPipeline { return pipe }
 
-	err := StoreTrending(context.Background(), nil, "ns", map[string]float64{"obj-1": 3.5, "obj-2": 1.2}, 2*time.Minute)
+	err := StoreTrending(context.Background(), nil, "ns", 1, map[string]float64{"obj-1": 3.5, "obj-2": 1.2}, 2*time.Minute)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -89,13 +124,13 @@ func TestStoreTrending_ExecError(t *testing.T) {
 	t.Cleanup(func() { newPipelineFn = orig })
 	newPipelineFn = func(_ *goredis.Client) trendingPipeline { return &fakePipeline{execErr: errors.New("exec failed")} }
 
-	if err := StoreTrending(context.Background(), nil, "ns", map[string]float64{"obj-1": 3.5}, time.Minute); err == nil {
+	if err := StoreTrending(context.Background(), nil, "ns", 1, map[string]float64{"obj-1": 3.5}, time.Minute); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestGetTrending_ZeroLimitReturnsNil(t *testing.T) {
-	entries, err := GetTrending(context.Background(), nil, "ns", 0, 0)
+	entries, err := GetTrending(context.Background(), nil, "ns", 1, 0, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -117,7 +152,7 @@ func TestGetTrending_ReturnsEntriesAndSkipsNonStringMembers(t *testing.T) {
 		}, nil
 	}
 
-	entries, err := GetTrending(context.Background(), nil, "ns", 1, 2)
+	entries, err := GetTrending(context.Background(), nil, "ns", 1, 1, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -133,7 +168,7 @@ func TestGetTrending_QueryError(t *testing.T) {
 		return nil, errors.New("redis failed")
 	}
 
-	if _, err := GetTrending(context.Background(), nil, "ns", 0, 2); err == nil {
+	if _, err := GetTrending(context.Background(), nil, "ns", 1, 0, 2); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
@@ -169,19 +204,4 @@ func TestNewClient_Success(t *testing.T) {
 		t.Fatal("NewClient returned no client")
 	}
 	t.Cleanup(func() { _ = client.Close() })
-}
-
-// Generation 1 keeps the original unqualified key, so an upgrade moves
-// nothing. A generation below 1 is not a real lifecycle value; clamping keeps
-// a bad caller from inventing a key no writer will ever produce.
-func TestTrendingKeyForGeneration_ClampsBelowOne(t *testing.T) {
-	base := trendingKeyForGeneration("ns", 1)
-	for _, generation := range []int64{0, -1} {
-		if got := trendingKeyForGeneration("ns", generation); got != base {
-			t.Errorf("generation %d gave key %q, want %q", generation, got, base)
-		}
-	}
-	if g2 := trendingKeyForGeneration("ns", 2); g2 == base {
-		t.Error("generation 2 shares generation 1's key; a deleted incarnation would stay visible")
-	}
 }

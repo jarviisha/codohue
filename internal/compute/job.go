@@ -167,7 +167,7 @@ func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, q
 			if !ok {
 				return fmt.Errorf("store trending for %q: %w", ns, nslifecycle.ErrLeaseRequired)
 			}
-			return infraredis.StoreTrendingForGeneration(ctx, redisClient, ns, generation, scores, ttl)
+			return infraredis.StoreTrending(ctx, redisClient, ns, generation, scores, ttl)
 		},
 	}
 }

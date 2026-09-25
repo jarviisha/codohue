@@ -126,7 +126,7 @@ type Service struct {
 	// injectable for testing — wired to real implementations in NewService
 	getCacheFn                            func(ctx context.Context, key string) (string, error)
 	setCacheFn                            func(ctx context.Context, key, value string, ttl time.Duration)
-	getTrendingFn                         func(ctx context.Context, ns string, offset, limit int) ([]infraredis.TrendingEntry, error)
+	getTrendingFn                         func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error)
 	fetchSubjectVecFn                     func(ctx context.Context, ns string, numID uint64) (*qdrant.SparseVector, error)
 	fetchSubjectDenseVecFn                func(ctx context.Context, ns string, numID uint64) ([]float32, error)
 	searchObjectsFn                       func(ctx context.Context, namespace string, queryVec *qdrant.SparseVector, filter *qdrant.Filter, topK uint64) ([]*qdrant.ScoredPoint, error)
@@ -161,8 +161,8 @@ func NewService(
 	s.setCacheFn = func(ctx context.Context, key, value string, ttl time.Duration) {
 		redisClient.Set(ctx, key, value, ttl) //nolint:errcheck // cache set is best-effort, failure is non-fatal
 	}
-	s.getTrendingFn = func(ctx context.Context, ns string, offset, limit int) ([]infraredis.TrendingEntry, error) {
-		return infraredis.GetTrending(ctx, redisClient, ns, offset, limit)
+	s.getTrendingFn = func(ctx context.Context, ns string, generation int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+		return infraredis.GetTrending(ctx, redisClient, ns, generation, offset, limit)
 	}
 	s.fetchSubjectVecFn = s.fetchSubjectVector
 	s.fetchSubjectDenseVecFn = s.fetchSubjectDenseVector
@@ -993,7 +993,7 @@ func (s *Service) GetTrending(ctx context.Context, ns string, limit, offset int)
 		actualWindow = cfg.TrendingWindow
 	}
 
-	entries, err := s.getTrendingFn(ctx, redisPhysicalNamespace(ns, cfg), offset, limit)
+	entries, err := s.getTrendingFn(ctx, ns, namespaceGeneration(cfg), offset, limit)
 	if err != nil {
 		slog.Error("get trending from redis", "namespace", ns, "error", err)
 		entries = nil
@@ -1033,8 +1033,8 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 		fetchOffset, fetchLimit = 0, req.Offset+limit+len(excluded)
 	}
 
-	physicalNamespace := redisPhysicalNamespace(req.Namespace, cfg)
-	entries, err := s.getTrendingFn(ctx, physicalNamespace, fetchOffset, fetchLimit)
+	generation := namespaceGeneration(cfg)
+	entries, err := s.getTrendingFn(ctx, req.Namespace, generation, fetchOffset, fetchLimit)
 	if err != nil {
 		slog.Error("get trending failed, serving popular", "namespace", req.Namespace, "error", err)
 		req.degraded = true
@@ -1045,7 +1045,7 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 	if !hasTrending && fetchOffset > 0 {
 		// Empty page at a non-zero offset: distinguish "past the end of
 		// trending" from "no trending data" by probing rank 0.
-		if probe, probeErr := s.getTrendingFn(ctx, physicalNamespace, 0, 1); probeErr == nil && len(probe) > 0 {
+		if probe, probeErr := s.getTrendingFn(ctx, req.Namespace, generation, 0, 1); probeErr == nil && len(probe) > 0 {
 			hasTrending = true
 		}
 	}
@@ -1729,10 +1729,6 @@ func namespaceGeneration(cfg *namespace.Config) int64 {
 // name belongs to.
 func qdrantPhysicalNamespace(ns string, cfg *namespace.Config) string {
 	return nslifecycle.QdrantNamespace(ns, namespaceGeneration(cfg))
-}
-
-func redisPhysicalNamespace(ns string, cfg *namespace.Config) string {
-	return nslifecycle.RedisNamespace(ns, namespaceGeneration(cfg))
 }
 
 // mergeExclusions unions two exclusion sets, returning nil when both are

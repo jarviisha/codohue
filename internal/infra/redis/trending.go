@@ -32,28 +32,20 @@ type TrendingEntry struct {
 	Score    float64
 }
 
-// trendingKey returns the Redis key for a namespace's trending sorted set.
-func trendingKey(namespace string) string {
-	return trendingKeyForGeneration(namespace, 1)
-}
-
-func trendingKeyForGeneration(namespace string, generation int64) string {
+// trendingKey is the single key rule for a namespace's trending sorted set:
+// writer and reader both derive it from the raw namespace plus generation.
+func trendingKey(namespace string, generation int64) string {
 	if generation < 1 {
 		generation = 1
 	}
 	return nslifecycle.MustPhysicalName(nslifecycle.KindTrending, namespace, generation)
 }
 
-// StoreTrending atomically replaces the trending sorted set for a namespace with the
-// given scores and sets a TTL. A DEL + ZADD + EXPIRE pipeline ensures a stale
-// read window of at most one round-trip duration.
-func StoreTrending(ctx context.Context, rdb *redis.Client, namespace string, scores map[string]float64, ttl time.Duration) error {
-	return StoreTrendingForGeneration(ctx, rdb, namespace, 1, scores, ttl)
-}
-
-// StoreTrendingForGeneration replaces the current lifecycle's sorted set.
-func StoreTrendingForGeneration(ctx context.Context, rdb *redis.Client, namespace string, generation int64, scores map[string]float64, ttl time.Duration) error {
-	key := trendingKeyForGeneration(namespace, generation)
+// StoreTrending atomically replaces the trending sorted set for the
+// namespace's generation with the given scores and sets a TTL. A DEL + ZADD +
+// EXPIRE pipeline ensures a stale read window of at most one round-trip.
+func StoreTrending(ctx context.Context, rdb *redis.Client, namespace string, generation int64, scores map[string]float64, ttl time.Duration) error {
+	key := trendingKey(namespace, generation)
 	members := make([]redis.Z, 0, len(scores))
 	for id, score := range scores {
 		members = append(members, redis.Z{Score: score, Member: id})
@@ -71,18 +63,14 @@ func StoreTrendingForGeneration(ctx context.Context, rdb *redis.Client, namespac
 	return nil
 }
 
-// GetTrending reads the top trending items from Redis, ordered by score descending.
-// offset and limit implement pagination (0-based offset, 0 limit returns nothing).
-func GetTrending(ctx context.Context, rdb *redis.Client, namespace string, offset, limit int) ([]TrendingEntry, error) {
-	return GetTrendingForGeneration(ctx, rdb, namespace, 1, offset, limit)
-}
-
-// GetTrendingForGeneration reads the current lifecycle's trending set.
-func GetTrendingForGeneration(ctx context.Context, rdb *redis.Client, namespace string, generation int64, offset, limit int) ([]TrendingEntry, error) {
+// GetTrending reads the top trending items for the namespace's generation,
+// ordered by score descending. offset and limit implement pagination
+// (0-based offset, 0 limit returns nothing).
+func GetTrending(ctx context.Context, rdb *redis.Client, namespace string, generation int64, offset, limit int) ([]TrendingEntry, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	key := trendingKeyForGeneration(namespace, generation)
+	key := trendingKey(namespace, generation)
 	results, err := zRevRangeWithScoresFn(ctx, rdb, key, int64(offset), int64(offset+limit-1))
 	if err != nil {
 		return nil, fmt.Errorf("get trending %s: %w", namespace, err)

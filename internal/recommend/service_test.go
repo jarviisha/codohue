@@ -150,7 +150,7 @@ func newTestService(repo recommendRepo, ns recommendNsConfig, idmap recommendIDM
 	}
 	s.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) {}
 	// Trending empty by default.
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, nil
 	}
 	// No subject vector by default → CF falls back to popular.
@@ -266,7 +266,7 @@ func TestDoRecommend_ColdStart_NoTrending_FallsBackToPopular(t *testing.T) {
 func TestDoRecommend_ColdStart_UsesTrendingCache(t *testing.T) {
 	repo := &fakeRepo{count: 0}
 	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{
 			{ObjectID: "trending-1", Score: 10.0},
 			{ObjectID: "trending-2", Score: 8.0},
@@ -439,7 +439,7 @@ func TestGetTrending_DefaultWindow(t *testing.T) {
 
 func TestGetTrending_ReturnsItems(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{
 			{ObjectID: "item-1", Score: 9.5},
 			{ObjectID: "item-2", Score: 7.0},
@@ -460,7 +460,7 @@ func TestGetTrending_ReturnsItems(t *testing.T) {
 
 func TestGetTrending_NormalizesLimitAndOffset(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		if offset != 0 {
 			t.Fatalf("expected normalized offset 0, got %d", offset)
 		}
@@ -482,7 +482,7 @@ func TestGetTrending_NormalizesLimitAndOffset(t *testing.T) {
 func TestGetTrending_ConfigErrorFailsBeforeRedis(t *testing.T) {
 	s := newTestService(&fakeRepo{}, &fakeNsConfig{err: errors.New("config failed")}, newFakeIDMapper())
 	redisCalled := false
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		redisCalled = true
 		return nil, errors.New("redis failed")
 	}
@@ -1589,7 +1589,7 @@ func TestHybridCold_ReturnsBlendedResults(t *testing.T) {
 			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-2")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{
 			{ObjectID: "pop-1", Score: 10},
 			{ObjectID: "pop-2", Score: 9},
@@ -1619,7 +1619,7 @@ func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) 
 			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, errors.New("redis failed")
 	}
 
@@ -1634,7 +1634,7 @@ func TestHybridCold_WhenPopularFailsReturnsCFWithHybridColdSource(t *testing.T) 
 
 func TestHybridCold_WhenCFEmptyReturnsPopular(t *testing.T) {
 	s := newTestService(&fakeRepo{count: 3}, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}}, nil
 	}
 
@@ -1814,7 +1814,7 @@ func TestFallbackTrending_ExcludesAuthoredBeforePaging(t *testing.T) {
 	svc := newTestService(repo, &fakeNsConfig{}, &fakeIDMapper{})
 
 	var gotOffset, gotLimit int
-	svc.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	svc.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		gotOffset, gotLimit = offset, limit
 		return []infraredis.TrendingEntry{
 			{ObjectID: "t1", Score: 9}, {ObjectID: "t2", Score: 8},
@@ -1967,7 +1967,7 @@ func TestHybridCold_DegradedCFBranchAppliesOffset(t *testing.T) {
 			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("o3")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, errors.New("redis down")
 	}
 	repo.popularErr = errors.New("db down") // popular path also fails → cf branch
@@ -1996,7 +1996,7 @@ func TestHybridCold_EmptyCFBranchAppliesOffset(t *testing.T) {
 	// offset 0) is served and must be re-paginated.
 	repo := &fakeRepo{count: 2}
 	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 3}, {ObjectID: "t2", Score: 2}, {ObjectID: "t3", Score: 1}}
 		if offset >= len(all) {
 			return nil, nil
@@ -2028,7 +2028,7 @@ func TestFallbackTrending_PastEndReturnsEmptyPageNotPopular(t *testing.T) {
 	repo := &fakeRepo{popularItems: []string{"p1", "p2", "p3"}}
 	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
 	all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 2}, {ObjectID: "t2", Score: 1}}
-	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		if offset >= len(all) {
 			return nil, nil
 		}
@@ -2097,7 +2097,7 @@ func TestRank_ReturnsAllCandidatesIncludingUnscored(t *testing.T) {
 func TestHybridCold_TrendingShareDropsSeenItems(t *testing.T) {
 	repo := &fakeRepo{count: 2, seenItems: []string{"t1"}}
 	s := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
-	s.getTrendingFn = func(_ context.Context, _ string, offset, limit int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
 		all := []infraredis.TrendingEntry{{ObjectID: "t1", Score: 3}, {ObjectID: "t2", Score: 2}, {ObjectID: "t3", Score: 1}}
 		if offset >= len(all) {
 			return nil, nil
@@ -2811,7 +2811,7 @@ func TestScoredTracksTheServingPath(t *testing.T) {
 				{Score: 0.9, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 			}, nil
 		}
-		s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+		s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 			return []infraredis.TrendingEntry{{ObjectID: "pop-1", Score: 10}, {ObjectID: "pop-2", Score: 9}}, nil
 		}
 		return s
@@ -2906,7 +2906,7 @@ func TestHybridCold_DegradedCFPassThroughKeepsRealScores(t *testing.T) {
 			{Score: 4, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("cf-1")}},
 		}, nil
 	}
-	s.getTrendingFn = func(_ context.Context, _ string, _, _ int) ([]infraredis.TrendingEntry, error) {
+	s.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
 		return nil, errors.New("redis unavailable")
 	}
 
