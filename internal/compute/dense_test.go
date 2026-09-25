@@ -16,6 +16,7 @@ import (
 // ─────────────────────────────────────────────────────────────
 
 func TestBuildInteractionSequencesBasic(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "p1", OccurredAt: 100},
 		{SubjectID: "u1", ObjectID: "p2", OccurredAt: 200},
@@ -39,6 +40,7 @@ func TestBuildInteractionSequencesBasic(t *testing.T) {
 }
 
 func TestBuildInteractionSequencesEmpty(t *testing.T) {
+	t.Parallel()
 	seqs := BuildInteractionSequences(nil)
 	if len(seqs) != 0 {
 		t.Errorf("expected empty result for nil input, got %d", len(seqs))
@@ -50,6 +52,7 @@ func TestBuildInteractionSequencesEmpty(t *testing.T) {
 // ─────────────────────────────────────────────────────────────
 
 func TestTrainItem2VecProducesVectors(t *testing.T) {
+	t.Parallel()
 	// Build enough sequences to exceed min_count=2.
 	seqs := []InteractionSequence{
 		{SubjectID: "u1", ObjectIDs: []string{"A", "B", "C", "D"}},
@@ -82,6 +85,7 @@ func TestTrainItem2VecProducesVectors(t *testing.T) {
 }
 
 func TestTrainItem2VecMinCountFiltering(t *testing.T) {
+	t.Parallel()
 	seqs := []InteractionSequence{
 		{SubjectID: "u1", ObjectIDs: []string{"common", "common", "rare"}},
 		{SubjectID: "u2", ObjectIDs: []string{"common", "common"}},
@@ -96,6 +100,7 @@ func TestTrainItem2VecMinCountFiltering(t *testing.T) {
 }
 
 func TestTrainItem2VecTooSmallVocab(t *testing.T) {
+	t.Parallel()
 	seqs := []InteractionSequence{
 		{SubjectID: "u1", ObjectIDs: []string{"only_item"}},
 	}
@@ -107,6 +112,7 @@ func TestTrainItem2VecTooSmallVocab(t *testing.T) {
 }
 
 func TestTrainItem2VecEmptyInput(t *testing.T) {
+	t.Parallel()
 	cfg := Item2VecConfig{Dim: 4, Window: 1, MinCount: 1, Epochs: 1, NegSamples: 1}
 	if result := TrainItem2Vec(nil, cfg); len(result) != 0 {
 		t.Fatalf("expected empty result, got %v", result)
@@ -118,6 +124,7 @@ func TestTrainItem2VecEmptyInput(t *testing.T) {
 // ─────────────────────────────────────────────────────────────
 
 func TestUserDenseVectors(t *testing.T) {
+	t.Parallel()
 	itemVecs := map[string][]float32{
 		"p1": {1.0, 0.0},
 		"p2": {0.0, 1.0},
@@ -162,6 +169,7 @@ func TestUserDenseVectors(t *testing.T) {
 // ─────────────────────────────────────────────────────────────
 
 func TestSGDUpdatePositivePairIncreasesAlignment(t *testing.T) {
+	t.Parallel()
 	// After a positive update, dot(target, output) should increase.
 	target := []float32{1.0, 0.0, 0.0}
 	output := []float32{0.0, 1.0, 0.0}
@@ -183,6 +191,7 @@ func TestSGDUpdatePositivePairIncreasesAlignment(t *testing.T) {
 }
 
 func TestSGDUpdateNegativePairDecreasesAlignment(t *testing.T) {
+	t.Parallel()
 	// Start with a positive dot product; a negative update should reduce it.
 	target := []float32{1.0, 0.5, 0.0}
 	output := []float32{1.0, 0.5, 0.0}
@@ -204,6 +213,7 @@ func TestSGDUpdateNegativePairDecreasesAlignment(t *testing.T) {
 }
 
 func TestSigmoid32Bounds(t *testing.T) {
+	t.Parallel()
 	tests := []struct{ x, lo, hi float32 }{
 		{0, 0.49, 0.51},
 		{100, 0.999, 1.001},
@@ -252,14 +262,34 @@ func (f *fakeDenseIDRepo) GetOrCreateBatch(ctx context.Context, stringIDs []stri
 	return out, nil
 }
 
-func TestUpsertItemDenseVectors_Success(t *testing.T) {
-	orig := qdrantUpsertDenseFn
-	t.Cleanup(func() { qdrantUpsertDenseFn = orig })
+// fakeDenseClient implements densePointClient; a nil field fails the test if
+// the operation is reached.
+type fakeDenseClient struct {
+	t      *testing.T
+	upsert func(points *qdrant.UpsertPoints) (*qdrant.UpdateResult, error)
+	get    func(req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
+}
 
+func (f *fakeDenseClient) Upsert(_ context.Context, points *qdrant.UpsertPoints) (*qdrant.UpdateResult, error) {
+	if f.upsert == nil {
+		f.t.Fatal("unexpected qdrant upsert")
+	}
+	return f.upsert(points)
+}
+
+func (f *fakeDenseClient) Get(_ context.Context, req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	if f.get == nil {
+		f.t.Fatal("unexpected qdrant get")
+	}
+	return f.get(req)
+}
+
+func TestUpsertItemDenseVectors_Success(t *testing.T) {
+	t.Parallel()
 	repo := &fakeDenseIDRepo{ids: map[string]uint64{}, errs: map[string]error{}, next: 10}
 	idmapSvc := idmap.NewService(repo)
 	called := false
-	qdrantUpsertDenseFn = func(_ context.Context, _ *qdrant.Client, points *qdrant.UpsertPoints) error {
+	client := &fakeDenseClient{t: t, upsert: func(points *qdrant.UpsertPoints) (*qdrant.UpdateResult, error) {
 		called = true
 		if points.CollectionName != "ns_objects_dense" {
 			t.Fatalf("unexpected collection: %s", points.CollectionName)
@@ -267,10 +297,10 @@ func TestUpsertItemDenseVectors_Success(t *testing.T) {
 		if len(points.Points) != 2 {
 			t.Fatalf("expected 2 points, got %d", len(points.Points))
 		}
-		return nil
-	}
+		return nil, nil
+	}}
 
-	err := UpsertItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
+	err := UpsertItemDenseVectors(leasedCtx("ns"), client, idmapSvc, "ns", "item2vec", map[string][]float32{
 		"obj-1": {0.1, 0.2},
 		"obj-2": {0.3, 0.4},
 	}, map[string]string{"obj-1": "2026-07-01T00:00:00Z"})
@@ -283,22 +313,20 @@ func TestUpsertItemDenseVectors_Success(t *testing.T) {
 }
 
 func TestUpsertSubjectDenseVectors_SkipsIDMappingErrors(t *testing.T) {
-	orig := qdrantUpsertDenseFn
-	t.Cleanup(func() { qdrantUpsertDenseFn = orig })
-
+	t.Parallel()
 	repo := &fakeDenseIDRepo{
 		ids:  map[string]uint64{"sub-1": 1},
 		errs: map[string]error{"sub-bad": errors.New("mapping failed")},
 	}
 	idmapSvc := idmap.NewService(repo)
-	qdrantUpsertDenseFn = func(_ context.Context, _ *qdrant.Client, points *qdrant.UpsertPoints) error {
+	client := &fakeDenseClient{t: t, upsert: func(points *qdrant.UpsertPoints) (*qdrant.UpdateResult, error) {
 		if len(points.Points) != 1 {
 			t.Fatalf("expected 1 point after skipping bad id, got %d", len(points.Points))
 		}
-		return nil
-	}
+		return nil, nil
+	}}
 
-	err := UpsertSubjectDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", "item2vec", map[string][]float32{
+	err := UpsertSubjectDenseVectors(leasedCtx("ns"), client, idmapSvc, "ns", "item2vec", map[string][]float32{
 		"sub-1":   {0.1, 0.2},
 		"sub-bad": {0.3, 0.4},
 	})
@@ -308,16 +336,14 @@ func TestUpsertSubjectDenseVectors_SkipsIDMappingErrors(t *testing.T) {
 }
 
 func TestUpsertDenseVectors_UpsertError(t *testing.T) {
-	orig := qdrantUpsertDenseFn
-	t.Cleanup(func() { qdrantUpsertDenseFn = orig })
-
+	t.Parallel()
 	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 1}, errs: map[string]error{}}
 	idmapSvc := idmap.NewService(repo)
-	qdrantUpsertDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.UpsertPoints) error {
-		return errors.New("upsert failed")
-	}
+	client := &fakeDenseClient{t: t, upsert: func(_ *qdrant.UpsertPoints) (*qdrant.UpdateResult, error) {
+		return nil, errors.New("upsert failed")
+	}}
 
-	err := upsertDenseVectors(context.Background(), nil, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", map[string][]float32{
+	err := upsertDenseVectors(context.Background(), client, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", map[string][]float32{
 		"obj-1": {0.1, 0.2},
 	}, nil)
 	if err == nil {
@@ -348,12 +374,10 @@ func densePoint(numID uint64, vec []float32) *qdrant.RetrievedPoint {
 }
 
 func TestFetchItemDenseVectors_Success(t *testing.T) {
-	orig := qdrantGetDenseFn
-	t.Cleanup(func() { qdrantGetDenseFn = orig })
-
+	t.Parallel()
 	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 7, "obj-2": 8}, errs: map[string]error{}}
 	idmapSvc := idmap.NewService(repo)
-	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	client := &fakeDenseClient{t: t, get: func(req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
 		if req.CollectionName != "ns_objects_dense" {
 			t.Fatalf("unexpected collection: %s", req.CollectionName)
 		}
@@ -364,9 +388,9 @@ func TestFetchItemDenseVectors_Success(t *testing.T) {
 			densePoint(7, []float32{0.1, 0.2}),
 			densePoint(8, []float32{0.3, 0.4}),
 		}, nil
-	}
+	}}
 
-	got, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", []string{"obj-2", "obj-1"})
+	got, err := FetchItemDenseVectors(leasedCtx("ns"), client, idmapSvc, "ns", []string{"obj-2", "obj-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -384,16 +408,14 @@ func TestFetchItemDenseVectors_Success(t *testing.T) {
 // Objects the embedder has not written yet come back as missing points; they
 // must be absent from the result rather than an error.
 func TestFetchItemDenseVectors_MissingPointsOmitted(t *testing.T) {
-	orig := qdrantGetDenseFn
-	t.Cleanup(func() { qdrantGetDenseFn = orig })
-
+	t.Parallel()
 	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 7, "obj-2": 8}, errs: map[string]error{}}
 	idmapSvc := idmap.NewService(repo)
-	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	client := &fakeDenseClient{t: t, get: func(_ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
 		return []*qdrant.RetrievedPoint{densePoint(7, []float32{0.1, 0.2})}, nil
-	}
+	}}
 
-	got, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", []string{"obj-1", "obj-2"})
+	got, err := FetchItemDenseVectors(leasedCtx("ns"), client, idmapSvc, "ns", []string{"obj-1", "obj-2"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -406,29 +428,24 @@ func TestFetchItemDenseVectors_MissingPointsOmitted(t *testing.T) {
 }
 
 func TestFetchItemDenseVectors_GetError(t *testing.T) {
-	orig := qdrantGetDenseFn
-	t.Cleanup(func() { qdrantGetDenseFn = orig })
-
+	t.Parallel()
 	repo := &fakeDenseIDRepo{ids: map[string]uint64{"obj-1": 7}, errs: map[string]error{}}
 	idmapSvc := idmap.NewService(repo)
-	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
+	client := &fakeDenseClient{t: t, get: func(_ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
 		return nil, errors.New("qdrant down")
-	}
+	}}
 
-	if _, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmapSvc, "ns", []string{"obj-1"}); err == nil {
+	if _, err := FetchItemDenseVectors(leasedCtx("ns"), client, idmapSvc, "ns", []string{"obj-1"}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
 func TestFetchItemDenseVectors_EmptyIsNoOp(t *testing.T) {
-	orig := qdrantGetDenseFn
-	t.Cleanup(func() { qdrantGetDenseFn = orig })
-	qdrantGetDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-		t.Fatal("qdrant get should not be called for an empty id list")
-		return nil, nil
-	}
+	t.Parallel()
+	// A nil get fn fails the test if the fetch reaches Qdrant at all.
+	client := &fakeDenseClient{t: t}
 
-	got, err := FetchItemDenseVectors(leasedCtx("ns"), nil, idmap.NewService(
+	got, err := FetchItemDenseVectors(leasedCtx("ns"), client, idmap.NewService(
 		&fakeDenseIDRepo{ids: map[string]uint64{}, errs: map[string]error{}}), "ns", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -439,26 +456,19 @@ func TestFetchItemDenseVectors_EmptyIsNoOp(t *testing.T) {
 }
 
 func TestUpsertDenseVectors_EmptyIsNoOp(t *testing.T) {
-	orig := qdrantUpsertDenseFn
-	t.Cleanup(func() { qdrantUpsertDenseFn = orig })
-
+	t.Parallel()
 	repo := &fakeDenseIDRepo{ids: map[string]uint64{}, errs: map[string]error{}}
 	idmapSvc := idmap.NewService(repo)
-	called := false
-	qdrantUpsertDenseFn = func(_ context.Context, _ *qdrant.Client, _ *qdrant.UpsertPoints) error {
-		called = true
-		return nil
-	}
+	// A nil upsert fn fails the test if the empty upsert reaches Qdrant.
+	client := &fakeDenseClient{t: t}
 
-	if err := upsertDenseVectors(context.Background(), nil, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", nil, nil); err != nil {
+	if err := upsertDenseVectors(context.Background(), client, idmapSvc, "ns_objects_dense", "ns", "object", "item2vec", nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	if called {
-		t.Fatal("expected no qdrant upsert for empty vectors")
 	}
 }
 
 func TestSVDEmbeddings_EmptyReturnsNil(t *testing.T) {
+	t.Parallel()
 	vecs, err := SVDEmbeddings(nil, 4, defaultLambda)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -469,6 +479,7 @@ func TestSVDEmbeddings_EmptyReturnsNil(t *testing.T) {
 }
 
 func TestSVDEmbeddings_MatrixTooLargeReturnsError(t *testing.T) {
+	t.Parallel()
 	events := make([]*RawEvent, 0, 10001)
 	for i := 0; i < 10001; i++ {
 		events = append(events, &RawEvent{

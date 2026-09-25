@@ -32,6 +32,38 @@ type jobComputeRepo interface {
 	GetActiveNamespaces(ctx context.Context) ([]string, error)
 	GetAllNamespaceEvents(ctx context.Context, namespace string) ([]*RawEvent, error)
 	GetNamespaceEventsInWindow(ctx context.Context, namespace string, windowHours int) ([]*RawEvent, error)
+	HasAnyEvents(ctx context.Context, namespace string) (bool, error)
+	FinalizeOrphanRuns(ctx context.Context, cutoff time.Time) (int64, error)
+}
+
+// computeLocks is the cross-process advisory locking surface the job needs.
+// *Repository implements it directly. A Job with a nil computeLocks (unit
+// tests) runs unlocked.
+type computeLocks interface {
+	TryLockNamespace(ctx context.Context, namespace string) (release func(), ok bool, err error)
+	LockNamespace(ctx context.Context, namespace string) (release func(), err error)
+	LockAllNamespaces(ctx context.Context) (release func(), err error)
+}
+
+// vectorStore groups the Qdrant collection management and dense-vector
+// operations the batch phases perform. The production implementation is
+// [qdrantVectorStore], which resolves generation-addressed physical
+// collection names from the namespace lifecycle lease carried in ctx.
+type vectorStore interface {
+	EnsureCollections(ctx context.Context, ns string) error
+	EnsureDenseCollections(ctx context.Context, ns string, dim uint64, distance string) error
+	UpsertItemDense(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error
+	UpsertSubjectDense(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
+	CleanupItemDense(ctx context.Context, ns string, keepIDs []string) (removed int, err error)
+	CleanupSubjectDense(ctx context.Context, ns string, keepIDs []string) (removed int, err error)
+	FetchItemDense(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error)
+}
+
+// trendingStore persists per-namespace trending scores. The production
+// implementation is [redisTrendingStore], which addresses the leased
+// generation's Redis key. A Job with a nil trendingStore skips phase 3.
+type trendingStore interface {
+	StoreTrending(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error
 }
 
 // PhaseResult holds per-phase metrics captured during a batch run.
@@ -81,27 +113,17 @@ type Job struct {
 	nsConfigSvc jobNsConfigReader
 	repo        jobComputeRepo
 	batchLog    batchLogger
-	redis       *goredis.Client
 	interval    time.Duration
 	observer    BatchRunObserver // optional; nil = no-op
 	lifecycle   interface {
 		WithWriter(context.Context, string, func(context.Context, *nslifecycle.NamespaceLifecycle) error) error
 	}
 
-	// injectable for testing — wired to real implementations in NewJob
-	tryLockFn                func(ctx context.Context, ns string) (release func(), ok bool, err error)
-	lockFn                   func(ctx context.Context, ns string) (release func(), err error)
-	lockAllFn                func(ctx context.Context) (release func(), err error)
-	finalizeOrphansFn        func(ctx context.Context, cutoff time.Time) (int64, error)
-	hasAnyEventsFn           func(ctx context.Context, ns string) (bool, error)
-	ensureCollectionsFn      func(ctx context.Context, ns string) error
-	ensureDenseCollectionsFn func(ctx context.Context, ns string, dim uint64, distance string) error
-	upsertItemDenseFn        func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error
-	upsertSubjectDenseFn     func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
-	cleanupItemDenseFn       func(ctx context.Context, ns string, keepIDs []string) (int, error)
-	cleanupSubjectDenseFn    func(ctx context.Context, ns string, keepIDs []string) (int, error)
-	fetchItemDenseFn         func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error)
-	storeTrendingFn          func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error
+	// Collaborators grouped by responsibility — wired to the production
+	// adapters below in NewJob, to fakes in unit tests.
+	locks    computeLocks  // nil = run unlocked (unit tests)
+	vectors  vectorStore   // Qdrant collections + dense vectors
+	trending trendingStore // nil = phase 3 skipped (no Redis)
 }
 
 // SetObserver attaches a BatchRunObserver — the admin bridge wires this to
@@ -120,56 +142,88 @@ func (j *Job) SetLifecycleWriter(writer interface {
 // NewJob creates a new Job with the given run interval in minutes.
 // redisClient may be nil; Phase 3 (trending) is skipped when it is.
 func NewJob(service *Service, nsConfigSvc jobNsConfigReader, repo *Repository, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, redisClient *goredis.Client, intervalMinutes int) *Job {
-	return &Job{
+	j := &Job{
 		service:     service,
 		nsConfigSvc: nsConfigSvc,
 		batchLog:    repo,
 		repo:        repo,
-		redis:       redisClient,
 		interval:    time.Duration(intervalMinutes) * time.Minute,
-
-		tryLockFn:         repo.TryLockNamespace,
-		lockFn:            repo.LockNamespace,
-		lockAllFn:         repo.LockAllNamespaces,
-		finalizeOrphansFn: repo.FinalizeOrphanRuns,
-		hasAnyEventsFn:    repo.HasAnyEvents,
-		ensureCollectionsFn: func(ctx context.Context, ns string) error {
-			inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
-			if !ok {
-				return fmt.Errorf("ensure collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
-			}
-			return infraqdrant.EnsureCollections(ctx, qdrantClient, inc)
-		},
-		ensureDenseCollectionsFn: func(ctx context.Context, ns string, dim uint64, distance string) error {
-			inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
-			if !ok {
-				return fmt.Errorf("ensure dense collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
-			}
-			return infraqdrant.EnsureDenseCollections(ctx, qdrantClient, inc, dim, distance)
-		},
-		upsertItemDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
-			return UpsertItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs, createdAt)
-		},
-		upsertSubjectDenseFn: func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
-			return UpsertSubjectDenseVectors(ctx, qdrantClient, idmapSvc, ns, strategy, vecs)
-		},
-		cleanupItemDenseFn: func(ctx context.Context, ns string, keepIDs []string) (int, error) {
-			return CleanupStaleItemDensePoints(ctx, qdrantClient, idmapSvc, ns, keepIDs)
-		},
-		cleanupSubjectDenseFn: func(ctx context.Context, ns string, keepIDs []string) (int, error) {
-			return CleanupStaleSubjectDensePoints(ctx, qdrantClient, idmapSvc, ns, keepIDs)
-		},
-		fetchItemDenseFn: func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error) {
-			return FetchItemDenseVectors(ctx, qdrantClient, idmapSvc, ns, objectIDs)
-		},
-		storeTrendingFn: func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
-			generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
-			if !ok {
-				return fmt.Errorf("store trending for %q: %w", ns, nslifecycle.ErrLeaseRequired)
-			}
-			return infraredis.StoreTrending(ctx, redisClient, ns, generation, scores, ttl)
-		},
+		locks:       repo,
+		vectors:     &qdrantVectorStore{client: qdrantClient, idmap: idmapSvc},
 	}
+	if redisClient != nil {
+		j.trending = &redisTrendingStore{rdb: redisClient}
+	}
+	return j
+}
+
+// qdrantVectorStore is the production vectorStore. Every operation is fenced
+// by the namespace lifecycle lease carried in ctx: the physical collection
+// names are generation-addressed, and a missing lease fails with
+// [nslifecycle.ErrLeaseRequired] rather than silently addressing generation 1
+// — that would write into the collections of a deleted incarnation.
+type qdrantVectorStore struct {
+	client *qdrant.Client
+	idmap  idmapService
+}
+
+// EnsureCollections creates the leased generation's sparse collections if absent.
+func (s *qdrantVectorStore) EnsureCollections(ctx context.Context, ns string) error {
+	inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
+	if !ok {
+		return fmt.Errorf("ensure collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
+	}
+	return infraqdrant.EnsureCollections(ctx, s.client, inc)
+}
+
+// EnsureDenseCollections creates the leased generation's dense collections if absent.
+func (s *qdrantVectorStore) EnsureDenseCollections(ctx context.Context, ns string, dim uint64, distance string) error {
+	inc, ok := nslifecycle.LeaseIncarnation(ctx, ns)
+	if !ok {
+		return fmt.Errorf("ensure dense collections for %q: %w", ns, nslifecycle.ErrLeaseRequired)
+	}
+	return infraqdrant.EnsureDenseCollections(ctx, s.client, inc, dim, distance)
+}
+
+// UpsertItemDense writes item dense vectors into {ns}_objects_dense.
+func (s *qdrantVectorStore) UpsertItemDense(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
+	return UpsertItemDenseVectors(ctx, s.client, s.idmap, ns, strategy, vecs, createdAt)
+}
+
+// UpsertSubjectDense writes subject dense vectors into {ns}_subjects_dense.
+func (s *qdrantVectorStore) UpsertSubjectDense(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
+	return UpsertSubjectDenseVectors(ctx, s.client, s.idmap, ns, strategy, vecs)
+}
+
+// CleanupItemDense removes {ns}_objects_dense points outside keepIDs.
+func (s *qdrantVectorStore) CleanupItemDense(ctx context.Context, ns string, keepIDs []string) (int, error) {
+	return CleanupStaleItemDensePoints(ctx, s.client, s.idmap, ns, keepIDs)
+}
+
+// CleanupSubjectDense removes {ns}_subjects_dense points outside keepIDs.
+func (s *qdrantVectorStore) CleanupSubjectDense(ctx context.Context, ns string, keepIDs []string) (int, error) {
+	return CleanupStaleSubjectDensePoints(ctx, s.client, s.idmap, ns, keepIDs)
+}
+
+// FetchItemDense reads back stored item dense vectors for the given objects.
+func (s *qdrantVectorStore) FetchItemDense(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error) {
+	return FetchItemDenseVectors(ctx, s.client, s.idmap, ns, objectIDs)
+}
+
+// redisTrendingStore is the production trendingStore. It derives the leased
+// generation from ctx so trending keys stay generation-addressed, and fails
+// with [nslifecycle.ErrLeaseRequired] without a lease.
+type redisTrendingStore struct {
+	rdb *goredis.Client
+}
+
+// StoreTrending writes the namespace's trending scores under the leased generation's key.
+func (s *redisTrendingStore) StoreTrending(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
+	generation, ok := nslifecycle.LeaseGeneration(ctx, ns)
+	if !ok {
+		return fmt.Errorf("store trending for %q: %w", ns, nslifecycle.ErrLeaseRequired)
+	}
+	return infraredis.StoreTrending(ctx, s.rdb, ns, generation, scores, ttl)
 }
 
 // Run starts the batch job on the configured interval (blocking).
@@ -205,12 +259,10 @@ func (j *Job) runOnce(ctx context.Context) {
 
 	// Close rows abandoned by a crashed/redeployed process; without this,
 	// phantom "running" rows block retry (409) until retention deletes them.
-	if j.finalizeOrphansFn != nil {
-		if n, err := j.finalizeOrphansFn(ctx, time.Now().Add(-orphanRunCutoff)); err != nil {
-			slog.Warn("finalize orphan batch runs failed", "error", err)
-		} else if n > 0 {
-			slog.Warn("finalized orphaned batch runs", "count", n)
-		}
+	if n, err := j.repo.FinalizeOrphanRuns(ctx, time.Now().Add(-orphanRunCutoff)); err != nil {
+		slog.Warn("finalize orphan batch runs failed", "error", err)
+	} else if n > 0 {
+		slog.Warn("finalized orphaned batch runs", "count", n)
 	}
 
 	namespaces, err := j.repo.GetActiveNamespaces(ctx)
@@ -339,13 +391,13 @@ func (j *Job) StartNamespaceRun(ctx context.Context, ns string, triggerSource ba
 	return logID, nil
 }
 
-// tryLock delegates to the injected lock fn; a Job built without one (unit
+// tryLock delegates to the locks collaborator; a Job built without one (unit
 // tests) runs unlocked.
 func (j *Job) tryLock(ctx context.Context, ns string) (release func(), ok bool, err error) {
-	if j.tryLockFn == nil {
+	if j.locks == nil {
 		return func() {}, true, nil
 	}
-	return j.tryLockFn(ctx, ns)
+	return j.locks.TryLockNamespace(ctx, ns)
 }
 
 // LockNamespace acquires the namespace compute lock, blocking until the
@@ -353,20 +405,20 @@ func (j *Job) tryLock(ctx context.Context, ns string) (release func(), ok bool, 
 // namespace wipe takes this before deleting so a run in flight can never
 // re-upsert Qdrant collections after the wipe finishes.
 func (j *Job) LockNamespace(ctx context.Context, ns string) (release func(), err error) {
-	if j.lockFn == nil {
+	if j.locks == nil {
 		return func() {}, nil
 	}
-	return j.lockFn(ctx, ns)
+	return j.locks.LockNamespace(ctx, ns)
 }
 
 // LockAllNamespaces acquires the exclusive compute maintenance lock. Every
 // namespace run holds the shared form, so acquisition waits for active runs
 // to finish and blocks new ones until release.
 func (j *Job) LockAllNamespaces(ctx context.Context) (release func(), err error) {
-	if j.lockAllFn == nil {
+	if j.locks == nil {
 		return func() {}, nil
 	}
-	return j.lockAllFn(ctx)
+	return j.locks.LockAllNamespaces(ctx)
 }
 
 // runNamespaceLocked executes the three phases and finalizes the run row.
@@ -437,7 +489,7 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		cancelled = true
 	}
 
-	if !cancelled && j.redis != nil {
+	if !cancelled && j.trending != nil {
 		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", log, func() (int, error) {
 			return j.runPhase3Trending(ctx, ns, cfg, log)
 		})
@@ -572,7 +624,7 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, l
 	// is nothing to write and nothing to sweep, and creating its collections
 	// anyway would leave four empty Qdrant collections behind for every
 	// namespace that was merely configured.
-	seen, err := j.hasAnyEventsFn(ctx, ns)
+	seen, err := j.repo.HasAnyEvents(ctx, ns)
 	if err != nil {
 		return 0, 0, fmt.Errorf("check namespace events: %w", err)
 	}
@@ -581,7 +633,7 @@ func (j *Job) runPhase1(ctx context.Context, ns string, cfg *namespace.Config, l
 		return 0, 0, nil
 	}
 
-	if err := j.ensureCollectionsFn(ctx, ns); err != nil {
+	if err := j.vectors.EnsureCollections(ctx, ns); err != nil {
 		return 0, 0, fmt.Errorf("ensure collections: %w", err)
 	}
 	log.Info("Qdrant collections ensured")
@@ -650,7 +702,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	// dense state to write and none to clear, so creating its collections would
 	// only leave empty ones behind. A namespace whose events merely aged out
 	// still passes this gate and reaches the cleanup below.
-	seen, err := j.hasAnyEventsFn(ctx, ns)
+	seen, err := j.repo.HasAnyEvents(ctx, ns)
 	if err != nil {
 		return 0, 0, fmt.Errorf("check namespace events: %w", err)
 	}
@@ -668,7 +720,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		distance = "cosine"
 	}
 
-	if err := j.ensureDenseCollectionsFn(ctx, ns, uint64(embeddingDim), distance); err != nil {
+	if err := j.vectors.EnsureDenseCollections(ctx, ns, uint64(embeddingDim), distance); err != nil {
 		return 0, 0, fmt.Errorf("ensure dense collections: %w", err)
 	}
 
@@ -677,15 +729,13 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		return 0, 0, fmt.Errorf("get namespace events: %w", err)
 	}
 	if len(events) == 0 {
-		if (cfg.DenseSource == codohuetypes.DenseSourceItem2Vec || cfg.DenseSource == codohuetypes.DenseSourceSVD) && j.cleanupItemDenseFn != nil {
-			if _, err := j.cleanupItemDenseFn(ctx, ns, nil); err != nil {
+		if cfg.DenseSource == codohuetypes.DenseSourceItem2Vec || cfg.DenseSource == codohuetypes.DenseSourceSVD {
+			if _, err := j.vectors.CleanupItemDense(ctx, ns, nil); err != nil {
 				return 0, 0, fmt.Errorf("clear item dense vectors: %w", err)
 			}
 		}
-		if j.cleanupSubjectDenseFn != nil {
-			if _, err := j.cleanupSubjectDenseFn(ctx, ns, nil); err != nil {
-				return 0, 0, fmt.Errorf("clear subject dense vectors: %w", err)
-			}
+		if _, err := j.vectors.CleanupSubjectDense(ctx, ns, nil); err != nil {
+			return 0, 0, fmt.Errorf("clear subject dense vectors: %w", err)
 		}
 		slog.Info("phase 2: no events, cleared compute-owned dense state", "namespace", ns)
 		log.Info("no events — compute-owned dense state cleared")
@@ -725,7 +775,7 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		// load exactly those rather than scanning the whole collection.
 		trained = false
 		interacted := interactedObjectIDs(events)
-		itemVecs, err = j.fetchItemDenseFn(ctx, ns, interacted)
+		itemVecs, err = j.vectors.FetchItemDense(ctx, ns, interacted)
 		if err != nil {
 			return 0, 0, fmt.Errorf("fetch catalog item dense vectors: %w", err)
 		}
@@ -743,15 +793,13 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 			slog.Warn("phase 2: no catalog item vectors available yet", "namespace", ns)
 			log.Warn("no catalog embeddings for interacted items yet — subject vectors unchanged")
 		}
-		if trained && j.cleanupItemDenseFn != nil {
-			if _, err := j.cleanupItemDenseFn(ctx, ns, nil); err != nil {
+		if trained {
+			if _, err := j.vectors.CleanupItemDense(ctx, ns, nil); err != nil {
 				return 0, 0, fmt.Errorf("clear item dense vectors: %w", err)
 			}
 		}
-		if j.cleanupSubjectDenseFn != nil {
-			if _, err := j.cleanupSubjectDenseFn(ctx, ns, nil); err != nil {
-				return 0, 0, fmt.Errorf("clear subject dense vectors: %w", err)
-			}
+		if _, err := j.vectors.CleanupSubjectDense(ctx, ns, nil); err != nil {
+			return 0, 0, fmt.Errorf("clear subject dense vectors: %w", err)
 		}
 		return 0, 0, nil
 	}
@@ -761,14 +809,14 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 		// created_at mirrors phase 1's sparse payload rule (explicit
 		// object_created_at, else newest occurred_at) so the γ-freshness
 		// rerank decays dense-only items the same way as sparse ones.
-		if err := j.upsertItemDenseFn(ctx, ns, cfg.DenseSource, itemVecs, objectCreatedAtLookup(events)); err != nil {
+		if err := j.vectors.UpsertItemDense(ctx, ns, cfg.DenseSource, itemVecs, objectCreatedAtLookup(events)); err != nil {
 			return 0, 0, fmt.Errorf("upsert item dense vectors: %w", err)
 		}
 	}
 
 	subjectVecs := UserDenseVectors(events, itemVecs)
 	if len(subjectVecs) > 0 {
-		if err := j.upsertSubjectDenseFn(ctx, ns, cfg.DenseSource, subjectVecs); err != nil {
+		if err := j.vectors.UpsertSubjectDense(ctx, ns, cfg.DenseSource, subjectVecs); err != nil {
 			return 0, 0, fmt.Errorf("upsert subject dense vectors: %w", err)
 		}
 	}
@@ -784,19 +832,15 @@ func (j *Job) runPhase2Dense(ctx context.Context, ns string, cfg *namespace.Conf
 	// items happen to be embedded — deleting the rest would drop vectors
 	// that are still valid. Best-effort, like the phase 1 sweep.
 	if trained {
-		if j.cleanupItemDenseFn != nil {
-			if n, err := j.cleanupItemDenseFn(ctx, ns, mapKeys(itemVecs)); err != nil {
-				slog.Warn("stale item dense cleanup failed", "namespace", ns, "error", err)
-			} else if n > 0 {
-				log.Info(fmt.Sprintf("removed %d stale item dense vectors", n))
-			}
+		if n, err := j.vectors.CleanupItemDense(ctx, ns, mapKeys(itemVecs)); err != nil {
+			slog.Warn("stale item dense cleanup failed", "namespace", ns, "error", err)
+		} else if n > 0 {
+			log.Info(fmt.Sprintf("removed %d stale item dense vectors", n))
 		}
-		if j.cleanupSubjectDenseFn != nil {
-			if n, err := j.cleanupSubjectDenseFn(ctx, ns, mapKeys(subjectVecs)); err != nil {
-				slog.Warn("stale subject dense cleanup failed", "namespace", ns, "error", err)
-			} else if n > 0 {
-				log.Info(fmt.Sprintf("removed %d stale subject dense vectors", n))
-			}
+		if n, err := j.vectors.CleanupSubjectDense(ctx, ns, mapKeys(subjectVecs)); err != nil {
+			slog.Warn("stale subject dense cleanup failed", "namespace", ns, "error", err)
+		} else if n > 0 {
+			log.Info(fmt.Sprintf("removed %d stale subject dense vectors", n))
 		}
 	}
 
@@ -838,7 +882,7 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.C
 		return 0, fmt.Errorf("get events in window: %w", err)
 	}
 	if len(events) == 0 {
-		if err := j.storeTrendingFn(ctx, ns, map[string]float64{}, time.Duration(ttlSeconds)*time.Second); err != nil {
+		if err := j.trending.StoreTrending(ctx, ns, map[string]float64{}, time.Duration(ttlSeconds)*time.Second); err != nil {
 			return 0, fmt.Errorf("clear trending: %w", err)
 		}
 		slog.Info("phase 3 trending: no events in window; stale state cleared", "namespace", ns, "window_hours", windowHours)
@@ -854,7 +898,7 @@ func (j *Job) runPhase3Trending(ctx context.Context, ns string, cfg *namespace.C
 	}
 
 	ttl := time.Duration(ttlSeconds) * time.Second
-	if err := j.storeTrendingFn(ctx, ns, scores, ttl); err != nil {
+	if err := j.trending.StoreTrending(ctx, ns, scores, ttl); err != nil {
 		return 0, fmt.Errorf("store trending: %w", err)
 	}
 	log.Info(fmt.Sprintf("stored %d trending items to Redis (TTL: %ds)", len(scores), ttlSeconds))

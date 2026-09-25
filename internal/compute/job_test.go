@@ -43,6 +43,11 @@ type fakeJobRepo struct {
 	namespaces []string
 	events     []*RawEvent
 	err        error
+
+	// hasEvents defaults to "the namespace has seen traffic"; the tests
+	// covering the never-used case override it.
+	hasEvents       func(ctx context.Context, ns string) (bool, error)
+	finalizeOrphans func(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
 func (f *fakeJobRepo) GetActiveNamespaces(_ context.Context) ([]string, error) {
@@ -57,42 +62,137 @@ func (f *fakeJobRepo) GetNamespaceEventsInWindow(_ context.Context, _ string, _ 
 	return f.events, f.err
 }
 
-// newTestJob builds a Job with all infra calls replaced by no-op fns.
+func (f *fakeJobRepo) HasAnyEvents(ctx context.Context, ns string) (bool, error) {
+	if f.hasEvents != nil {
+		return f.hasEvents(ctx, ns)
+	}
+	return true, nil
+}
+
+func (f *fakeJobRepo) FinalizeOrphanRuns(ctx context.Context, cutoff time.Time) (int64, error) {
+	if f.finalizeOrphans != nil {
+		return f.finalizeOrphans(ctx, cutoff)
+	}
+	return 0, nil
+}
+
+// fakeVectorStore implements vectorStore with per-operation overrides; a nil
+// field is a no-op.
+type fakeVectorStore struct {
+	ensureCollections      func(ctx context.Context, ns string) error
+	ensureDenseCollections func(ctx context.Context, ns string, dim uint64, distance string) error
+	upsertItemDense        func(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error
+	upsertSubjectDense     func(ctx context.Context, ns, strategy string, vecs map[string][]float32) error
+	cleanupItemDense       func(ctx context.Context, ns string, keepIDs []string) (int, error)
+	cleanupSubjectDense    func(ctx context.Context, ns string, keepIDs []string) (int, error)
+	fetchItemDense         func(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error)
+}
+
+func (f *fakeVectorStore) EnsureCollections(ctx context.Context, ns string) error {
+	if f.ensureCollections != nil {
+		return f.ensureCollections(ctx, ns)
+	}
+	return nil
+}
+
+func (f *fakeVectorStore) EnsureDenseCollections(ctx context.Context, ns string, dim uint64, distance string) error {
+	if f.ensureDenseCollections != nil {
+		return f.ensureDenseCollections(ctx, ns, dim, distance)
+	}
+	return nil
+}
+
+func (f *fakeVectorStore) UpsertItemDense(ctx context.Context, ns, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
+	if f.upsertItemDense != nil {
+		return f.upsertItemDense(ctx, ns, strategy, vecs, createdAt)
+	}
+	return nil
+}
+
+func (f *fakeVectorStore) UpsertSubjectDense(ctx context.Context, ns, strategy string, vecs map[string][]float32) error {
+	if f.upsertSubjectDense != nil {
+		return f.upsertSubjectDense(ctx, ns, strategy, vecs)
+	}
+	return nil
+}
+
+func (f *fakeVectorStore) CleanupItemDense(ctx context.Context, ns string, keepIDs []string) (int, error) {
+	if f.cleanupItemDense != nil {
+		return f.cleanupItemDense(ctx, ns, keepIDs)
+	}
+	return 0, nil
+}
+
+func (f *fakeVectorStore) CleanupSubjectDense(ctx context.Context, ns string, keepIDs []string) (int, error) {
+	if f.cleanupSubjectDense != nil {
+		return f.cleanupSubjectDense(ctx, ns, keepIDs)
+	}
+	return 0, nil
+}
+
+func (f *fakeVectorStore) FetchItemDense(ctx context.Context, ns string, objectIDs []string) (map[string][]float32, error) {
+	if f.fetchItemDense != nil {
+		return f.fetchItemDense(ctx, ns, objectIDs)
+	}
+	return nil, nil
+}
+
+// fakeLocks implements computeLocks; only tryLock is overridable because the
+// blocking variants are exercised through the admin plane, not these tests.
+type fakeLocks struct {
+	tryLock func(ctx context.Context, ns string) (func(), bool, error)
+}
+
+func (f *fakeLocks) TryLockNamespace(ctx context.Context, ns string) (func(), bool, error) {
+	return f.tryLock(ctx, ns)
+}
+
+func (f *fakeLocks) LockNamespace(context.Context, string) (func(), error) {
+	return func() {}, nil
+}
+
+func (f *fakeLocks) LockAllNamespaces(context.Context) (func(), error) {
+	return func() {}, nil
+}
+
+// trendingStoreFunc adapts a bare function to the trendingStore interface.
+type trendingStoreFunc func(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error
+
+func (f trendingStoreFunc) StoreTrending(ctx context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
+	return f(ctx, ns, scores, ttl)
+}
+
+// vs returns the fake vector store newTestJob installed, for per-test overrides.
+func vs(j *Job) *fakeVectorStore { return j.vectors.(*fakeVectorStore) }
+
+// newTestJob builds a Job with fake collaborators: unlocked (nil locks), a
+// no-op vector store, and no trending store (phase 3 skipped by default).
 func newTestJob(svc recomputer, nsCfg jobNsConfigReader, repo jobComputeRepo) *Job {
-	noErr := func(...any) error { return nil }
-	_ = noErr
 	return &Job{
 		service:     svc,
 		nsConfigSvc: nsCfg,
 		repo:        repo,
-		redis:       nil, // phase 3 skipped by default
-
-		// Default to a namespace that has seen traffic; the tests covering the
-		// never-used case override this.
-		hasAnyEventsFn:           func(_ context.Context, _ string) (bool, error) { return true, nil },
-		ensureCollectionsFn:      func(_ context.Context, _ string) error { return nil },
-		ensureDenseCollectionsFn: func(_ context.Context, _ string, _ uint64, _ string) error { return nil },
-		upsertItemDenseFn:        func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error { return nil },
-		upsertSubjectDenseFn:     func(_ context.Context, _, _ string, _ map[string][]float32) error { return nil },
-		fetchItemDenseFn: func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
-			return nil, nil
-		},
-		storeTrendingFn: func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error { return nil },
+		vectors:     &fakeVectorStore{},
 	}
 }
 
 // ─── interval ────────────────────────────────────────────────────────────────
 
 func TestNewJobInterval(t *testing.T) {
+	t.Parallel()
 	job := NewJob(nil, nil, nil, nil, nil, nil, 10)
 	if job.interval != 10*time.Minute {
 		t.Errorf("expected 10m interval, got %v", job.interval)
+	}
+	if job.locks == nil || job.vectors == nil {
+		t.Errorf("NewJob must wire the lock and vector collaborators, got locks=%v vectors=%v", job.locks, job.vectors)
 	}
 }
 
 // ─── runOnce: phase 1 ────────────────────────────────────────────────────────
 
 func TestRunOnce_Phase1_UsesConfigLambda(t *testing.T) {
+	t.Parallel()
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc,
 		&fakeNsConfigReader{cfg: &namespace.Config{Lambda: 0.02}},
@@ -110,6 +210,7 @@ func TestRunOnce_Phase1_UsesConfigLambda(t *testing.T) {
 }
 
 func TestRunOnce_Phase1_FallsBackToDefaultLambda(t *testing.T) {
+	t.Parallel()
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc,
 		&fakeNsConfigReader{cfg: nil}, // no config
@@ -124,6 +225,7 @@ func TestRunOnce_Phase1_FallsBackToDefaultLambda(t *testing.T) {
 }
 
 func TestRunOnce_Phase1_RepoError_Skips(t *testing.T) {
+	t.Parallel()
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc,
 		&fakeNsConfigReader{},
@@ -141,13 +243,14 @@ func TestRunOnce_Phase1_RepoError_Skips(t *testing.T) {
 // ─── runOnce: phase 2 dispatch ───────────────────────────────────────────────
 
 func TestRunOnce_Phase2_SkippedForBYOE(t *testing.T) {
+	t.Parallel()
 	phase2Called := false
 	job := newTestJob(
 		&fakeRecomputer{},
 		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "byoe"}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		phase2Called = true
 		return nil
 	}
@@ -160,13 +263,14 @@ func TestRunOnce_Phase2_SkippedForBYOE(t *testing.T) {
 }
 
 func TestRunOnce_Phase2_SkippedForDisabled(t *testing.T) {
+	t.Parallel()
 	phase2Called := false
 	job := newTestJob(
 		&fakeRecomputer{},
 		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "disabled"}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		phase2Called = true
 		return nil
 	}
@@ -182,6 +286,7 @@ func TestRunOnce_Phase2_SkippedForDisabled(t *testing.T) {
 // {ns}_subjects_dense — but it must not write back item vectors, which
 // cmd/embedder owns.
 func TestRunOnce_Phase2_CatalogPoolsSubjectsWithoutUpsertingItems(t *testing.T) {
+	t.Parallel()
 	itemUpsert := false
 	var subjectsUpserted map[string][]float32
 
@@ -196,7 +301,7 @@ func TestRunOnce_Phase2_CatalogPoolsSubjectsWithoutUpsertingItems(t *testing.T) 
 			},
 		},
 	)
-	job.fetchItemDenseFn = func(_ context.Context, _ string, objectIDs []string) (map[string][]float32, error) {
+	vs(job).fetchItemDense = func(_ context.Context, _ string, objectIDs []string) (map[string][]float32, error) {
 		if len(objectIDs) != 2 {
 			t.Errorf("expected 2 interacted object ids, got %v", objectIDs)
 		}
@@ -205,11 +310,11 @@ func TestRunOnce_Phase2_CatalogPoolsSubjectsWithoutUpsertingItems(t *testing.T) 
 			"o2": {2, 0},
 		}, nil
 	}
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		itemUpsert = true
 		return nil
 	}
-	job.upsertSubjectDenseFn = func(_ context.Context, _, _ string, vecs map[string][]float32) error {
+	vs(job).upsertSubjectDense = func(_ context.Context, _, _ string, vecs map[string][]float32) error {
 		subjectsUpserted = vecs
 		return nil
 	}
@@ -231,14 +336,15 @@ func TestRunOnce_Phase2_CatalogPoolsSubjectsWithoutUpsertingItems(t *testing.T) 
 // Interacted items that the embedder has not embedded yet yield no vectors —
 // the phase must no-op rather than wipe existing subject vectors.
 func TestRunPhase2Dense_CatalogNoEmbeddingsYet(t *testing.T) {
+	t.Parallel()
 	subjectUpsertCalled := false
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{
 		events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1}},
 	})
-	job.fetchItemDenseFn = func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
+	vs(job).fetchItemDense = func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
 		return map[string][]float32{}, nil
 	}
-	job.upsertSubjectDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	vs(job).upsertSubjectDense = func(_ context.Context, _, _ string, _ map[string][]float32) error {
 		subjectUpsertCalled = true
 		return nil
 	}
@@ -257,10 +363,11 @@ func TestRunPhase2Dense_CatalogNoEmbeddingsYet(t *testing.T) {
 }
 
 func TestRunPhase2Dense_CatalogFetchError(t *testing.T) {
+	t.Parallel()
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{
 		events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1}},
 	})
-	job.fetchItemDenseFn = func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
+	vs(job).fetchItemDense = func(_ context.Context, _ string, _ []string) (map[string][]float32, error) {
 		return nil, errors.New("qdrant down")
 	}
 
@@ -272,6 +379,7 @@ func TestRunPhase2Dense_CatalogFetchError(t *testing.T) {
 }
 
 func TestPhase2Runs(t *testing.T) {
+	t.Parallel()
 	for src, want := range map[string]bool{
 		"item2vec": true,
 		"svd":      true,
@@ -287,6 +395,7 @@ func TestPhase2Runs(t *testing.T) {
 }
 
 func TestInteractedObjectIDs(t *testing.T) {
+	t.Parallel()
 	got := interactedObjectIDs([]*RawEvent{
 		{SubjectID: "u1", ObjectID: "b"},
 		{SubjectID: "u2", ObjectID: "a"},
@@ -298,13 +407,14 @@ func TestInteractedObjectIDs(t *testing.T) {
 }
 
 func TestRunOnce_Phase2_SkippedWhenNoConfig(t *testing.T) {
+	t.Parallel()
 	phase2Called := false
 	job := newTestJob(
 		&fakeRecomputer{},
 		&fakeNsConfigReader{cfg: nil},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		phase2Called = true
 		return nil
 	}
@@ -318,27 +428,29 @@ func TestRunOnce_Phase2_SkippedWhenNoConfig(t *testing.T) {
 
 // ─── runOnce: phase 3 dispatch ───────────────────────────────────────────────
 
-func TestRunOnce_Phase3_SkippedWhenRedisNil(t *testing.T) {
-	phase3Called := false
+func TestRunOnce_Phase3_SkippedWithoutTrendingStore(t *testing.T) {
+	t.Parallel()
 	job := newTestJob(
 		&fakeRecomputer{},
 		&fakeNsConfigReader{cfg: &namespace.Config{TrendingWindow: 24}},
 		&fakeJobRepo{namespaces: []string{"ns1"}},
 	)
-	job.redis = nil // explicitly nil
-	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
-		phase3Called = true
-		return nil
-	}
+	job.trending = nil // the wiring NewJob produces for a nil Redis client
 
+	// If the phase-3 gate broke, runPhase3Trending would dereference the nil
+	// trending store on its empty-window clear and panic.
 	job.runOnce(context.Background())
+}
 
-	if phase3Called {
-		t.Error("phase 3 should be skipped when redis is nil")
+func TestNewJob_NilRedisLeavesTrendingUnset(t *testing.T) {
+	t.Parallel()
+	if j := NewJob(nil, nil, nil, nil, nil, nil, 1); j.trending != nil {
+		t.Fatal("a nil Redis client must leave the trending store unset so phase 3 is skipped")
 	}
 }
 
 func TestRunOnce_MultipleNamespaces_AllProcessed(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	svc := &fakeRecomputer{}
 	realSvc := svc
@@ -361,6 +473,7 @@ func TestRunOnce_MultipleNamespaces_AllProcessed(t *testing.T) {
 }
 
 func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "o1", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 		{SubjectID: "u1", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
@@ -377,7 +490,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 	itemCalled := false
 	subjectCalled := false
 
-	job.upsertItemDenseFn = func(_ context.Context, ns, strategy string, vecs map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, ns, strategy string, vecs map[string][]float32, _ map[string]string) error {
 		itemCalled = true
 		if ns != "ns1" || strategy != "item2vec" {
 			t.Fatalf("unexpected item upsert args: ns=%s strategy=%s", ns, strategy)
@@ -387,7 +500,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 		}
 		return nil
 	}
-	job.upsertSubjectDenseFn = func(_ context.Context, ns, strategy string, vecs map[string][]float32) error {
+	vs(job).upsertSubjectDense = func(_ context.Context, ns, strategy string, vecs map[string][]float32) error {
 		subjectCalled = true
 		if ns != "ns1" || strategy != "item2vec" {
 			t.Fatalf("unexpected subject upsert args: ns=%s strategy=%s", ns, strategy)
@@ -412,6 +525,7 @@ func TestRunPhase2Dense_Item2Vec_UpsertsItemAndSubjectVectors(t *testing.T) {
 }
 
 func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "o1", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 		{SubjectID: "u1", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
@@ -423,12 +537,12 @@ func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
 	var gotDistance string
 	itemCalled := false
 
-	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, dim uint64, distance string) error {
+	vs(job).ensureDenseCollections = func(_ context.Context, _ string, dim uint64, distance string) error {
 		gotDim = dim
 		gotDistance = distance
 		return nil
 	}
-	job.upsertItemDenseFn = func(_ context.Context, _, strategy string, vecs map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, strategy string, vecs map[string][]float32, _ map[string]string) error {
 		itemCalled = true
 		if strategy != "svd" {
 			t.Fatalf("strategy: got %s want svd", strategy)
@@ -456,14 +570,15 @@ func TestRunPhase2Dense_SVD_UsesConfigDimensionAndDistance(t *testing.T) {
 }
 
 func TestRunPhase2Dense_NoEvents_SkipsUpserts(t *testing.T) {
+	t.Parallel()
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{events: nil})
 	itemCalled := false
 	subjectCalled := false
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		itemCalled = true
 		return nil
 	}
-	job.upsertSubjectDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	vs(job).upsertSubjectDense = func(_ context.Context, _, _ string, _ map[string][]float32) error {
 		subjectCalled = true
 		return nil
 	}
@@ -478,8 +593,9 @@ func TestRunPhase2Dense_NoEvents_SkipsUpserts(t *testing.T) {
 }
 
 func TestRunPhase2Dense_EnsureDenseCollectionsFailure(t *testing.T) {
+	t.Parallel()
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	vs(job).ensureDenseCollections = func(_ context.Context, _ string, _ uint64, _ string) error {
 		return errors.New("ensure failed")
 	}
 
@@ -490,6 +606,7 @@ func TestRunPhase2Dense_EnsureDenseCollectionsFailure(t *testing.T) {
 }
 
 func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "o1", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 		{SubjectID: "u1", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
@@ -503,7 +620,7 @@ func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
 		{SubjectID: "u5", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 	}
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{events: events})
-	job.upsertItemDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
+	vs(job).upsertItemDense = func(_ context.Context, _, _ string, _ map[string][]float32, _ map[string]string) error {
 		return errors.New("item upsert failed")
 	}
 
@@ -514,6 +631,7 @@ func TestRunPhase2Dense_ItemUpsertFailure(t *testing.T) {
 }
 
 func TestRunPhase2Dense_SubjectUpsertFailure(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "o1", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 		{SubjectID: "u1", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
@@ -527,7 +645,7 @@ func TestRunPhase2Dense_SubjectUpsertFailure(t *testing.T) {
 		{SubjectID: "u5", ObjectID: "o2", Action: "view", Weight: 1, OccurredAt: time.Now().Unix()},
 	}
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{events: events})
-	job.upsertSubjectDenseFn = func(_ context.Context, _, _ string, _ map[string][]float32) error {
+	vs(job).upsertSubjectDense = func(_ context.Context, _, _ string, _ map[string][]float32) error {
 		return errors.New("subject upsert failed")
 	}
 
@@ -538,6 +656,7 @@ func TestRunPhase2Dense_SubjectUpsertFailure(t *testing.T) {
 }
 
 func TestRunPhase3Trending_UsesDefaults(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{ObjectID: "o1", Action: "view", Weight: 1, OccurredAt: time.Now().Add(-time.Hour).Unix()},
 	}
@@ -546,12 +665,12 @@ func TestRunPhase3Trending_UsesDefaults(t *testing.T) {
 	var gotTTL time.Duration
 	var gotScores map[string]float64
 
-	job.storeTrendingFn = func(_ context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
+	job.trending = trendingStoreFunc(func(_ context.Context, ns string, scores map[string]float64, ttl time.Duration) error {
 		gotNS = ns
 		gotTTL = ttl
 		gotScores = scores
 		return nil
-	}
+	})
 
 	_, err := job.runPhase3Trending(context.Background(), "ns1", nil, slog.New(&LogCapture{}))
 	if err != nil {
@@ -569,6 +688,7 @@ func TestRunPhase3Trending_UsesDefaults(t *testing.T) {
 }
 
 func TestRunPhase3Trending_UsesConfigOverrides(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{ObjectID: "o1", Action: "purchase", Weight: 2, OccurredAt: time.Now().Add(-time.Hour).Unix()},
 	}
@@ -581,10 +701,10 @@ func TestRunPhase3Trending_UsesConfigOverrides(t *testing.T) {
 		fakeJobRepo: repo,
 		onWindow:    func(window int) { gotWindow = window },
 	}
-	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, ttl time.Duration) error {
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, ttl time.Duration) error {
 		gotTTL = ttl
 		return nil
-	}
+	})
 
 	_, err := job.runPhase3Trending(context.Background(), "ns1", &namespace.Config{
 		TrendingWindow: 48,
@@ -604,13 +724,14 @@ func TestRunPhase3Trending_UsesConfigOverrides(t *testing.T) {
 }
 
 func TestRunPhase3Trending_StoreFailure(t *testing.T) {
+	t.Parallel()
 	events := []*RawEvent{
 		{ObjectID: "o1", Action: "view", Weight: 1, OccurredAt: time.Now().Add(-time.Hour).Unix()},
 	}
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{events: events})
-	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
 		return errors.New("redis failed")
-	}
+	})
 
 	_, err := job.runPhase3Trending(context.Background(), "ns1", nil, slog.New(&LogCapture{}))
 	if err == nil {
@@ -665,11 +786,12 @@ func (f *fakeBatchLogger) GetCancelRequested(_ context.Context, _ int64) (bool, 
 }
 
 func TestRunNamespace_ReturnsErrRunInProgressWhenLockHeld(t *testing.T) {
+	t.Parallel()
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+	job.locks = &fakeLocks{tryLock: func(_ context.Context, _ string) (func(), bool, error) {
 		return nil, false, nil
-	}
+	}}
 
 	err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerManual)
 	if !errors.Is(err, batchrun.ErrRunInProgress) {
@@ -681,11 +803,12 @@ func TestRunNamespace_ReturnsErrRunInProgressWhenLockHeld(t *testing.T) {
 }
 
 func TestRunNamespace_ReleasesLockAfterRun(t *testing.T) {
+	t.Parallel()
 	released := false
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+	job.locks = &fakeLocks{tryLock: func(_ context.Context, _ string) (func(), bool, error) {
 		return func() { released = true }, true, nil
-	}
+	}}
 
 	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -696,6 +819,7 @@ func TestRunNamespace_ReleasesLockAfterRun(t *testing.T) {
 }
 
 func TestStartNamespaceRun_RunsDetachedFromCallerContext(t *testing.T) {
+	t.Parallel()
 	logger := newFakeBatchLogger(7)
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
 	job.batchLog = logger
@@ -721,25 +845,27 @@ func TestStartNamespaceRun_RunsDetachedFromCallerContext(t *testing.T) {
 }
 
 func TestStartNamespaceRun_LockHeld(t *testing.T) {
+	t.Parallel()
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+	job.locks = &fakeLocks{tryLock: func(_ context.Context, _ string) (func(), bool, error) {
 		return nil, false, nil
-	}
+	}}
 	if _, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute); !errors.Is(err, batchrun.ErrRunInProgress) {
 		t.Fatalf("expected ErrRunInProgress, got %v", err)
 	}
 }
 
 func TestRunOnce_FinalizesOrphanRuns(t *testing.T) {
+	t.Parallel()
 	called := false
-	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.finalizeOrphansFn = func(_ context.Context, cutoff time.Time) (int64, error) {
+	repo := &fakeJobRepo{finalizeOrphans: func(_ context.Context, cutoff time.Time) (int64, error) {
 		called = true
 		if time.Until(cutoff) > -30*time.Minute {
 			t.Errorf("cutoff too recent: %v", cutoff)
 		}
 		return 2, nil
-	}
+	}}
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, repo)
 
 	job.runOnce(context.Background())
 	if !called {
@@ -748,17 +874,18 @@ func TestRunOnce_FinalizesOrphanRuns(t *testing.T) {
 }
 
 func TestRunNamespace_Phase3FailureFailsRun(t *testing.T) {
+	t.Parallel()
 	logger := newFakeBatchLogger(9)
 	successCh := make(chan bool, 1)
 	loggerWithSuccess := &successCapturingLogger{fakeBatchLogger: logger, success: successCh}
 
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
 	job.batchLog = loggerWithSuccess
-	job.redis = &goredis.Client{} // non-nil so phase 3 executes; storeTrendingFn is stubbed
 	job.repo = &fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}}
-	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+	// non-nil trending store so phase 3 executes
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
 		return errors.New("redis write failed")
-	}
+	})
 
 	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -775,6 +902,7 @@ func TestRunNamespace_Phase3FailureFailsRun(t *testing.T) {
 }
 
 func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
+	t.Parallel()
 	logger := newFakeBatchLogger(10)
 	successCh := make(chan bool, 1)
 	loggerWithSuccess := &successCapturingLogger{fakeBatchLogger: logger, success: successCh}
@@ -785,15 +913,14 @@ func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
 		&fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}},
 	)
 	job.batchLog = loggerWithSuccess
-	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	vs(job).ensureDenseCollections = func(_ context.Context, _ string, _ uint64, _ string) error {
 		return errors.New("qdrant unavailable")
 	}
-	job.redis = &goredis.Client{}
 	phase3Called := false
-	job.storeTrendingFn = func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
 		phase3Called = true
 		return nil
-	}
+	})
 
 	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -852,14 +979,15 @@ func (f *fakeLifecycleWriter) WithWriter(ctx context.Context, ns string, fn func
 // compute lock. Taking them the other way round lets a delete holding the
 // lifecycle lock wait on a run that is itself waiting for the lifecycle lease.
 func TestRunNamespace_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
+	t.Parallel()
 	var order []string
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
 	lifecycle := &fakeLifecycleWriter{generation: 4, order: &order}
 	job.SetLifecycleWriter(lifecycle)
-	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+	job.locks = &fakeLocks{tryLock: func(_ context.Context, _ string) (func(), bool, error) {
 		order = append(order, "compute_lock")
 		return func() {}, true, nil
-	}
+	}}
 
 	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
 		t.Fatalf("RunNamespace: %v", err)
@@ -872,14 +1000,15 @@ func TestRunNamespace_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
 // A namespace mid-delete must not be recomputed: the vectors would be written
 // back into collections the delete is in the middle of dropping.
 func TestRunNamespace_InactiveNamespaceNeverTakesComputeLock(t *testing.T) {
+	t.Parallel()
 	locked := false
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{})
 	job.SetLifecycleWriter(&fakeLifecycleWriter{err: nslifecycle.ErrNamespaceNotActive})
-	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+	job.locks = &fakeLocks{tryLock: func(_ context.Context, _ string) (func(), bool, error) {
 		locked = true
 		return func() {}, true, nil
-	}
+	}}
 
 	err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron)
 	if !errors.Is(err, nslifecycle.ErrNamespaceNotActive) {
@@ -894,18 +1023,19 @@ func TestRunNamespace_InactiveNamespaceNeverTakesComputeLock(t *testing.T) {
 }
 
 func TestStartNamespaceRun_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var order []string
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
 	job.batchLog = newFakeBatchLogger(7)
 	lifecycle := &fakeLifecycleWriter{generation: 4}
 	job.SetLifecycleWriter(lifecycle)
-	job.tryLockFn = func(_ context.Context, _ string) (func(), bool, error) {
+	job.locks = &fakeLocks{tryLock: func(_ context.Context, _ string) (func(), bool, error) {
 		mu.Lock()
 		order = append(order, "compute_lock")
 		mu.Unlock()
 		return func() {}, true, nil
-	}
+	}}
 
 	runID, err := job.StartNamespaceRun(context.Background(), "ns1", batchrun.TriggerManual, time.Minute)
 	if err != nil {
@@ -928,6 +1058,7 @@ func TestStartNamespaceRun_TakesLifecycleLeaseBeforeComputeLock(t *testing.T) {
 // batch_run_logs row is written — an orphan row would show a run for a
 // namespace the operator was told is gone.
 func TestStartNamespaceRun_InactiveNamespaceLogsNoRun(t *testing.T) {
+	t.Parallel()
 	logger := newFakeBatchLogger(7)
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
 	job.batchLog = logger
@@ -949,6 +1080,7 @@ func TestStartNamespaceRun_InactiveNamespaceLogsNoRun(t *testing.T) {
 // keep matching searches. What "owns" means depends on dense_source, and
 // getting it wrong either strands stale data or deletes another process's work.
 func TestRunPhase2Dense_EmptyWindowClearsOnlyWhatThisRunOwns(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		denseSource      string
 		wantItemCleared  bool
@@ -962,14 +1094,14 @@ func TestRunPhase2Dense_EmptyWindowClearsOnlyWhatThisRunOwns(t *testing.T) {
 		t.Run(tc.denseSource, func(t *testing.T) {
 			job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{}) // no events
 			itemCleared, subjCleared := false, false
-			job.cleanupItemDenseFn = func(_ context.Context, _ string, keep []string) (int, error) {
+			vs(job).cleanupItemDense = func(_ context.Context, _ string, keep []string) (int, error) {
 				itemCleared = true
 				if len(keep) != 0 {
 					t.Errorf("empty window must clear with an empty keep set, got %v", keep)
 				}
 				return 0, nil
 			}
-			job.cleanupSubjectDenseFn = func(_ context.Context, _ string, keep []string) (int, error) {
+			vs(job).cleanupSubjectDense = func(_ context.Context, _ string, keep []string) (int, error) {
 				subjCleared = true
 				if len(keep) != 0 {
 					t.Errorf("empty window must clear with an empty keep set, got %v", keep)
@@ -994,12 +1126,13 @@ func TestRunPhase2Dense_EmptyWindowClearsOnlyWhatThisRunOwns(t *testing.T) {
 // Under catalog mode the embedder's vectors must survive an empty event
 // window: they are the namespace's corpus, not this run's output.
 func TestRunPhase2Dense_CatalogEmptyWindowPreservesEmbedderVectors(t *testing.T) {
+	t.Parallel()
 	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+	vs(job).cleanupItemDense = func(_ context.Context, _ string, _ []string) (int, error) {
 		t.Fatal("catalog mode must never clear {ns}_objects_dense — cmd/embedder owns it")
 		return 0, nil
 	}
-	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
+	vs(job).cleanupSubjectDense = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
 
 	if _, _, err := job.runPhase2Dense(context.Background(), "ns1",
 		&namespace.Config{DenseSource: "catalog", EmbeddingDim: 2}, slog.New(&LogCapture{})); err != nil {
@@ -1012,6 +1145,7 @@ func TestRunPhase2Dense_CatalogEmptyWindowPreservesEmbedderVectors(t *testing.T)
 // happen to have recent events. Otherwise a namespace that goes quiet keeps
 // its last vectors forever.
 func TestRunOnce_SchedulesConfiguredNamespacesWithNoEvents(t *testing.T) {
+	t.Parallel()
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc,
 		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "disabled"}},
@@ -1026,6 +1160,7 @@ func TestRunOnce_SchedulesConfiguredNamespacesWithNoEvents(t *testing.T) {
 }
 
 func TestRunOnce_NamespaceEnumerationFailureSkipsTheTick(t *testing.T) {
+	t.Parallel()
 	svc := &fakeRecomputer{}
 	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{err: errors.New("db down")})
 
@@ -1044,11 +1179,12 @@ func TestRunOnce_NamespaceEnumerationFailureSkipsTheTick(t *testing.T) {
 // reaches phase 1, and creating its collections there would leave four empty
 // Qdrant collections behind for every namespace anyone ever configured.
 func TestRunPhase1_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
-	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	t.Parallel()
+	repo := &fakeJobRepo{hasEvents: func(_ context.Context, _ string) (bool, error) { return false, nil }}
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, repo)
 
 	ensured := false
-	job.ensureCollectionsFn = func(_ context.Context, _ string) error {
+	vs(job).ensureCollections = func(_ context.Context, _ string) error {
 		ensured = true
 		return nil
 	}
@@ -1074,11 +1210,12 @@ func TestRunPhase1_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
 // A namespace whose every event aged out still holds vectors that must be
 // swept, so it has to reach the recompute path.
 func TestRunPhase1_ExpiredEventsStillReachTheSweep(t *testing.T) {
-	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return true, nil }
+	t.Parallel()
+	repo := &fakeJobRepo{hasEvents: func(_ context.Context, _ string) (bool, error) { return true, nil }}
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, repo)
 
 	ensured := false
-	job.ensureCollectionsFn = func(_ context.Context, _ string) error {
+	vs(job).ensureCollections = func(_ context.Context, _ string) error {
 		ensured = true
 		return nil
 	}
@@ -1096,10 +1233,11 @@ func TestRunPhase1_ExpiredEventsStillReachTheSweep(t *testing.T) {
 // A failed lookup must not be read as "never used" — that would silently skip
 // the sweep for a namespace that does hold vectors.
 func TestRunPhase1_EventLookupFailureIsNotTreatedAsQuiet(t *testing.T) {
-	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) {
+	t.Parallel()
+	repo := &fakeJobRepo{hasEvents: func(_ context.Context, _ string) (bool, error) {
 		return false, errors.New("connection refused")
-	}
+	}}
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, repo)
 
 	if _, _, err := job.runPhase1(context.Background(), "ns", &namespace.Config{}, slog.New(&LogCapture{})); err == nil {
 		t.Fatal("runPhase1 returned nil error when the event lookup failed")
@@ -1110,16 +1248,17 @@ func TestRunPhase1_EventLookupFailureIsNotTreatedAsQuiet(t *testing.T) {
 // separate ensure call, so gating only phase 1 still leaves an empty
 // {ns}_subjects_dense behind for every namespace that was merely configured.
 func TestRunPhase2Dense_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
-	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return false, nil }
+	t.Parallel()
+	repo := &fakeJobRepo{hasEvents: func(_ context.Context, _ string) (bool, error) { return false, nil }}
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, repo)
 
 	ensured := false
-	job.ensureDenseCollectionsFn = func(_ context.Context, _ string, _ uint64, _ string) error {
+	vs(job).ensureDenseCollections = func(_ context.Context, _ string, _ uint64, _ string) error {
 		ensured = true
 		return nil
 	}
 	cleared := false
-	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+	vs(job).cleanupSubjectDense = func(_ context.Context, _ string, _ []string) (int, error) {
 		cleared = true
 		return 0, nil
 	}
@@ -1139,15 +1278,16 @@ func TestRunPhase2Dense_NeverUsedNamespaceCreatesNoCollections(t *testing.T) {
 // An aged-out namespace has dense state that must be cleared, so it has to get
 // past the gate and reach the cleanup.
 func TestRunPhase2Dense_ExpiredEventsStillClearDenseState(t *testing.T) {
-	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, &fakeJobRepo{})
-	job.hasAnyEventsFn = func(_ context.Context, _ string) (bool, error) { return true, nil }
+	t.Parallel()
+	repo := &fakeJobRepo{hasEvents: func(_ context.Context, _ string) (bool, error) { return true, nil }}
+	job := newTestJob(&fakeRecomputer{}, &fakeNsConfigReader{}, repo)
 
 	cleared := false
-	job.cleanupSubjectDenseFn = func(_ context.Context, _ string, _ []string) (int, error) {
+	vs(job).cleanupSubjectDense = func(_ context.Context, _ string, _ []string) (int, error) {
 		cleared = true
 		return 0, nil
 	}
-	job.cleanupItemDenseFn = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
+	vs(job).cleanupItemDense = func(_ context.Context, _ string, _ []string) (int, error) { return 0, nil }
 
 	cfg := &namespace.Config{DenseSource: "item2vec", EmbeddingDim: 4}
 	if _, _, err := job.runPhase2Dense(context.Background(), "ns", cfg, slog.New(&LogCapture{})); err != nil {
@@ -1158,18 +1298,19 @@ func TestRunPhase2Dense_ExpiredEventsStillClearDenseState(t *testing.T) {
 	}
 }
 
-// The generation-addressed closures wired by NewJob must refuse to run
+// The generation-addressed stores wired by NewJob must refuse to run
 // without a lease rather than silently addressing generation 1.
-func TestNewJobGenerationClosuresRequireLease(t *testing.T) {
-	j := NewJob(nil, nil, nil, nil, nil, nil, 1)
+func TestNewJobStoresRequireLease(t *testing.T) {
+	t.Parallel()
+	j := NewJob(nil, nil, nil, nil, nil, &goredis.Client{}, 1)
 	ctx := context.Background()
-	if err := j.ensureCollectionsFn(ctx, "ns"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
-		t.Errorf("ensureCollectionsFn: %v", err)
+	if err := j.vectors.EnsureCollections(ctx, "ns"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Errorf("EnsureCollections: %v", err)
 	}
-	if err := j.ensureDenseCollectionsFn(ctx, "ns", 128, "cosine"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
-		t.Errorf("ensureDenseCollectionsFn: %v", err)
+	if err := j.vectors.EnsureDenseCollections(ctx, "ns", 128, "cosine"); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Errorf("EnsureDenseCollections: %v", err)
 	}
-	if err := j.storeTrendingFn(ctx, "ns", nil, time.Minute); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
-		t.Errorf("storeTrendingFn: %v", err)
+	if err := j.trending.StoreTrending(ctx, "ns", nil, time.Minute); !errors.Is(err, nslifecycle.ErrLeaseRequired) {
+		t.Errorf("StoreTrending: %v", err)
 	}
 }

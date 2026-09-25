@@ -11,25 +11,15 @@ import (
 
 	"gonum.org/v1/gonum/mat"
 
-	"github.com/jarviisha/codohue/internal/core/idmap"
 	infraqdrant "github.com/jarviisha/codohue/internal/infra/qdrant"
 	"github.com/qdrant/go-client/qdrant"
 )
 
-var qdrantUpsertDenseFn = func(ctx context.Context, client *qdrant.Client, points *qdrant.UpsertPoints) error {
-	_, err := client.Upsert(ctx, points)
-	if err != nil {
-		return fmt.Errorf("qdrant dense upsert: %w", err)
-	}
-	return nil
-}
-
-var qdrantGetDenseFn = func(ctx context.Context, client *qdrant.Client, req *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error) {
-	points, err := client.Get(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("qdrant dense get: %w", err)
-	}
-	return points, nil
+// densePointClient is the slice of *qdrant.Client the dense upsert/fetch path
+// needs. Declared as an interface so tests can drive it without a live Qdrant.
+type densePointClient interface {
+	Upsert(ctx context.Context, request *qdrant.UpsertPoints) (*qdrant.UpdateResult, error)
+	Get(ctx context.Context, request *qdrant.GetPoints) ([]*qdrant.RetrievedPoint, error)
 }
 
 const (
@@ -273,7 +263,7 @@ func SVDEmbeddings(events []*RawEvent, embeddingDim int, lambda float64) (map[st
 // Objects with no point in the collection (never embedded, or still pending)
 // are simply absent from the result — the caller treats that as "no dense
 // signal for that item" rather than an error.
-func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace string, objectIDs []string) (map[string][]float32, error) {
+func FetchItemDenseVectors(ctx context.Context, qdrantClient densePointClient, idmapSvc idmapService, namespace string, objectIDs []string) (map[string][]float32, error) {
 	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense)
 	if err != nil {
 		return nil, err
@@ -295,7 +285,7 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 		if len(batch) == 0 {
 			return nil
 		}
-		points, err := qdrantGetDenseFn(ctx, qdrantClient, &qdrant.GetPoints{
+		points, err := qdrantClient.Get(ctx, &qdrant.GetPoints{
 			CollectionName: collection,
 			Ids:            batch,
 			WithVectors:    qdrant.NewWithVectorsInclude(denseVectorName),
@@ -347,7 +337,7 @@ func FetchItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idm
 // entries may be absent (payload key omitted). The recommend service's
 // γ-freshness rerank reads this key — without it, items surfaced only by the
 // dense path would never decay while sparse-path items do.
-func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, itemVecs map[string][]float32, createdAt map[string]string) error {
+func UpsertItemDenseVectors(ctx context.Context, qdrantClient densePointClient, idmapSvc idmapService, namespace, strategy string, itemVecs map[string][]float32, createdAt map[string]string) error {
 	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjectsDense)
 	if err != nil {
 		return err
@@ -356,7 +346,7 @@ func UpsertItemDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, id
 }
 
 // UpsertSubjectDenseVectors upserts subject dense vectors into {ns}_subjects_dense.
-func UpsertSubjectDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, namespace, strategy string, subjectVecs map[string][]float32) error {
+func UpsertSubjectDenseVectors(ctx context.Context, qdrantClient densePointClient, idmapSvc idmapService, namespace, strategy string, subjectVecs map[string][]float32) error {
 	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionSubjectsDense)
 	if err != nil {
 		return err
@@ -364,7 +354,7 @@ func UpsertSubjectDenseVectors(ctx context.Context, qdrantClient *qdrant.Client,
 	return upsertDenseVectors(ctx, qdrantClient, idmapSvc, collection, namespace, "subject", strategy, subjectVecs, nil)
 }
 
-func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapSvc *idmap.Service, collection, namespace, entityType, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
+func upsertDenseVectors(ctx context.Context, qdrantClient densePointClient, idmapSvc idmapService, collection, namespace, entityType, strategy string, vecs map[string][]float32, createdAt map[string]string) error {
 	// Sort entity IDs for deterministic batching.
 	ids := make([]string, 0, len(vecs))
 	for id := range vecs {
@@ -381,7 +371,7 @@ func upsertDenseVectors(ctx context.Context, qdrantClient *qdrant.Client, idmapS
 		if len(batch) == 0 {
 			return nil
 		}
-		err := qdrantUpsertDenseFn(ctx, qdrantClient, &qdrant.UpsertPoints{
+		_, err := qdrantClient.Upsert(ctx, &qdrant.UpsertPoints{
 			CollectionName: collection,
 			Points:         batch,
 		})
