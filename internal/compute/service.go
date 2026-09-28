@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -91,30 +93,35 @@ func l2Normalize(values []float32) {
 
 type computeRepo interface {
 	GetActiveSubjects(ctx context.Context, namespace string) ([]string, error)
-	GetSubjectEvents(ctx context.Context, namespace, subjectID string) ([]*RawEvent, error)
+	GetSubjectsEvents(ctx context.Context, namespace string, subjectIDs []string) (map[string][]*RawEvent, error)
 }
 
 type idmapService interface {
 	GetOrCreateSubjectID(ctx context.Context, subjectID, namespace string) (uint64, error)
+	GetOrCreateSubjectIDs(ctx context.Context, subjectIDs []string, namespace string) (map[string]uint64, error)
 	GetOrCreateObjectID(ctx context.Context, objectID, namespace string) (uint64, error)
 	GetOrCreateObjectIDs(ctx context.Context, objectIDs []string, namespace string) (map[string]uint64, error)
 }
 
 // Service computes sparse vectors with time decay for each subject in a namespace.
 type Service struct {
-	repo      computeRepo
-	idmapSvc  idmapService
-	qdrant    *qdrant.Client
-	upsertFn  func(ctx context.Context, points *qdrant.UpsertPoints) error
-	cleanupFn func(ctx context.Context, collection string, keep map[uint64]struct{}) (int, error)
+	repo     computeRepo
+	idmapSvc idmapService
+	qdrant   *qdrant.Client
+	// subjectChunkSize is how many subjects share one events query, one id
+	// resolution per entity type, and one Qdrant upsert.
+	subjectChunkSize int
+	upsertFn         func(ctx context.Context, points *qdrant.UpsertPoints) error
+	cleanupFn        func(ctx context.Context, collection string, keep map[uint64]struct{}) (int, error)
 }
 
 // NewService creates a new Service with the required dependencies.
 func NewService(repo *Repository, idmapSvc *idmap.Service, qdrantClient *qdrant.Client) *Service {
 	return &Service{
-		repo:     repo,
-		idmapSvc: idmapSvc,
-		qdrant:   qdrantClient,
+		repo:             repo,
+		idmapSvc:         idmapSvc,
+		qdrant:           qdrantClient,
+		subjectChunkSize: qdrantBatchSize,
 		upsertFn: func(ctx context.Context, points *qdrant.UpsertPoints) error {
 			_, err := qdrantClient.Upsert(ctx, points)
 			if err != nil {
@@ -138,44 +145,47 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 
 	slog.Info("recomputing namespace", "namespace", namespace, "subjects", len(subjects))
 
-	// outer key: objectID, inner key: subjectNumericID, value: decay-weighted score
-	objectAccum := make(map[string]map[uint64]float32)
-	// objectMaxTime[objectID] = max occurred_at (or object_created_at when available) across all subjects
-	objectMaxTime := make(map[string]int64)
-	// objectCreatedAt[objectID] = object_created_at when explicitly provided by the event source
-	objectCreatedAt := make(map[string]int64)
+	co := newCooccurrence()
 
-	// Per-subject failures are tolerated (one bad subject must not sink the
-	// namespace), but a run where nothing was upserted is a failure — phase 1
-	// reporting success while Qdrant holds only stale vectors is worse than
-	// an honest red run.
+	// Subjects are processed in chunks so each chunk costs a fixed handful of
+	// round-trips (events, subject ids, object ids, one upsert) instead of
+	// three per subject — the N+1 that made phase 1 84% of batch time.
+	// Failures are tolerated at the smallest scope they occur: a subject that
+	// cannot be built is dropped alone; a failed lookup (events, subject or
+	// object ids) drops its whole chunk, vectors and co-occurrence both,
+	// until the next tick; a failed subject upsert drops only the chunk's
+	// subject vectors — the built rows still feed co-occurrence. Either chunk
+	// failure also skips the stale-point sweep below. A run where nothing was upserted
+	// is still a failure — phase 1 reporting success while Qdrant holds only
+	// stale vectors is worse than an honest red run.
 	upserted := 0
+	failedChunks := 0
 	keepSubjects := make(map[uint64]struct{}, len(subjects))
-	for _, subjectID := range subjects {
-		built, err := s.buildVectors(ctx, namespace, subjectID, lambda)
+	for start := 0; start < len(subjects); start += s.subjectChunkSize {
+		chunk := subjects[start:min(start+s.subjectChunkSize, len(subjects))]
+		built, objectIDs, err := s.buildChunk(ctx, namespace, chunk, lambda)
 		if err != nil {
-			slog.Error("build vectors failed", "namespace", namespace, "subject_id", subjectID, "error", err)
+			slog.Error("build subject chunk failed", "namespace", namespace, "subjects", len(chunk), "first_subject_id", chunk[0], "error", err)
+			failedChunks++
 			continue
 		}
 
-		if err := s.upsertSubjectVector(ctx, namespace, built.vec); err != nil {
-			slog.Error("upsert subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
+		vecs := make([]*SubjectVector, 0, len(built))
+		for _, b := range built {
+			vecs = append(vecs, b.vec)
+		}
+		if err := s.upsertSubjectVectors(ctx, namespace, vecs); err != nil {
+			slog.Error("upsert subject vectors failed", "namespace", namespace, "subjects", len(vecs), "first_subject_id", chunk[0], "error", err)
+			failedChunks++
 		} else {
-			upserted++
-			keepSubjects[built.vec.NumericID] = struct{}{}
+			upserted += len(vecs)
+			for _, vec := range vecs {
+				keepSubjects[vec.NumericID] = struct{}{}
+			}
 		}
 
-		s.accumulateObjectCooccurrence(objectAccum, built.scores, built.objectIDs)
-
-		for objID := range built.scores {
-			if t, ok := built.maxTimes[objID]; ok && t > objectMaxTime[objID] {
-				objectMaxTime[objID] = t
-			}
-			if t, ok := built.createdTimes[objID]; ok && t > 0 {
-				if existing, has := objectCreatedAt[objID]; !has || t > existing {
-					objectCreatedAt[objID] = t
-				}
-			}
+		for _, b := range built {
+			co.add(&b.subjectScores, objectIDs)
 		}
 	}
 
@@ -183,21 +193,41 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 		return 0, 0, fmt.Errorf("all %d subject upserts failed", len(subjects))
 	}
 
-	keepObjects, err := s.upsertObjectVectors(ctx, namespace, objectAccum, objectMaxTime, objectCreatedAt)
-	if err != nil {
-		return upserted, 0, fmt.Errorf("upsert object vectors: %w", err)
+	// The full object×object matrix grows with Σk² over subjects and OOM-killed
+	// cron at bluesky scale, so rows are built one target partition at a time
+	// and each partition is upserted before the next is accumulated.
+	passOf, passes := co.planPasses(cooccurrenceBudget)
+	if passes > 1 {
+		slog.Info("partitioning object co-occurrence", "namespace", namespace, "passes", passes)
+	}
+	keepObjects := make(map[uint64]struct{}, len(co.keys))
+	objects := 0
+	for pass := range passes {
+		accum := co.accumulate(passOf, pass)
+		kept, err := s.upsertObjectVectors(ctx, namespace, accum, co)
+		if err != nil {
+			return upserted, 0, fmt.Errorf("upsert object vectors: %w", err)
+		}
+		maps.Copy(keepObjects, kept)
+		objects += len(accum)
 	}
 
 	// Full recompute only upserts what the window produced — sweep out the
 	// points of entities that aged past it, or they keep frozen scores (and
 	// keep matching searches) forever. Best-effort: a failed sweep is stale
-	// data, not a failed run; the next tick retries it.
-	s.cleanupCollection(ctx, namespace, infraqdrant.CollectionSubjects, keepSubjects)
-	s.cleanupCollection(ctx, namespace, infraqdrant.CollectionObjects, keepObjects)
+	// data, not a failed run; the next tick retries it. A failed chunk is
+	// missing from the keep-sets, so sweeping would delete up to a chunk of
+	// live vectors over a transient error — wait for a clean run instead.
+	if failedChunks > 0 {
+		slog.Warn("stale point cleanup skipped after failed chunks", "namespace", namespace, "failed_chunks", failedChunks)
+	} else {
+		s.cleanupCollection(ctx, namespace, infraqdrant.CollectionSubjects, keepSubjects)
+		s.cleanupCollection(ctx, namespace, infraqdrant.CollectionObjects, keepObjects)
+	}
 
 	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(upserted))
-	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", len(objectAccum))
-	return upserted, len(objectAccum), nil
+	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", objects)
+	return upserted, objects, nil
 }
 
 func (s *Service) cleanupCollection(ctx context.Context, namespace string, kind infraqdrant.CollectionKind, keep map[uint64]struct{}) {
@@ -219,31 +249,113 @@ func (s *Service) cleanupCollection(ctx context.Context, namespace string, kind 
 	}
 }
 
-// accumulateObjectCooccurrence folds one subject's scores into the namespace's
-// object co-occurrence rows. objectIDs is the resolved numeric id per object,
-// passed in rather than looked up here: buildVectors already resolved exactly
-// this key set for the subject vector, and resolving it twice per subject was
-// half of the 2N sequential queries each tick spent on id mapping.
-func (s *Service) accumulateObjectCooccurrence(objectAccum map[string]map[uint64]float32, objectScores map[string]float64, objectIDs map[string]uint64) {
-	for targetID := range objectScores {
-		for otherID, score := range objectScores {
-			if otherID == targetID {
-				continue
-			}
-			if objectAccum[targetID] == nil {
-				objectAccum[targetID] = make(map[uint64]float32)
-			}
-			objectAccum[targetID][objectIDs[otherID]] += float32(score)
-		}
+// coEntry is one object a subject touched: its numeric id and the subject's
+// decay-weighted score for it.
+type coEntry struct {
+	id    uint64
+	score float32
+}
+
+// cooccurrence is the object side of phase 1: every subject's row, kept
+// compact so the quadratic object×object fold can run in bounded passes after
+// all subjects are built, plus the per-object data the object payload needs.
+// Everything here grows linearly with events and distinct objects.
+type cooccurrence struct {
+	rows [][]coEntry
+	// keys maps a numeric object id back to its string key for the payload.
+	keys map[uint64]string
+	// maxTimes is the latest occurred_at per object across all subjects.
+	maxTimes map[uint64]int64
+	// createdTimes is the latest explicit object_created_at per object, when
+	// the event source supplied one.
+	createdTimes map[uint64]int64
+}
+
+func newCooccurrence() *cooccurrence {
+	return &cooccurrence{
+		keys:         make(map[uint64]string),
+		maxTimes:     make(map[uint64]int64),
+		createdTimes: make(map[uint64]int64),
 	}
 }
 
-// subjectVectors is everything one subject's event window produced: the sparse
-// vector itself, plus the per-object data the namespace-level accumulators
-// fold together afterwards. These five travel together to every caller, so
-// they are one value rather than a six-result signature.
-type subjectVectors struct {
-	vec *SubjectVector
+// add folds one built subject into the accumulator.
+func (c *cooccurrence) add(sc *subjectScores, objectIDs map[string]uint64) {
+	row := make([]coEntry, 0, len(sc.scores))
+	for objID, score := range sc.scores {
+		id := objectIDs[objID]
+		c.keys[id] = objID
+		row = append(row, coEntry{id: id, score: float32(score)})
+
+		if t, ok := sc.maxTimes[objID]; ok && t > c.maxTimes[id] {
+			c.maxTimes[id] = t
+		}
+		if t, ok := sc.createdTimes[objID]; ok && t > c.createdTimes[id] {
+			c.createdTimes[id] = t
+		}
+	}
+	c.rows = append(c.rows, row)
+}
+
+// cooccurrenceBudget caps the co-occurrence contributions accumulated in one
+// pass. Contributions bound distinct map entries from above, so a pass holds
+// at most this many entries unless a single target alone exceeds it (its row
+// is bounded by the distinct object count). ~10M entries is on the order of
+// a few hundred MiB of map.
+const cooccurrenceBudget = 10_000_000
+
+// planPasses assigns every target object to a pass so that no pass exceeds
+// budget contributions, where a target's contribution is k-1 for every row of
+// length k it appears in. Packing by actual load, not by id modulo, keeps the
+// bound per pass under hub skew.
+func (c *cooccurrence) planPasses(budget uint64) (passOf map[uint64]int, passes int) {
+	load := make(map[uint64]uint64, len(c.keys))
+	for _, row := range c.rows {
+		k := uint64(len(row))
+		for _, e := range row {
+			load[e.id] += k - 1
+		}
+	}
+
+	passOf = make(map[uint64]int, len(load))
+	var current uint64
+	for id, l := range load {
+		if current > 0 && current+l > budget {
+			passes++
+			current = 0
+		}
+		passOf[id] = passes
+		current += l
+	}
+	return passOf, passes + 1
+}
+
+// accumulate builds the co-occurrence rows of the targets assigned to pass.
+// Across all passes every target is folded exactly once, so the union equals
+// the unpartitioned matrix.
+func (c *cooccurrence) accumulate(passOf map[uint64]int, pass int) map[uint64]map[uint64]float32 {
+	accum := make(map[uint64]map[uint64]float32)
+	for _, row := range c.rows {
+		for _, target := range row {
+			if passOf[target.id] != pass {
+				continue
+			}
+			for _, other := range row {
+				if other.id == target.id {
+					continue
+				}
+				if accum[target.id] == nil {
+					accum[target.id] = make(map[uint64]float32)
+				}
+				accum[target.id][other.id] += other.score
+			}
+		}
+	}
+	return accum
+}
+
+// subjectScores is one subject's event window folded per object.
+type subjectScores struct {
 	// scores is the decay-weighted score per object.
 	scores map[string]float64
 	// maxTimes is the latest occurred_at per object.
@@ -251,23 +363,69 @@ type subjectVectors struct {
 	// createdTimes is the explicit object_created_at per object, when the
 	// event source supplied one.
 	createdTimes map[string]int64
-	// objectIDs is the numeric id per object, resolved once so callers need
-	// not resolve it again.
-	objectIDs map[string]uint64
 }
 
-// buildVectors computes one subject's sparse vector and the per-object data
-// derived alongside it.
-func (s *Service) buildVectors(ctx context.Context, namespace, subjectID string, lambda float64) (*subjectVectors, error) {
-	events, err := s.repo.GetSubjectEvents(ctx, namespace, subjectID)
+// subjectVectors is a built subject: its sparse vector plus the scores it was
+// built from, which the co-occurrence accumulator folds afterwards.
+type subjectVectors struct {
+	subjectScores
+	vec *SubjectVector
+}
+
+// buildChunk builds the sparse vectors of a chunk of subjects with one events
+// query and one batch id resolution per entity type. A subject that cannot be
+// built is logged and left out; a failed round-trip fails the whole chunk.
+// The returned object ids cover every object the built subjects touched.
+func (s *Service) buildChunk(ctx context.Context, namespace string, chunk []string, lambda float64) ([]*subjectVectors, map[string]uint64, error) {
+	events, err := s.repo.GetSubjectsEvents(ctx, namespace, chunk)
 	if err != nil {
-		return nil, fmt.Errorf("get events: %w", err)
+		return nil, nil, fmt.Errorf("get events: %w", err)
+	}
+	subjectIDs, err := s.idmapSvc.GetOrCreateSubjectIDs(ctx, chunk, namespace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get subject ids: %w", err)
 	}
 
+	now := time.Now().Unix()
+	scored := make([]*subjectScores, len(chunk))
+	objectSet := make(map[string]struct{})
+	for i, subjectID := range chunk {
+		scored[i] = scoreEvents(events[subjectID], lambda, now)
+		for objID := range scored[i].scores {
+			objectSet[objID] = struct{}{}
+		}
+	}
+
+	// One resolution per chunk, shared by the subject vectors and the
+	// co-occurrence fold: both need exactly this key set.
+	objectIDs, err := s.resolveObjectIDs(ctx, namespace, slices.Collect(maps.Keys(objectSet)))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	built := make([]*subjectVectors, 0, len(chunk))
+	for i, subjectID := range chunk {
+		subjectNumID, ok := subjectIDs[subjectID]
+		if !ok {
+			slog.Error("subject id not resolved", "namespace", namespace, "subject_id", subjectID)
+			continue
+		}
+		vec, err := buildSubjectVector(namespace, subjectID, subjectNumID, scored[i].scores, objectIDs)
+		if err != nil {
+			slog.Error("build subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
+			continue
+		}
+		built = append(built, &subjectVectors{subjectScores: *scored[i], vec: vec})
+	}
+	return built, objectIDs, nil
+}
+
+// scoreEvents folds one subject's events into decay-weighted per-object
+// scores plus the object timestamps the namespace accumulators need.
+func scoreEvents(events []*RawEvent, lambda float64, now int64) *subjectScores {
 	objectScores := make(map[string]float64)
 	objectMaxTime := make(map[string]int64)
 	objectCreatedTimes := make(map[string]int64)
-	now := time.Now().Unix()
 
 	for _, e := range events {
 		// Clamp: a future-dated event (clock skew that slipped past ingest)
@@ -284,35 +442,17 @@ func (s *Service) buildVectors(ctx context.Context, namespace, subjectID string,
 		}
 	}
 
-	// One resolution per subject, shared by the subject vector and the
-	// co-occurrence fold: both need exactly this key set.
-	objectIDs, err := s.resolveObjectIDs(ctx, namespace, objectScores)
-	if err != nil {
-		return nil, err
-	}
-
-	vec, err := s.buildSubjectVector(ctx, namespace, subjectID, objectScores, objectIDs)
-	if err != nil {
-		return nil, fmt.Errorf("build subject vector: %w", err)
-	}
-
-	return &subjectVectors{
-		vec:          vec,
+	return &subjectScores{
 		scores:       objectScores,
 		maxTimes:     objectMaxTime,
 		createdTimes: objectCreatedTimes,
-		objectIDs:    objectIDs,
-	}, nil
+	}
 }
 
 // resolveObjectIDs maps every object key to its numeric id in one round-trip.
-func (s *Service) resolveObjectIDs(ctx context.Context, namespace string, objectScores map[string]float64) (map[string]uint64, error) {
-	if len(objectScores) == 0 {
+func (s *Service) resolveObjectIDs(ctx context.Context, namespace string, keys []string) (map[string]uint64, error) {
+	if len(keys) == 0 {
 		return map[string]uint64{}, nil
-	}
-	keys := make([]string, 0, len(objectScores))
-	for objectID := range objectScores {
-		keys = append(keys, objectID)
 	}
 	objectIDs, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, keys, namespace)
 	if err != nil {
@@ -321,12 +461,7 @@ func (s *Service) resolveObjectIDs(ctx context.Context, namespace string, object
 	return objectIDs, nil
 }
 
-func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID string, objectScores map[string]float64, objectIDs map[string]uint64) (*SubjectVector, error) {
-	subjectNumID, err := s.idmapSvc.GetOrCreateSubjectID(ctx, subjectID, namespace)
-	if err != nil {
-		return nil, fmt.Errorf("get subject id for %q: %w", subjectID, err)
-	}
-
+func buildSubjectVector(namespace, subjectID string, subjectNumID uint64, objectScores map[string]float64, objectIDs map[string]uint64) (*SubjectVector, error) {
 	entries := make([]sparseEntry, 0, len(objectScores))
 	for objectID, score := range objectScores {
 		objNumID, ok := objectIDs[objectID]
@@ -361,60 +496,50 @@ func (s *Service) buildSubjectVector(ctx context.Context, namespace, subjectID s
 	}, nil
 }
 
-func (s *Service) upsertSubjectVector(ctx context.Context, namespace string, vec *SubjectVector) error {
+// upsertSubjectVectors writes a chunk of subject vectors in one request.
+func (s *Service) upsertSubjectVectors(ctx context.Context, namespace string, vecs []*SubjectVector) error {
+	if len(vecs) == 0 {
+		return nil
+	}
 	collection, err := collectionForContext(ctx, namespace, infraqdrant.CollectionSubjects)
 	if err != nil {
 		return err
 	}
-	err = s.upsertFn(ctx, &qdrant.UpsertPoints{
-		CollectionName: collection,
-		Points: []*qdrant.PointStruct{
-			{
-				Id: qdrant.NewIDNum(vec.NumericID),
-				Vectors: &qdrant.Vectors{
-					VectorsOptions: &qdrant.Vectors_Vectors{
-						Vectors: &qdrant.NamedVectors{
-							Vectors: map[string]*qdrant.Vector{
-								sparseVectorName: qdrant.NewVectorSparse(vec.Indices, vec.Values),
-							},
+	updatedAt := qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339))
+	points := make([]*qdrant.PointStruct, 0, len(vecs))
+	for _, vec := range vecs {
+		points = append(points, &qdrant.PointStruct{
+			Id: qdrant.NewIDNum(vec.NumericID),
+			Vectors: &qdrant.Vectors{
+				VectorsOptions: &qdrant.Vectors_Vectors{
+					Vectors: &qdrant.NamedVectors{
+						Vectors: map[string]*qdrant.Vector{
+							sparseVectorName: qdrant.NewVectorSparse(vec.Indices, vec.Values),
 						},
 					},
 				},
-				Payload: map[string]*qdrant.Value{
-					"subject_id": qdrant.NewValueString(vec.SubjectID),
-					"updated_at": qdrant.NewValueString(time.Now().UTC().Format(time.RFC3339)),
-				},
 			},
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("upsert subject vector: %w", err)
+			Payload: map[string]*qdrant.Value{
+				"subject_id": qdrant.NewValueString(vec.SubjectID),
+				"updated_at": updatedAt,
+			},
+		})
+	}
+	if err := s.upsertFn(ctx, &qdrant.UpsertPoints{CollectionName: collection, Points: points}); err != nil {
+		return fmt.Errorf("upsert subject vectors: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[string]map[uint64]float32, maxTimes, createdTimes map[string]int64) (map[uint64]struct{}, error) {
+// upsertObjectVectors writes one pass of co-occurrence rows, keyed by target
+// numeric id, and returns the ids it wrote.
+func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[uint64]map[uint64]float32, co *cooccurrence) (map[uint64]struct{}, error) {
 	collectionName, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjects)
 	if err != nil {
 		return nil, err
 	}
 	upsertedIDs := make(map[uint64]struct{}, len(accum))
 	var batch []*qdrant.PointStruct
-
-	// One resolution for the whole accumulated set: these keys were already
-	// minted while building the subject vectors, so this is a bulk read.
-	objectKeys := make([]string, 0, len(accum))
-	for objectID := range accum {
-		objectKeys = append(objectKeys, objectID)
-	}
-	objectIDs := make(map[string]uint64, len(accum))
-	if len(objectKeys) > 0 {
-		resolved, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, objectKeys, namespace)
-		if err != nil {
-			return upsertedIDs, fmt.Errorf("get object ids: %w", err)
-		}
-		objectIDs = resolved
-	}
 
 	flush := func() error {
 		if len(batch) == 0 {
@@ -431,15 +556,12 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 		return nil
 	}
 
-	for objectID, subjectScores := range accum {
-		objNumID, ok := objectIDs[objectID]
-		if !ok {
-			return upsertedIDs, fmt.Errorf("no numeric id resolved for object %q", objectID)
-		}
+	for objNumID, row := range accum {
+		objectID := co.keys[objNumID]
 		upsertedIDs[objNumID] = struct{}{}
 
-		entries := make([]sparseEntry, 0, len(subjectScores))
-		for coNumID, score := range subjectScores {
+		entries := make([]sparseEntry, 0, len(row))
+		for coNumID, score := range row {
 			index, fits := sparseIndex(coNumID)
 			if !fits {
 				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "numeric_id", coNumID)
@@ -452,9 +574,9 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 
 		// Prefer explicit object_created_at from the event payload; fall back to max occurred_at.
 		createdAt := time.Now().UTC().Format(time.RFC3339)
-		if t, ok := createdTimes[objectID]; ok && t > 0 {
+		if t := co.createdTimes[objNumID]; t > 0 {
 			createdAt = time.Unix(t, 0).UTC().Format(time.RFC3339)
-		} else if t, ok := maxTimes[objectID]; ok && t > 0 {
+		} else if t := co.maxTimes[objNumID]; t > 0 {
 			createdAt = time.Unix(t, 0).UTC().Format(time.RFC3339)
 		}
 

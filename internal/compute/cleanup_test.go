@@ -137,3 +137,48 @@ func TestRecomputeNamespace_SweepsStaleCollections(t *testing.T) {
 		t.Errorf("objects sweep keep-set: got %d (called=%v), want 2", got, ok)
 	}
 }
+
+// A chunk that failed on a transient read or upsert is missing from the
+// keep-sets; sweeping would delete up to a chunk of live vectors that did not
+// age out. The sweep waits for a run where every chunk made it.
+func TestRecomputeNamespace_SkipsSweepAfterChunkFailure(t *testing.T) {
+	now := time.Now().Unix()
+	cases := map[string]func(svc *Service, idmap *fakeIDMap){
+		"lookup failure": func(_ *Service, idmap *fakeIDMap) { idmap.objectErrs["bad"] = context.Canceled },
+		"subject upsert failure": func(svc *Service, _ *fakeIDMap) {
+			svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
+				if points.CollectionName == "ns_subjects" && points.Points[0].Payload["subject_id"].GetStringValue() == "u2" {
+					return context.DeadlineExceeded
+				}
+				return nil
+			}
+		},
+	}
+	for name, breakChunk := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := &fakeComputeRepo{
+				subjects: []string{"u1", "u2"},
+				subjectEvents: map[string][]*RawEvent{
+					"u1": {{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: now}, {SubjectID: "u1", ObjectID: "o2", Weight: 1, OccurredAt: now}},
+					"u2": {{SubjectID: "u2", ObjectID: "bad", Weight: 1, OccurredAt: now}},
+				},
+			}
+			idmap := newFakeIDMap()
+			svc := newTestService(repo, idmap)
+			svc.subjectChunkSize = 1
+			breakChunk(svc, idmap)
+			swept := 0
+			svc.cleanupFn = func(context.Context, string, map[uint64]struct{}) (int, error) {
+				swept++
+				return 0, nil
+			}
+
+			if _, _, err := svc.RecomputeNamespace(leasedCtx("ns"), "ns", 0); err != nil {
+				t.Fatalf("one failed chunk must not fail the run: %v", err)
+			}
+			if swept != 0 {
+				t.Fatalf("sweep ran %d times after a failed chunk, want 0", swept)
+			}
+		})
+	}
+}

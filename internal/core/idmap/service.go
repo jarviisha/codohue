@@ -45,6 +45,16 @@ func (s *Service) GetOrCreateSubjectID(ctx context.Context, subjectID, namespace
 	return id, nil
 }
 
+// GetOrCreateSubjectIDs resolves many subject ids in a single round-trip.
+func (s *Service) GetOrCreateSubjectIDs(ctx context.Context, subjectIDs []string, namespace string) (map[string]uint64, error) {
+	ids, err := s.repo.GetOrCreateBatch(ctx, subjectIDs, namespace, "subject")
+	if err != nil {
+		metrics.IDMappingErrors.WithLabelValues("subject").Inc()
+		return nil, fmt.Errorf("batch get or create subject ids: %w", err)
+	}
+	return ids, nil
+}
+
 // GetOrCreateObjectID returns the numeric ID for the given objectID, creating it if absent.
 func (s *Service) GetOrCreateObjectID(ctx context.Context, objectID, namespace string) (uint64, error) {
 	id, err := s.repo.GetOrCreate(ctx, objectID, namespace, "object")

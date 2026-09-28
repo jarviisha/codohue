@@ -115,36 +115,37 @@ func TestRepositoryGetActiveSubjects_Success(t *testing.T) {
 	}
 }
 
-func TestRepositoryGetSubjectEvents_QueryError(t *testing.T) {
+func TestRepositoryGetSubjectsEvents_QueryError(t *testing.T) {
 	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 		return nil, errors.New("query failed")
 	}}
-	if _, err := repo.GetSubjectEvents(context.Background(), "ns", "u1"); err == nil {
+	if _, err := repo.GetSubjectsEvents(context.Background(), "ns", []string{"u1"}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
-func TestRepositoryGetSubjectEvents_ScanError(t *testing.T) {
+func TestRepositoryGetSubjectsEvents_ScanError(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"u1", "o1", "VIEW", 1.0, int64(10), nil}}, scanErr: errors.New("scan failed")}
 	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
-	if _, err := repo.GetSubjectEvents(context.Background(), "ns", "u1"); err == nil {
+	if _, err := repo.GetSubjectsEvents(context.Background(), "ns", []string{"u1"}); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
 
-func TestRepositoryGetSubjectEvents_Success(t *testing.T) {
+func TestRepositoryGetSubjectsEvents_Success(t *testing.T) {
 	created := int64(5)
 	rows := &fakeRows{items: [][]any{{"u1", "o1", "VIEW", 1.0, int64(10), created}}}
 	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
-	events, err := repo.GetSubjectEvents(context.Background(), "ns", "u1")
+	events, err := repo.GetSubjectsEvents(context.Background(), "ns", []string{"u1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(events) != 1 || events[0].SubjectID != "u1" || events[0].ObjectID != "o1" {
+	got := events["u1"]
+	if len(events) != 1 || len(got) != 1 || got[0].ObjectID != "o1" {
 		t.Fatalf("unexpected events: %+v", events)
 	}
-	if events[0].ObjectCreatedAt == nil || *events[0].ObjectCreatedAt != created {
-		t.Fatalf("unexpected created_at: %+v", events[0].ObjectCreatedAt)
+	if got[0].ObjectCreatedAt == nil || *got[0].ObjectCreatedAt != created {
+		t.Fatalf("unexpected created_at: %+v", got[0].ObjectCreatedAt)
 	}
 }
 
