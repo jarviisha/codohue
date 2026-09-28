@@ -344,6 +344,12 @@ func TestPlanPasses_BoundsEveryPassUnderHubSkew(t *testing.T) {
 	const budget = 120
 
 	passOf, passes := co.planPasses(budget)
+	if passes < 5 {
+		t.Fatalf("4 hubs over budget must each get their own pass, got %d passes", passes)
+	}
+	if len(passOf) != 54 {
+		t.Fatalf("every target needs a pass, got %d of 54", len(passOf))
+	}
 	load := make([]uint64, passes)
 	targets := make([]int, passes)
 	for _, row := range co.rows {

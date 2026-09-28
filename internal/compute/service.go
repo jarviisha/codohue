@@ -545,12 +545,12 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 		return nil
 	}
 
-	for objNumID, subjectScores := range accum {
+	for objNumID, row := range accum {
 		objectID := co.keys[objNumID]
 		upsertedIDs[objNumID] = struct{}{}
 
-		entries := make([]sparseEntry, 0, len(subjectScores))
-		for coNumID, score := range subjectScores {
+		entries := make([]sparseEntry, 0, len(row))
+		for coNumID, score := range row {
 			index, fits := sparseIndex(coNumID)
 			if !fits {
 				slog.Warn("skipping unrepresentable sparse dimension", "namespace", namespace, "object_id", objectID, "numeric_id", coNumID)
