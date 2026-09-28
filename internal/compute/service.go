@@ -151,19 +151,22 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// round-trips (events, subject ids, object ids, one upsert) instead of
 	// three per subject — the N+1 that made phase 1 84% of batch time.
 	// Failures are tolerated at the smallest scope they occur: a subject that
-	// cannot be built is dropped alone; a failed read (events or ids) drops
-	// its whole chunk, vectors and co-occurrence both, until the next tick; a
-	// failed subject upsert drops only the chunk's subject vectors — the
-	// built rows still feed co-occurrence. A run where nothing was upserted
+	// cannot be built is dropped alone; a failed lookup (events, subject or
+	// object ids) drops its whole chunk, vectors and co-occurrence both,
+	// until the next tick; a failed subject upsert drops only the chunk's
+	// subject vectors — the built rows still feed co-occurrence. Either chunk
+	// failure also skips the stale-point sweep below. A run where nothing was upserted
 	// is still a failure — phase 1 reporting success while Qdrant holds only
 	// stale vectors is worse than an honest red run.
 	upserted := 0
+	failedChunks := 0
 	keepSubjects := make(map[uint64]struct{}, len(subjects))
 	for start := 0; start < len(subjects); start += s.subjectChunkSize {
 		chunk := subjects[start:min(start+s.subjectChunkSize, len(subjects))]
 		built, objectIDs, err := s.buildChunk(ctx, namespace, chunk, lambda)
 		if err != nil {
 			slog.Error("build subject chunk failed", "namespace", namespace, "subjects", len(chunk), "first_subject_id", chunk[0], "error", err)
+			failedChunks++
 			continue
 		}
 
@@ -173,6 +176,7 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 		}
 		if err := s.upsertSubjectVectors(ctx, namespace, vecs); err != nil {
 			slog.Error("upsert subject vectors failed", "namespace", namespace, "subjects", len(vecs), "first_subject_id", chunk[0], "error", err)
+			failedChunks++
 		} else {
 			upserted += len(vecs)
 			for _, vec := range vecs {
@@ -211,9 +215,15 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// Full recompute only upserts what the window produced — sweep out the
 	// points of entities that aged past it, or they keep frozen scores (and
 	// keep matching searches) forever. Best-effort: a failed sweep is stale
-	// data, not a failed run; the next tick retries it.
-	s.cleanupCollection(ctx, namespace, infraqdrant.CollectionSubjects, keepSubjects)
-	s.cleanupCollection(ctx, namespace, infraqdrant.CollectionObjects, keepObjects)
+	// data, not a failed run; the next tick retries it. A failed chunk is
+	// missing from the keep-sets, so sweeping would delete up to a chunk of
+	// live vectors over a transient error — wait for a clean run instead.
+	if failedChunks > 0 {
+		slog.Warn("stale point cleanup skipped after failed chunks", "namespace", namespace, "failed_chunks", failedChunks)
+	} else {
+		s.cleanupCollection(ctx, namespace, infraqdrant.CollectionSubjects, keepSubjects)
+		s.cleanupCollection(ctx, namespace, infraqdrant.CollectionObjects, keepObjects)
+	}
 
 	metrics.BatchEntitiesProcessed.WithLabelValues(namespace).Set(float64(upserted))
 	slog.Info("namespace recomputed", "namespace", namespace, "subjects", upserted, "objects", objects)
