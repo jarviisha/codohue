@@ -97,7 +97,7 @@ func TestRepositoryGetActiveSubjects_ExcludesOldEvents(t *testing.T) {
 	}
 }
 
-func TestRepositoryGetSubjectEvents(t *testing.T) {
+func TestRepositoryGetSubjectsEvents(t *testing.T) {
 	db := openTestDB(t)
 	cleanupNS(t, db, "compute_test_events")
 
@@ -107,18 +107,24 @@ func TestRepositoryGetSubjectEvents(t *testing.T) {
 
 	seedEvent(t, db, "compute_test_events", "user-1", "item-1", now)
 	seedEvent(t, db, "compute_test_events", "user-1", "item-2", now)
-	seedEvent(t, db, "compute_test_events", "user-2", "item-3", now) // different subject
+	seedEvent(t, db, "compute_test_events", "user-2", "item-3", now)
+	seedEvent(t, db, "compute_test_events", "user-3", "item-4", now) // not requested
 
-	events, err := repo.GetSubjectEvents(ctx, "compute_test_events", "user-1")
+	events, err := repo.GetSubjectsEvents(ctx, "compute_test_events", []string{"user-1", "user-2"})
 	if err != nil {
-		t.Fatalf("GetSubjectEvents: %v", err)
+		t.Fatalf("GetSubjectsEvents: %v", err)
 	}
-	if len(events) != 2 {
-		t.Errorf("expected 2 events for user-1, got %d", len(events))
+	if len(events["user-1"]) != 2 || len(events["user-2"]) != 1 {
+		t.Errorf("expected 2 events for user-1 and 1 for user-2, got %d and %d", len(events["user-1"]), len(events["user-2"]))
 	}
-	for _, e := range events {
-		if e.SubjectID != "user-1" {
-			t.Errorf("unexpected SubjectID: %q", e.SubjectID)
+	if _, ok := events["user-3"]; ok {
+		t.Error("unrequested subject must not be returned")
+	}
+	for subjectID, evs := range events {
+		for _, e := range evs {
+			if e.SubjectID != subjectID {
+				t.Errorf("event for %q grouped under %q", e.SubjectID, subjectID)
+			}
 		}
 	}
 }

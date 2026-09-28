@@ -99,6 +99,24 @@ func TestServiceGetOrCreateObjectIDs(t *testing.T) {
 	}
 }
 
+func TestServiceGetOrCreateSubjectIDs(t *testing.T) {
+	repo := &fakeRepo{id: 10}
+	svc := &Service{repo: repo}
+	out, err := svc.GetOrCreateSubjectIDs(context.Background(), []string{"a", "b"}, "ns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("expected 2 ids, got %v", out)
+	}
+	if repo.lastType != "subject" {
+		t.Errorf("entityType: got %q, want subject", repo.lastType)
+	}
+	if _, err := (&Service{repo: &fakeRepo{err: errors.New("boom")}}).GetOrCreateSubjectIDs(context.Background(), []string{"a"}, "ns"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
 func TestServiceGetOrCreateObjectIDs_Error(t *testing.T) {
 	svc := &Service{repo: &fakeRepo{err: errors.New("boom")}}
 	if _, err := svc.GetOrCreateObjectIDs(context.Background(), []string{"a"}, "ns"); err == nil {

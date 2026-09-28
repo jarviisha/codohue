@@ -55,33 +55,34 @@ func (r *Repository) GetActiveSubjects(ctx context.Context, namespace string) ([
 	return subjects, nil
 }
 
-// GetSubjectEvents returns all events for a subject within the last 90 days.
-func (r *Repository) GetSubjectEvents(ctx context.Context, namespace, subjectID string) ([]*RawEvent, error) {
+// GetSubjectsEvents returns the last 90 days of events for many subjects in
+// one query, grouped by subject. Subjects with no events are absent.
+func (r *Repository) GetSubjectsEvents(ctx context.Context, namespace string, subjectIDs []string) (map[string][]*RawEvent, error) {
 	rows, err := r.queryFn(ctx, `
 		SELECT subject_id, object_id, action, weight,
 		       EXTRACT(EPOCH FROM occurred_at)::BIGINT,
 		       EXTRACT(EPOCH FROM object_created_at)::BIGINT
 		FROM events
-		WHERE subject_id = $1
+		WHERE subject_id = ANY($1)
 		  AND namespace  = $2
 		  AND occurred_at > NOW() - INTERVAL '90 days'`,
-		subjectID, namespace,
+		subjectIDs, namespace,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("get subject events: %w", err)
+		return nil, fmt.Errorf("get subjects events: %w", err)
 	}
 	defer rows.Close()
 
-	var events []*RawEvent
+	events := make(map[string][]*RawEvent, len(subjectIDs))
 	for rows.Next() {
 		e := &RawEvent{}
 		if err := rows.Scan(&e.SubjectID, &e.ObjectID, &e.Action, &e.Weight, &e.OccurredAt, &e.ObjectCreatedAt); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
-		events = append(events, e)
+		events[e.SubjectID] = append(events[e.SubjectID], e)
 	}
 	if err := rows.Err(); err != nil {
-		return events, fmt.Errorf("iterate subject events: %w", err)
+		return nil, fmt.Errorf("iterate subjects events: %w", err)
 	}
 	return events, nil
 }
