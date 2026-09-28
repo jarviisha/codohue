@@ -113,10 +113,10 @@ func (f *fakeIDMap) GetOrCreateObjectIDs(_ context.Context, objectIDs []string, 
 
 func newTestService(repo computeRepo, idmap idmapService) *Service {
 	return &Service{
-		repo:         repo,
-		idmapSvc:     idmap,
-		subjectChunk: qdrantBatchSize,
-		upsertFn:     func(_ context.Context, _ *qdrant.UpsertPoints) error { return nil },
+		repo:             repo,
+		idmapSvc:         idmap,
+		subjectChunkSize: qdrantBatchSize,
+		upsertFn:         func(_ context.Context, _ *qdrant.UpsertPoints) error { return nil },
 	}
 }
 
@@ -538,7 +538,7 @@ func TestRecomputeNamespace_ContinuesOnBuildAndUpsertFailures(t *testing.T) {
 	idmap := newFakeIDMap()
 	idmap.objectErrs["bad"] = context.Canceled
 	svc := newTestService(repo, idmap)
-	svc.subjectChunk = 1 // one subject per chunk, so each failure is isolated
+	svc.subjectChunkSize = 1 // one subject per chunk, so each failure is isolated
 	callCount := 0
 	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
 		callCount++
@@ -867,7 +867,7 @@ func TestRecomputeNamespace_BatchesRoundTripsPerChunk(t *testing.T) {
 	}
 	idmap := newFakeIDMap()
 	svc := newTestService(repo, idmap)
-	svc.subjectChunk = 2
+	svc.subjectChunkSize = 2
 	subjectUpserts := 0
 	svc.upsertFn = func(_ context.Context, points *qdrant.UpsertPoints) error {
 		if points.CollectionName == "ns_subjects" {

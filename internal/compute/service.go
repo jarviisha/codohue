@@ -108,20 +108,20 @@ type Service struct {
 	repo     computeRepo
 	idmapSvc idmapService
 	qdrant   *qdrant.Client
-	// subjectChunk is how many subjects share one events query, one id
+	// subjectChunkSize is how many subjects share one events query, one id
 	// resolution per entity type, and one Qdrant upsert.
-	subjectChunk int
-	upsertFn     func(ctx context.Context, points *qdrant.UpsertPoints) error
-	cleanupFn    func(ctx context.Context, collection string, keep map[uint64]struct{}) (int, error)
+	subjectChunkSize int
+	upsertFn         func(ctx context.Context, points *qdrant.UpsertPoints) error
+	cleanupFn        func(ctx context.Context, collection string, keep map[uint64]struct{}) (int, error)
 }
 
 // NewService creates a new Service with the required dependencies.
 func NewService(repo *Repository, idmapSvc *idmap.Service, qdrantClient *qdrant.Client) *Service {
 	return &Service{
-		repo:         repo,
-		idmapSvc:     idmapSvc,
-		qdrant:       qdrantClient,
-		subjectChunk: qdrantBatchSize,
+		repo:             repo,
+		idmapSvc:         idmapSvc,
+		qdrant:           qdrantClient,
+		subjectChunkSize: qdrantBatchSize,
 		upsertFn: func(ctx context.Context, points *qdrant.UpsertPoints) error {
 			_, err := qdrantClient.Upsert(ctx, points)
 			if err != nil {
@@ -151,15 +151,16 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// round-trips (events, subject ids, object ids, one upsert) instead of
 	// three per subject — the N+1 that made phase 1 84% of batch time.
 	// Failures are tolerated at the smallest scope they occur: a subject that
-	// cannot be built is dropped alone, a failed round-trip drops its chunk
-	// (subject vectors and co-occurrence both) until the next tick. A run
-	// where nothing was upserted is still a failure — phase 1 reporting
-	// success while Qdrant holds only stale vectors is worse than an honest
-	// red run.
+	// cannot be built is dropped alone; a failed read (events or ids) drops
+	// its whole chunk, vectors and co-occurrence both, until the next tick; a
+	// failed subject upsert drops only the chunk's subject vectors — the
+	// built rows still feed co-occurrence. A run where nothing was upserted
+	// is still a failure — phase 1 reporting success while Qdrant holds only
+	// stale vectors is worse than an honest red run.
 	upserted := 0
 	keepSubjects := make(map[uint64]struct{}, len(subjects))
-	for start := 0; start < len(subjects); start += s.subjectChunk {
-		chunk := subjects[start:min(start+s.subjectChunk, len(subjects))]
+	for start := 0; start < len(subjects); start += s.subjectChunkSize {
+		chunk := subjects[start:min(start+s.subjectChunkSize, len(subjects))]
 		built, objectIDs, err := s.buildChunk(ctx, namespace, chunk, lambda)
 		if err != nil {
 			slog.Error("build subject chunk failed", "namespace", namespace, "subjects", len(chunk), "first_subject_id", chunk[0], "error", err)
