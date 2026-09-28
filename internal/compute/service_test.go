@@ -133,8 +133,8 @@ func TestNewService(t *testing.T) {
 
 // ─── buildChunk ──────────────────────────────────────────────────────────────
 
-func buildOne(svc *Service, lambda float64) (*subjectVectors, error) {
-	built, err := svc.buildChunk(context.Background(), "ns", []string{"u1"}, lambda)
+func buildSingleSubject(svc *Service, lambda float64) (*subjectVectors, error) {
+	built, _, err := svc.buildChunk(context.Background(), "ns", []string{"u1"}, lambda)
 	if err != nil {
 		return nil, err
 	}
@@ -144,14 +144,14 @@ func buildOne(svc *Service, lambda float64) (*subjectVectors, error) {
 	return built[0], nil
 }
 
-func TestBuildVectors_SingleEvent(t *testing.T) {
+func TestBuildChunk_SingleEvent(t *testing.T) {
 	now := time.Now().Unix()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "o1", Weight: 5.0, OccurredAt: now},
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	built, err := buildOne(svc, 0.05)
+	built, err := buildSingleSubject(svc, 0.05)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestBuildVectors_SingleEvent(t *testing.T) {
 	}
 }
 
-func TestBuildVectors_TimeDecayApplied(t *testing.T) {
+func TestBuildChunk_TimeDecayApplied(t *testing.T) {
 	// Event 10 days ago: score = weight * e^(-lambda * 10)
 	tenDaysAgo := time.Now().Add(-10 * 24 * time.Hour).Unix()
 	events := []*RawEvent{
@@ -174,7 +174,7 @@ func TestBuildVectors_TimeDecayApplied(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
 	lambda := 0.05
-	built, err := buildOne(svc, lambda)
+	built, err := buildSingleSubject(svc, lambda)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestBuildVectors_TimeDecayApplied(t *testing.T) {
 	}
 }
 
-func TestBuildVectors_MultipleEventsAccumulate(t *testing.T) {
+func TestBuildChunk_MultipleEventsAccumulate(t *testing.T) {
 	now := time.Now().Unix()
 	events := []*RawEvent{
 		{SubjectID: "u1", ObjectID: "o1", Weight: 2.0, OccurredAt: now},
@@ -194,7 +194,7 @@ func TestBuildVectors_MultipleEventsAccumulate(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	built, err := buildOne(svc, 0.0)
+	built, err := buildSingleSubject(svc, 0.0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestBuildVectors_MultipleEventsAccumulate(t *testing.T) {
 	}
 }
 
-func TestBuildVectors_ObjectCreatedAtTracked(t *testing.T) {
+func TestBuildChunk_ObjectCreatedAtTracked(t *testing.T) {
 	now := time.Now().Unix()
 	created := now - 1000
 	events := []*RawEvent{
@@ -216,7 +216,7 @@ func TestBuildVectors_ObjectCreatedAtTracked(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	built, err := buildOne(svc, 0.0)
+	built, err := buildSingleSubject(svc, 0.0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -226,10 +226,10 @@ func TestBuildVectors_ObjectCreatedAtTracked(t *testing.T) {
 	}
 }
 
-func TestBuildVectors_NoEvents_EmptyResult(t *testing.T) {
+func TestBuildChunk_NoEvents_EmptyResult(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{events: nil}, newFakeIDMap())
 
-	built, err := buildOne(svc, 0.05)
+	built, err := buildSingleSubject(svc, 0.05)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestBuildVectors_NoEvents_EmptyResult(t *testing.T) {
 	}
 }
 
-func TestBuildVectors_MaxTimeTracksLatest(t *testing.T) {
+func TestBuildChunk_MaxTimeTracksLatest(t *testing.T) {
 	older := time.Now().Add(-2 * time.Hour).Unix()
 	newer := time.Now().Add(-1 * time.Hour).Unix()
 	events := []*RawEvent{
@@ -260,7 +260,7 @@ func TestBuildVectors_MaxTimeTracksLatest(t *testing.T) {
 	}
 	svc := newTestService(&fakeComputeRepo{events: events}, newFakeIDMap())
 
-	built, err := buildOne(svc, 0.0)
+	built, err := buildSingleSubject(svc, 0.0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -273,19 +273,19 @@ func TestBuildVectors_MaxTimeTracksLatest(t *testing.T) {
 // ─── existing accumulation + decay helpers (kept for regression) ──────────────
 
 func TestObjectCooccurrenceAccumulation(t *testing.T) {
-	keys := map[uint64]string{1: "obj-A", 2: "obj-B", 3: "obj-C"}
-	row := []coEntry{{1, 2.0}, {2, 1.5}, {3, 0.8}}
+	co := newCooccurrence()
+	co.rows = [][]coEntry{{{1, 2.0}, {2, 1.5}, {3, 0.8}}}
 
-	objectAccum := make(map[string]map[uint64]float32)
-	accumulateObjectCooccurrence(objectAccum, row, keys, 1, 0)
+	passOf, _ := co.planPasses(cooccurrenceBudget)
+	accum := co.accumulate(passOf, 0)
 
-	if got := objectAccum["obj-A"][2]; math.Abs(float64(got)-1.5) > 1e-6 {
+	if got := accum[1][2]; math.Abs(float64(got)-1.5) > 1e-6 {
 		t.Errorf("obj-A[obj-B] = %v, want 1.5", got)
 	}
-	if got := objectAccum["obj-A"][3]; math.Abs(float64(got)-0.8) > 1e-6 {
+	if got := accum[1][3]; math.Abs(float64(got)-0.8) > 1e-6 {
 		t.Errorf("obj-A[obj-C] = %v, want 0.8", got)
 	}
-	if _, exists := objectAccum["obj-A"][1]; exists {
+	if _, exists := accum[1][1]; exists {
 		t.Error("obj-A should not contain self dimension")
 	}
 }
@@ -293,59 +293,82 @@ func TestObjectCooccurrenceAccumulation(t *testing.T) {
 // Partitioning is what bounds phase-1 memory (issue #74); it must not change
 // the result: the union of every pass equals the single-pass matrix.
 func TestObjectCooccurrence_PartitionedPassesMatchSinglePass(t *testing.T) {
-	keys := map[uint64]string{}
-	for id := uint64(1); id <= 9; id++ {
-		keys[id] = string(rune('a' + id))
-	}
-	rows := [][]coEntry{
+	co := newCooccurrence()
+	co.rows = [][]coEntry{
 		{{1, 1}, {2, 2}, {3, 3}, {4, 4}},
 		{{2, 0.5}, {5, 1}, {6, 2}, {7, 1}, {8, 3}},
 		{{9, 1}},
 		{{1, 2}, {9, 1}},
 	}
 
-	want := make(map[string]map[uint64]float32)
-	for _, row := range rows {
-		accumulateObjectCooccurrence(want, row, keys, 1, 0)
-	}
+	onePass, _ := co.planPasses(cooccurrenceBudget)
+	want := co.accumulate(onePass, 0)
 
-	const passes = 4
-	got := make(map[string]map[uint64]float32)
-	for pass := range uint64(passes) {
-		accum := make(map[string]map[uint64]float32)
-		for _, row := range rows {
-			accumulateObjectCooccurrence(accum, row, keys, passes, pass)
-		}
-		for key, r := range accum {
-			if _, dup := got[key]; dup {
-				t.Fatalf("target %q folded in more than one pass", key)
+	passOf, passes := co.planPasses(6)
+	if passes < 2 {
+		t.Fatalf("budget 6 must split the rows, got %d pass", passes)
+	}
+	got := make(map[uint64]map[uint64]float32)
+	for pass := range passes {
+		for target, r := range co.accumulate(passOf, pass) {
+			if _, dup := got[target]; dup {
+				t.Fatalf("target %d folded in more than one pass", target)
 			}
-			got[key] = r
+			got[target] = r
 		}
 	}
 
 	if len(got) != len(want) {
 		t.Fatalf("got %d rows, want %d", len(got), len(want))
 	}
-	for key, wantRow := range want {
-		for dim, v := range wantRow {
-			if got[key][dim] != v {
-				t.Fatalf("%s[%d] = %v, want %v", key, dim, got[key][dim], v)
-			}
+	for target, wantRow := range want {
+		if len(got[target]) != len(wantRow) {
+			t.Fatalf("%d: %d dims, want %d", target, len(got[target]), len(wantRow))
 		}
-		if len(got[key]) != len(wantRow) {
-			t.Fatalf("%s: %d dims, want %d", key, len(got[key]), len(wantRow))
+		for dim, v := range wantRow {
+			if got[target][dim] != v {
+				t.Fatalf("%d[%d] = %v, want %v", target, dim, got[target][dim], v)
+			}
 		}
 	}
 }
 
-func TestCooccurrencePasses(t *testing.T) {
-	if got := cooccurrencePasses(nil); got != 1 {
-		t.Fatalf("empty: got %d passes, want 1", got)
+// The budget must hold for every pass, not on average: modulo partitioning let
+// one pass draw several hub targets and blow far past it.
+func TestPlanPasses_BoundsEveryPassUnderHubSkew(t *testing.T) {
+	co := newCooccurrence()
+	// Hubs 1..4 appear in every row; tail objects appear once each.
+	for i := range uint64(50) {
+		co.rows = append(co.rows, []coEntry{{1, 1}, {2, 1}, {3, 1}, {4, 1}, {100 + i, 1}})
 	}
-	// One subject with 5,000 objects contributes ~25M pairs → 3 passes.
-	if got := cooccurrencePasses([][]coEntry{make([]coEntry, 5000)}); got != 3 {
-		t.Fatalf("5000-object subject: got %d passes, want 3", got)
+	const budget = 120
+
+	passOf, passes := co.planPasses(budget)
+	load := make([]uint64, passes)
+	targets := make([]int, passes)
+	for _, row := range co.rows {
+		for _, e := range row {
+			load[passOf[e.id]] += uint64(len(row) - 1)
+		}
+	}
+	for _, pass := range passOf {
+		targets[pass]++
+	}
+	for pass := range passes {
+		if load[pass] > budget && targets[pass] > 1 {
+			t.Fatalf("pass %d holds %d contributions over %d targets, budget %d", pass, load[pass], targets[pass], budget)
+		}
+	}
+}
+
+func TestPlanPasses_SinglePassWithinBudget(t *testing.T) {
+	co := newCooccurrence()
+	if _, passes := co.planPasses(cooccurrenceBudget); passes != 1 {
+		t.Fatalf("empty: got %d passes, want 1", passes)
+	}
+	co.rows = [][]coEntry{{{1, 1}, {2, 1}, {3, 1}}}
+	if _, passes := co.planPasses(cooccurrenceBudget); passes != 1 {
+		t.Fatalf("small: got %d passes, want 1", passes)
 	}
 }
 
@@ -367,7 +390,7 @@ func TestBuildChunk_SubjectIDError(t *testing.T) {
 	idmap.subjectErr = context.DeadlineExceeded
 	svc := newTestService(&fakeComputeRepo{}, idmap)
 
-	if _, err := buildOne(svc, 0); err == nil {
+	if _, err := buildSingleSubject(svc, 0); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
@@ -429,6 +452,13 @@ func TestUpsertSubjectVectors_UpsertError(t *testing.T) {
 	}
 }
 
+// testCooccurrence knows object 7 as "o1".
+func testCooccurrence() *cooccurrence {
+	co := newCooccurrence()
+	co.keys[7] = "o1"
+	return co
+}
+
 func TestUpsertObjectVectors_UsesExplicitCreatedAt(t *testing.T) {
 	svc := newTestService(&fakeComputeRepo{}, newFakeIDMap())
 	var got *qdrant.UpsertPoints
@@ -438,11 +468,10 @@ func TestUpsertObjectVectors_UsesExplicitCreatedAt(t *testing.T) {
 		return nil
 	}
 
-	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
-		map[string]map[uint64]float32{"o1": {1: 1.25}},
-		map[string]int64{"o1": createdAt.Add(-time.Hour).Unix()},
-		map[string]int64{"o1": createdAt.Unix()},
-	)
+	co := testCooccurrence()
+	co.maxTimes[7] = createdAt.Add(-time.Hour).Unix()
+	co.createdTimes[7] = createdAt.Unix()
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", map[uint64]map[uint64]float32{7: {1: 1.25}}, co)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -467,31 +496,14 @@ func TestUpsertObjectVectors_UsesMaxOccurredAtFallback(t *testing.T) {
 		return nil
 	}
 
-	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
-		map[string]map[uint64]float32{"o1": {1: 1.25}},
-		map[string]int64{"o1": maxTime.Unix()},
-		nil,
-	)
+	co := testCooccurrence()
+	co.maxTimes[7] = maxTime.Unix()
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", map[uint64]map[uint64]float32{7: {1: 1.25}}, co)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.Points[0].Payload["created_at"].GetStringValue() != maxTime.Format(time.RFC3339) {
 		t.Fatalf("unexpected created_at: %s", got.Points[0].Payload["created_at"].GetStringValue())
-	}
-}
-
-func TestUpsertObjectVectors_ObjectIDError(t *testing.T) {
-	idmap := newFakeIDMap()
-	idmap.objectErrs["o1"] = context.DeadlineExceeded
-	svc := newTestService(&fakeComputeRepo{}, idmap)
-
-	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
-		map[string]map[uint64]float32{"o1": {1: 1.25}},
-		nil,
-		nil,
-	)
-	if err == nil {
-		t.Fatal("expected error, got nil")
 	}
 }
 
@@ -501,11 +513,7 @@ func TestUpsertObjectVectors_UpsertError(t *testing.T) {
 		return context.DeadlineExceeded
 	}
 
-	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns",
-		map[string]map[uint64]float32{"o1": {1: 1.25}},
-		nil,
-		nil,
-	)
+	_, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", map[uint64]map[uint64]float32{7: {1: 1.25}}, testCooccurrence())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -723,10 +731,6 @@ func TestSparseIndex_RefusesNarrowingInsteadOfColliding(t *testing.T) {
 // whole run, permanently, at the object site — the offending id never goes
 // away.
 func TestBuildSubjectVector_SkipsObjectPastSparseIndexSpace(t *testing.T) {
-	idmap := newFakeIDMap()
-	idmap.objectIDs["o-bad"] = maxSparseIndex + 1
-	idmap.objectIDs["o-good"] = 7
-
 	vec, err := buildSubjectVector("ns", "u1", 1,
 		map[string]float64{"o-bad": 1, "o-good": 2},
 		map[string]uint64{"o-bad": maxSparseIndex + 1, "o-good": 7})
@@ -744,10 +748,6 @@ func TestBuildSubjectVector_SkipsObjectPastSparseIndexSpace(t *testing.T) {
 // sparse search returns nothing, requests fall to fallback_popular, and the
 // run still reports success.
 func TestBuildSubjectVector_TotalTruncationIsAnError(t *testing.T) {
-	idmap := newFakeIDMap()
-	idmap.objectIDs["o-bad"] = maxSparseIndex + 1
-	idmap.objectIDs["o-worse"] = maxSparseIndex + 2
-
 	_, err := buildSubjectVector("ns", "u1", 1,
 		map[string]float64{"o-bad": 1, "o-worse": 2},
 		map[string]uint64{"o-bad": maxSparseIndex + 1, "o-worse": maxSparseIndex + 2})
@@ -759,7 +759,6 @@ func TestBuildSubjectVector_TotalTruncationIsAnError(t *testing.T) {
 // A subject with no interactions legitimately has an empty vector — that path
 // must stay distinct from total truncation.
 func TestBuildSubjectVector_NoScoresIsNotTruncation(t *testing.T) {
-
 	vec, err := buildSubjectVector("ns", "u1", 1, map[string]float64{}, map[string]uint64{})
 	if err != nil {
 		t.Fatalf("empty score set is not truncation: %v", err)
@@ -776,9 +775,9 @@ func TestUpsertObjectVectors_SkipsCooccurrenceEntryPastSparseIndexSpace(t *testi
 		got = points
 		return nil
 	}
-	accum := map[string]map[uint64]float32{"o1": {maxSparseIndex + 1: 1, 5: 2}}
+	accum := map[uint64]map[uint64]float32{7: {maxSparseIndex + 1: 1, 5: 2}}
 
-	if _, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", accum, nil, nil); err != nil {
+	if _, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", accum, testCooccurrence()); err != nil {
 		t.Fatalf("unrepresentable dimension must not fail the run: %v", err)
 	}
 	idx := got.Points[0].GetVectors().GetVectors().GetVectors()[sparseVectorName].GetSparse().GetIndices()
@@ -824,8 +823,8 @@ func TestUpsertObjectVectors_RowsAreUnitNorm(t *testing.T) {
 		got = points
 		return nil
 	}
-	accum := map[string]map[uint64]float32{"o1": {1: 3, 2: 4}}
-	if _, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", accum, nil, nil); err != nil {
+	accum := map[uint64]map[uint64]float32{7: {1: 3, 2: 4}}
+	if _, err := svc.upsertObjectVectors(leasedCtx("ns"), "ns", accum, testCooccurrence()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	vals := got.Points[0].GetVectors().GetVectors().GetVectors()[sparseVectorName].GetSparse().GetValues()
@@ -882,12 +881,12 @@ func TestRecomputeNamespace_BatchesRoundTripsPerChunk(t *testing.T) {
 		t.Fatalf("object ids must resolve in batches, got %d per-id calls", idmap.singleCalls)
 	}
 	// 2 chunks: one events query, one subject batch, one object batch and one
-	// upsert each; plus one object batch for the accumulated rows.
+	// upsert each. Object rows reuse the chunk-resolved ids.
 	if repo.eventCalls != 2 || idmap.subjectBatchCalls != 2 || subjectUpserts != 2 {
 		t.Fatalf("per-chunk round-trips: events=%d subject ids=%d upserts=%d, want 2 each",
 			repo.eventCalls, idmap.subjectBatchCalls, subjectUpserts)
 	}
-	if idmap.batchCalls != 3 {
-		t.Fatalf("expected 3 object batch resolutions (2 chunks + object rows), got %d", idmap.batchCalls)
+	if idmap.batchCalls != 2 {
+		t.Fatalf("expected 2 object batch resolutions (one per chunk), got %d", idmap.batchCalls)
 	}
 }

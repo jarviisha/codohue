@@ -145,27 +145,22 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 
 	slog.Info("recomputing namespace", "namespace", namespace, "subjects", len(subjects))
 
-	// rows keeps each subject's (object id, score) pairs so the quadratic
-	// co-occurrence fold can run in bounded partitions after the loop.
-	rows := make([][]coEntry, 0, len(subjects))
-	objectKeys := make(map[uint64]string)
-	// objectMaxTime[objectID] = max occurred_at (or object_created_at when available) across all subjects
-	objectMaxTime := make(map[string]int64)
-	// objectCreatedAt[objectID] = object_created_at when explicitly provided by the event source
-	objectCreatedAt := make(map[string]int64)
+	co := newCooccurrence()
 
 	// Subjects are processed in chunks so each chunk costs a fixed handful of
 	// round-trips (events, subject ids, object ids, one upsert) instead of
 	// three per subject — the N+1 that made phase 1 84% of batch time.
-	// Chunk and per-subject failures are tolerated (one bad subject must not
-	// sink the namespace), but a run where nothing was upserted is a failure —
-	// phase 1 reporting success while Qdrant holds only stale vectors is worse
-	// than an honest red run.
+	// Failures are tolerated at the smallest scope they occur: a subject that
+	// cannot be built is dropped alone, a failed round-trip drops its chunk
+	// (subject vectors and co-occurrence both) until the next tick. A run
+	// where nothing was upserted is still a failure — phase 1 reporting
+	// success while Qdrant holds only stale vectors is worse than an honest
+	// red run.
 	upserted := 0
 	keepSubjects := make(map[uint64]struct{}, len(subjects))
 	for start := 0; start < len(subjects); start += s.subjectChunk {
 		chunk := subjects[start:min(start+s.subjectChunk, len(subjects))]
-		built, err := s.buildChunk(ctx, namespace, chunk, lambda)
+		built, objectIDs, err := s.buildChunk(ctx, namespace, chunk, lambda)
 		if err != nil {
 			slog.Error("build subject chunk failed", "namespace", namespace, "subjects", len(chunk), "first_subject_id", chunk[0], "error", err)
 			continue
@@ -185,22 +180,7 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 		}
 
 		for _, b := range built {
-			row := make([]coEntry, 0, len(b.scores))
-			for objID, score := range b.scores {
-				id := b.objectIDs[objID]
-				objectKeys[id] = objID
-				row = append(row, coEntry{id: id, score: float32(score)})
-
-				if t, ok := b.maxTimes[objID]; ok && t > objectMaxTime[objID] {
-					objectMaxTime[objID] = t
-				}
-				if t, ok := b.createdTimes[objID]; ok && t > 0 {
-					if existing, has := objectCreatedAt[objID]; !has || t > existing {
-						objectCreatedAt[objID] = t
-					}
-				}
-			}
-			rows = append(rows, row)
+			co.add(&b.subjectScores, objectIDs)
 		}
 	}
 
@@ -211,18 +191,15 @@ func (s *Service) RecomputeNamespace(ctx context.Context, namespace string, lamb
 	// The full object×object matrix grows with Σk² over subjects and OOM-killed
 	// cron at bluesky scale, so rows are built one target partition at a time
 	// and each partition is upserted before the next is accumulated.
-	passes := cooccurrencePasses(rows)
+	passOf, passes := co.planPasses(cooccurrenceBudget)
 	if passes > 1 {
 		slog.Info("partitioning object co-occurrence", "namespace", namespace, "passes", passes)
 	}
-	keepObjects := make(map[uint64]struct{}, len(objectKeys))
+	keepObjects := make(map[uint64]struct{}, len(co.keys))
 	objects := 0
 	for pass := range passes {
-		accum := make(map[string]map[uint64]float32)
-		for _, row := range rows {
-			accumulateObjectCooccurrence(accum, row, objectKeys, passes, pass)
-		}
-		kept, err := s.upsertObjectVectors(ctx, namespace, accum, objectMaxTime, objectCreatedAt)
+		accum := co.accumulate(passOf, pass)
+		kept, err := s.upsertObjectVectors(ctx, namespace, accum, co)
 		if err != nil {
 			return upserted, 0, fmt.Errorf("upsert object vectors: %w", err)
 		}
@@ -268,51 +245,106 @@ type coEntry struct {
 	score float32
 }
 
+// cooccurrence is the object side of phase 1: every subject's row, kept
+// compact so the quadratic object×object fold can run in bounded passes after
+// all subjects are built, plus the per-object data the object payload needs.
+// Everything here grows linearly with events and distinct objects.
+type cooccurrence struct {
+	rows [][]coEntry
+	// keys maps a numeric object id back to its string key for the payload.
+	keys map[uint64]string
+	// maxTimes is the latest occurred_at per object across all subjects.
+	maxTimes map[uint64]int64
+	// createdTimes is the latest explicit object_created_at per object, when
+	// the event source supplied one.
+	createdTimes map[uint64]int64
+}
+
+func newCooccurrence() *cooccurrence {
+	return &cooccurrence{
+		keys:         make(map[uint64]string),
+		maxTimes:     make(map[uint64]int64),
+		createdTimes: make(map[uint64]int64),
+	}
+}
+
+// add folds one built subject into the accumulator.
+func (c *cooccurrence) add(sc *subjectScores, objectIDs map[string]uint64) {
+	row := make([]coEntry, 0, len(sc.scores))
+	for objID, score := range sc.scores {
+		id := objectIDs[objID]
+		c.keys[id] = objID
+		row = append(row, coEntry{id: id, score: float32(score)})
+
+		if t, ok := sc.maxTimes[objID]; ok && t > c.maxTimes[id] {
+			c.maxTimes[id] = t
+		}
+		if t, ok := sc.createdTimes[objID]; ok && t > c.createdTimes[id] {
+			c.createdTimes[id] = t
+		}
+	}
+	c.rows = append(c.rows, row)
+}
+
 // cooccurrenceBudget caps the co-occurrence contributions accumulated in one
-// pass. Contributions bound distinct map entries from above, so one pass holds
-// at most this many entries (a few hundred MiB) whatever the namespace size.
+// pass. Contributions bound distinct map entries from above, so a pass holds
+// at most this many entries unless a single target alone exceeds it (its row
+// is bounded by the distinct object count). ~10M entries is on the order of
+// a few hundred MiB of map.
 const cooccurrenceBudget = 10_000_000
 
-// cooccurrencePasses returns how many target partitions keep each pass within
-// cooccurrenceBudget.
-func cooccurrencePasses(rows [][]coEntry) uint64 {
-	var pairs uint64
-	for _, row := range rows {
-		if k := uint64(len(row)); k > 1 {
-			pairs += k * (k - 1)
+// planPasses assigns every target object to a pass so that no pass exceeds
+// budget contributions, where a target's contribution is k-1 for every row of
+// length k it appears in. Packing by actual load, not by id modulo, keeps the
+// bound per pass under hub skew.
+func (c *cooccurrence) planPasses(budget uint64) (passOf map[uint64]int, passes int) {
+	load := make(map[uint64]uint64, len(c.keys))
+	for _, row := range c.rows {
+		k := uint64(len(row))
+		for _, e := range row {
+			load[e.id] += k - 1
 		}
 	}
-	return max(1, (pairs+cooccurrenceBudget-1)/cooccurrenceBudget)
+
+	passOf = make(map[uint64]int, len(load))
+	var current uint64
+	for id, l := range load {
+		if current > 0 && current+l > budget {
+			passes++
+			current = 0
+		}
+		passOf[id] = passes
+		current += l
+	}
+	return passOf, passes + 1
 }
 
-// accumulateObjectCooccurrence folds one subject's row into the co-occurrence
-// rows of the targets that fall in this pass (id % passes == pass). Across all
-// passes every target is folded exactly once, so the union equals the
-// unpartitioned matrix.
-func accumulateObjectCooccurrence(accum map[string]map[uint64]float32, row []coEntry, keys map[uint64]string, passes, pass uint64) {
-	for _, target := range row {
-		if target.id%passes != pass {
-			continue
-		}
-		key := keys[target.id]
-		for _, other := range row {
-			if other.id == target.id {
+// accumulate builds the co-occurrence rows of the targets assigned to pass.
+// Across all passes every target is folded exactly once, so the union equals
+// the unpartitioned matrix.
+func (c *cooccurrence) accumulate(passOf map[uint64]int, pass int) map[uint64]map[uint64]float32 {
+	accum := make(map[uint64]map[uint64]float32)
+	for _, row := range c.rows {
+		for _, target := range row {
+			if passOf[target.id] != pass {
 				continue
 			}
-			if accum[key] == nil {
-				accum[key] = make(map[uint64]float32)
+			for _, other := range row {
+				if other.id == target.id {
+					continue
+				}
+				if accum[target.id] == nil {
+					accum[target.id] = make(map[uint64]float32)
+				}
+				accum[target.id][other.id] += other.score
 			}
-			accum[key][other.id] += other.score
 		}
 	}
+	return accum
 }
 
-// subjectVectors is everything one subject's event window produced: the sparse
-// vector itself, plus the per-object data the namespace-level accumulators
-// fold together afterwards. These five travel together to every caller, so
-// they are one value rather than a six-result signature.
-type subjectVectors struct {
-	vec *SubjectVector
+// subjectScores is one subject's event window folded per object.
+type subjectScores struct {
 	// scores is the decay-weighted score per object.
 	scores map[string]float64
 	// maxTimes is the latest occurred_at per object.
@@ -320,26 +352,31 @@ type subjectVectors struct {
 	// createdTimes is the explicit object_created_at per object, when the
 	// event source supplied one.
 	createdTimes map[string]int64
-	// objectIDs is the numeric id per object, resolved once so callers need
-	// not resolve it again.
-	objectIDs map[string]uint64
+}
+
+// subjectVectors is a built subject: its sparse vector plus the scores it was
+// built from, which the co-occurrence accumulator folds afterwards.
+type subjectVectors struct {
+	subjectScores
+	vec *SubjectVector
 }
 
 // buildChunk builds the sparse vectors of a chunk of subjects with one events
 // query and one batch id resolution per entity type. A subject that cannot be
 // built is logged and left out; a failed round-trip fails the whole chunk.
-func (s *Service) buildChunk(ctx context.Context, namespace string, chunk []string, lambda float64) ([]*subjectVectors, error) {
+// The returned object ids cover every object the built subjects touched.
+func (s *Service) buildChunk(ctx context.Context, namespace string, chunk []string, lambda float64) ([]*subjectVectors, map[string]uint64, error) {
 	events, err := s.repo.GetSubjectsEvents(ctx, namespace, chunk)
 	if err != nil {
-		return nil, fmt.Errorf("get events: %w", err)
+		return nil, nil, fmt.Errorf("get events: %w", err)
 	}
 	subjectIDs, err := s.idmapSvc.GetOrCreateSubjectIDs(ctx, chunk, namespace)
 	if err != nil {
-		return nil, fmt.Errorf("get subject ids: %w", err)
+		return nil, nil, fmt.Errorf("get subject ids: %w", err)
 	}
 
 	now := time.Now().Unix()
-	scored := make([]*subjectVectors, len(chunk))
+	scored := make([]*subjectScores, len(chunk))
 	objectSet := make(map[string]struct{})
 	for i, subjectID := range chunk {
 		scored[i] = scoreEvents(events[subjectID], lambda, now)
@@ -352,31 +389,29 @@ func (s *Service) buildChunk(ctx context.Context, namespace string, chunk []stri
 	// co-occurrence fold: both need exactly this key set.
 	objectIDs, err := s.resolveObjectIDs(ctx, namespace, slices.Collect(maps.Keys(objectSet)))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	built := make([]*subjectVectors, 0, len(chunk))
 	for i, subjectID := range chunk {
 		subjectNumID, ok := subjectIDs[subjectID]
 		if !ok {
-			slog.Error("build vectors failed", "namespace", namespace, "subject_id", subjectID, "error", "no numeric id resolved")
+			slog.Error("subject id not resolved", "namespace", namespace, "subject_id", subjectID)
 			continue
 		}
 		vec, err := buildSubjectVector(namespace, subjectID, subjectNumID, scored[i].scores, objectIDs)
 		if err != nil {
-			slog.Error("build vectors failed", "namespace", namespace, "subject_id", subjectID, "error", err)
+			slog.Error("build subject vector failed", "namespace", namespace, "subject_id", subjectID, "error", err)
 			continue
 		}
-		scored[i].vec = vec
-		scored[i].objectIDs = objectIDs
-		built = append(built, scored[i])
+		built = append(built, &subjectVectors{subjectScores: *scored[i], vec: vec})
 	}
-	return built, nil
+	return built, objectIDs, nil
 }
 
 // scoreEvents folds one subject's events into decay-weighted per-object
 // scores plus the object timestamps the namespace accumulators need.
-func scoreEvents(events []*RawEvent, lambda float64, now int64) *subjectVectors {
+func scoreEvents(events []*RawEvent, lambda float64, now int64) *subjectScores {
 	objectScores := make(map[string]float64)
 	objectMaxTime := make(map[string]int64)
 	objectCreatedTimes := make(map[string]int64)
@@ -396,7 +431,7 @@ func scoreEvents(events []*RawEvent, lambda float64, now int64) *subjectVectors 
 		}
 	}
 
-	return &subjectVectors{
+	return &subjectScores{
 		scores:       objectScores,
 		maxTimes:     objectMaxTime,
 		createdTimes: objectCreatedTimes,
@@ -485,28 +520,15 @@ func (s *Service) upsertSubjectVectors(ctx context.Context, namespace string, ve
 	return nil
 }
 
-func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[string]map[uint64]float32, maxTimes, createdTimes map[string]int64) (map[uint64]struct{}, error) {
+// upsertObjectVectors writes one pass of co-occurrence rows, keyed by target
+// numeric id, and returns the ids it wrote.
+func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, accum map[uint64]map[uint64]float32, co *cooccurrence) (map[uint64]struct{}, error) {
 	collectionName, err := collectionForContext(ctx, namespace, infraqdrant.CollectionObjects)
 	if err != nil {
 		return nil, err
 	}
 	upsertedIDs := make(map[uint64]struct{}, len(accum))
 	var batch []*qdrant.PointStruct
-
-	// One resolution for the whole accumulated set: these keys were already
-	// minted while building the subject vectors, so this is a bulk read.
-	objectKeys := make([]string, 0, len(accum))
-	for objectID := range accum {
-		objectKeys = append(objectKeys, objectID)
-	}
-	objectIDs := make(map[string]uint64, len(accum))
-	if len(objectKeys) > 0 {
-		resolved, err := s.idmapSvc.GetOrCreateObjectIDs(ctx, objectKeys, namespace)
-		if err != nil {
-			return upsertedIDs, fmt.Errorf("get object ids: %w", err)
-		}
-		objectIDs = resolved
-	}
 
 	flush := func() error {
 		if len(batch) == 0 {
@@ -523,11 +545,8 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 		return nil
 	}
 
-	for objectID, subjectScores := range accum {
-		objNumID, ok := objectIDs[objectID]
-		if !ok {
-			return upsertedIDs, fmt.Errorf("no numeric id resolved for object %q", objectID)
-		}
+	for objNumID, subjectScores := range accum {
+		objectID := co.keys[objNumID]
 		upsertedIDs[objNumID] = struct{}{}
 
 		entries := make([]sparseEntry, 0, len(subjectScores))
@@ -544,9 +563,9 @@ func (s *Service) upsertObjectVectors(ctx context.Context, namespace string, acc
 
 		// Prefer explicit object_created_at from the event payload; fall back to max occurred_at.
 		createdAt := time.Now().UTC().Format(time.RFC3339)
-		if t, ok := createdTimes[objectID]; ok && t > 0 {
+		if t := co.createdTimes[objNumID]; t > 0 {
 			createdAt = time.Unix(t, 0).UTC().Format(time.RFC3339)
-		} else if t, ok := maxTimes[objectID]; ok && t > 0 {
+		} else if t := co.maxTimes[objNumID]; t > 0 {
 			createdAt = time.Unix(t, 0).UTC().Format(time.RFC3339)
 		}
 
