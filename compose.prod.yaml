@@ -72,8 +72,14 @@ services:
       qdrant:
         condition: service_healthy
         required: false
+    # Recompute memory grows with namespace size (#74); cap it so an
+    # oversized batch kills only cron instead of OOM-thrashing the host.
+    # Keep GOMEMLIMIT below mem_limit so the GC works before the kill.
+    mem_limit: "${CODOHUE_CRON_MEM_LIMIT:-2g}"
+    memswap_limit: "${CODOHUE_CRON_MEM_LIMIT:-2g}"
     environment:
       <<: *environment
+      GOMEMLIMIT: "${CODOHUE_CRON_GOMEMLIMIT:-1536MiB}"
       CODOHUE_BATCH_INTERVAL_MINUTES: "${CODOHUE_BATCH_INTERVAL_MINUTES:-5}"
       CODOHUE_BATCH_RUN_RETENTION_DAYS: "${CODOHUE_BATCH_RUN_RETENTION_DAYS:-30}"
       CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS: "${CODOHUE_BACKLOG_SAMPLES_RETENTION_DAYS:-7}"
