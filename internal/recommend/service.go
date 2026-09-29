@@ -388,9 +388,9 @@ type outcome struct {
 //	otherwise   → collaborativeFiltering
 //	              (hands off to hybridRecommend when hybridEligible and the
 //	               subject has a dense vector; any infra failure descends to
-//	               fallbackPopular via descendPopular — degraded; a sparse
-//	               search with no candidates descends to fallbackTrending,
-//	               excluding seen items — not degraded)
+//	               fallbackPopular via descendPopular — degraded; a CF or
+//	               hybrid search with no candidates descends to
+//	               fallbackTrending, excluding seen items — not degraded)
 //
 // Each rung returns an outcome, never an HTTP-shaped Response; Recommend
 // assembles the wire shape and makes the cache decision from the outcome.
@@ -411,15 +411,17 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 		out, err = s.hybridCold(ctx, req, maxResults, cfg)
 	default:
 		out, err = s.collaborativeFiltering(ctx, req, maxResults, cfg)
-		// A successful sparse search with no candidates at all (every
-		// co-occurring object already seen, or the subject's objects have no
-		// co-occurrence vector) is a data state: serve trending like the
-		// cold-start rung, cacheable. total == 0 rather than an empty page,
-		// so a client paging past the end of real CF candidates still gets
-		// an empty page, while one paging through this fallback keeps
-		// getting it. Checked here, not inside collaborativeFiltering,
-		// because hybridCold calls that rung and blends trending itself.
-		if err == nil && out.source == SourceCollaborativeFiltering && out.total == 0 {
+		// A successful search with no candidates at all (every co-occurring
+		// object already seen, or the subject's objects have no co-occurrence
+		// vector) is a data state: serve trending like the cold-start rung,
+		// cacheable. total == 0 rather than an empty page, so a client paging
+		// past the end of real candidates still gets an empty page, while one
+		// paging through this fallback keeps getting it. Checked here, not
+		// inside collaborativeFiltering or the hybridRecommend it hands off
+		// to, because hybridCold calls collaborativeFiltering and blends
+		// trending itself.
+		if err == nil && out.total == 0 &&
+			(out.source == SourceCollaborativeFiltering || out.source == SourceHybrid) {
 			out, err = s.fallbackTrending(ctx, req, maxResults, cfg, s.seenObjectSet(ctx, req, cfg))
 		}
 	}
@@ -555,7 +557,12 @@ func (s *Service) hybridRecommend(
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
-		return s.descendPopular(ctx, req, limit, cfg, nil, degraded)
+		if degraded {
+			return s.descendPopular(ctx, req, limit, cfg, nil, true)
+		}
+		// Both arms answered with nothing: a data state that doRecommend
+		// descends from, exactly as it does for pure sparse CF.
+		return outcome{source: SourceHybrid, scale: scaleUnitBlend}, nil
 	}
 
 	// Each arm's top-K must also be scored by the other arm before blending.

@@ -331,7 +331,7 @@ Responses are cached in Redis for 5 minutes per `(namespace, subject_id, limit, 
 - `hybrid_cold` — trending + CF blend (cold start)
 - `hybrid_rank` — `/rankings` endpoint, subject was scored
 - `no_subject_vector` — `/rankings` whole-response fallback: the subject has neither a sparse nor a dense vector; every item is `scored: false` in request order
-- `fallback_popular` — also served to a warm subject whose sparse CF search returns no candidates at all (trending minus seen items, cacheable); paging past the end of real CF candidates still returns an empty `collaborative_filtering` page
+- `fallback_popular` — also served to a warm subject whose CF or hybrid search returns no candidates at all (trending minus seen items, cacheable); paging past the end of real candidates still returns an empty `collaborative_filtering` / `hybrid` page
 
 ## 9. Authentication
 
