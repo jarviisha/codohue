@@ -455,6 +455,65 @@ func TestCollaborativeFiltering_UsesSeenItemsDaysFromConfig(t *testing.T) {
 	}
 }
 
+func TestDoRecommend_CF_EmptySearch_FallsBackToTrendingAndCaches(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{count: 10, seenItems: []string{"seen-1"}}
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, _ int) ([]infraredis.TrendingEntry, error) {
+		all := []infraredis.TrendingEntry{{ObjectID: "seen-1"}, {ObjectID: "t-1"}, {ObjectID: "t-2"}}
+		if offset >= len(all) {
+			return nil, nil
+		}
+		return all[offset:], nil
+	}
+	cached := false
+	f.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular {
+		t.Fatalf("source: got %q, want %q", resp.Source, SourceFallbackPopular)
+	}
+	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "t-1" || resp.Items[1].ObjectID != "t-2" {
+		t.Fatalf("want trending minus seen items, got %+v", resp.Items)
+	}
+	if !cached {
+		t.Fatal("data-state fallback must be cached")
+	}
+}
+
+func TestDoRecommend_CF_PastEndStaysEmpty(t *testing.T) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{count: 10}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+		}, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return []infraredis.TrendingEntry{{ObjectID: "t-1"}}, nil
+	}
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5, Offset: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceCollaborativeFiltering || len(resp.Items) != 0 {
+		t.Fatalf("paging past CF candidates must return an empty CF page, got source=%q items=%+v", resp.Source, resp.Items)
+	}
+}
+
 // ─── doRecommend: popular error ──────────────────────────────────────────────
 
 func TestDoRecommend_ColdStart_PopularError_ReturnsError(t *testing.T) {

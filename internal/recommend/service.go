@@ -387,7 +387,9 @@ type outcome struct {
 //	otherwise   → collaborativeFiltering
 //	              (hands off to hybridRecommend when hybridEligible and the
 //	               subject has a dense vector; any infra failure descends to
-//	               fallbackPopular via descendPopular — degraded)
+//	               fallbackPopular via descendPopular — degraded; a sparse
+//	               search with no candidates descends to fallbackTrending,
+//	               excluding seen items — not degraded)
 //
 // Each rung returns an outcome, never an HTTP-shaped Response; Recommend
 // assembles the wire shape and makes the cache decision from the outcome.
@@ -408,6 +410,17 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 		out, err = s.hybridCold(ctx, req, maxResults, cfg)
 	default:
 		out, err = s.collaborativeFiltering(ctx, req, maxResults, cfg)
+		// A successful sparse search with no candidates at all (every
+		// co-occurring object already seen, or the subject's objects have no
+		// co-occurrence vector) is a data state: serve trending like the
+		// cold-start rung, cacheable. total == 0 rather than an empty page,
+		// so a client paging past the end of real CF candidates still gets
+		// an empty page, while one paging through this fallback keeps
+		// getting it. Checked here, not inside collaborativeFiltering,
+		// because hybridCold calls that rung and blends trending itself.
+		if err == nil && out.source == SourceCollaborativeFiltering && out.total == 0 {
+			out, err = s.fallbackTrending(ctx, req, maxResults, cfg, s.seenObjectSet(ctx, req, cfg))
+		}
 	}
 	if err != nil {
 		return outcome{}, err
@@ -850,19 +863,7 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 	// trending share must drop them too, or the item the subject touched
 	// five minutes ago (likely trending) comes straight back in 70% of
 	// their recommendations.
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	var seen map[string]struct{}
-	if seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays); err != nil {
-		slog.Error("hybrid cold: get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-	} else if len(seenItems) > 0 {
-		seen = make(map[string]struct{}, len(seenItems))
-		for _, id := range seenItems {
-			seen[id] = struct{}{}
-		}
-	}
+	seen := s.seenObjectSet(ctx, req, cfg)
 
 	cfOut, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
 	popOut, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg, seen)
@@ -907,6 +908,28 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 		scale:    scaleUnscored,
 		degraded: degraded,
 	}, nil
+}
+
+// seenObjectSet returns the subject's seen items within the namespace's
+// seen-items window as a set, or nil when there are none or the lookup fails.
+func (s *Service) seenObjectSet(ctx context.Context, req *Request, cfg *namespace.Config) map[string]struct{} {
+	seenItemsDays := 30
+	if cfg != nil && cfg.SeenItemsDays > 0 {
+		seenItemsDays = cfg.SeenItemsDays
+	}
+	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays)
+	if err != nil {
+		slog.Error("get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		return nil
+	}
+	if len(seenItems) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(seenItems))
+	for _, id := range seenItems {
+		seen[id] = struct{}{}
+	}
+	return seen
 }
 
 // GetTrending returns the trending items for a namespace from Redis.
