@@ -167,10 +167,10 @@ func TestRepositoryGetNamespaceEventsInWindow_Success(t *testing.T) {
 	}
 }
 
-func TestRepositoryGetActiveNamespaces_Success(t *testing.T) {
+func TestRepositoryGetAllNamespaces_Success(t *testing.T) {
 	rows := &fakeRows{items: [][]any{{"ns1"}, {"ns2"}}}
 	repo := &Repository{queryFn: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) { return rows, nil }}
-	namespaces, err := repo.GetActiveNamespaces(context.Background())
+	namespaces, err := repo.GetAllNamespaces(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

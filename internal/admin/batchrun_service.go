@@ -97,7 +97,7 @@ func (s *Service) RetryBatchRun(ctx context.Context, id int64) (*BatchRunCreateR
 	// lock, so we don't duplicate that protection here.
 	created, err := s.CreateBatchRun(ctx, row.Namespace)
 	if err != nil {
-		if errors.Is(err, errBatchRunning) {
+		if errors.Is(err, errBatchRunning) || errors.Is(err, ErrNamespacePaused) {
 			return nil, http.StatusConflict, err
 		}
 		return nil, http.StatusInternalServerError, err

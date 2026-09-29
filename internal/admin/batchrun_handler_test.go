@@ -109,6 +109,16 @@ func TestHandlerRetryBatchRunStatusMapping(t *testing.T) {
 	}
 }
 
+func TestHandlerRetryBatchRunPausedNamespaceIs409(t *testing.T) {
+	h := newTestHandler(&fakeSvc{retryStatus: http.StatusConflict, retryErr: ErrNamespacePaused})
+	req := newChiRequest(http.MethodPost, "/api/admin/v1/batch-runs/1/retry", map[string]string{"id": "1"}, "")
+	rec := httptest.NewRecorder()
+	h.RetryBatchRun(rec, req)
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "namespace_paused") {
+		t.Fatalf("got %d %s, want 409 namespace_paused", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandlerRetryBatchRunSetsLocationOnAccepted(t *testing.T) {
 	svc := &fakeSvc{
 		retryStatus: http.StatusAccepted,

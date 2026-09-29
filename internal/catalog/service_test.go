@@ -376,6 +376,17 @@ func TestServiceIngest_NamespaceNotEnabled(t *testing.T) {
 	}
 }
 
+func TestServiceIngest_NamespacePaused(t *testing.T) {
+	cfg := enabledCfg()
+	cfg.Paused = true
+	repo := &fakeRepo{}
+	svc := newSvc(repo, &fakeNSConfig{cfg: cfg}, &fakeXAdder{})
+	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hi"})
+	if !errors.Is(err, ErrNamespacePaused) {
+		t.Fatalf("expected ErrNamespacePaused, got %v", err)
+	}
+}
+
 func TestServiceIngest_NamespaceConfigError(t *testing.T) {
 	svc := newSvc(&fakeRepo{}, &fakeNSConfig{err: errors.New("db down")}, &fakeXAdder{})
 	_, err := svc.Ingest(context.Background(), "ns", &IngestRequest{ObjectID: "o1", Content: "hi"})

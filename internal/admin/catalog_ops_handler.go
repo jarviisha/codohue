@@ -17,7 +17,7 @@ import (
 //	                            header points at the batch run record.
 //	404 Not Found             — namespace does not exist OR dense_source is not "catalog"
 //	                            (same body — see FR-008).
-//	409 Conflict              — a re-embed is already in progress.
+//	409 Conflict              — a re-embed is already in progress, or the namespace is paused.
 //	500 Internal Server Error — unexpected DB / Redis error.
 //	503 Service Unavailable   — catalog feature not wired in this deployment.
 func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +49,8 @@ func (h *Handler) TriggerReEmbed(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, ErrCatalogStrategyPickerUnavailable):
 			httpapi.WriteError(w, http.StatusServiceUnavailable, "catalog_unavailable",
 				"catalog auto-embedding is not wired in this deployment")
+		case errors.Is(err, ErrNamespacePaused):
+			httpapi.WriteNamespacePaused(w)
 		case errors.Is(err, ErrReembedAlreadyRunning):
 			httpapi.WriteError(w, http.StatusConflict, "reembed_running",
 				"a re-embed is already in progress for this namespace")

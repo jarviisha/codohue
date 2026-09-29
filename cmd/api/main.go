@@ -202,6 +202,7 @@ func run() error {
 		r.Use(auth.RequireNamespace(cfg.AdminAPIKey, keyHashFn, func(r *http.Request) string {
 			return httpapi.URLParam(r, "ns")
 		}, access.NewStore(db).ServiceToken))
+		r.Use(rejectPausedNamespace(nsConfigSvc.Get))
 		r.Post("/v1/namespaces/{ns}/events", ingestHandler.Ingest)
 		r.Post("/v1/namespaces/{ns}/catalog", catalogHandler.Ingest)
 		r.Post("/v1/namespaces/{ns}/catalog/batch", catalogHandler.BatchIngest)

@@ -39,6 +39,7 @@ func (a *nsConfigAdapter) Upsert(ctx context.Context, ns string, req *admin.Name
 		MaxResults:      req.MaxResults,
 		SeenItemsDays:   req.SeenItemsDays,
 		ExcludeAuthored: req.ExcludeAuthored,
+		Paused:          req.Paused,
 		DenseSource:     req.DenseSource,
 		EmbeddingDim:    req.EmbeddingDim,
 		DenseDistance:   req.DenseDistance,

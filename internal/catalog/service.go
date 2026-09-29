@@ -161,6 +161,9 @@ func (s *Service) ingestActive(ctx context.Context, ns string, req *IngestReques
 	if cfg == nil {
 		return nil, ErrNamespaceNotFound
 	}
+	if cfg.Paused {
+		return nil, ErrNamespacePaused
+	}
 	if cfg.DenseSource != codohuetypes.DenseSourceCatalog {
 		return nil, ErrNamespaceNotEnabled
 	}

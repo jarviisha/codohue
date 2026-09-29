@@ -12,6 +12,7 @@ export type NamespaceConfig = {
   max_results: number
   seen_items_days: number
   exclude_authored: boolean
+  paused: boolean
   dense_source: string
   embedding_dim: number
   dense_distance: string
@@ -37,6 +38,8 @@ export type NamespaceUpsertRequest = {
   max_results?: number
   seen_items_days?: number
   exclude_authored?: boolean
+  /** true stops the namespace: data plane 409s, cron and embedder skip it. */
+  paused?: boolean
   dense_source?: string
   embedding_dim?: number
   dense_distance?: string

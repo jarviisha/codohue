@@ -129,7 +129,7 @@ func TestRepositoryGetSubjectsEvents(t *testing.T) {
 	}
 }
 
-func TestRepositoryGetActiveNamespaces(t *testing.T) {
+func TestRepositoryGetAllNamespaces(t *testing.T) {
 	db := openTestDB(t)
 	cleanupNS(t, db, "compute_ns_a")
 	cleanupNS(t, db, "compute_ns_b")
@@ -141,9 +141,9 @@ func TestRepositoryGetActiveNamespaces(t *testing.T) {
 	seedEvent(t, db, "compute_ns_a", "user-1", "item-1", now)
 	seedEvent(t, db, "compute_ns_b", "user-1", "item-1", now)
 
-	namespaces, err := repo.GetActiveNamespaces(ctx)
+	namespaces, err := repo.GetAllNamespaces(ctx)
 	if err != nil {
-		t.Fatalf("GetActiveNamespaces: %v", err)
+		t.Fatalf("GetAllNamespaces: %v", err)
 	}
 
 	got := make(map[string]bool)
@@ -154,6 +154,45 @@ func TestRepositoryGetActiveNamespaces(t *testing.T) {
 		if !got[want] {
 			t.Errorf("expected namespace %q in results", want)
 		}
+	}
+}
+
+func TestRepositoryPausedNamespaceSkippedOnlyByCron(t *testing.T) {
+	db := openTestDB(t)
+	const ns = "compute_ns_paused"
+	cleanupNS(t, db, ns)
+	ctx := context.Background()
+	if _, err := db.Exec(ctx, `UPDATE namespace_configs SET paused_at = NOW() WHERE namespace = $1`, ns); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	t.Cleanup(func() {
+		db.Exec(context.Background(), //nolint:errcheck // test cleanup, failure is not critical
+			`UPDATE namespace_configs SET paused_at = NULL WHERE namespace = $1`, ns)
+	})
+
+	repo := NewRepository(db)
+	contains := func(list []string) bool {
+		for _, n := range list {
+			if n == ns {
+				return true
+			}
+		}
+		return false
+	}
+
+	all, err := repo.GetAllNamespaces(ctx)
+	if err != nil {
+		t.Fatalf("GetAllNamespaces: %v", err)
+	}
+	if !contains(all) {
+		t.Error("GetAllNamespaces must still list a paused namespace (id-mapping repair relies on it)")
+	}
+	scheduled, err := repo.GetScheduledNamespaces(ctx)
+	if err != nil {
+		t.Fatalf("GetScheduledNamespaces: %v", err)
+	}
+	if contains(scheduled) {
+		t.Error("GetScheduledNamespaces must skip a paused namespace")
 	}
 }
 

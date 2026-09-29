@@ -26,6 +26,7 @@ type NamespaceConfig struct {
 	MaxResults             int                `json:"max_results"`
 	SeenItemsDays          int                `json:"seen_items_days"`
 	ExcludeAuthored        bool               `json:"exclude_authored"`
+	Paused                 bool               `json:"paused"`
 	DenseSource            string             `json:"dense_source"`
 	EmbeddingDim           int                `json:"embedding_dim"`
 	DenseDistance          string             `json:"dense_distance"`
@@ -374,6 +375,7 @@ type NamespaceUpsertRequest struct {
 	MaxResults      *int               `json:"max_results"`
 	SeenItemsDays   *int               `json:"seen_items_days"`
 	ExcludeAuthored *bool              `json:"exclude_authored"`
+	Paused          *bool              `json:"paused"`
 	DenseSource     *string            `json:"dense_source"`
 	EmbeddingDim    *int               `json:"embedding_dim"`
 	DenseDistance   *string            `json:"dense_distance"`

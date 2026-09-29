@@ -18,6 +18,10 @@ type Config struct {
 	// not imply the namespace wants it filtered.
 	ExcludeAuthored bool `json:"exclude_authored"`
 
+	// Paused is the operator stop switch (namespace_configs.paused_at set):
+	// the data plane rejects the namespace and background work skips it.
+	Paused bool `json:"paused"`
+
 	// Auth.
 	APIKeyHash string `json:"-"`
 
