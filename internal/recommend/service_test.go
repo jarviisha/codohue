@@ -11,7 +11,9 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/qdrant/go-client/qdrant"
 )
 
@@ -452,6 +454,136 @@ func TestCollaborativeFiltering_UsesSeenItemsDaysFromConfig(t *testing.T) {
 	}
 	if resp.Source != SourceCollaborativeFiltering {
 		t.Fatalf("source: got %q, want %q", resp.Source, SourceCollaborativeFiltering)
+	}
+}
+
+func TestDoRecommend_CF_EmptySearch_FallsBackToTrendingAndCaches(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{count: 10, seenItems: []string{"seen-1"}}
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, _ int) ([]infraredis.TrendingEntry, error) {
+		all := []infraredis.TrendingEntry{{ObjectID: "seen-1"}, {ObjectID: "t-1"}, {ObjectID: "t-2"}}
+		if offset >= len(all) {
+			return nil, nil
+		}
+		return all[offset:], nil
+	}
+	cached := false
+	f.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular {
+		t.Fatalf("source: got %q, want %q", resp.Source, SourceFallbackPopular)
+	}
+	if len(resp.Items) != 2 || resp.Items[0].ObjectID != "t-1" || resp.Items[1].ObjectID != "t-2" {
+		t.Fatalf("want trending minus seen items, got %+v", resp.Items)
+	}
+	if !cached {
+		t.Fatal("data-state fallback must be cached")
+	}
+}
+
+func TestDoRecommend_CF_EmptySearch_AllTrendingSeenFallsToPopular(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{count: 10, seenItems: []string{"t-1", "t-2"}, popularItems: []string{"t-1", "p-1"}}
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return []infraredis.TrendingEntry{{ObjectID: "t-1"}, {ObjectID: "t-2"}}, nil
+	}
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0].ObjectID != "p-1" {
+		t.Fatalf("want unseen DB-popular items, got source=%q items=%+v", resp.Source, resp.Items)
+	}
+}
+
+func TestDoRecommend_CF_EmptySearch_CountsOnlyServedSource(t *testing.T) {
+	t.Parallel()
+	const ns = "ns-cf-empty-metric"
+	s, f := newTestService(&fakeRepo{count: 10, popularItems: []string{"p-1"}}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+
+	if _, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: ns, Limit: 5}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.RecommendRequests.WithLabelValues(ns, SourceCollaborativeFiltering)); got != 0 {
+		t.Fatalf("collaborative_filtering counted %v times for a request served by the fallback", got)
+	}
+	if got := testutil.ToFloat64(metrics.RecommendRequests.WithLabelValues(ns, SourceFallbackPopular)); got != 1 {
+		t.Fatalf("fallback_popular counted %v times, want 1", got)
+	}
+}
+
+func TestDoRecommend_CF_EmptySearch_LaterPageContinuesTrending(t *testing.T) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{count: 10}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, offset, limit int) ([]infraredis.TrendingEntry, error) {
+		all := []infraredis.TrendingEntry{{ObjectID: "t-1"}, {ObjectID: "t-2"}, {ObjectID: "t-3"}}
+		if offset >= len(all) {
+			return nil, nil
+		}
+		return all[offset:min(offset+limit, len(all))], nil
+	}
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 2, Offset: 2})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0].ObjectID != "t-3" || resp.Items[0].Rank != 3 {
+		t.Fatalf("want trending page 2, got source=%q items=%+v", resp.Source, resp.Items)
+	}
+}
+
+func TestDoRecommend_CF_PastEndStaysEmpty(t *testing.T) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{count: 10}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return []*qdrant.ScoredPoint{
+			{Score: 3, Payload: map[string]*qdrant.Value{"object_id": qdrant.NewValueString("obj-1")}},
+		}, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return []infraredis.TrendingEntry{{ObjectID: "t-1"}}, nil
+	}
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5, Offset: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceCollaborativeFiltering || len(resp.Items) != 0 {
+		t.Fatalf("paging past CF candidates must return an empty CF page, got source=%q items=%+v", resp.Source, resp.Items)
 	}
 }
 
@@ -1058,7 +1190,7 @@ func TestHybridRecommend_OrderingFixture(t *testing.T) {
 	}
 }
 
-func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
+func TestHybridRecommend_BothSearchesEmptyReturnsNoCandidates(t *testing.T) {
 	t.Parallel()
 	s, f := newTestService(&fakeRepo{popularItems: []string{"popular-1"}}, &fakeNsConfig{}, newFakeIDMapper())
 	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
@@ -1072,8 +1204,62 @@ func TestHybridRecommend_FallsBackWhenBothSearchesEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.source != SourceFallbackPopular || out.items[0].ObjectID != "popular-1" {
-		t.Fatalf("unexpected fallback outcome: %+v", out)
+	// doRecommend owns the no-candidates descent, so the rung reports it.
+	if out.source != SourceHybrid || out.total != 0 || len(out.items) != 0 || out.degraded {
+		t.Fatalf("want an empty, non-degraded hybrid outcome, got %+v", out)
+	}
+}
+
+func TestHybridRecommend_FailedArmAndEmptyArmFallsBackDegraded(t *testing.T) {
+	t.Parallel()
+	s, f := newTestService(&fakeRepo{popularItems: []string{"popular-1"}}, &fakeNsConfig{}, newFakeIDMapper())
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, errors.New("qdrant down")
+	}
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+
+	out, err := s.hybridRecommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, &namespace.Config{Alpha: 0.5}, &qdrant.SparseVector{}, []float32{1}, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.source != SourceFallbackPopular || out.items[0].ObjectID != "popular-1" || !out.degraded {
+		t.Fatalf("want degraded popular fallback, got %+v", out)
+	}
+}
+
+func TestDoRecommend_Hybrid_NoCandidates_FallsBackToTrending(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{count: 10, seenItems: []string{"seen-1"}}
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return []infraredis.TrendingEntry{{ObjectID: "seen-1"}, {ObjectID: "t-1"}}, nil
+	}
+	cached := false
+	f.setCacheFn = func(_ context.Context, _, _ string, _ time.Duration) { cached = true }
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0].ObjectID != "t-1" {
+		t.Fatalf("want trending minus seen items, got source=%q items=%+v", resp.Source, resp.Items)
+	}
+	if !cached {
+		t.Fatal("data-state fallback must be cached")
 	}
 }
 
@@ -1677,6 +1863,36 @@ func TestHybridCold_WhenCFEmptyReturnsPopular(t *testing.T) {
 	}
 	if out.source != SourceFallbackPopular || len(out.items) != 1 || out.items[0].ObjectID != "pop-1" {
 		t.Fatalf("unexpected outcome: %+v", out)
+	}
+}
+
+func TestHybridCold_WhenHybridEmptyServesTrendingNotPopularBlend(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{count: 3, popularItems: []string{"db-pop-1"}}
+	s, f := newTestService(repo, &fakeNsConfig{}, newFakeIDMapper())
+	cfg := &namespace.Config{Alpha: 0.5, DenseSource: "byoe"}
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.fetchSubjectDenseVecFn = func(_ context.Context, _ string, _ uint64) ([]float32, error) {
+		return []float32{1}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.searchObjectsDenseFn = func(_ context.Context, _ string, _ []float32, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return []infraredis.TrendingEntry{{ObjectID: "t-1"}}, nil
+	}
+
+	out, err := s.hybridCold(context.Background(), &Request{SubjectID: "u1", Namespace: "ns"}, 2, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if out.source != SourceFallbackPopular || len(out.items) != 1 || out.items[0].ObjectID != "t-1" || out.degraded {
+		t.Fatalf("want trending alone, got %+v", out)
 	}
 }
 

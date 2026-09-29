@@ -31,6 +31,7 @@ const (
 	denseVectorName      = "dense_interactions"
 	cfOverFetchFactor    = 5
 	denseOverFetchFactor = 3
+	defaultSeenItemsDays = 30 // seen-items window when the namespace sets none
 
 	// dotNormK is the half-saturation constant of the batch-independent
 	// score map x/(x+k) applied to unbounded dot products: a raw dot of k
@@ -387,7 +388,9 @@ type outcome struct {
 //	otherwise   → collaborativeFiltering
 //	              (hands off to hybridRecommend when hybridEligible and the
 //	               subject has a dense vector; any infra failure descends to
-//	               fallbackPopular via descendPopular — degraded)
+//	               fallbackPopular via descendPopular — degraded; a CF or
+//	               hybrid search with no candidates descends to
+//	               fallbackTrending, excluding seen items — not degraded)
 //
 // Each rung returns an outcome, never an HTTP-shaped Response; Recommend
 // assembles the wire shape and makes the cache decision from the outcome.
@@ -408,6 +411,19 @@ func (s *Service) doRecommend(ctx context.Context, req *Request, maxResults int,
 		out, err = s.hybridCold(ctx, req, maxResults, cfg)
 	default:
 		out, err = s.collaborativeFiltering(ctx, req, maxResults, cfg)
+		// A successful search with no candidates at all (every co-occurring
+		// object already seen, or the subject's objects have no co-occurrence
+		// vector) is a data state: serve trending like the cold-start rung,
+		// cacheable. total == 0 rather than an empty page, so a client paging
+		// past the end of real candidates still gets an empty page, while one
+		// paging through this fallback keeps getting it. Checked here, not
+		// inside collaborativeFiltering or the hybridRecommend it hands off
+		// to, because hybridCold calls collaborativeFiltering and blends
+		// trending itself.
+		if err == nil && out.total == 0 &&
+			(out.source == SourceCollaborativeFiltering || out.source == SourceHybrid) {
+			out, err = s.fallbackTrending(ctx, req, maxResults, cfg, s.seenObjectSet(ctx, req, cfg))
+		}
 	}
 	if err != nil {
 		return outcome{}, err
@@ -455,11 +471,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 		return s.descendPopular(ctx, req, limit, cfg, nil, err != nil)
 	}
 
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays)
+	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsWindow(cfg))
 	if err != nil {
 		slog.Error("get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 	}
@@ -497,7 +509,11 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 
 	scored := rerankScored(results, resolveGamma(cfg), req.Offset+limit)
 
-	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceCollaborativeFiltering).Inc()
+	// No candidates: doRecommend descends to trending, which counts the
+	// request under the source it actually serves.
+	if len(scored) > 0 {
+		metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceCollaborativeFiltering).Inc()
+	}
 	return outcome{
 		items:  pageItems(scored, req.Offset, limit),
 		source: SourceCollaborativeFiltering,
@@ -545,7 +561,12 @@ func (s *Service) hybridRecommend(
 	}
 
 	if len(sparseResults) == 0 && len(denseResults) == 0 {
-		return s.descendPopular(ctx, req, limit, cfg, nil, degraded)
+		if degraded {
+			return s.descendPopular(ctx, req, limit, cfg, nil, true)
+		}
+		// Both arms answered with nothing: a data state that doRecommend
+		// descends from, exactly as it does for pure sparse CF.
+		return outcome{source: SourceHybrid, scale: scaleUnitBlend}, nil
 	}
 
 	// Each arm's top-K must also be scored by the other arm before blending.
@@ -850,19 +871,7 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 	// trending share must drop them too, or the item the subject touched
 	// five minutes ago (likely trending) comes straight back in 70% of
 	// their recommendations.
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	var seen map[string]struct{}
-	if seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays); err != nil {
-		slog.Error("hybrid cold: get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
-	} else if len(seenItems) > 0 {
-		seen = make(map[string]struct{}, len(seenItems))
-		for _, id := range seenItems {
-			seen[id] = struct{}{}
-		}
-	}
+	seen := s.seenObjectSet(ctx, req, cfg)
 
 	cfOut, cfErr := s.collaborativeFiltering(ctx, innerReq, overLimit, cfg)
 	popOut, popErr := s.fallbackTrending(ctx, innerReq, overLimit, cfg, seen)
@@ -907,6 +916,32 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 		scale:    scaleUnscored,
 		degraded: degraded,
 	}, nil
+}
+
+// seenItemsWindow returns the namespace's seen-items window in days.
+func seenItemsWindow(cfg *namespace.Config) int {
+	if cfg != nil && cfg.SeenItemsDays > 0 {
+		return cfg.SeenItemsDays
+	}
+	return defaultSeenItemsDays
+}
+
+// seenObjectSet returns the subject's seen items within the namespace's
+// seen-items window as a set, or nil when there are none or the lookup fails.
+func (s *Service) seenObjectSet(ctx context.Context, req *Request, cfg *namespace.Config) map[string]struct{} {
+	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsWindow(cfg))
+	if err != nil {
+		slog.Error("get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
+		return nil
+	}
+	if len(seenItems) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(seenItems))
+	for _, id := range seenItems {
+		seen[id] = struct{}{}
+	}
+	return seen
 }
 
 // GetTrending returns the trending items for a namespace from Redis.
@@ -996,6 +1031,13 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 
 	if len(excluded) > 0 {
 		entries = dropAuthoredEntries(entries, excluded)
+		if len(entries) == 0 {
+			// The fetch ran from rank 0 with headroom beyond the exclusion
+			// set, so nothing surviving means every trending object is
+			// excluded (a heavy user has seen them all) — no usable trending,
+			// the same data state as no trending data at all.
+			return s.descendPopular(ctx, req, limit, cfg, exclude, false)
+		}
 		entries, _ = pageOf(entries, req.Offset, limit)
 	}
 
@@ -1386,11 +1428,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	// The MustNot rides on the candidate filter, so an excluded candidate
 	// drops out of both searches and comes back Scored=false instead of
 	// carrying a relevance score. Lookup failures degrade to unfiltered.
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	seenItems, err := s.repo.GetSeenItems(ctx, ns, req.SubjectID, seenItemsDays)
+	seenItems, err := s.repo.GetSeenItems(ctx, ns, req.SubjectID, seenItemsWindow(cfg))
 	if err != nil {
 		slog.Error("rank: get seen items failed, serving unfiltered", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 	}
