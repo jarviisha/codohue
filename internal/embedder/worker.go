@@ -177,6 +177,9 @@ func (w *Worker) refreshNamespaces(ctx context.Context) error {
 	type enabledStream struct{ namespace, stream string }
 	enabled := make(map[string]enabledStream, len(cfgs))
 	for _, c := range cfgs {
+		if c.Paused {
+			continue // queued items wait in the stream until the namespace resumes
+		}
 		stream := embedStreamName(c.Namespace, c.Generation)
 		enabled[stream] = enabledStream{namespace: c.Namespace, stream: stream}
 	}

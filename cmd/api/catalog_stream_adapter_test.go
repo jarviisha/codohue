@@ -46,6 +46,17 @@ func TestCatalogStreamAdapter_ClassifiesValidationAsRejected(t *testing.T) {
 	}
 }
 
+func TestCatalogStreamAdapter_PausedNamespaceIsRejected(t *testing.T) {
+	cfg := &namespace.Config{Namespace: "ns", DenseSource: codohuetypes.DenseSourceCatalog, Paused: true}
+	a := &catalogStreamAdapter{svc: catalog.NewService(nil, &adapterFakeNsCfg{cfg: cfg}, nil)}
+	err := a.IngestStreamItem(context.Background(), &codohuetypes.CatalogStreamItem{
+		Namespace: "ns", ObjectID: "o1", Content: "hello",
+	})
+	if !errors.Is(err, ingest.ErrCatalogItemRejected) {
+		t.Fatalf("paused namespace must classify as rejected (acked and dropped), got %v", err)
+	}
+}
+
 // Generation enforcement belongs to the stream worker, which evaluates the
 // envelope against the lifecycle ledger before dispatching. The adapter must
 // therefore treat a stamped and an unstamped item identically — if it started

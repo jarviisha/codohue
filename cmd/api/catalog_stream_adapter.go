@@ -37,6 +37,7 @@ func (a *catalogStreamAdapter) IngestStreamItem(ctx context.Context, item *codoh
 		errors.Is(err, catalog.ErrEmptyContent),
 		errors.Is(err, catalog.ErrContentTooLarge),
 		errors.Is(err, catalog.ErrNamespaceNotFound),
+		errors.Is(err, catalog.ErrNamespacePaused),
 		errors.Is(err, catalog.ErrNamespaceNotEnabled),
 		errors.Is(err, catalog.ErrUnstorable):
 		return fmt.Errorf("%w: %v", ingest.ErrCatalogItemRejected, err)

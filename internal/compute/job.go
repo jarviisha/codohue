@@ -29,7 +29,7 @@ type jobNsConfigReader interface {
 }
 
 type jobComputeRepo interface {
-	GetActiveNamespaces(ctx context.Context) ([]string, error)
+	GetScheduledNamespaces(ctx context.Context) ([]string, error)
 	GetAllNamespaceEvents(ctx context.Context, namespace string) ([]*RawEvent, error)
 	GetNamespaceEventsInWindow(ctx context.Context, namespace string, windowHours int) ([]*RawEvent, error)
 	HasAnyEvents(ctx context.Context, namespace string) (bool, error)
@@ -265,9 +265,9 @@ func (j *Job) runOnce(ctx context.Context) {
 		slog.Warn("finalized orphaned batch runs", "count", n)
 	}
 
-	namespaces, err := j.repo.GetActiveNamespaces(ctx)
+	namespaces, err := j.repo.GetScheduledNamespaces(ctx)
 	if err != nil {
-		slog.Error("get active namespaces failed", "error", err)
+		slog.Error("get scheduled namespaces failed", "error", err)
 		return
 	}
 

@@ -94,6 +94,10 @@ func (h *Handler) RetryBatchRun(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, http.StatusUnprocessableEntity, "unprocessable", msg)
 		return
 	case http.StatusConflict:
+		if errors.Is(err, ErrNamespacePaused) {
+			httpapi.WriteNamespacePaused(w)
+			return
+		}
 		httpapi.WriteError(w, http.StatusConflict, "conflict", "original batch run is still in flight")
 		return
 	}

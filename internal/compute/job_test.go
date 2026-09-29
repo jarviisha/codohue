@@ -50,7 +50,7 @@ type fakeJobRepo struct {
 	finalizeOrphans func(ctx context.Context, cutoff time.Time) (int64, error)
 }
 
-func (f *fakeJobRepo) GetActiveNamespaces(_ context.Context) ([]string, error) {
+func (f *fakeJobRepo) GetScheduledNamespaces(_ context.Context) ([]string, error) {
 	return f.namespaces, f.err
 }
 
@@ -236,7 +236,7 @@ func TestRunOnce_Phase1_RepoError_Skips(t *testing.T) {
 	job.runOnce(context.Background())
 
 	if svc.called {
-		t.Error("expected RecomputeNamespace NOT to be called when GetActiveNamespaces fails")
+		t.Error("expected RecomputeNamespace NOT to be called when GetScheduledNamespaces fails")
 	}
 }
 

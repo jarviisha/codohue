@@ -30,6 +30,9 @@ var (
 	ErrUnknownAction = errors.New("unknown action")
 	// ErrNamespaceNotFound indicates that an event targets a namespace that no longer exists.
 	ErrNamespaceNotFound = errors.New("namespace not found")
+	// ErrNamespacePaused indicates that an operator has paused the namespace;
+	// its events are dropped, not queued for after the pause.
+	ErrNamespacePaused = errors.New("namespace paused")
 )
 
 type eventInserter interface {
@@ -115,10 +118,13 @@ func (s *Service) processActive(ctx context.Context, payload *EventPayload) (int
 	weight, err := s.resolveWeight(ctx, payload.Namespace, payload.Action)
 	if err != nil {
 		reason := "config"
-		if errors.Is(err, ErrUnknownAction) {
+		switch {
+		case errors.Is(err, ErrUnknownAction):
 			reason = "unknown_action"
-		} else if errors.Is(err, ErrNamespaceNotFound) {
+		case errors.Is(err, ErrNamespaceNotFound):
 			reason = "unknown_namespace"
+		case errors.Is(err, ErrNamespacePaused):
+			reason = "paused_namespace"
 		}
 		metrics.IngestErrorsTotal.WithLabelValues(payload.Namespace, reason).Inc()
 		return 0, fmt.Errorf("resolve weight: %w", err)
@@ -162,6 +168,9 @@ func (s *Service) resolveWeight(ctx context.Context, ns string, action Action) (
 	}
 	if cfg == nil {
 		return 0, fmt.Errorf("%w: %s", ErrNamespaceNotFound, ns)
+	}
+	if cfg.Paused {
+		return 0, fmt.Errorf("%w: %s", ErrNamespacePaused, ns)
 	}
 	if w, ok := cfg.ActionWeights[string(action)]; ok {
 		return w, nil

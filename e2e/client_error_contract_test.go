@@ -80,3 +80,17 @@ func TestClientErrors_HTTPIngestUnknownActionIsJSON(t *testing.T) {
 		t.Fatalf("error message = %q", message)
 	}
 }
+
+func TestClientErrors_PausedNamespaceIsRejectedUntilResumed(t *testing.T) {
+	ns, key := createIsolatedNamespace(t, "paused", nil)
+	trendingURL := baseURL + "/v1/namespaces/" + ns + "/trending"
+
+	createNamespace(t, ns, map[string]any{"paused": true})
+	code, _ := decodeErrorJSON(t, doRequest(t, http.MethodGet, trendingURL, key, nil), http.StatusConflict)
+	if code != "namespace_paused" {
+		t.Fatalf("error code = %q, want namespace_paused", code)
+	}
+
+	createNamespace(t, ns, map[string]any{"paused": false})
+	assertStatus(t, doRequest(t, http.MethodGet, trendingURL, key, nil), http.StatusOK)
+}

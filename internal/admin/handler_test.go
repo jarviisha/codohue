@@ -876,6 +876,21 @@ func TestCreateBatchRun_OK(t *testing.T) {
 	}
 }
 
+func TestPausedNamespaceWorkIs409(t *testing.T) {
+	svc := &fakeSvc{triggerErr: ErrNamespacePaused, reembedErr: ErrNamespacePaused}
+	h := newTestHandler(svc)
+	for name, call := range map[string]func(http.ResponseWriter, *http.Request){
+		"batch-runs":       h.CreateBatchRun,
+		"catalog/re-embed": h.TriggerReEmbed,
+	} {
+		rec := httptest.NewRecorder()
+		call(rec, newChiRequest(http.MethodPost, "/api/admin/v1/namespaces/ns1/"+name, map[string]string{"ns": "ns1"}, ""))
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "namespace_paused") {
+			t.Errorf("%s: got %d %s, want 409 namespace_paused", name, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestTriggerBatch_NotFound(t *testing.T) {
 	svc := &fakeSvc{triggerResp: nil, triggerErr: nil} // nil,nil → 404
 	h := newTestHandler(svc)

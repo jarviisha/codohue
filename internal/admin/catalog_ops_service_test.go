@@ -224,6 +224,20 @@ func TestTriggerReEmbed_Service_RunningInDB_409(t *testing.T) {
 	}
 }
 
+func TestTriggerReEmbed_Service_PausedNamespaceRejected(t *testing.T) {
+	repo := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns", Paused: true}}
+	picker := &fakeStrategyPicker{id: "x", version: "v1", enabled: true}
+	svc, pub, _ := withCatalogPlumbing(t, repo, picker)
+
+	_, err := svc.TriggerReEmbed(context.Background(), "ns", "")
+	if !errors.Is(err, ErrNamespacePaused) {
+		t.Fatalf("expected ErrNamespacePaused, got %v", err)
+	}
+	if repo.insertedReembed.namespace != "" || len(pub.calls) != 0 {
+		t.Errorf("paused namespace must not open a run or publish: insert=%+v calls=%d", repo.insertedReembed, len(pub.calls))
+	}
+}
+
 func TestTriggerReEmbed_Service_PickerUnavailable_503(t *testing.T) {
 	svc := newTestService(&fakeRepo{}, "", "")
 	// no SetCatalogStrategyPicker call

@@ -21,6 +21,11 @@ var (
 	// row exists for the namespace. Handler maps to 409 Conflict.
 	ErrReembedAlreadyRunning = errors.New("admin: re-embed already in progress for namespace")
 
+	// ErrNamespacePaused rejects work an operator could start on a paused
+	// namespace: a manual batch run or a re-embed whose run could never
+	// close while the embedder skips the namespace. Handler maps to 409.
+	ErrNamespacePaused = errors.New("admin: namespace is paused")
+
 	// ErrCatalogStrategyPickerUnavailable indicates the wiring layer did not
 	// install a catalogStrategyPicker — the catalog feature is not enabled in
 	// this deployment. Handler maps to 503.
@@ -133,6 +138,13 @@ func (s *Service) TriggerReEmbed(ctx context.Context, namespace, onlyState strin
 	if !enabled {
 		// Both "namespace missing" and "catalog disabled" surface as 404.
 		return nil, nil
+	}
+	nsConfig, err := s.repo.GetNamespace(ctx, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace: %w", err)
+	}
+	if nsConfig != nil && nsConfig.Paused {
+		return nil, ErrNamespacePaused
 	}
 	if strategyVersion == "" {
 		// Defensive: enabled=true with no version is a misconfiguration —

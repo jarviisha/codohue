@@ -152,14 +152,24 @@ func (r *Repository) GetNamespaceEventsInWindow(ctx context.Context, namespace s
 	return events, nil
 }
 
-// GetActiveNamespaces returns every configured namespace. Empty active windows
-// still need a compute pass so owned Qdrant and Redis state is removed.
-func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) {
-	rows, err := r.queryFn(ctx, `
-		SELECT namespace FROM namespace_configs ORDER BY namespace`,
-	)
+// GetAllNamespaces returns every configured namespace, paused or not.
+// Callers outside the batch loop (id-mapping repair) need the full set.
+func (r *Repository) GetAllNamespaces(ctx context.Context) ([]string, error) {
+	return r.listNamespaces(ctx, `SELECT namespace FROM namespace_configs ORDER BY namespace`)
+}
+
+// GetScheduledNamespaces returns the namespaces the batch loop recomputes:
+// every configured namespace except those an operator has paused. Empty
+// active windows still need a compute pass so owned Qdrant and Redis state
+// is removed.
+func (r *Repository) GetScheduledNamespaces(ctx context.Context) ([]string, error) {
+	return r.listNamespaces(ctx, `SELECT namespace FROM namespace_configs WHERE paused_at IS NULL ORDER BY namespace`)
+}
+
+func (r *Repository) listNamespaces(ctx context.Context, query string) ([]string, error) {
+	rows, err := r.queryFn(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("get active namespaces: %w", err)
+		return nil, fmt.Errorf("list namespaces: %w", err)
 	}
 	defer rows.Close()
 
@@ -172,7 +182,7 @@ func (r *Repository) GetActiveNamespaces(ctx context.Context) ([]string, error) 
 		ns = append(ns, n)
 	}
 	if err := rows.Err(); err != nil {
-		return ns, fmt.Errorf("iterate active namespaces: %w", err)
+		return ns, fmt.Errorf("iterate namespaces: %w", err)
 	}
 	return ns, nil
 }

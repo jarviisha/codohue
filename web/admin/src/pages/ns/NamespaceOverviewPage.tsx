@@ -21,7 +21,8 @@ import {
   Token,
 } from '@astryxdesign/core'
 import { kindTokenColor } from '@/services/batchRuns'
-import { useNamespaceDashboard } from '@/services/namespaces'
+import { useNamespaceDashboard, useUpsertNamespace } from '@/services/namespaces'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import { useDeleteNamespace } from '@/services/dangerZone'
 import PageHeader from '@/components/shell/PageHeader'
 import PhaseStrip from '@/components/monitoring/PhaseStrip'
@@ -32,6 +33,8 @@ export default function NamespaceOverviewPage() {
   const navigate = useNavigate()
   const q = useNamespaceDashboard(ns ?? null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [pauseOpen, setPauseOpen] = useState(false)
+  const upsert = useUpsertNamespace()
 
   if (!ns) return null
 
@@ -77,6 +80,7 @@ export default function NamespaceOverviewPage() {
           <Stack gap={1}>
             <Stack gap={4} direction="horizontal" align="center">
               <h1 className="text-primary text-xl font-semibold">Overview</h1>
+              {config?.paused && <Token color="red" label="paused" />}
               {config?.dense_source === 'catalog' && <Token color="green" label="catalog" />}
             </Stack>
             {config && (
@@ -176,6 +180,34 @@ export default function NamespaceOverviewPage() {
             <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
               <Stack gap={6}>
                 <span className="text-secondary text-xs uppercase tracking-wide">
+                  Namespace state
+                </span>
+                <p className="text-secondary text-sm">
+                  {config?.paused
+                    ? 'Paused. Client requests get 409, stream messages are dropped, and cron and the embedder skip this namespace. Data is kept.'
+                    : 'Active. Pausing rejects client requests and stops cron and the embedder without deleting any data.'}
+                </p>
+              </Stack>
+              {config?.paused ? (
+                <Button
+                  variant="secondary"
+                  isDisabled={upsert.isPending}
+                  onClick={() => upsert.mutate({ namespace: data.namespace, body: { paused: false } })}
+                  label={upsert.isPending ? 'Resuming…' : 'Resume namespace'}
+                />
+              ) : (
+                <Button variant="destructive" onClick={() => setPauseOpen(true)} label="Pause namespace…" />
+              )}
+            </Stack>
+            {upsert.error && !pauseOpen && (
+              <Banner status="error" title="State change failed" description={upsert.error.message} />
+            )}
+        </Card>
+
+        <Card>
+            <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
+              <Stack gap={6}>
+                <span className="text-secondary text-xs uppercase tracking-wide">
                   Danger zone
                 </span>
                 <p className="text-secondary text-sm">
@@ -187,6 +219,27 @@ export default function NamespaceOverviewPage() {
             </Stack>
         </Card>
       </Stack>
+
+      <ConfirmDialog
+        open={pauseOpen}
+        onOpenChange={setPauseOpen}
+        title={`Pause namespace ${data.namespace}`}
+        description={
+          <p className="text-secondary text-sm">
+            Every client request for this namespace will fail with 409 and stream-delivered
+            events are dropped until you resume it.
+          </p>
+        }
+        confirmLabel="Pause namespace"
+        pending={upsert.isPending}
+        error={upsert.error?.message}
+        onConfirm={() =>
+          upsert.mutate(
+            { namespace: data.namespace, body: { paused: true } },
+            { onSuccess: () => setPauseOpen(false) },
+          )
+        }
+      />
 
       <DeleteNamespaceDialog
         namespace={data.namespace}

@@ -131,7 +131,7 @@ func TestWorkerLifecycleStaleACKsAndStoreFailureRetries(t *testing.T) {
 }
 
 func TestWorkerHandleMessage_PermanentErrorAckedAndDropped(t *testing.T) {
-	for _, sentinel := range []error{ErrInvalidPayload, ErrUnknownAction, ErrNamespaceNotFound} {
+	for _, sentinel := range []error{ErrInvalidPayload, ErrUnknownAction, ErrNamespaceNotFound, ErrNamespacePaused} {
 		proc := &fakeProcessor{processErr: fmt.Errorf("wrapped: %w", sentinel)}
 		acked := []string{}
 		w := &Worker{service: proc, ackFn: ackRecorder(&acked)}

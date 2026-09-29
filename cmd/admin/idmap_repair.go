@@ -269,7 +269,7 @@ func buildRepairService(ctx context.Context) (*idmap.RepairService, func(), erro
 	evidence := &repairEvidenceSource{
 		repo:       repairRepo,
 		qdrant:     qdrantClient,
-		namespaces: computeRepo.GetActiveNamespaces,
+		namespaces: computeRepo.GetAllNamespaces,
 		generation: generationOf,
 	}
 

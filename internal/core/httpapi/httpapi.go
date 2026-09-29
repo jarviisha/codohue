@@ -112,6 +112,13 @@ func WriteLifecycleError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
+// WriteNamespacePaused answers a request for a namespace an operator has
+// paused. Unlike namespace_not_active it is operator-reversible, so clients
+// get their own code to tell "wait for an operator" from "lifecycle work".
+func WriteNamespacePaused(w http.ResponseWriter) {
+	WriteError(w, http.StatusConflict, "namespace_paused", "namespace is paused")
+}
+
 // URLParam returns a chi route parameter with its percent-encoding resolved.
 //
 // chi matches against r.URL.RawPath whenever the client escaped anything, so

@@ -261,6 +261,22 @@ func TestServiceProcess_MissingNamespaceRejected(t *testing.T) {
 	}
 }
 
+func TestServiceProcess_PausedNamespaceRejected(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Paused: true}})
+
+	_, err := svc.Process(context.Background(), &EventPayload{
+		Namespace: "ns", SubjectID: "u1", ObjectID: "o1",
+		Action: ActionView, OccurredAt: time.Now(),
+	})
+	if !errors.Is(err, ErrNamespacePaused) {
+		t.Fatalf("expected ErrNamespacePaused, got %v", err)
+	}
+	if repo.insertCalled {
+		t.Fatal("event for paused namespace must not be inserted")
+	}
+}
+
 func TestServiceProcess_UnknownAction(t *testing.T) {
 	svc := newTestService(&fakeRepo{}, &fakeNsConfig{})
 

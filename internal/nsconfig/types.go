@@ -25,6 +25,9 @@ type UpsertRequest struct {
 	// recommendations. Defaults to false — see migration 020.
 	ExcludeAuthored *bool `json:"exclude_authored,omitempty"`
 
+	// Paused stops the namespace: true pauses, false resumes.
+	Paused *bool `json:"paused,omitempty"`
+
 	// Dense hybrid
 	Alpha         *float64 `json:"alpha,omitempty"`
 	DenseSource   *string  `json:"dense_source,omitempty"`

@@ -120,6 +120,10 @@ var (
 	// the URL-supplied namespace (handler maps to 404, same body as above).
 	ErrNamespaceNotFound = errors.New("catalog: namespace not found")
 
+	// ErrNamespacePaused fires when an operator has paused the namespace.
+	// The HTTP path is rejected earlier by cmd/api; this guards stream ingest.
+	ErrNamespacePaused = errors.New("catalog: namespace paused")
+
 	// ErrUnstorable fires when the persist itself fails with a PostgreSQL
 	// data exception — the value cannot be stored as sent, so a retry gets
 	// the identical error. Permanent, but unlike the checks above it is only

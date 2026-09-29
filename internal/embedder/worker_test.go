@@ -305,6 +305,7 @@ func TestWorker_RefreshNamespaces_StartsConsumersForEnabled(t *testing.T) {
 	lister := &fakeNSLister{cfgs: []*namespace.Config{
 		{Namespace: "ns-a", DenseSource: "catalog"},
 		{Namespace: "ns-b", DenseSource: "catalog"},
+		{Namespace: "ns-paused", DenseSource: "catalog", Paused: true},
 	}}
 	w := newTestWorker(client, &fakeProcessor{}, lister)
 
@@ -316,7 +317,7 @@ func TestWorker_RefreshNamespaces_StartsConsumersForEnabled(t *testing.T) {
 
 	w.mu.Lock()
 	if len(w.cancels) != 2 {
-		t.Errorf("expected 2 namespaces tracked, got %d", len(w.cancels))
+		t.Errorf("expected 2 namespaces tracked (paused skipped), got %d", len(w.cancels))
 	}
 	w.mu.Unlock()
 

@@ -169,7 +169,8 @@ func (w *Worker) handleMessage(ctx context.Context, msg redis.XMessage) {
 
 	if _, err := w.service.Process(ctx, payload); err != nil {
 		if errors.Is(err, ErrInvalidPayload) || errors.Is(err, ErrUnknownAction) ||
-			errors.Is(err, ErrNamespaceNotFound) || errors.Is(err, ErrInvalidObjectCreatedAt) {
+			errors.Is(err, ErrNamespaceNotFound) || errors.Is(err, ErrNamespacePaused) ||
+			errors.Is(err, ErrInvalidObjectCreatedAt) {
 			// Permanent: no retry can make a future timestamp valid.
 			slog.Warn("ingest dropping unprocessable event", "entry_id", msg.ID, "error", err)
 			w.ack(ctx, msg.ID)

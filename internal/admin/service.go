@@ -795,6 +795,9 @@ func (s *Service) CreateBatchRun(ctx context.Context, ns string) (*BatchRunCreat
 	if nsConfig == nil {
 		return nil, nil // caller maps nil,nil → 404
 	}
+	if nsConfig.Paused {
+		return nil, ErrNamespacePaused
+	}
 	if s.job == nil {
 		return nil, errors.New("batch runner is not wired")
 	}

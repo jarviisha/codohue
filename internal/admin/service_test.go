@@ -1097,6 +1097,21 @@ func TestTriggerBatch_ReturnsRunID(t *testing.T) {
 	}
 }
 
+func TestTriggerBatch_PausedNamespaceRejected(t *testing.T) {
+	repo := &fakeRepo{namespace: &NamespaceConfig{Namespace: "ns1", Paused: true}}
+	svc := newTestService(repo, "", "")
+	runner := &fakeBatchRunner{runID: 42}
+	svc.job = runner
+
+	_, err := svc.CreateBatchRun(context.Background(), "ns1")
+	if !errors.Is(err, ErrNamespacePaused) {
+		t.Fatalf("expected ErrNamespacePaused, got %v", err)
+	}
+	if runner.started != 0 {
+		t.Errorf("paused namespace must not start a run, started=%d", runner.started)
+	}
+}
+
 // ─── GetRecentEvents tests ────────────────────────────────────────────────────
 
 func TestGetRecentEvents_LimitClamp_Zero(t *testing.T) {

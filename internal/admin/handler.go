@@ -560,6 +560,10 @@ func (h *Handler) CreateBatchRun(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteError(w, http.StatusConflict, "conflict", err.Error())
 			return
 		}
+		if errors.Is(err, ErrNamespacePaused) {
+			httpapi.WriteNamespacePaused(w)
+			return
+		}
 		if errors.Is(r.Context().Err(), context.DeadlineExceeded) {
 			httpapi.WriteError(w, http.StatusGatewayTimeout, "timeout", "batch run timed out")
 			return

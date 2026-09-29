@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -122,6 +123,54 @@ func TestRepositoryUpsert_Create(t *testing.T) {
 	}
 	if cfg.ActionWeights["LIKE"] != 5.0 {
 		t.Errorf("ActionWeights[LIKE]: got %.1f, want 5.0", cfg.ActionWeights["LIKE"])
+	}
+}
+
+// TestRepositoryUpsert_PauseSemantics locks the paused_at rules: true pauses
+// and keeps the original timestamp on repeat, nil leaves the state alone,
+// false resumes.
+func TestRepositoryUpsert_PauseSemantics(t *testing.T) {
+	db := openTestDB(t)
+	const ns = "nsconfig_pause_test"
+	cleanupNS(t, db, ns)
+	repo := NewRepository(db)
+	ctx := context.Background()
+
+	pausedAt := func() *time.Time {
+		t.Helper()
+		var at *time.Time
+		if err := db.QueryRow(ctx, `SELECT paused_at FROM namespace_configs WHERE namespace = $1`, ns).Scan(&at); err != nil {
+			t.Fatalf("read paused_at: %v", err)
+		}
+		return at
+	}
+	upsert := func(req *UpsertRequest) bool {
+		t.Helper()
+		cfg, err := repo.Upsert(ctx, ns, req)
+		if err != nil {
+			t.Fatalf("Upsert: %v", err)
+		}
+		return cfg.Paused
+	}
+
+	if upsert(&UpsertRequest{}) {
+		t.Fatal("a new namespace must not start paused")
+	}
+	if !upsert(&UpsertRequest{Paused: ptr(true)}) {
+		t.Fatal("paused=true must pause")
+	}
+	first := pausedAt()
+	if !upsert(&UpsertRequest{Paused: ptr(true)}) || !pausedAt().Equal(*first) {
+		t.Fatal("re-pausing must keep the original paused_at")
+	}
+	if !upsert(&UpsertRequest{MaxResults: ptr(10)}) {
+		t.Fatal("an edit that omits paused must leave the namespace paused")
+	}
+	if cfg, err := repo.Get(ctx, ns); err != nil || !cfg.Paused {
+		t.Fatalf("Get must report paused: cfg=%+v err=%v", cfg, err)
+	}
+	if upsert(&UpsertRequest{Paused: ptr(false)}) || pausedAt() != nil {
+		t.Fatal("paused=false must resume and clear paused_at")
 	}
 }
 

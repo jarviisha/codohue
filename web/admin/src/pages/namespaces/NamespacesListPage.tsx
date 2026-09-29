@@ -84,12 +84,15 @@ export default function NamespacesListPage() {
                 {q.data.items.map((ns) => (
                   <TableRow key={ns.namespace}>
                     <TableCell>
-                      <Link
-                        to={`/ns/${encodeURIComponent(ns.namespace)}`}
-                        className="font-medium"
-                      >
-                        <NamespaceTag name={ns.namespace} />
-                      </Link>
+                      <Stack gap={2} direction="horizontal" align="center">
+                        <Link
+                          to={`/ns/${encodeURIComponent(ns.namespace)}`}
+                          className="font-medium"
+                        >
+                          <NamespaceTag name={ns.namespace} />
+                        </Link>
+                        {ns.paused && <Token color="red" label="paused" />}
+                      </Stack>
                     </TableCell>
                     <TableCell>
                       <Token color="gray" label={ns.dense_source || '—'} />

@@ -165,6 +165,7 @@ Schema evolution after `001_initial`:
 - **026** scopes numeric ID uniqueness to `(namespace, entity_type)` and adds the durable ID-mapping repair run/item manifests
 - **027** records rebuilt namespaces on ID-mapping repair runs so verification uses durable evidence
 - **030** caps the `id_mappings.numeric_id` sequence at 2^32-1 to match the Qdrant sparse index space; skipped with a warning on a deployment already past that value, where `codohue_sparse_dimensions_skipped_total` reports the damage instead
+- **031** adds `namespace_configs.paused_at`, the operator pause switch (see §10.3); independent of the lifecycle generation and ignored by the configuration-revision trigger
 
 ### 5.2 Redis
 
@@ -403,7 +404,7 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | GET    | `/api/admin/v1/stream`                                            | **(SSE)** Global ops bus: `batch_run.*`, `catalog.dead_letter_grew`, `catalog.reembed_progress` |
 | GET    | `/api/admin/v1/namespaces`                                        | List configs |
 | GET    | `/api/admin/v1/namespaces/{ns}`                                   | Get config |
-| PUT    | `/api/admin/v1/namespaces/{ns}`                                   | Create/update (200/201); optional `provision_api_key` enables immutable retry-safe initial provisioning (409 on conflict). **PATCH semantics** — an omitted field leaves that column untouched. `dense_source="catalog"` is accepted when `catalog_strategy_id`/`_version` accompany it (same dim validation as the catalog endpoint — one-request core-mode provisioning); without them → 422 naming the missing fields |
+| PUT    | `/api/admin/v1/namespaces/{ns}`                                   | Create/update (200/201); `paused` true/false pauses or resumes the namespace (`namespace_paused`, §10.3); optional `provision_api_key` enables immutable retry-safe initial provisioning (409 on conflict). **PATCH semantics** — an omitted field leaves that column untouched. `dense_source="catalog"` is accepted when `catalog_strategy_id`/`_version` accompany it (same dim validation as the catalog endpoint — one-request core-mode provisioning); without them → 422 naming the missing fields |
 | DELETE | `/api/admin/v1/namespaces/{ns}`                                   | Wipe namespace + all its data (200 summary; 404 when missing) |
 | POST   | `/api/admin/v1/namespaces/{ns}/api-key`                           | Rotate the namespace data-plane key (plaintext returned once) |
 | GET    | `/api/admin/v1/namespaces/{ns}/dashboard`                         | Per-namespace aggregate: config + last 12 runs + backlog + events + qdrant counts + trending TTL + author coverage |
@@ -457,6 +458,7 @@ Lifecycle and validation failures use stable codes across data-plane handlers:
 | ------ | ---- | ------- |
 | 404 | `namespace_not_found` | The namespace does not exist |
 | 409 | `namespace_not_active` | Delete/reset lifecycle work blocks the namespace |
+| 409 | `namespace_paused` | An operator paused the namespace (`PUT /api/admin/v1/namespaces/{ns}` with `"paused": true`; `false` resumes). Every data-plane route is rejected, and so are the admin `batch-runs` (including retry) and `catalog/re-embed` triggers; a re-embed run already open when the pause lands stays open until resume. Stream-delivered events and catalog items are acked and **dropped**, not held: `codohue:events` and `codohue:catalog` are shared, so pending entries would pin retention for every namespace. Scheduled cron skips the namespace and the embedder stops consuming its stream (queued embed items wait for resume). No stored data is removed, but trending keys expire during the pause and stay empty until the first cron tick after resume |
 | 503 | `namespace_config_unavailable` | Lifecycle or configuration storage could not be read safely |
 | 400 | `invalid_object_created_at` | The supplied creation time is more than five minutes in the future |
 
