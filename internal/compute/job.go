@@ -271,8 +271,24 @@ func (j *Job) runOnce(ctx context.Context) {
 		return
 	}
 
+	// Refresh trending for every namespace before any vector phase runs: one
+	// namespace crashing the process in phase 1 (e.g. an OOM kill) must not
+	// leave the trending of the namespaces after it to expire.
+	preTrending := make(map[string]*PhaseResult, len(namespaces))
+	if j.trending != nil {
+		for _, ns := range namespaces {
+			result, err := j.refreshTrending(ctx, ns)
+			if err != nil {
+				// The namespace's run below retries trending itself.
+				slog.Warn("trending pre-pass skipped namespace", "namespace", ns, "error", err)
+				continue
+			}
+			preTrending[ns] = result
+		}
+	}
+
 	for _, ns := range namespaces {
-		if err := j.RunNamespace(ctx, ns, batchrun.TriggerCron); err != nil {
+		if err := j.runNamespace(ctx, ns, batchrun.TriggerCron, preTrending[ns]); err != nil {
 			if errors.Is(err, batchrun.ErrRunInProgress) {
 				slog.Info("skipping namespace: run already in progress", "namespace", ns)
 			} else {
@@ -297,26 +313,54 @@ func (j *Job) runOnce(ctx context.Context) {
 // without running the remaining phases. Mid-phase cancel is intentionally
 // unsupported — see BUILD_PLAN §9.2.
 func (j *Job) RunNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) error {
-	if j.lifecycle != nil {
-		return j.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
-			return j.runNamespaceWithComputeLock(leased, ns, triggerSource)
-		})
-	}
-	return j.runNamespaceWithComputeLock(ctx, ns, triggerSource)
+	return j.runNamespace(ctx, ns, triggerSource, nil)
 }
 
-func (j *Job) runNamespaceWithComputeLock(ctx context.Context, ns string, triggerSource batchrun.TriggerSource) error {
-	release, ok, err := j.tryLock(ctx, ns)
-	if err != nil {
-		return fmt.Errorf("namespace lock %s: %w", ns, err)
-	}
-	if !ok {
-		return fmt.Errorf("%w: %s", batchrun.ErrRunInProgress, ns)
-	}
-	defer release()
+func (j *Job) runNamespace(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, preTrending *PhaseResult) error {
+	return j.withNamespaceLocks(ctx, ns, func(locked context.Context) {
+		j.runNamespaceLocked(locked, ns, triggerSource, 0, preTrending)
+	})
+}
 
-	j.runNamespaceLocked(ctx, ns, triggerSource, 0)
-	return nil
+// withNamespaceLocks runs fn under the namespace's lifecycle lease (when
+// configured) and compute lock, in that order.
+func (j *Job) withNamespaceLocks(ctx context.Context, ns string, fn func(context.Context)) error {
+	locked := func(ctx context.Context) error {
+		release, ok, err := j.tryLock(ctx, ns)
+		if err != nil {
+			return fmt.Errorf("namespace lock %s: %w", ns, err)
+		}
+		if !ok {
+			return fmt.Errorf("%w: %s", batchrun.ErrRunInProgress, ns)
+		}
+		defer release()
+		fn(ctx)
+		return nil
+	}
+	if j.lifecycle != nil {
+		return j.lifecycle.WithWriter(ctx, ns, func(leased context.Context, _ *nslifecycle.NamespaceLifecycle) error {
+			return locked(leased)
+		})
+	}
+	return locked(ctx)
+}
+
+// refreshTrending runs the trending phase for one namespace outside a batch
+// run. A cron tick calls it for every namespace before any vector phase, so a
+// namespace whose sparse phase crashes the process cannot starve the trending
+// refresh of the namespaces scheduled after it.
+func (j *Job) refreshTrending(ctx context.Context, ns string) (*PhaseResult, error) {
+	var result *PhaseResult
+	err := j.withNamespaceLocks(ctx, ns, func(locked context.Context) {
+		// A config load failure falls back to trending defaults, as in a run;
+		// the run that follows reports the failure.
+		cfg, _ := j.nsConfigSvc.Get(locked, ns)
+		log := slog.With("namespace", ns)
+		result = j.executePhase1Arg(locked, 0, ns, 3, "trending", log, func() (int, error) {
+			return j.runPhase3Trending(locked, ns, cfg, log)
+		})
+	})
+	return result, err
 }
 
 // StartNamespaceRun acquires the namespace lock, inserts the running
@@ -353,7 +397,7 @@ func (j *Job) StartNamespaceRun(ctx context.Context, ns string, triggerSource ba
 				defer cancel()
 				started <- startResult{id: logID}
 				signaled = true
-				j.runNamespaceLocked(runCtx, ns, triggerSource, logID)
+				j.runNamespaceLocked(runCtx, ns, triggerSource, logID, nil)
 				return nil
 			})
 			if !signaled {
@@ -386,7 +430,7 @@ func (j *Job) StartNamespaceRun(ctx context.Context, ns string, triggerSource ba
 	go func() {
 		defer cancel()
 		defer release()
-		j.runNamespaceLocked(runCtx, ns, triggerSource, logID)
+		j.runNamespaceLocked(runCtx, ns, triggerSource, logID, nil)
 	}()
 	return logID, nil
 }
@@ -424,8 +468,9 @@ func (j *Job) LockAllNamespaces(ctx context.Context) (release func(), err error)
 // runNamespaceLocked executes the three phases (trending first, then sparse
 // and dense) and finalizes the run row.
 // The caller must hold the namespace lock. logID > 0 means the row was
-// already inserted (async path); 0 inserts it here.
-func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, logID int64) {
+// already inserted (async path); 0 inserts it here. A non-nil preTrending is
+// the result of a trending refresh already done this tick.
+func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, logID int64, preTrending *PhaseResult) {
 	nsStart := time.Now()
 	capture := &LogCapture{}
 	log := slog.New(capture)
@@ -464,16 +509,23 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 	// crash the process (an OOM kill in phase 1 would otherwise let
 	// trending:{ns} expire). A trending failure does not stop the vector
 	// phases; it folds into the run status at the end.
+	// A cron tick refreshes trending for every namespace up front (see
+	// runOnce) and hands the result in as preTrending, so it is recorded here
+	// rather than recomputed.
 	var trendingErr error
-	if j.trending != nil {
+	switch {
+	case preTrending != nil:
+		phases.Phase3 = preTrending
+		log.Info(fmt.Sprintf("phase 3 · trending refreshed at tick start (ok: %t, %dms, items: %d)", preTrending.OK, preTrending.DurationMs, preTrending.Count1))
+	case j.trending != nil:
 		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", log, func() (int, error) {
 			return j.runPhase3Trending(ctx, ns, cfg, log)
 		})
-		if !phases.Phase3.OK {
-			trendingErr = errors.New(phases.Phase3.Error)
-		}
-	} else {
+	default:
 		log.Info("phase 3 · trending skipped (no Redis)")
+	}
+	if phases.Phase3 != nil && !phases.Phase3.OK {
+		trendingErr = errors.New(phases.Phase3.Error)
 	}
 
 	if j.checkCancelBetweenPhases(ctx, logID, 3, log) {

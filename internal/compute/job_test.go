@@ -963,6 +963,53 @@ func TestRunNamespace_TrendingRunsBeforeSparsePhase(t *testing.T) {
 	}
 }
 
+// A cron tick refreshes trending for every namespace before any sparse phase,
+// so one namespace crashing the process in phase 1 cannot starve the trending
+// of the namespaces after it. Each namespace's trending runs exactly once and
+// is recorded in its run.
+func TestRunOnce_TrendingForAllNamespacesBeforeAnySparsePhase(t *testing.T) {
+	t.Parallel()
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{
+		namespaces: []string{"ns1", "ns2"},
+		events:     []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}},
+	})
+	phasesCh := make(chan PhaseResults, 2)
+	job.batchLog = &phasesCapturingLogger{fakeBatchLogger: newFakeBatchLogger(13), phases: phasesCh}
+	stores := map[string]int{}
+	sparseRanBeforeTrending := false
+	job.trending = trendingStoreFunc(func(_ context.Context, ns string, _ map[string]float64, _ time.Duration) error {
+		stores[ns]++
+		sparseRanBeforeTrending = sparseRanBeforeTrending || svc.called
+		return nil
+	})
+
+	job.runOnce(context.Background())
+
+	if sparseRanBeforeTrending {
+		t.Fatal("every namespace's trending must be stored before any sparse phase starts")
+	}
+	if stores["ns1"] != 1 || stores["ns2"] != 1 {
+		t.Fatalf("trending must run once per namespace, got %v", stores)
+	}
+	for range 2 {
+		if p := <-phasesCh; p.Phase3 == nil || !p.Phase3.OK {
+			t.Fatalf("run must record the tick-start trending result, got %+v", p.Phase3)
+		}
+	}
+}
+
+// phasesCapturingLogger records the phase results passed to UpdateBatchRunPhases.
+type phasesCapturingLogger struct {
+	*fakeBatchLogger
+	phases chan PhaseResults
+}
+
+func (l *phasesCapturingLogger) UpdateBatchRunPhases(_ context.Context, _ int64, p PhaseResults) error {
+	l.phases <- p
+	return nil
+}
+
 // A trending failure must not stop the vector phases, but the run still fails.
 func TestRunNamespace_TrendingFailureStillRunsVectorPhases(t *testing.T) {
 	t.Parallel()
