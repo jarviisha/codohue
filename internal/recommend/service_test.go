@@ -11,7 +11,9 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/namespace"
 	"github.com/jarviisha/codohue/internal/core/nslifecycle"
+	"github.com/jarviisha/codohue/internal/infra/metrics"
 	infraredis "github.com/jarviisha/codohue/internal/infra/redis"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/qdrant/go-client/qdrant"
 )
 
@@ -487,6 +489,51 @@ func TestDoRecommend_CF_EmptySearch_FallsBackToTrendingAndCaches(t *testing.T) {
 	}
 	if !cached {
 		t.Fatal("data-state fallback must be cached")
+	}
+}
+
+func TestDoRecommend_CF_EmptySearch_AllTrendingSeenFallsToPopular(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{count: 10, seenItems: []string{"t-1", "t-2"}, popularItems: []string{"t-1", "p-1"}}
+	s, f := newTestService(repo, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+	f.getTrendingFn = func(_ context.Context, _ string, _ int64, _, _ int) ([]infraredis.TrendingEntry, error) {
+		return []infraredis.TrendingEntry{{ObjectID: "t-1"}, {ObjectID: "t-2"}}, nil
+	}
+
+	resp, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: "ns", Limit: 5})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Source != SourceFallbackPopular || len(resp.Items) != 1 || resp.Items[0].ObjectID != "p-1" {
+		t.Fatalf("want unseen DB-popular items, got source=%q items=%+v", resp.Source, resp.Items)
+	}
+}
+
+func TestDoRecommend_CF_EmptySearch_CountsOnlyServedSource(t *testing.T) {
+	t.Parallel()
+	const ns = "ns-cf-empty-metric"
+	s, f := newTestService(&fakeRepo{count: 10, popularItems: []string{"p-1"}}, &fakeNsConfig{cfg: &namespace.Config{Gamma: 0}}, newFakeIDMapper())
+	f.fetchSubjectVecFn = func(_ context.Context, _ string, _ uint64) (*qdrant.SparseVector, error) {
+		return &qdrant.SparseVector{Indices: []uint32{1}, Values: []float32{1}}, nil
+	}
+	f.searchObjectsFn = func(_ context.Context, _ string, _ *qdrant.SparseVector, _ *qdrant.Filter, _ uint64) ([]*qdrant.ScoredPoint, error) {
+		return nil, nil
+	}
+
+	if _, err := s.Recommend(context.Background(), &Request{SubjectID: "u1", Namespace: ns, Limit: 5}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := testutil.ToFloat64(metrics.RecommendRequests.WithLabelValues(ns, SourceCollaborativeFiltering)); got != 0 {
+		t.Fatalf("collaborative_filtering counted %v times for a request served by the fallback", got)
+	}
+	if got := testutil.ToFloat64(metrics.RecommendRequests.WithLabelValues(ns, SourceFallbackPopular)); got != 1 {
+		t.Fatalf("fallback_popular counted %v times, want 1", got)
 	}
 }
 

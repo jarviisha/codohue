@@ -316,7 +316,7 @@ Two exclusions are merged into the same Qdrant `MustNot`, so one filter covers t
 - **Seen items** — objects the subject interacted with in the last `seen_items_days` (default 30). Read directly from `events`, no cache.
 - **Authored objects** (`exclude_authored`, default off) — objects whose `objects.author_subject_id` is the requesting subject. Materialised as point IDs rather than a payload filter, because `cmd/cron` writes the sparse points and knows nothing about authorship; a payload filter would silently reach only the dense collection. Capped at 5000 ids with a warning log; a query failure degrades to unfiltered results rather than failing the request.
 
-The trending and popular fallbacks cannot push the filter into the store, so they over-fetch by the exclusion size and drop authored ids **before** paging.
+The trending and popular fallbacks cannot push the filter into the store, so they over-fetch by the exclusion size and drop authored ids **before** paging. When exclusions remove every trending object, trending counts as empty and the response descends to DB-popular.
 
 `POST /rankings` applies the **same** exclusion set unconditionally (same `excludedObjectIDs` path, merged as `MustNot` onto its candidate filter), so one code path defines "eligible object" for both read surfaces; excluded candidates return `scored: false` rather than being dropped. Exclusion-lookup failures degrade to unfiltered scoring on both surfaces.
 

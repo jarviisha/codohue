@@ -509,7 +509,11 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 
 	scored := rerankScored(results, resolveGamma(cfg), req.Offset+limit)
 
-	metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceCollaborativeFiltering).Inc()
+	// No candidates: doRecommend descends to trending, which counts the
+	// request under the source it actually serves.
+	if len(scored) > 0 {
+		metrics.RecommendRequests.WithLabelValues(req.Namespace, SourceCollaborativeFiltering).Inc()
+	}
 	return outcome{
 		items:  pageItems(scored, req.Offset, limit),
 		source: SourceCollaborativeFiltering,
@@ -1027,6 +1031,13 @@ func (s *Service) fallbackTrending(ctx context.Context, req *Request, limit int,
 
 	if len(excluded) > 0 {
 		entries = dropAuthoredEntries(entries, excluded)
+		if len(entries) == 0 {
+			// The fetch ran from rank 0 with headroom beyond the exclusion
+			// set, so nothing surviving means every trending object is
+			// excluded (a heavy user has seen them all) — no usable trending,
+			// the same data state as no trending data at all.
+			return s.descendPopular(ctx, req, limit, cfg, exclude, false)
+		}
 		entries, _ = pageOf(entries, req.Offset, limit)
 	}
 
