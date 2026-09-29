@@ -31,6 +31,7 @@ const (
 	denseVectorName      = "dense_interactions"
 	cfOverFetchFactor    = 5
 	denseOverFetchFactor = 3
+	defaultSeenItemsDays = 30 // seen-items window when the namespace sets none
 
 	// dotNormK is the half-saturation constant of the batch-independent
 	// score map x/(x+k) applied to unbounded dot products: a raw dot of k
@@ -468,11 +469,7 @@ func (s *Service) collaborativeFiltering(ctx context.Context, req *Request, limi
 		return s.descendPopular(ctx, req, limit, cfg, nil, err != nil)
 	}
 
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays)
+	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsWindow(cfg))
 	if err != nil {
 		slog.Error("get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 	}
@@ -910,14 +907,18 @@ func (s *Service) hybridCold(ctx context.Context, req *Request, limit int, cfg *
 	}, nil
 }
 
+// seenItemsWindow returns the namespace's seen-items window in days.
+func seenItemsWindow(cfg *namespace.Config) int {
+	if cfg != nil && cfg.SeenItemsDays > 0 {
+		return cfg.SeenItemsDays
+	}
+	return defaultSeenItemsDays
+}
+
 // seenObjectSet returns the subject's seen items within the namespace's
 // seen-items window as a set, or nil when there are none or the lookup fails.
 func (s *Service) seenObjectSet(ctx context.Context, req *Request, cfg *namespace.Config) map[string]struct{} {
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsDays)
+	seenItems, err := s.repo.GetSeenItems(ctx, req.Namespace, req.SubjectID, seenItemsWindow(cfg))
 	if err != nil {
 		slog.Error("get seen items failed", "namespace", req.Namespace, "subject_id", req.SubjectID, "error", err)
 		return nil
@@ -1409,11 +1410,7 @@ func (s *Service) Rank(ctx context.Context, req *RankRequest, ns string) (*RankR
 	// The MustNot rides on the candidate filter, so an excluded candidate
 	// drops out of both searches and comes back Scored=false instead of
 	// carrying a relevance score. Lookup failures degrade to unfiltered.
-	seenItemsDays := 30
-	if cfg != nil && cfg.SeenItemsDays > 0 {
-		seenItemsDays = cfg.SeenItemsDays
-	}
-	seenItems, err := s.repo.GetSeenItems(ctx, ns, req.SubjectID, seenItemsDays)
+	seenItems, err := s.repo.GetSeenItems(ctx, ns, req.SubjectID, seenItemsWindow(cfg))
 	if err != nil {
 		slog.Error("rank: get seen items failed, serving unfiltered", "namespace", ns, "subject_id", req.SubjectID, "error", err)
 	}
