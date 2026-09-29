@@ -354,8 +354,12 @@ func (j *Job) refreshTrending(ctx context.Context, ns string) (*PhaseResult, err
 	err := j.withNamespaceLocks(ctx, ns, func(locked context.Context) {
 		// A config load failure falls back to trending defaults, as in a run;
 		// the run that follows reports the failure.
-		cfg, _ := j.nsConfigSvc.Get(locked, ns)
 		log := slog.With("namespace", ns)
+		cfg, err := j.nsConfigSvc.Get(locked, ns)
+		if err != nil {
+			log.Warn("trending pre-pass: config load failed, using defaults", "error", err)
+			cfg = nil
+		}
 		result = j.executePhase1Arg(locked, 0, ns, 3, "trending", log, func() (int, error) {
 			return j.runPhase3Trending(locked, ns, cfg, log)
 		})
