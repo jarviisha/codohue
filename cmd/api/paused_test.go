@@ -36,7 +36,7 @@ func TestRejectPausedNamespace(t *testing.T) {
 				})
 			})
 			rec := httptest.NewRecorder()
-			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/namespaces/ns/trending", nil))
+			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/namespaces/ns/trending", http.NoBody))
 			if rec.Code != tc.want {
 				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.want, rec.Body)
 			}
