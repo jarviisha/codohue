@@ -758,6 +758,7 @@ type fakeBatchLogger struct {
 	insertErr error
 	updated   chan int64
 	inserted  atomic.Int64
+	cancel    bool
 }
 
 func newFakeBatchLogger(id int64) *fakeBatchLogger {
@@ -782,7 +783,7 @@ func (f *fakeBatchLogger) UpdateBatchRunPhases(_ context.Context, _ int64, _ Pha
 }
 
 func (f *fakeBatchLogger) GetCancelRequested(_ context.Context, _ int64) (bool, error) {
-	return false, nil
+	return f.cancel, nil
 }
 
 func TestRunNamespace_ReturnsErrRunInProgressWhenLockHeld(t *testing.T) {
@@ -901,7 +902,7 @@ func TestRunNamespace_Phase3FailureFailsRun(t *testing.T) {
 	}
 }
 
-func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
+func TestRunNamespace_Phase2FailureFailsRunButKeepsTrending(t *testing.T) {
 	t.Parallel()
 	logger := newFakeBatchLogger(10)
 	successCh := make(chan bool, 1)
@@ -926,7 +927,7 @@ func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !phase3Called {
-		t.Fatal("trending phase must still run after an independent dense failure")
+		t.Fatal("trending phase must run in a run whose dense phase fails")
 	}
 	select {
 	case ok := <-successCh:
@@ -935,6 +936,137 @@ func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
 		}
 	default:
 		t.Fatal("run was not finalized")
+	}
+}
+
+// Trending must be stored before the sparse phase starts, so a process killed
+// inside phase 1 (e.g. OOM) still leaves fresh trending data behind.
+func TestRunNamespace_TrendingRunsBeforeSparsePhase(t *testing.T) {
+	t.Parallel()
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{},
+		&fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}})
+	sparseRanBeforeTrending := false
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+		sparseRanBeforeTrending = svc.called
+		return nil
+	})
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !svc.called {
+		t.Fatal("sparse phase must still run after trending")
+	}
+	if sparseRanBeforeTrending {
+		t.Fatal("trending must be stored before the sparse phase starts")
+	}
+}
+
+// A cron tick refreshes trending for every namespace before any sparse phase,
+// so one namespace crashing the process in phase 1 cannot starve the trending
+// of the namespaces after it. Each namespace's trending runs exactly once and
+// is recorded in its run.
+func TestRunOnce_TrendingForAllNamespacesBeforeAnySparsePhase(t *testing.T) {
+	t.Parallel()
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{}, &fakeJobRepo{
+		namespaces: []string{"ns1", "ns2"},
+		events:     []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}},
+	})
+	phasesCh := make(chan PhaseResults, 2)
+	job.batchLog = &phasesCapturingLogger{fakeBatchLogger: newFakeBatchLogger(13), phases: phasesCh}
+	stores := map[string]int{}
+	sparseRanBeforeTrending := false
+	job.trending = trendingStoreFunc(func(_ context.Context, ns string, _ map[string]float64, _ time.Duration) error {
+		stores[ns]++
+		sparseRanBeforeTrending = sparseRanBeforeTrending || svc.called
+		return nil
+	})
+
+	job.runOnce(context.Background())
+
+	if sparseRanBeforeTrending {
+		t.Fatal("every namespace's trending must be stored before any sparse phase starts")
+	}
+	if stores["ns1"] != 1 || stores["ns2"] != 1 {
+		t.Fatalf("trending must run once per namespace, got %v", stores)
+	}
+	for range 2 {
+		if p := <-phasesCh; p.Phase3 == nil || !p.Phase3.OK {
+			t.Fatalf("run must record the tick-start trending result, got %+v", p.Phase3)
+		}
+	}
+}
+
+// phasesCapturingLogger records the phase results passed to UpdateBatchRunPhases.
+type phasesCapturingLogger struct {
+	*fakeBatchLogger
+	phases chan PhaseResults
+}
+
+func (l *phasesCapturingLogger) UpdateBatchRunPhases(_ context.Context, _ int64, p PhaseResults) error {
+	l.phases <- p
+	return nil
+}
+
+// A trending failure must not stop the vector phases, but the run still fails.
+func TestRunNamespace_TrendingFailureStillRunsVectorPhases(t *testing.T) {
+	t.Parallel()
+	successCh := make(chan bool, 1)
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc,
+		&fakeNsConfigReader{cfg: &namespace.Config{DenseSource: "catalog", EmbeddingDim: 8}},
+		&fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}})
+	job.batchLog = &successCapturingLogger{fakeBatchLogger: newFakeBatchLogger(11), success: successCh}
+	denseRan := false
+	vs(job).ensureDenseCollections = func(_ context.Context, _ string, _ uint64, _ string) error {
+		denseRan = true
+		return nil
+	}
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+		return errors.New("redis write failed")
+	})
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !svc.called || !denseRan {
+		t.Fatalf("vector phases must run after a trending failure: sparse=%v dense=%v", svc.called, denseRan)
+	}
+	select {
+	case ok := <-successCh:
+		if ok {
+			t.Fatal("a run whose trending phase failed must not be recorded as success")
+		}
+	default:
+		t.Fatal("run was not finalized")
+	}
+}
+
+// A cancel requested while trending runs stops the run before the sparse phase.
+func TestRunNamespace_CancelAfterTrendingSkipsVectorPhases(t *testing.T) {
+	t.Parallel()
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{},
+		&fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}})
+	logger := newFakeBatchLogger(12)
+	logger.cancel = true
+	job.batchLog = logger
+	trendingRan := false
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+		trendingRan = true
+		return nil
+	})
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !trendingRan {
+		t.Fatal("trending must run before the first cancel check")
+	}
+	if svc.called {
+		t.Fatal("sparse phase must not run after a cancel request")
 	}
 }
 
