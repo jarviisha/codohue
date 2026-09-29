@@ -938,6 +938,30 @@ func TestRunNamespace_Phase2FailureFailsRunAndContinuesToPhase3(t *testing.T) {
 	}
 }
 
+// Trending must be stored before the sparse phase starts, so a process killed
+// inside phase 1 (e.g. OOM) still leaves fresh trending data behind.
+func TestRunNamespace_TrendingRunsBeforeSparsePhase(t *testing.T) {
+	t.Parallel()
+	svc := &fakeRecomputer{}
+	job := newTestJob(svc, &fakeNsConfigReader{},
+		&fakeJobRepo{events: []*RawEvent{{SubjectID: "u1", ObjectID: "o1", Weight: 1, OccurredAt: time.Now().Unix()}}})
+	sparseStartedFirst := false
+	job.trending = trendingStoreFunc(func(_ context.Context, _ string, _ map[string]float64, _ time.Duration) error {
+		sparseStartedFirst = svc.called
+		return nil
+	})
+
+	if err := job.RunNamespace(context.Background(), "ns1", batchrun.TriggerCron); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !svc.called {
+		t.Fatal("sparse phase must still run after trending")
+	}
+	if sparseStartedFirst {
+		t.Fatal("trending must be stored before the sparse phase starts")
+	}
+}
+
 // successCapturingLogger records the success flag passed to UpdateBatchRunLog.
 type successCapturingLogger struct {
 	*fakeBatchLogger

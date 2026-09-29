@@ -421,7 +421,8 @@ func (j *Job) LockAllNamespaces(ctx context.Context) (release func(), err error)
 	return j.locks.LockAllNamespaces(ctx)
 }
 
-// runNamespaceLocked executes the three phases and finalizes the run row.
+// runNamespaceLocked executes the three phases (trending first, then sparse
+// and dense) and finalizes the run row.
 // The caller must hold the namespace lock. logID > 0 means the row was
 // already inserted (async path); 0 inserts it here.
 func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource batchrun.TriggerSource, logID int64) {
@@ -458,7 +459,28 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		log.Info(fmt.Sprintf("config loaded — dense_source: %s, lambda: %.3f", cfg.DenseSource, cfg.Lambda))
 	}
 
-	if runErr == nil {
+	// Trending (phase 3) runs first: it is a cheap ranking over a short event
+	// window, and must keep refreshing even when the expensive vector phases
+	// crash the process (an OOM kill in phase 1 would otherwise let
+	// trending:{ns} expire). A trending failure does not stop the vector
+	// phases; it folds into the run status at the end.
+	var trendingErr error
+	if j.trending != nil {
+		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", log, func() (int, error) {
+			return j.runPhase3Trending(ctx, ns, cfg, log)
+		})
+		if !phases.Phase3.OK {
+			trendingErr = errors.New(phases.Phase3.Error)
+		}
+	} else {
+		log.Info("phase 3 · trending skipped (no Redis)")
+	}
+
+	if j.checkCancelBetweenPhases(ctx, logID, 3, log) {
+		cancelled = true
+	}
+
+	if !cancelled && runErr == nil {
 		phases.Phase1 = j.executePhase(ctx, logID, ns, 1, "sparse CF", log, func() (int, int, error) {
 			return j.runPhase1(ctx, ns, cfg, log)
 		})
@@ -467,7 +489,7 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		}
 	}
 
-	if runErr == nil && j.checkCancelBetweenPhases(ctx, logID, 1, log) {
+	if !cancelled && runErr == nil && j.checkCancelBetweenPhases(ctx, logID, 1, log) {
 		cancelled = true
 	}
 
@@ -475,9 +497,7 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		phases.Phase2 = j.executePhase(ctx, logID, ns, 2, fmt.Sprintf("dense (%s)", cfg.DenseSource), log, func() (int, int, error) {
 			return j.runPhase2Dense(ctx, ns, cfg, log)
 		})
-		// Dense and trending are independent, so phase 3 still runs after a
-		// dense failure. The aggregate run must nevertheless report failure:
-		// an all-green run means every phase that ran succeeded.
+		// An all-green run means every phase that ran succeeded.
 		if !phases.Phase2.OK {
 			runErr = errors.New(phases.Phase2.Error)
 		}
@@ -485,22 +505,8 @@ func (j *Job) runNamespaceLocked(ctx context.Context, ns string, triggerSource b
 		log.Info(fmt.Sprintf("phase 2 · dense skipped (dense_source: %s)", cfg.DenseSource))
 	}
 
-	if !cancelled && j.checkCancelBetweenPhases(ctx, logID, 2, log) {
-		cancelled = true
-	}
-
-	if !cancelled && j.trending != nil {
-		phases.Phase3 = j.executePhase1Arg(ctx, logID, ns, 3, "trending", log, func() (int, error) {
-			return j.runPhase3Trending(ctx, ns, cfg, log)
-		})
-		// Unlike phase 2 (dense is an optional surface), a failed trending
-		// phase folds into the run status — an all-green run list must mean
-		// every phase that ran actually succeeded.
-		if !phases.Phase3.OK && runErr == nil {
-			runErr = errors.New(phases.Phase3.Error)
-		}
-	} else if !cancelled {
-		log.Info("phase 3 · trending skipped (no Redis)")
+	if runErr == nil {
+		runErr = trendingErr
 	}
 
 	subjects := 0
