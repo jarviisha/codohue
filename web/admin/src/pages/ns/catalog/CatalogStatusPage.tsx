@@ -30,6 +30,7 @@ import {
 import { streamStatusProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import ConfirmDialog from '@/components/ConfirmDialog'
 import CopyButton from '@/components/CopyButton'
 import MetaLine from '@/components/MetaLine'
 import QueryFeedback from '@/components/QueryFeedback'
@@ -68,6 +69,13 @@ export default function CatalogStatusPage() {
   const failures = useCatalogFailuresSummary(ns ?? null, '24h')
   const reembed = useTriggerReEmbed(ns ?? null)
   const bulkRedrive = useBulkRedriveDeadletter(ns ?? null)
+  // Both bulk actions touch every matching item in the namespace, so the
+  // header buttons only stage the action; the dialog runs it.
+  const [confirm, setConfirm] = useState<'redrive' | 'reembed' | null>(null)
+  const openConfirm = (action: 'redrive' | 'reembed') => {
+    ;(action === 'redrive' ? bulkRedrive : reembed).reset()
+    setConfirm(action)
+  }
 
   // Live backlog snapshot from SSE — when present we render it on the tiles
   // so the page tracks the embedder's sample cadence (30s) rather than the
@@ -199,6 +207,8 @@ export default function CatalogStatusPage() {
     : data.backlog
   const reembedStatus = data.last_re_embed
   const reembedRunning = reembedStatus?.status === 'running'
+  const confirmMutation = confirm === 'redrive' ? bulkRedrive : reembed
+  const closeConfirm = () => setConfirm(null)
 
   return (
     <>
@@ -244,9 +254,9 @@ export default function CatalogStatusPage() {
             {backlog.dead_letter > 0 && (
               <Button
                 size="sm"
-              className={TOUCH_TARGET}
+                className={TOUCH_TARGET}
                 variant="destructive"
-                onClick={() => bulkRedrive.mutate()}
+                onClick={() => openConfirm('redrive')}
                 isDisabled={bulkRedrive.isPending}
                 label={
                   bulkRedrive.isPending
@@ -258,7 +268,7 @@ export default function CatalogStatusPage() {
             <Button
               size="sm"
               className={TOUCH_TARGET}
-              onClick={() => reembed.mutate()}
+              onClick={() => openConfirm('reembed')}
               isDisabled={reembed.isPending || reembedRunning}
               label={
                 reembedRunning
@@ -281,16 +291,6 @@ export default function CatalogStatusPage() {
             endContent={
               <Button size="sm" variant="ghost" onClick={() => setDlAlert(null)} label="Dismiss" />
             }
-          />
-        )}
-        {reembed.error && (
-          <Banner status="error" title="Re-embed failed" description={reembed.error.message} />
-        )}
-        {bulkRedrive.error && (
-          <Banner
-            status="error"
-            title="Bulk redrive failed"
-            description={bulkRedrive.error.message}
           />
         )}
 
@@ -452,6 +452,36 @@ export default function CatalogStatusPage() {
           />
         </Stack>
       </Stack>
+
+      <ConfirmDialog
+        open={confirm !== null}
+        onOpenChange={(next) => {
+          if (!next) closeConfirm()
+        }}
+        title={confirm === 'redrive' ? 'Redrive dead-letter items' : 'Trigger re-embed'}
+        description={
+          confirm === 'redrive' ? (
+            <p>
+              Moves {backlog.dead_letter.toLocaleString()} dead-letter items in <b>{ns}</b> back
+              to pending with their attempt count reset, so the embedder retries them.
+            </p>
+          ) : (
+            <p>
+              Re-queues every embedded, failed or dead-letter item in <b>{ns}</b> that was not
+              embedded with{' '}
+              <code>
+                {data.catalog.strategy_id}@{data.catalog.strategy_version}
+              </code>
+              . The embedder works through them in the background; progress appears under Last
+              re-embed.
+            </p>
+          )
+        }
+        confirmLabel={confirm === 'redrive' ? 'Redrive items' : 'Start re-embed'}
+        pending={confirmMutation.isPending}
+        error={confirmMutation.error?.message}
+        onConfirm={() => confirmMutation.mutate(undefined, { onSuccess: closeConfirm })}
+      />
     </>
   )
 }

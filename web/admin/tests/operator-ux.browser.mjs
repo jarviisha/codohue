@@ -48,6 +48,7 @@ let healthDetails = false
 let catalogRequests = 0
 let historyQueries = []
 let historyFailure = false
+let redrivePosts = 0
 let configReadFailure = false
 let saveFailure = false
 let denseLocked = false
@@ -169,6 +170,10 @@ await context.route('**/api/**', async (route) => {
             stream_len: 0,
           })),
         })
+  }
+  if (path.endsWith('/catalog/items/redrive-deadletter')) {
+    redrivePosts++
+    return json({ namespace: 'a', redriven: 3 })
   }
   if (path.endsWith('/catalog/failures-summary'))
     return json({
@@ -546,6 +551,19 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS catalog header actions stay inside narrow viewports')
+
+  const redriveButton = page.getByRole('button', { name: 'Redrive 3 dead-letter', exact: true })
+  const redriveDialog = page.getByRole('heading', { name: 'Redrive dead-letter items' })
+  await redriveButton.click()
+  await redriveDialog.waitFor()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await redriveDialog.waitFor({ state: 'detached' })
+  assert.equal(redrivePosts, 0, 'cancel must not redrive')
+  await redriveButton.click()
+  await page.getByRole('button', { name: 'Redrive items', exact: true }).click()
+  await redriveDialog.waitFor({ state: 'detached' })
+  assert.equal(redrivePosts, 1)
+  console.log('PASS bulk redrive runs only after confirmation')
 
   const reasonText = page.locator('span.line-clamp-2').first()
   assert.ok(
