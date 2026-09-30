@@ -33,7 +33,7 @@ type adminRepo interface {
 	GetBatchRunByID(ctx context.Context, id int64) (*BatchRunLog, error)
 	RequestCancel(ctx context.Context, id int64) (RequestCancelResult, error)
 	GetBatchRunStats(ctx context.Context, windowSeconds, bucketSeconds int) ([]BatchRunStatsBucket, error)
-	GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds int) ([]CatalogBacklogSample, error)
+	GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds, bucketSeconds int) ([]CatalogBacklogSample, error)
 	GetCatalogFailuresSummary(ctx context.Context, namespace string, windowSeconds, limit int) ([]CatalogFailureReason, error)
 	GetLastBatchRunPerNamespace(ctx context.Context) (map[string]BatchRunLog, error)
 	GetRecentEventCounts(ctx context.Context, windowHours int) (map[string]int, error)

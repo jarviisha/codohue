@@ -10,10 +10,12 @@ import (
 )
 
 // GetCatalogBacklogHistory handles
-// GET /api/admin/v1/namespaces/{ns}/catalog/backlog-history?window=1h
+// GET /api/admin/v1/namespaces/{ns}/catalog/backlog-history?window=1h&bucket=5m
 //
-// Window is a Go duration string (e.g. "1h", "24h", "7d"). Default 1h —
-// matches the Catalog status page's initial chart window.
+// Window is a Go duration string (e.g. "1h", "24h", "168h"). Default 1h —
+// matches the Catalog status page's initial chart window. Bucket is optional:
+// absent or zero returns raw samples; otherwise samples are downsampled to
+// one point per bucket, taking the MAX of each series so backlog peaks survive.
 func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Request) {
 	ns := httpapi.URLParam(r, "ns")
 	if ns == "" {
@@ -25,7 +27,16 @@ func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Reques
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "window: "+err.Error())
 		return
 	}
-	resp, err := h.svc.GetCatalogBacklogHistory(r.Context(), ns, window)
+	bucket, err := parseDurationDefault(r.URL.Query().Get("bucket"), 0)
+	if err != nil {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "bucket: "+err.Error())
+		return
+	}
+	if bucket < 0 {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "bucket must not be negative")
+		return
+	}
+	resp, err := h.svc.GetCatalogBacklogHistory(r.Context(), ns, window, bucket)
 	if err != nil {
 		writeInternalError(w, r, "could not load backlog history", err, slog.String("namespace", ns))
 		return

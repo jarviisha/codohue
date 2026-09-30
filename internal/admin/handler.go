@@ -53,7 +53,7 @@ type adminSvc interface {
 	GetBatchRunStats(ctx context.Context, window, bucket time.Duration) ([]BatchRunStatsBucket, error)
 	GetOverview(ctx context.Context) (*OverviewResponse, error)
 	GetNamespaceDashboard(ctx context.Context, namespace string) (*NamespaceDashboardResponse, error)
-	GetCatalogBacklogHistory(ctx context.Context, namespace string, window time.Duration) (*CatalogBacklogHistoryResponse, error)
+	GetCatalogBacklogHistory(ctx context.Context, namespace string, window, bucket time.Duration) (*CatalogBacklogHistoryResponse, error)
 	GetCatalogFailuresSummary(ctx context.Context, namespace string, window time.Duration, limit int) (*CatalogFailuresSummaryResponse, error)
 	GetRecentEvents(ctx context.Context, ns string, limit, offset int, subjectID string) (*EventsListResponse, error)
 	GetEventsSummary(ctx context.Context, ns string, window, bucket time.Duration) (*EventsSummaryResponse, error)

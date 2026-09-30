@@ -640,18 +640,33 @@ func (r *Repository) DeleteCatalogItem(ctx context.Context, namespace string, id
 // The sampler skips duplicate-and-recent ticks, so the returned series is
 // step-function-shaped rather than evenly-spaced — that's a feature for
 // rendering ("changes happened here") not a defect.
-func (r *Repository) GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds int) ([]CatalogBacklogSample, error) {
-	if windowSeconds <= 0 {
-		return nil, fmt.Errorf("invalid window seconds: %d", windowSeconds)
+//
+// bucketSeconds > 0 downsamples to one row per bucket (same epoch math as
+// GetBatchRunStats), taking MAX per series so a short backlog spike is not
+// averaged away. 0 returns raw samples.
+func (r *Repository) GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds, bucketSeconds int) ([]CatalogBacklogSample, error) {
+	if windowSeconds <= 0 || bucketSeconds < 0 {
+		return nil, fmt.Errorf("invalid window/bucket seconds: %d / %d", windowSeconds, bucketSeconds)
 	}
-	rows, err := r.db.Query(ctx, `
+	query := `
 		SELECT sampled_at, pending, in_flight, failed, dead_letter, stream_len
 		FROM catalog_backlog_samples
 		WHERE namespace = $1
 		  AND sampled_at > now() - make_interval(secs => $2)
-		ORDER BY sampled_at`,
-		namespace, windowSeconds,
-	)
+		ORDER BY sampled_at`
+	args := []any{namespace, windowSeconds}
+	if bucketSeconds > 0 {
+		query = `
+		SELECT to_timestamp(floor(extract(epoch FROM sampled_at)::int / $3) * $3) AS bucket_ts,
+		       MAX(pending), MAX(in_flight), MAX(failed), MAX(dead_letter), MAX(stream_len)
+		FROM catalog_backlog_samples
+		WHERE namespace = $1
+		  AND sampled_at > now() - make_interval(secs => $2)
+		GROUP BY bucket_ts
+		ORDER BY bucket_ts`
+		args = append(args, bucketSeconds)
+	}
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query backlog history: %w", err)
 	}

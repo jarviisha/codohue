@@ -122,10 +122,12 @@ type fakeRepo struct {
 	batchRunStatsErr        error
 
 	// Phase 2 catalog backlog history + failures summary
-	backlogHistory     []CatalogBacklogSample
-	backlogHistoryErr  error
-	failuresSummary    []CatalogFailureReason
-	failuresSummaryErr error
+	backlogHistory    []CatalogBacklogSample
+	backlogHistoryErr error
+	// Captured bucketSeconds of the last GetCatalogBacklogHistory call.
+	backlogHistoryBucket int
+	failuresSummary      []CatalogFailureReason
+	failuresSummaryErr   error
 }
 
 func (f *fakeRepo) GetBatchRunByID(_ context.Context, _ int64) (*BatchRunLog, error) {
@@ -141,7 +143,8 @@ func (f *fakeRepo) GetBatchRunStats(_ context.Context, _, _ int) ([]BatchRunStat
 	return f.batchRunStats, f.batchRunStatsErr
 }
 
-func (f *fakeRepo) GetCatalogBacklogHistory(_ context.Context, _ string, _ int) ([]CatalogBacklogSample, error) {
+func (f *fakeRepo) GetCatalogBacklogHistory(_ context.Context, _ string, _, bucketSeconds int) ([]CatalogBacklogSample, error) {
+	f.backlogHistoryBucket = bucketSeconds
 	return f.backlogHistory, f.backlogHistoryErr
 }
 

@@ -7,13 +7,18 @@ import (
 )
 
 // GetCatalogBacklogHistory returns the persisted backlog samples for a
-// namespace over the requested window. Default window is 1h.
-func (s *Service) GetCatalogBacklogHistory(ctx context.Context, namespace string, window time.Duration) (*CatalogBacklogHistoryResponse, error) {
+// namespace over the requested window. Default window is 1h. A zero bucket
+// returns raw samples; a positive bucket downsamples to one point per bucket.
+func (s *Service) GetCatalogBacklogHistory(ctx context.Context, namespace string, window, bucket time.Duration) (*CatalogBacklogHistoryResponse, error) {
 	windowSec := int(window.Seconds())
 	if windowSec <= 0 {
 		return nil, fmt.Errorf("invalid window: %v", window)
 	}
-	samples, err := s.repo.GetCatalogBacklogHistory(ctx, namespace, windowSec)
+	bucketSec := int(bucket.Seconds())
+	if bucketSec < 0 {
+		return nil, fmt.Errorf("invalid bucket: %v", bucket)
+	}
+	samples, err := s.repo.GetCatalogBacklogHistory(ctx, namespace, windowSec, bucketSec)
 	if err != nil {
 		return nil, fmt.Errorf("get backlog history: %w", err)
 	}
@@ -23,6 +28,7 @@ func (s *Service) GetCatalogBacklogHistory(ctx context.Context, namespace string
 	return &CatalogBacklogHistoryResponse{
 		Namespace:     namespace,
 		WindowSeconds: windowSec,
+		BucketSeconds: bucketSec,
 		Samples:       samples,
 	}, nil
 }

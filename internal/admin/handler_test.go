@@ -117,13 +117,17 @@ type fakeSvc struct {
 	nsDashboardErr    error
 
 	// Phase 2 catalog history endpoints
-	backlogHistoryResp  *CatalogBacklogHistoryResponse
-	backlogHistoryErr   error
-	failuresSummaryResp *CatalogFailuresSummaryResponse
-	failuresSummaryErr  error
+	backlogHistoryResp *CatalogBacklogHistoryResponse
+	backlogHistoryErr  error
+	// Captured args of the last GetCatalogBacklogHistory call.
+	backlogHistoryWindow time.Duration
+	backlogHistoryBucket time.Duration
+	failuresSummaryResp  *CatalogFailuresSummaryResponse
+	failuresSummaryErr   error
 }
 
-func (f *fakeSvc) GetCatalogBacklogHistory(_ context.Context, _ string, _ time.Duration) (*CatalogBacklogHistoryResponse, error) {
+func (f *fakeSvc) GetCatalogBacklogHistory(_ context.Context, _ string, window, bucket time.Duration) (*CatalogBacklogHistoryResponse, error) {
+	f.backlogHistoryWindow, f.backlogHistoryBucket = window, bucket
 	return f.backlogHistoryResp, f.backlogHistoryErr
 }
 

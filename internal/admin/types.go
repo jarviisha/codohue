@@ -106,6 +106,7 @@ type CatalogBacklogSample struct {
 type CatalogBacklogHistoryResponse struct {
 	Namespace     string                 `json:"namespace"`
 	WindowSeconds int                    `json:"window_seconds"`
+	BucketSeconds int                    `json:"bucket_seconds"`
 	Samples       []CatalogBacklogSample `json:"samples"`
 }
 
