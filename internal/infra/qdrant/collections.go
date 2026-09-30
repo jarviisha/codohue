@@ -90,7 +90,9 @@ func createSparseCollection(ctx context.Context, client *qdrant.Client, name str
 		SparseVectorsConfig: qdrant.NewSparseVectorsConfig(map[string]*qdrant.SparseVectorParams{
 			"sparse_interactions": {
 				Index: &qdrant.SparseIndexConfig{
-					OnDisk: new(false),
+					// Large namespaces outgrow host RAM with an in-memory
+					// sparse index and OOM-loop Qdrant on startup.
+					OnDisk: new(true),
 				},
 			},
 		}),
