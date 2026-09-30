@@ -22,6 +22,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { breakGaps } from '@/components/charts/timeSeries'
 
 type Series = {
   key: string
@@ -54,6 +55,11 @@ type TimeSeriesChartProps = {
    * "unchanged"), so the line holds flat instead of interpolating.
    */
   curve?: 'monotone' | 'stepAfter'
+  /**
+   * Break the line when consecutive samples are further apart than this, so
+   * an outage in the data source does not render as a steady value.
+   */
+  maxGapMs?: number
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -81,13 +87,23 @@ export default function TimeSeriesChart({
   stacked = false,
   tickFormatter,
   curve = 'monotone',
+  maxGapMs,
 }: TimeSeriesChartProps) {
   // The data table can be thousands of rows; keep it out of the DOM until asked for.
   const [tableOpen, setTableOpen] = useState(false)
   // A numeric time axis keeps gaps between samples proportional instead of
   // spacing every point evenly.
-  const formatted = useMemo(() => data.map((p) => ({ ...p, _t: Date.parse(p.ts) })), [data])
-  const spanMs = formatted.length > 1 ? formatted[formatted.length - 1]._t - formatted[0]._t : 0
+  const points = useMemo(() => {
+    const withBreaks = maxGapMs
+      ? breakGaps(
+          data,
+          maxGapMs,
+          series.map((s) => s.key),
+        )
+      : data
+    return withBreaks.map((p) => ({ ...p, _t: Date.parse(p.ts as string) }))
+  }, [data, series, maxGapMs])
+  const spanMs = points.length > 1 ? points[points.length - 1]._t - points[0]._t : 0
   const formatTick = tickFormatter ?? defaultTickFormatter(spanMs > DAY_MS)
 
   return (
@@ -96,7 +112,7 @@ export default function TimeSeriesChart({
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
             accessibilityLayer
-            data={formatted}
+            data={points}
             margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
           >
             <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
@@ -158,10 +174,11 @@ export default function TimeSeriesChart({
         <details onToggle={(e) => setTableOpen(e.currentTarget.open)}>
           <summary>View chart data</summary>
           {tableOpen && (
-            // Table bleeds into the Card's padding when it is a first child
-            // (Astryx containerBleed); without the reset it slides 12px up over
-            // the <summary> and swallows clicks meant to close it.
-            <Stack className="min-w-0 [--container-padding-block-start:0px]">
+            // Table bleeds into its container's padding when it is a first
+            // child (Astryx containerBleed). Inside the Card it slid 12px up
+            // over the <summary> and swallowed clicks meant to close it; a
+            // zero-padding Section resets the bleed to 0.
+            <Section variant="transparent" padding={0} className="min-w-0">
               <Table
                 aria-label="Chart data"
                 columns={['Time', ...series.map((item) => item.key)].map((key) => ({
@@ -189,7 +206,7 @@ export default function TimeSeriesChart({
                   ))}
                 </TableBody>
               </Table>
-            </Stack>
+            </Section>
           )}
         </details>
       </Stack>

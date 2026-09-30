@@ -49,6 +49,8 @@ let catalogRequests = 0
 let historyQueries = []
 let historyFailure = false
 let redrivePosts = 0
+let reembedPosts = 0
+let deadLetter = 3
 let configReadFailure = false
 let saveFailure = false
 let denseLocked = false
@@ -146,7 +148,7 @@ await context.route('**/api/**', async (route) => {
         pending: 0,
         in_flight: 0,
         failed: 0,
-        dead_letter: 3,
+        dead_letter: deadLetter,
         stream_len: 0,
         embedded: 0,
         consumer_lag: 0,
@@ -170,6 +172,10 @@ await context.route('**/api/**', async (route) => {
             stream_len: 0,
           })),
         })
+  }
+  if (path.endsWith('/catalog/re-embed')) {
+    reembedPosts++
+    return json({ batch_run_id: 7, namespace: 'a', status: 'running', started_at: config.updated_at }, 202)
   }
   if (path.endsWith('/catalog/items/redrive-deadletter')) {
     redrivePosts++
@@ -543,20 +549,44 @@ try {
   assert.equal(historyQueries.at(-1), '?window=24h&bucket=5m')
   console.log('PASS catalog history sends Go durations and surfaces HTTP errors')
 
-  for (const width of [320, 360, 390, 768]) {
-    await page.setViewportSize({ width, height: 1000 })
-    for (const [role, name] of [
-      ['link', 'Browse items'],
-      ['link', 'Catalog settings'],
-      ['button', 'Redrive 3 dead-letter'],
-      ['button', 'Trigger re-embed'],
-    ]) {
-      const box = await page.getByRole(role, { name, exact: true }).boundingBox()
-      assert.ok(box.x >= 0 && box.x + box.width <= width, `${name} clipped at ${width}px`)
+  const headerActions = [
+    ['link', 'Browse items'],
+    ['link', 'Catalog settings'],
+    ['button', 'Redrive 3 dead-letter'],
+    ['button', 'Trigger re-embed'],
+  ]
+  const assertHeaderFits = async (actions) => {
+    for (const width of [320, 360, 390, 768]) {
+      await page.setViewportSize({ width, height: 1000 })
+      for (const [role, name] of actions) {
+        const box = await page.getByRole(role, { name, exact: true }).boundingBox()
+        assert.ok(box.x >= 0 && box.x + box.width <= width, `${name} clipped at ${width}px`)
+      }
     }
+    await page.setViewportSize({ width: 1440, height: 1000 })
   }
-  await page.setViewportSize({ width: 1440, height: 1000 })
-  console.log('PASS catalog header actions stay inside narrow viewports')
+  await assertHeaderFits(headerActions)
+  deadLetter = 0
+  await page.reload()
+  await page.getByRole('button', { name: 'Trigger re-embed', exact: true }).waitFor()
+  assert.equal(await page.getByRole('button', { name: /^Redrive/ }).count(), 0)
+  await assertHeaderFits(headerActions.filter(([, name]) => !name.startsWith('Redrive')))
+  deadLetter = 3
+  await page.reload()
+  await page.getByRole('button', { name: 'Redrive 3 dead-letter', exact: true }).waitFor()
+  console.log('PASS catalog header actions stay inside narrow viewports, with and without dead-letter')
+
+  const heightOf = (role, name) =>
+    page.getByRole(role, { name, exact: true }).boundingBox().then((box) => box.height)
+  const cdp = await context.newCDPSession(page)
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 })
+  for (const [role, name] of headerActions)
+    assert.ok((await heightOf(role, name)) >= 44, `${name} is a 44px touch target`)
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false })
+  for (const [role, name] of headerActions)
+    assert.ok((await heightOf(role, name)) < 44, `${name} keeps its compact desktop size`)
+  await cdp.detach()
+  console.log('PASS header actions grow to 44px on coarse pointers only')
 
   const redriveButton = page.getByRole('button', { name: 'Redrive 3 dead-letter', exact: true })
   const redriveDialog = page.getByRole('heading', { name: 'Redrive dead-letter items' })
@@ -569,7 +599,18 @@ try {
   await page.getByRole('button', { name: 'Redrive items', exact: true }).click()
   await redriveDialog.waitFor({ state: 'detached' })
   assert.equal(redrivePosts, 1)
-  console.log('PASS bulk redrive runs only after confirmation')
+  const reembedDialog = page.getByRole('heading', { name: 'Trigger re-embed' })
+  await page.getByRole('button', { name: 'Trigger re-embed', exact: true }).click()
+  await reembedDialog.waitFor()
+  await page.getByText('test@v1', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await reembedDialog.waitFor({ state: 'detached' })
+  assert.equal(reembedPosts, 0, 'cancel must not re-embed')
+  await page.getByRole('button', { name: 'Trigger re-embed', exact: true }).click()
+  await page.getByRole('button', { name: 'Start re-embed', exact: true }).click()
+  await reembedDialog.waitFor({ state: 'detached' })
+  assert.equal(reembedPosts, 1)
+  console.log('PASS bulk redrive and re-embed run only after confirmation')
 
   const reasonText = page.locator('span.line-clamp-2').first()
   assert.ok(

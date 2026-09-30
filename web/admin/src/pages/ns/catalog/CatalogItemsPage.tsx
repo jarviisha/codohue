@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import {
+  Text,
   Token,
   Banner,
   Button,
@@ -154,7 +155,10 @@ export default function CatalogItemsPage() {
         )}
 
         {items.data && items.data.items.length > 0 && (
-          <Stack className="min-w-0">
+          <Stack className="min-w-0" gap={2}>
+            <Text type="supporting" className="md:hidden">
+              Scroll the table sideways to see every column.
+            </Text>
             <Table
               aria-label="Catalog items"
               // Widths sized to content; narrow viewports scroll the table

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   Banner,
@@ -48,6 +48,26 @@ type HistoryWindow = keyof typeof HISTORY_WINDOWS
 // 44px targets on touch screens only; desktop keeps the compact size.
 const TOUCH_TARGET = 'pointer-coarse:min-h-11'
 
+// cmd/embedder's BacklogSampler writes at least every 5 min (ForceWriteAfter)
+// on a 30s tick; a longer silence beyond one bucket means it stopped.
+const SAMPLER_SILENCE_MS = 6 * 60_000
+
+type BulkAction = 'redrive' | 'reembed'
+type BulkActionCopy = { title: string; confirmLabel: string; description: ReactNode }
+// The slice of a react-query mutation the confirm dialog drives; both bulk
+// hooks fit it regardless of their response types.
+type BulkMutation = {
+  mutate: (variables: void, options: { onSuccess: () => void }) => void
+  reset: () => void
+  isPending: boolean
+  error: Error | null
+}
+
+function catalogItemsPath(ns: string, filter: { state?: string; q?: string } = {}) {
+  const query = new URLSearchParams(filter).toString()
+  return `/ns/${encodeURIComponent(ns)}/catalog/items${query ? `?${query}` : ''}`
+}
+
 type ReembedProgress = {
   batch_run_id: number
   processed: number
@@ -71,11 +91,7 @@ export default function CatalogStatusPage() {
   const bulkRedrive = useBulkRedriveDeadletter(ns ?? null)
   // Both bulk actions touch every matching item in the namespace, so the
   // header buttons only stage the action; the dialog runs it.
-  const [confirm, setConfirm] = useState<'redrive' | 'reembed' | null>(null)
-  const openConfirm = (action: 'redrive' | 'reembed') => {
-    ;(action === 'redrive' ? bulkRedrive : reembed).reset()
-    setConfirm(action)
-  }
+  const [confirm, setConfirm] = useState<BulkAction | null>(null)
 
   // Live backlog snapshot from SSE — when present we render it on the tiles
   // so the page tracks the embedder's sample cadence (30s) rather than the
@@ -207,7 +223,40 @@ export default function CatalogStatusPage() {
     : data.backlog
   const reembedStatus = data.last_re_embed
   const reembedRunning = reembedStatus?.status === 'running'
-  const confirmMutation = confirm === 'redrive' ? bulkRedrive : reembed
+  const bulkActions: Record<BulkAction, BulkActionCopy & { mutation: BulkMutation }> = {
+    redrive: {
+      mutation: bulkRedrive,
+      title: 'Redrive dead-letter items',
+      confirmLabel: 'Redrive items',
+      description: (
+        <p>
+          Moves {backlog.dead_letter.toLocaleString()} dead-letter items in <b>{ns}</b> back to
+          pending with their attempt count reset, so the embedder retries them.
+        </p>
+      ),
+    },
+    reembed: {
+      mutation: reembed,
+      title: 'Trigger re-embed',
+      confirmLabel: 'Start re-embed',
+      description: (
+        <p>
+          Re-queues every embedded, failed or dead-letter item in <b>{ns}</b> that was not embedded
+          with{' '}
+          <code>
+            {data.catalog.strategy_id}@{data.catalog.strategy_version}
+          </code>
+          . The embedder works through them in the background; progress appears under Last
+          re-embed.
+        </p>
+      ),
+    },
+  }
+  const pendingAction = confirm ? bulkActions[confirm] : null
+  const openConfirm = (action: BulkAction) => {
+    bulkActions[action].mutation.reset()
+    setConfirm(action)
+  }
   const closeConfirm = () => setConfirm(null)
 
   return (
@@ -240,7 +289,7 @@ export default function CatalogStatusPage() {
               size="sm"
               className={TOUCH_TARGET}
               variant="secondary"
-              href={`/ns/${encodeURIComponent(ns)}/catalog/items`}
+              href={catalogItemsPath(ns)}
               label="Browse items"
             />
             <Button
@@ -344,8 +393,7 @@ export default function CatalogStatusPage() {
             </Stack>
             <SegmentedControl
               label="Backlog time range"
-              // Items drop className, so size them from the group.
-              className="pointer-coarse:[&_[role=radio]]:min-h-11 pointer-coarse:[&_[role=radio]]:min-w-11"
+              size="lg"
               value={window}
               onChange={(next) => setWindow(next as HistoryWindow)}
             >
@@ -388,6 +436,7 @@ export default function CatalogStatusPage() {
               ]}
               stacked
               curve="stepAfter"
+              maxGapMs={history.data.bucket_seconds * 1000 + SAMPLER_SILENCE_MS}
               height={240}
             />
           )}
@@ -428,7 +477,7 @@ export default function CatalogStatusPage() {
                         // Items search is "object ID contains", so this always
                         // lands on the sample without a lookup by internal id.
                         <Link
-                          to={`/ns/${encodeURIComponent(ns)}/catalog/items?q=${encodeURIComponent(r.sample_object_id)}`}
+                          to={catalogItemsPath(ns, { q: r.sample_object_id })}
                           title={r.sample_object_id}
                           className="text-primary block max-w-60 truncate font-mono text-xs"
                         >
@@ -444,44 +493,19 @@ export default function CatalogStatusPage() {
             </Table>
           )}
         </Stack>
-
-        <Stack align="center" gap={4} direction="horizontal" justify="end">
-          <Button
-            href={`/ns/${encodeURIComponent(ns)}/catalog/items`}
-            variant="secondary"
-            label="Browse items →"
-          />
-        </Stack>
       </Stack>
 
       <ConfirmDialog
-        open={confirm !== null}
+        open={pendingAction !== null}
         onOpenChange={(next) => {
           if (!next) closeConfirm()
         }}
-        title={confirm === 'redrive' ? 'Redrive dead-letter items' : 'Trigger re-embed'}
-        description={
-          confirm === 'redrive' ? (
-            <p>
-              Moves {backlog.dead_letter.toLocaleString()} dead-letter items in <b>{ns}</b> back
-              to pending with their attempt count reset, so the embedder retries them.
-            </p>
-          ) : (
-            <p>
-              Re-queues every embedded, failed or dead-letter item in <b>{ns}</b> that was not
-              embedded with{' '}
-              <code>
-                {data.catalog.strategy_id}@{data.catalog.strategy_version}
-              </code>
-              . The embedder works through them in the background; progress appears under Last
-              re-embed.
-            </p>
-          )
-        }
-        confirmLabel={confirm === 'redrive' ? 'Redrive items' : 'Start re-embed'}
-        pending={confirmMutation.isPending}
-        error={confirmMutation.error?.message}
-        onConfirm={() => confirmMutation.mutate(undefined, { onSuccess: closeConfirm })}
+        title={pendingAction?.title ?? ''}
+        description={pendingAction?.description}
+        confirmLabel={pendingAction?.confirmLabel ?? ''}
+        pending={pendingAction?.mutation.isPending}
+        error={pendingAction?.mutation.error?.message}
+        onConfirm={() => pendingAction?.mutation.mutate(undefined, { onSuccess: closeConfirm })}
       />
     </>
   )
@@ -527,7 +551,7 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
 }
 
 function BacklogTiles({ ns, backlog }: { ns: string; backlog: CatalogBacklog }) {
-  const itemsIn = (state: string) => `/ns/${encodeURIComponent(ns)}/catalog/items?state=${state}`
+  const itemsIn = (state: string) => catalogItemsPath(ns, { state })
   return (
     <Stack gap={4} direction="horizontal" align="stretch" wrap="wrap">
       <StatTile

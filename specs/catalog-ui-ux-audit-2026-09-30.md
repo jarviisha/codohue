@@ -1,6 +1,6 @@
 # Catalog — kiểm tra UI/UX và đề xuất tinh chỉnh
 
-Ngày kiểm tra: 2026-09-30. Trạng thái: đã xác minh trên trình duyệt; CAT-01…06 đang được triển khai.
+Ngày kiểm tra: 2026-09-30. Trạng thái: đã xác minh trên trình duyệt; CAT-01…06 và 7 đề xuất bổ sung đã triển khai (2026-09-30). Vùng chạm của bộ chọn khoảng thời gian dùng `size="lg"` của Astryx (28px) thay vì selector arbitrary, nên chưa đạt 44px.
 
 ## Phạm vi và phương pháp
 
