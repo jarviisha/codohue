@@ -507,6 +507,20 @@ try {
   assert.equal(historyQueries.at(-1), '?window=24h&bucket=5m')
   console.log('PASS catalog history sends Go durations and surfaces HTTP errors')
 
+  for (const width of [320, 360, 390, 768]) {
+    await page.setViewportSize({ width, height: 1000 })
+    for (const [role, name] of [
+      ['link', 'Catalog settings'],
+      ['button', 'Redrive 3 dead-letter'],
+      ['button', 'Trigger re-embed'],
+    ]) {
+      const box = await page.getByRole(role, { name, exact: true }).boundingBox()
+      assert.ok(box.x >= 0 && box.x + box.width <= width, `${name} clipped at ${width}px`)
+    }
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  console.log('PASS catalog header actions stay inside narrow viewports')
+
   await goto('/ns/a/catalog/items')
   await page.getByRole('link', { name: 'item-42' }).waitFor()
   const beforeTyping = catalogRequests

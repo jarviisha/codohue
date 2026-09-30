@@ -221,7 +221,7 @@ export default function CatalogStatusPage() {
               strategy={data.catalog.strategy_id}@{data.catalog.strategy_version}
             </p>
           </Stack>
-          <Stack gap={4} direction="horizontal" align="center">
+          <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
             <Button
               size="sm"
               variant="secondary"
