@@ -171,7 +171,17 @@ await context.route('**/api/**', async (route) => {
         })
   }
   if (path.endsWith('/catalog/failures-summary'))
-    return json({ namespace: 'a', window_seconds: 86400, reasons: [] })
+    return json({
+      namespace: 'a',
+      window_seconds: 86400,
+      reasons: [
+        {
+          reason: `rpc error: code = Unavailable desc = ${'connection refused; '.repeat(30)}`,
+          count: 4,
+          sample_object_id: 'at://did:plc:sample/app.bsky.feed.post/3abc',
+        },
+      ],
+    })
   if (path.endsWith('/dashboard'))
     return json({
       config: {
@@ -537,6 +547,21 @@ try {
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS catalog header actions stay inside narrow viewports')
 
+  const reasonText = page.locator('span.line-clamp-2').first()
+  assert.ok(
+    await reasonText.evaluate((node) => node.scrollHeight > node.clientHeight),
+    'long failure reason is clamped',
+  )
+  await page.getByText('View full error', { exact: true }).click()
+  await page.locator('details p').filter({ hasText: 'rpc error' }).waitFor()
+  await page.getByRole('button', { name: 'Copy', exact: true }).waitFor()
+  await page.getByRole('link', { name: 'at://did:plc:sample/app.bsky.feed.post/3abc' }).click()
+  await page.waitForURL(
+    `**/ns/a/catalog/items?q=${encodeURIComponent('at://did:plc:sample/app.bsky.feed.post/3abc')}`,
+  )
+  console.log('PASS failure reasons clamp, expand, copy and link the sample object')
+
+  await page.goBack()
   await page.getByText('Out of retries; needs redrive', { exact: true }).waitFor()
   await page.getByRole('link', { name: /^Dead-letter/ }).click()
   await page.waitForURL('**/ns/a/catalog/items?state=dead_letter')

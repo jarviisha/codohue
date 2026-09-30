@@ -30,6 +30,7 @@ import {
 import { streamStatusProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
+import CopyButton from '@/components/CopyButton'
 import MetaLine from '@/components/MetaLine'
 import QueryFeedback from '@/components/QueryFeedback'
 import StatTile from '@/components/StatTile'
@@ -415,13 +416,23 @@ export default function CatalogStatusPage() {
               <TableBody>
                 {failures.data.reasons.map((r, i) => (
                   <TableRow key={`${r.reason}-${i}`}>
-                    <TableCell className="text-secondary text-sm">{r.reason}</TableCell>
+                    <TableCell className="text-secondary text-sm">
+                      <FailureReason reason={r.reason} />
+                    </TableCell>
                     <TableCell className="text-right tabular-nums">
                       {r.count.toLocaleString()}
                     </TableCell>
                     <TableCell>
                       {r.sample_object_id ? (
-                        <code className="text-secondary text-xs">{r.sample_object_id}</code>
+                        // Items search is "object ID contains", so this always
+                        // lands on the sample without a lookup by internal id.
+                        <Link
+                          to={`/ns/${encodeURIComponent(ns)}/catalog/items?q=${encodeURIComponent(r.sample_object_id)}`}
+                          title={r.sample_object_id}
+                          className="text-primary block max-w-60 truncate font-mono text-xs"
+                        >
+                          {r.sample_object_id}
+                        </Link>
                       ) : (
                         <span className="text-secondary text-xs">—</span>
                       )}
@@ -442,6 +453,22 @@ export default function CatalogStatusPage() {
         </Stack>
       </Stack>
     </>
+  )
+}
+
+/** Long RPC errors clamp to two lines; the full text stays one click away. */
+function FailureReason({ reason }: { reason: string }) {
+  return (
+    <Stack gap={2}>
+      <span className="line-clamp-2 break-words">{reason}</span>
+      <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
+        <details>
+          <summary className="text-xs">View full error</summary>
+          <p className="whitespace-pre-wrap break-words text-xs">{reason}</p>
+        </details>
+        <CopyButton value={reason} label="error" />
+      </Stack>
+    </Stack>
   )
 }
 
