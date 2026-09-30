@@ -6,6 +6,8 @@ import {
   Card,
   EmptyState,
   ProgressBar,
+  SegmentedControl,
+  SegmentedControlItem,
   Skeleton,
   Stack,
   StatusDot,
@@ -29,10 +31,17 @@ import { streamStatusProps, useServerStream } from '@/services/stream'
 import PageHeader from '@/components/shell/PageHeader'
 import TimeSeriesChart from '@/components/charts/TimeSeriesChart'
 import MetaLine from '@/components/MetaLine'
+import QueryFeedback from '@/components/QueryFeedback'
 import StatTile from '@/components/StatTile'
 
-const HISTORY_WINDOWS = ['1h', '24h', '7d'] as const
-type HistoryWindow = (typeof HISTORY_WINDOWS)[number]
+// The server parses Go durations (no "d" unit), and bucketing keeps every
+// range at roughly 120–340 points instead of ~20k raw 30s samples for 7d.
+const HISTORY_WINDOWS = {
+  '1h': { window: '1h', bucket: '' },
+  '24h': { window: '24h', bucket: '5m' },
+  '7d': { window: '168h', bucket: '30m' },
+} as const
+type HistoryWindow = keyof typeof HISTORY_WINDOWS
 
 type ReembedProgress = {
   batch_run_id: number
@@ -47,7 +56,11 @@ export default function CatalogStatusPage() {
   const [streamEvents, setStreamEvents] = useState(0)
 
   const config = useCatalogConfig(ns ?? null)
-  const history = useCatalogBacklogHistory(ns ?? null, window)
+  const history = useCatalogBacklogHistory(
+    ns ?? null,
+    HISTORY_WINDOWS[window].window,
+    HISTORY_WINDOWS[window].bucket,
+  )
   const failures = useCatalogFailuresSummary(ns ?? null, '24h')
   const reembed = useTriggerReEmbed(ns ?? null)
   const bulkRedrive = useBulkRedriveDeadletter(ns ?? null)
@@ -308,32 +321,31 @@ export default function CatalogStatusPage() {
         )}
 
         <Stack gap={6}>
-          <Stack gap={4} direction="horizontal" align="center" justify="between">
+          <Stack gap={4} direction="horizontal" align="center" justify="between" wrap="wrap">
             <Stack gap={6}>
               <h2 className="text-primary text-sm font-semibold">Backlog timeline</h2>
               <p className="text-secondary text-xs">
                 Persisted samples — survives reload, sampled every 30 seconds.
               </p>
             </Stack>
-            <Stack align="center" gap={4} direction="horizontal">
-              {HISTORY_WINDOWS.map((w) => (
-                <Button
-                  key={w}
-                  size="sm"
-                  variant="primary"
-                  onClick={() => setWindow(w)}
-                  label={w}
-                />
+            <SegmentedControl
+              label="Backlog time range"
+              value={window}
+              onChange={(next) => setWindow(next as HistoryWindow)}
+            >
+              {Object.keys(HISTORY_WINDOWS).map((w) => (
+                <SegmentedControlItem key={w} value={w} label={w} />
               ))}
-            </Stack>
+            </SegmentedControl>
           </Stack>
+          <QueryFeedback query={history} label="Backlog timeline" />
           {history.isLoading ? (
             <Skeleton className="h-40 w-full" />
-          ) : history.data?.samples.length === 0 ? (
+          ) : !history.data ? null : history.data.samples.length === 0 ? (
             <p className="text-secondary text-sm">No samples yet — the sampler writes every 30s.</p>
           ) : (
             <TimeSeriesChart
-              data={(history.data?.samples ?? []).map((s) => ({
+              data={history.data.samples.map((s) => ({
                 ts: s.sampled_at,
                 pending: s.pending,
                 in_flight: s.in_flight,
@@ -371,9 +383,10 @@ export default function CatalogStatusPage() {
               Buckets failed + dead-letter rows by last_error so the dominant cause surfaces first.
             </p>
           </Stack>
+          <QueryFeedback query={failures} label="Top failure reasons" />
           {failures.isLoading ? (
             <Skeleton className="h-32 w-full" />
-          ) : failures.data?.reasons.length === 0 ? (
+          ) : !failures.data ? null : failures.data.reasons.length === 0 ? (
             <p className="text-secondary text-sm">No failed items in the last 24h.</p>
           ) : (
             <Table>
@@ -385,7 +398,7 @@ export default function CatalogStatusPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {failures.data?.reasons.map((r, i) => (
+                {failures.data.reasons.map((r, i) => (
                   <TableRow key={`${r.reason}-${i}`}>
                     <TableCell className="text-secondary text-sm">{r.reason}</TableCell>
                     <TableCell className="text-right tabular-nums">

@@ -46,6 +46,8 @@ let trendingOffsets = []
 let healthFailure = false
 let healthDetails = false
 let catalogRequests = 0
+let historyQueries = []
+let historyFailure = false
 let configReadFailure = false
 let saveFailure = false
 let denseLocked = false
@@ -139,7 +141,38 @@ await context.route('**/api/**', async (route) => {
     return json({
       catalog: { namespace: 'a', enabled: true, strategy_id: 'test', strategy_version: 'v1' },
       available_strategies: [{ id: 'test', version: 'v1', dim: 128 }],
+      backlog: {
+        pending: 0,
+        in_flight: 0,
+        failed: 0,
+        dead_letter: 3,
+        stream_len: 0,
+        embedded: 0,
+        consumer_lag: 0,
+      },
     })
+  if (path.endsWith('/catalog/backlog-history')) {
+    historyQueries.push(url.search)
+    return historyFailure
+      ? json({ error: { message: 'History unavailable' } }, 500)
+      : json({
+          namespace: 'a',
+          window_seconds: 3600,
+          bucket_seconds: 0,
+          samples: [
+            {
+              sampled_at: config.updated_at,
+              pending: 1,
+              in_flight: 0,
+              failed: 0,
+              dead_letter: 3,
+              stream_len: 0,
+            },
+          ],
+        })
+  }
+  if (path.endsWith('/catalog/failures-summary'))
+    return json({ namespace: 'a', window_seconds: 86400, reasons: [] })
   if (path.endsWith('/dashboard'))
     return json({
       config: {
@@ -230,6 +263,10 @@ await context.route('**/api/**', async (route) => {
   return json({ error: { message: 'Fixture intentionally unavailable' } }, 404)
 })
 const goto = (path) => page.goto(`${origin}${path}`)
+const expectPoll = async (read, want) => {
+  for (let i = 0; i < 50 && read() !== want; i++) await page.waitForTimeout(100)
+  assert.equal(read(), want)
+}
 try {
   await page.clock.install()
   await goto('/ns/a/config')
@@ -455,6 +492,20 @@ try {
   await page.getByText('Service health could not refresh', { exact: true }).waitFor()
   assert.equal(await page.getByText('PostgreSQL', { exact: true }).count(), 1)
   console.log('PASS health keeps last good snapshot after refresh failure')
+
+  await goto('/ns/a/catalog')
+  await page.getByText('1 recorded time points', { exact: false }).waitFor()
+  await page.getByRole('radio', { name: '7d', exact: true }).click()
+  await expectPoll(() => historyQueries.at(-1), '?window=168h&bucket=30m')
+  historyFailure = true
+  await page.getByRole('radio', { name: '24h', exact: true }).click()
+  await page.getByText('Backlog timeline could not refresh', { exact: true }).waitFor()
+  assert.equal(await page.getByText(/recorded time points/).count(), 0)
+  historyFailure = false
+  await page.getByRole('button', { name: 'Retry', exact: true }).click()
+  await page.getByText(/recorded time points/).waitFor()
+  assert.equal(historyQueries.at(-1), '?window=24h&bucket=5m')
+  console.log('PASS catalog history sends Go durations and surfaces HTTP errors')
 
   await goto('/ns/a/catalog/items')
   await page.getByRole('link', { name: 'item-42' }).waitFor()

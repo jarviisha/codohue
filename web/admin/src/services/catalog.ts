@@ -83,6 +83,7 @@ type CatalogBacklogSample = {
 export type CatalogBacklogHistoryResponse = {
   namespace: string
   window_seconds: number
+  bucket_seconds: number
   samples: CatalogBacklogSample[]
 }
 
@@ -154,8 +155,8 @@ export type CatalogReEmbedResponse = {
 const catalogKeys = {
   config: (ns: string) => ['catalog', ns, 'config'] as const,
   strategies: (dim: number) => ['catalog', 'strategies', dim] as const,
-  backlogHistory: (ns: string, window: string) =>
-    ['catalog', ns, 'backlog-history', window] as const,
+  backlogHistory: (ns: string, window: string, bucket: string) =>
+    ['catalog', ns, 'backlog-history', window, bucket] as const,
   failures: (ns: string, window: string) => ['catalog', ns, 'failures', window] as const,
   items: (ns: string, filter: Record<string, unknown>) => ['catalog', ns, 'items', filter] as const,
   item: (ns: string, id: number | string) => ['catalog', ns, 'item', id] as const,
@@ -200,12 +201,16 @@ export function useCatalogStrategies(dim: number, enabled = true) {
   })
 }
 
-export function useCatalogBacklogHistory(ns: string | null, window: string = '1h') {
+/** `window` and `bucket` are Go duration strings; an empty bucket returns raw samples. */
+export function useCatalogBacklogHistory(ns: string | null, window: string = '1h', bucket = '') {
+  const bucketParam = bucket ? `&bucket=${encodeURIComponent(bucket)}` : ''
   return useQuery({
-    queryKey: ns ? catalogKeys.backlogHistory(ns, window) : ['catalog', 'unknown', 'history'],
+    queryKey: ns
+      ? catalogKeys.backlogHistory(ns, window, bucket)
+      : ['catalog', 'unknown', 'history'],
     queryFn: () =>
       apiFetch<CatalogBacklogHistoryResponse>(
-        `/api/admin/v1/namespaces/${ns}/catalog/backlog-history?window=${encodeURIComponent(window)}`,
+        `/api/admin/v1/namespaces/${ns}/catalog/backlog-history?window=${encodeURIComponent(window)}${bucketParam}`,
       ),
     enabled: ns != null && ns !== '',
     refetchInterval: 60_000,
