@@ -10,6 +10,7 @@ import {
   Skeleton,
   Stack,
   Table,
+  pixel,
   proportional,
   TableBody,
   TableCell,
@@ -156,15 +157,17 @@ export default function CatalogItemsPage() {
           <Stack className="min-w-0">
             <Table
               aria-label="Catalog items"
+              // Widths sized to content; narrow viewports scroll the table
+              // horizontally instead of squeezing every column to 120px.
               columns={[
-                'Object',
-                'Author',
-                'State',
-                'Attempts',
-                'Last error',
-                'Updated',
-                'Actions',
-              ].map((key) => ({ key, header: key, width: proportional(1) }))}
+                { key: 'Object', header: 'Object', width: proportional(2, { minWidth: 200 }) },
+                { key: 'Author', header: 'Author', width: proportional(1) },
+                { key: 'State', header: 'State', width: proportional(1, { minWidth: 100 }) },
+                { key: 'Attempts', header: 'Attempts', width: pixel(88) },
+                { key: 'Last error', header: 'Last error', width: proportional(2, { minWidth: 140 }) },
+                { key: 'Updated', header: 'Updated', width: proportional(1, { minWidth: 180 }) },
+                { key: 'Actions', header: 'Actions', width: proportional(1, { minWidth: 150 }) },
+              ]}
             >
               <TableHeader>
                 <TableRow>
@@ -257,7 +260,8 @@ function ItemRow({
       <TableCell>
         <Link
           to={`/ns/${encodeURIComponent(ns)}/catalog/items/${item.id}`}
-          className="text-primary font-medium"
+          title={item.object_id}
+          className="text-primary font-medium block max-w-60 truncate"
         >
           {item.object_id}
         </Link>

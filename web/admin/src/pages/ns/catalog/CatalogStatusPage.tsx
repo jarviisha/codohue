@@ -43,6 +43,9 @@ const HISTORY_WINDOWS = {
 } as const
 type HistoryWindow = keyof typeof HISTORY_WINDOWS
 
+// 44px targets on touch screens only; desktop keeps the compact size.
+const TOUCH_TARGET = 'pointer-coarse:min-h-11'
+
 type ReembedProgress = {
   batch_run_id: number
   processed: number
@@ -224,6 +227,7 @@ export default function CatalogStatusPage() {
           <Stack gap={4} direction="horizontal" align="center" wrap="wrap">
             <Button
               size="sm"
+              className={TOUCH_TARGET}
               variant="secondary"
               href={`/ns/${encodeURIComponent(ns)}/config?tab=embeddings`}
               label="Catalog settings"
@@ -232,6 +236,7 @@ export default function CatalogStatusPage() {
             {backlog.dead_letter > 0 && (
               <Button
                 size="sm"
+              className={TOUCH_TARGET}
                 variant="destructive"
                 onClick={() => bulkRedrive.mutate()}
                 isDisabled={bulkRedrive.isPending}
@@ -244,6 +249,7 @@ export default function CatalogStatusPage() {
             )}
             <Button
               size="sm"
+              className={TOUCH_TARGET}
               onClick={() => reembed.mutate()}
               isDisabled={reembed.isPending || reembedRunning}
               label={
@@ -330,6 +336,8 @@ export default function CatalogStatusPage() {
             </Stack>
             <SegmentedControl
               label="Backlog time range"
+              // Items drop className, so size them from the group.
+              className="pointer-coarse:[&_[role=radio]]:min-h-11 pointer-coarse:[&_[role=radio]]:min-w-11"
               value={window}
               onChange={(next) => setWindow(next as HistoryWindow)}
             >
