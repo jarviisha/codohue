@@ -101,7 +101,7 @@ export default function TimeSeriesChart({
           series.map((s) => s.key),
         )
       : data
-    return withBreaks.map((p) => ({ ...p, _t: Date.parse(p.ts as string) }))
+    return withBreaks.map((p) => ({ ...p, _t: Date.parse(p.ts) }))
   }, [data, series, maxGapMs])
   const spanMs = points.length > 1 ? points[points.length - 1]._t - points[0]._t : 0
   const formatTick = tickFormatter ?? defaultTickFormatter(spanMs > DAY_MS)

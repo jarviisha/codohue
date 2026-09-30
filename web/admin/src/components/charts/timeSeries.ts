@@ -1,3 +1,6 @@
+/** An all-null point that makes the chart break its line. */
+type GapPoint = { ts: string } & Record<string, string | null>
+
 /**
  * breakGaps inserts an all-null point `maxGapMs` after any sample whose
  * successor arrives later than that, so the chart breaks the line instead of
@@ -7,8 +10,8 @@ export function breakGaps<T extends { ts: string }>(
   points: T[],
   maxGapMs: number,
   keys: string[],
-): Array<T | Record<string, string | null>> {
-  const out: Array<T | Record<string, string | null>> = []
+): Array<T | GapPoint> {
+  const out: Array<T | GapPoint> = []
   points.forEach((point, i) => {
     out.push(point)
     const next = points[i + 1]

@@ -10,9 +10,15 @@ import (
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
 
-// errWindowTooShort rejects windows that round down to zero seconds, which
-// the repository would otherwise turn into a 500.
-var errWindowTooShort = errors.New("must be at least 1s")
+// parseWindow parses a lookback window and rejects anything under 1s: the
+// repository works in whole seconds and would turn a zero window into a 500.
+func parseWindow(raw string, def time.Duration) (time.Duration, error) {
+	window, err := parseDurationDefault(raw, def)
+	if err == nil && window < time.Second {
+		err = errors.New("must be at least 1s")
+	}
+	return window, err
+}
 
 // GetCatalogBacklogHistory handles
 // GET /api/admin/v1/namespaces/{ns}/catalog/backlog-history?window=1h&bucket=5m
@@ -27,10 +33,7 @@ func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Reques
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
 	}
-	window, err := parseDurationDefault(r.URL.Query().Get("window"), time.Hour)
-	if err == nil && window < time.Second {
-		err = errWindowTooShort
-	}
+	window, err := parseWindow(r.URL.Query().Get("window"), time.Hour)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "window: "+err.Error())
 		return
@@ -66,10 +69,7 @@ func (h *Handler) GetCatalogFailuresSummary(w http.ResponseWriter, r *http.Reque
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "namespace is required")
 		return
 	}
-	window, err := parseDurationDefault(r.URL.Query().Get("window"), 24*time.Hour)
-	if err == nil && window < time.Second {
-		err = errWindowTooShort
-	}
+	window, err := parseWindow(r.URL.Query().Get("window"), 24*time.Hour)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "window: "+err.Error())
 		return

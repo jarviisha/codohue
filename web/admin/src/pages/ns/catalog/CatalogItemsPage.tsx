@@ -156,7 +156,8 @@ export default function CatalogItemsPage() {
 
         {items.data && items.data.items.length > 0 && (
           <Stack className="min-w-0" gap={2}>
-            <Text type="supporting" className="md:hidden">
+            {/* Column minimums add up past most content widths, desktop included. */}
+            <Text type="supporting">
               Scroll the table sideways to see every column.
             </Text>
             <Table

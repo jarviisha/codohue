@@ -414,7 +414,7 @@ Sessions are modeled as a resource: login = create, logout = delete current. The
 | PUT    | `/api/admin/v1/namespaces/{ns}/catalog`                           | Enable/update/disable catalog (400 on dim mismatch; 503 unwired) |
 | POST   | `/api/admin/v1/namespaces/{ns}/catalog/re-embed`                  | Trigger re-embed (202 + `Location`; 409 if one is running) |
 | GET    | `/api/admin/v1/namespaces/{ns}/catalog/backlog-history`           | Backlog time-series (`?window=` Go duration, default `1h`, e.g. `168h`; optional `?bucket=` (≥ `1s`) downsamples to one point per bucket, MAX per series; absent/`0` = raw samples; `window` < `1s` → 400) |
-| GET    | `/api/admin/v1/namespaces/{ns}/catalog/failures-summary`          | Top `last_error` reasons in window (`?window=`) |
+| GET    | `/api/admin/v1/namespaces/{ns}/catalog/failures-summary`          | Top `last_error` reasons in window (`?window=`, default `24h`; < `1s` → 400) |
 | GET    | `/api/admin/v1/namespaces/{ns}/catalog/stream`                    | **(SSE)** `item_state_changed`, `backlog_snapshot`, `dead_letter_grew`, `reembed_progress` |
 | GET    | `/api/admin/v1/namespaces/{ns}/catalog/items`                     | Browse (`?state=&limit=&offset=&object_id=&author=`) |
 | GET    | `/api/admin/v1/namespaces/{ns}/catalog/items/{id}`                | Full item (with `content`, `metadata`) |
