@@ -48,7 +48,7 @@ UI vẫn dựng biểu đồ với trục 0–4 và mô tả `0 recorded time po
 - Tách rõ các trạng thái loading, success có dữ liệu, success rỗng và error. Error có thông báo ngắn cùng nút `Try again`.
 - Áp dụng cùng cách xử lý lỗi cho phần tổng hợp nguyên nhân thất bại.
 
-**Khối lượng dữ liệu 7d:** sampler ghi khoảng 30 giây/mẫu, nên 7d là khoảng 20.160 mẫu. Toàn bộ đi vào Recharts và vào bảng trong `<details>` (bảng luôn nằm trong DOM kể cả khi đóng), và dữ liệu tải lại mỗi 60 giây. Phương án: thêm tham số `bucket` (đã được mô tả ở `ARCHITECTURE.md` nhưng handler chưa hỗ trợ) để server gộp mẫu theo `MAX()` từng series, giữ được đỉnh backlog; 24h dùng bucket 5m, 7d dùng 30m (khoảng 288 và 336 điểm).
+**Khối lượng dữ liệu 7d:** sampler ghi khoảng 30 giây/mẫu, nên 7d là khoảng 20.160 mẫu. Toàn bộ đi vào Recharts và vào bảng trong `<details>` (bảng luôn nằm trong DOM kể cả khi đóng), và dữ liệu tải lại mỗi 60 giây. Phương án: thêm tham số `bucket` (đã được mô tả ở `ARCHITECTURE.md` nhưng handler chưa hỗ trợ) để server gộp mẫu, mỗi bucket giữ nguyên mẫu có tổng backlog lớn nhất (không lấy `MAX()` riêng từng series, vì biểu đồ xếp chồng sẽ cộng ra tổng không có thật), nên vẫn giữ được đỉnh backlog; 24h dùng bucket 5m, 7d dùng 30m (khoảng 288 và 336 điểm).
 
 **Nghiệm thu:** cả ba khoảng tải thành công; 7d tương ứng 604800 giây; lỗi mạng/HTTP không trở thành trạng thái rỗng; thử lại tải đúng khoảng đã chọn.
 
