@@ -229,6 +229,13 @@ export default function CatalogStatusPage() {
               size="sm"
               className={TOUCH_TARGET}
               variant="secondary"
+              href={`/ns/${encodeURIComponent(ns)}/catalog/items`}
+              label="Browse items"
+            />
+            <Button
+              size="sm"
+              className={TOUCH_TARGET}
+              variant="secondary"
               href={`/ns/${encodeURIComponent(ns)}/config?tab=embeddings`}
               label="Catalog settings"
             />
@@ -286,7 +293,7 @@ export default function CatalogStatusPage() {
           />
         )}
 
-        <BacklogTiles backlog={backlog} />
+        <BacklogTiles ns={ns} backlog={backlog} />
 
         {reembedStatus && (
           <Card>
@@ -461,30 +468,55 @@ function ReembedProgressBar({ progress }: { progress: ReembedProgress }) {
   )
 }
 
-function BacklogTiles({ backlog }: { backlog: CatalogBacklog }) {
+function BacklogTiles({ ns, backlog }: { ns: string; backlog: CatalogBacklog }) {
+  const itemsIn = (state: string) => `/ns/${encodeURIComponent(ns)}/catalog/items?state=${state}`
   return (
-    <Stack gap={4} direction="horizontal" align="start" wrap="wrap">
-      <StatTile label="Pending" value={backlog.pending} />
-      <StatTile label="In flight" value={backlog.in_flight} />
+    <Stack gap={4} direction="horizontal" align="stretch" wrap="wrap">
+      <StatTile
+        label="Pending"
+        value={backlog.pending}
+        description="Queued, not yet picked up"
+        href={itemsIn('pending')}
+      />
+      <StatTile
+        label="In flight"
+        value={backlog.in_flight}
+        description="Being embedded now"
+        href={itemsIn('in_flight')}
+      />
       <StatTile
         label="Failed"
         value={backlog.failed}
         tone="warning"
         hint={backlog.failed > 0 ? 'attention' : undefined}
+        description="Will retry automatically"
+        href={itemsIn('failed')}
       />
       <StatTile
         label="Dead-letter"
         value={backlog.dead_letter}
         tone="error"
         hint={backlog.dead_letter > 0 ? 'stuck' : undefined}
+        description="Out of retries; needs redrive"
+        href={itemsIn('dead_letter')}
       />
-      <StatTile label="Embedded" value={backlog.embedded} />
-      <StatTile label="Stream length (XLEN)" value={backlog.stream_len} />
+      <StatTile
+        label="Embedded"
+        value={backlog.embedded}
+        description="Vector stored"
+        href={itemsIn('embedded')}
+      />
+      <StatTile
+        label="Stream length (XLEN)"
+        value={backlog.stream_len}
+        description="Messages in the Redis stream"
+      />
       <StatTile
         label="Consumer lag (PEL)"
         value={backlog.consumer_lag}
         tone="warning"
         hint={backlog.consumer_lag > 1000 ? 'high' : undefined}
+        description="Delivered but not yet acknowledged"
       />
     </Stack>
   )

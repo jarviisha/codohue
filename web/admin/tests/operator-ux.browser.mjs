@@ -525,6 +525,7 @@ try {
   for (const width of [320, 360, 390, 768]) {
     await page.setViewportSize({ width, height: 1000 })
     for (const [role, name] of [
+      ['link', 'Browse items'],
       ['link', 'Catalog settings'],
       ['button', 'Redrive 3 dead-letter'],
       ['button', 'Trigger re-embed'],
@@ -535,6 +536,11 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
   console.log('PASS catalog header actions stay inside narrow viewports')
+
+  await page.getByText('Out of retries; needs redrive', { exact: true }).waitFor()
+  await page.getByRole('link', { name: /^Dead-letter/ }).click()
+  await page.waitForURL('**/ns/a/catalog/items?state=dead_letter')
+  console.log('PASS backlog tiles explain themselves and open the filtered list')
 
   await goto('/ns/a/catalog/items')
   await page.getByRole('link', { name: 'item-42' }).waitFor()
