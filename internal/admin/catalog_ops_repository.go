@@ -641,9 +641,10 @@ func (r *Repository) DeleteCatalogItem(ctx context.Context, namespace string, id
 // step-function-shaped rather than evenly-spaced — that's a feature for
 // rendering ("changes happened here") not a defect.
 //
-// bucketSeconds > 0 downsamples to one row per bucket (same epoch math as
-// GetBatchRunStats), taking MAX per series so a short backlog spike is not
-// averaged away. 0 returns raw samples.
+// bucketSeconds > 0 downsamples to one row per bucket, taking MAX per series
+// so a short backlog spike is not averaged away. Epoch seconds are floored
+// before dividing: an ::int cast would round a sample from a bucket's last
+// half-second into the next bucket. 0 returns raw samples.
 func (r *Repository) GetCatalogBacklogHistory(ctx context.Context, namespace string, windowSeconds, bucketSeconds int) ([]CatalogBacklogSample, error) {
 	if windowSeconds <= 0 || bucketSeconds < 0 {
 		return nil, fmt.Errorf("invalid window/bucket seconds: %d / %d", windowSeconds, bucketSeconds)
@@ -657,7 +658,7 @@ func (r *Repository) GetCatalogBacklogHistory(ctx context.Context, namespace str
 	args := []any{namespace, windowSeconds}
 	if bucketSeconds > 0 {
 		query = `
-		SELECT to_timestamp(floor(extract(epoch FROM sampled_at)::int / $3) * $3) AS bucket_ts,
+		SELECT to_timestamp(floor(extract(epoch FROM sampled_at) / $3) * $3) AS bucket_ts,
 		       MAX(pending), MAX(in_flight), MAX(failed), MAX(dead_letter), MAX(stream_len)
 		FROM catalog_backlog_samples
 		WHERE namespace = $1

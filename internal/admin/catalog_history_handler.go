@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -8,6 +9,10 @@ import (
 
 	"github.com/jarviisha/codohue/internal/core/httpapi"
 )
+
+// errWindowTooShort rejects windows that round down to zero seconds, which
+// the repository would otherwise turn into a 500.
+var errWindowTooShort = errors.New("must be at least 1s")
 
 // GetCatalogBacklogHistory handles
 // GET /api/admin/v1/namespaces/{ns}/catalog/backlog-history?window=1h&bucket=5m
@@ -23,17 +28,22 @@ func (h *Handler) GetCatalogBacklogHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	window, err := parseDurationDefault(r.URL.Query().Get("window"), time.Hour)
+	if err == nil && window < time.Second {
+		err = errWindowTooShort
+	}
 	if err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "window: "+err.Error())
 		return
 	}
+	// Storage math is in whole seconds; a sub-second bucket would truncate
+	// to 0 and silently mean "raw samples".
 	bucket, err := parseDurationDefault(r.URL.Query().Get("bucket"), 0)
 	if err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "bucket: "+err.Error())
 		return
 	}
-	if bucket < 0 {
-		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "bucket must not be negative")
+	if bucket != 0 && bucket < time.Second {
+		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "bucket must be 0 or at least 1s")
 		return
 	}
 	resp, err := h.svc.GetCatalogBacklogHistory(r.Context(), ns, window, bucket)
@@ -57,6 +67,9 @@ func (h *Handler) GetCatalogFailuresSummary(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	window, err := parseDurationDefault(r.URL.Query().Get("window"), 24*time.Hour)
+	if err == nil && window < time.Second {
+		err = errWindowTooShort
+	}
 	if err != nil {
 		httpapi.WriteError(w, http.StatusBadRequest, "invalid_request", "window: "+err.Error())
 		return

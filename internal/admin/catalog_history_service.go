@@ -15,9 +15,6 @@ func (s *Service) GetCatalogBacklogHistory(ctx context.Context, namespace string
 		return nil, fmt.Errorf("invalid window: %v", window)
 	}
 	bucketSec := int(bucket.Seconds())
-	if bucketSec < 0 {
-		return nil, fmt.Errorf("invalid bucket: %v", bucket)
-	}
 	samples, err := s.repo.GetCatalogBacklogHistory(ctx, namespace, windowSec, bucketSec)
 	if err != nil {
 		return nil, fmt.Errorf("get backlog history: %w", err)

@@ -365,7 +365,7 @@ func (r *Repository) GetBatchRunStats(ctx context.Context, windowSeconds, bucket
 	}
 	rows, err := r.db.Query(ctx, `
 		SELECT
-		    to_timestamp(floor(extract(epoch FROM started_at)::int / $1) * $1) AS bucket_ts,
+		    to_timestamp(floor(extract(epoch FROM started_at) / $1) * $1)      AS bucket_ts,
 		    COUNT(*) FILTER (WHERE success = TRUE)                              AS ok_count,
 		    COUNT(*) FILTER (WHERE success = FALSE AND error_message = $3)      AS cancelled_count,
 		    COUNT(*) FILTER (WHERE success = FALSE AND error_message IS DISTINCT FROM $3) AS failed_count,
