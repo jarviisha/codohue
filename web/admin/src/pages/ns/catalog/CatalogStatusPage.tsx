@@ -387,6 +387,7 @@ export default function CatalogStatusPage() {
                 },
               ]}
               stacked
+              curve="stepAfter"
               height={240}
             />
           )}

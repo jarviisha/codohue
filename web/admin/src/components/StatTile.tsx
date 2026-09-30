@@ -30,7 +30,7 @@ export default function StatTile({
 }) {
   const formatted = typeof value === 'number' ? value.toLocaleString() : value
   const card = (
-    <Card className="h-full">
+    <Card className={href ? 'h-full' : 'flex-1 min-w-36'}>
       <Stack gap={6}>
         <span className="text-secondary text-xs uppercase tracking-wide">{label}</span>
         <Stack gap={4} direction="horizontal" align="center">
@@ -48,7 +48,7 @@ export default function StatTile({
       </Stack>
     </Card>
   )
-  if (!href) return <div className="flex-1 min-w-36">{card}</div>
+  if (!href) return card
   return (
     <Link to={href} className="flex-1 min-w-36 hover:opacity-80">
       {card}

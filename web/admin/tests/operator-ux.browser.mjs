@@ -509,6 +509,12 @@ try {
 
   await goto('/ns/a/catalog')
   await page.getByText('336 recorded time points', { exact: false }).waitFor()
+  await page.getByText(/Times in \S+/).waitFor()
+  const ticks = await page.locator('.recharts-xAxis .recharts-cartesian-axis-tick-value').allTextContents()
+  assert.ok(
+    ticks.some((t) => /\d{2}\/\d{2}/.test(t)),
+    `multi-day axis shows dates: ${ticks}`,
+  )
   const chartSummary = page.getByText('View chart data', { exact: true })
   const chartTable = page.getByRole('table', { name: 'Chart data', exact: true })
   assert.equal(await chartTable.count(), 0, 'closed chart data stays out of the DOM')

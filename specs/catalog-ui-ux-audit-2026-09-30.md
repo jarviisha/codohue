@@ -121,7 +121,13 @@ Nhiều nút, gồm bộ chọn thời gian và nhóm hành động Catalog, đo
 
 ## Đề xuất tinh chỉnh bổ sung
 
-Các mục sau là đề xuất thiết kế, chưa phải lỗi chức năng đã tái hiện:
+Các mục sau là đề xuất thiết kế, chưa phải lỗi chức năng đã tái hiện. Cả 7 mục đã được triển khai (2026-09-30):
+
+- Mục 3: rút gọn còn 2 dòng, có "View full error" và nút Copy; không làm bảng ánh xạ lỗi sang câu dễ hiểu, vì danh sách pattern sẽ lỗi thời khi backend đổi message.
+- Mục 4: Sample object dẫn tới danh sách items tìm theo object ID (`?q=`), không cần API lookup mới.
+- Mục 6: dùng dialog xác nhận thường (nêu namespace, số item hoặc strategy đích), không yêu cầu gõ tên namespace.
+- Mục 7: sửa trong `TimeSeriesChart` dùng chung: trục X theo thời gian thật, tự thêm ngày khi dữ liệu trải quá 24h, ghi timezone; biểu đồ Catalog dùng đường bậc thang (`stepAfter`).
+
 
 1. **Đưa Browse items lên gần tiêu đề.** Đây là lối vào tác vụ thường dùng nhưng hiện nằm dưới biểu đồ và bảng lỗi; có thể giữ thêm liên kết cuối trang.
 2. **Cho phép đi từ thống kê tới danh sách đã lọc.** Failed và Dead-letter nên dẫn tới trạng thái tương ứng, giữ ngữ cảnh namespace.

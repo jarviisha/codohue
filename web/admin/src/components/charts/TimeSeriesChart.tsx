@@ -45,15 +45,26 @@ type TimeSeriesChartProps = {
    */
   stacked?: boolean
   /**
-   * Override the x-axis tick formatter. Default: HH:MM in local time.
+   * Override the x-axis tick formatter. Default: HH:MM in local time, with
+   * the date prepended once the data spans more than a day.
    */
   tickFormatter?: (raw: string) => string
+  /**
+   * `stepAfter` for series that only record changes (a missing point means
+   * "unchanged"), so the line holds flat instead of interpolating.
+   */
+  curve?: 'monotone' | 'stepAfter'
 }
 
-const DEFAULT_TICK_FORMATTER = (raw: string) => {
+const DAY_MS = 24 * 60 * 60 * 1000
+const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+const defaultTickFormatter = (withDate: boolean) => (raw: string) => {
   const d = new Date(raw)
   if (Number.isNaN(d.getTime())) return raw
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return withDate
+    ? d.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 /**
@@ -68,14 +79,16 @@ export default function TimeSeriesChart({
   series,
   height = 200,
   stacked = false,
-  tickFormatter = DEFAULT_TICK_FORMATTER,
+  tickFormatter,
+  curve = 'monotone',
 }: TimeSeriesChartProps) {
   // The data table can be thousands of rows; keep it out of the DOM until asked for.
   const [tableOpen, setTableOpen] = useState(false)
-  const formatted = useMemo(
-    () => data.map((p) => ({ ...p, _label: tickFormatter(p.ts) })),
-    [data, tickFormatter],
-  )
+  // A numeric time axis keeps gaps between samples proportional instead of
+  // spacing every point evenly.
+  const formatted = useMemo(() => data.map((p) => ({ ...p, _t: Date.parse(p.ts) })), [data])
+  const spanMs = formatted.length > 1 ? formatted[formatted.length - 1]._t - formatted[0]._t : 0
+  const formatTick = tickFormatter ?? defaultTickFormatter(spanMs > DAY_MS)
 
   return (
     <Card>
@@ -88,7 +101,11 @@ export default function TimeSeriesChart({
           >
             <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
             <XAxis
-              dataKey="_label"
+              dataKey="_t"
+              type="number"
+              scale="time"
+              domain={['dataMin', 'dataMax']}
+              tickFormatter={(t: number) => formatTick(new Date(t).toISOString())}
               stroke="var(--color-text-secondary)"
               fontSize={11}
               tickLine={false}
@@ -110,6 +127,7 @@ export default function TimeSeriesChart({
                 fontSize: 12,
               }}
               labelStyle={{ color: 'var(--color-text-primary)' }}
+              labelFormatter={(t) => new Date(Number(t)).toLocaleString()}
             />
             <Legend
               wrapperStyle={{ fontSize: 12, color: 'var(--color-text-secondary)' }}
@@ -118,7 +136,7 @@ export default function TimeSeriesChart({
             {series.map((s) => (
               <Area
                 key={s.key}
-                type="monotone"
+                type={curve}
                 isAnimationActive={false}
                 dataKey={s.key}
                 name={s.label}
@@ -135,6 +153,7 @@ export default function TimeSeriesChart({
       <Stack gap={2}>
         <Text type="supporting">
           {series.map((item) => item.label).join(', ')} over {data.length} recorded time points.
+          Times in {TIME_ZONE}.
         </Text>
         <details onToggle={(e) => setTableOpen(e.currentTarget.open)}>
           <summary>View chart data</summary>
