@@ -76,6 +76,8 @@ Playwright tái hiện timeout hai lần; log cho biết ô header `In flight` c
 
 **Lưu ý:** `Table` của `@astryxdesign/core` không có sticky header (chỉ AppShell và ChatLayout dùng `position:sticky`), nên giả thuyết sticky header không đúng. Lượt tái hiện diễn ra khi 7d đang lỗi, tức bảng rỗng; nguyên nhân cần tìm lại sau khi CAT-01 được sửa, với bảng có dữ liệu thật.
 
+**Nguyên nhân (đã xác minh khi sửa):** rule `containerBleed` của Astryx Table đặt `margin-top: calc(-1 * var(--container-padding-block-start))` khi scroll wrapper là `:first-child`. Bảng trong `<details>` thừa hưởng biến padding 12px của Card, nên bị kéo lên 12px và đè lên nửa dưới `<summary>`. Sửa bằng cách reset biến này về `0px` trên Stack bọc bảng.
+
 **Đề xuất:** chỉ render bảng khi `<details>` đang mở (bỏ luôn hàng nghìn hàng khỏi DOM khi đóng); nếu vẫn bị chặn, dùng `elementFromPoint` tại vị trí summary để tìm phần tử đè lên rồi sửa đúng chỗ đó. Không khắc phục bằng cách ép click trong bài test.
 
 **Nghiệm thu:** mở/đóng bằng chuột và Enter/Space đều được; header không che summary khi cuộn; kiểm tra bảng có dữ liệu, rỗng và sau lỗi tải. Nguyên nhân CSS chính xác cần xác minh trong bước sửa.

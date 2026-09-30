@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Card,
   Section,
@@ -70,6 +70,8 @@ export default function TimeSeriesChart({
   stacked = false,
   tickFormatter = DEFAULT_TICK_FORMATTER,
 }: TimeSeriesChartProps) {
+  // The data table can be thousands of rows; keep it out of the DOM until asked for.
+  const [tableOpen, setTableOpen] = useState(false)
   const formatted = useMemo(
     () => data.map((p) => ({ ...p, _label: tickFormatter(p.ts) })),
     [data, tickFormatter],
@@ -134,37 +136,42 @@ export default function TimeSeriesChart({
         <Text type="supporting">
           {series.map((item) => item.label).join(', ')} over {data.length} recorded time points.
         </Text>
-        <details>
+        <details onToggle={(e) => setTableOpen(e.currentTarget.open)}>
           <summary>View chart data</summary>
-          <Stack className="min-w-0">
-            <Table
-              aria-label="Chart data"
-              columns={['Time', ...series.map((item) => item.key)].map((key) => ({
-                key,
-                header: key,
-                width: proportional(1),
-              }))}
-            >
-              <TableHeader>
-                <TableRow>
-                  <TableHeaderCell>Time</TableHeaderCell>
-                  {series.map((item) => (
-                    <TableHeaderCell key={item.key}>{item.label}</TableHeaderCell>
-                  ))}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {data.map((point, index) => (
-                  <TableRow key={`${point.ts}-${index}`}>
-                    <TableCell>{new Date(point.ts).toLocaleString()}</TableCell>
+          {tableOpen && (
+            // Table bleeds into the Card's padding when it is a first child
+            // (Astryx containerBleed); without the reset it slides 12px up over
+            // the <summary> and swallows clicks meant to close it.
+            <Stack className="min-w-0 [--container-padding-block-start:0px]">
+              <Table
+                aria-label="Chart data"
+                columns={['Time', ...series.map((item) => item.key)].map((key) => ({
+                  key,
+                  header: key,
+                  width: proportional(1),
+                }))}
+              >
+                <TableHeader>
+                  <TableRow>
+                    <TableHeaderCell>Time</TableHeaderCell>
                     {series.map((item) => (
-                      <TableCell key={item.key}>{point[item.key] ?? 'Unavailable'}</TableCell>
+                      <TableHeaderCell key={item.key}>{item.label}</TableHeaderCell>
                     ))}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Stack>
+                </TableHeader>
+                <TableBody>
+                  {data.map((point, index) => (
+                    <TableRow key={`${point.ts}-${index}`}>
+                      <TableCell>{new Date(point.ts).toLocaleString()}</TableCell>
+                      {series.map((item) => (
+                        <TableCell key={item.key}>{point[item.key] ?? 'Unavailable'}</TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Stack>
+          )}
         </details>
       </Stack>
     </Card>

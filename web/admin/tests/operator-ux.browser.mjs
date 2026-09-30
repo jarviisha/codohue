@@ -159,16 +159,15 @@ await context.route('**/api/**', async (route) => {
           namespace: 'a',
           window_seconds: 3600,
           bucket_seconds: 0,
-          samples: [
-            {
-              sampled_at: config.updated_at,
-              pending: 1,
-              in_flight: 0,
-              failed: 0,
-              dead_letter: 3,
-              stream_len: 0,
-            },
-          ],
+          // 7d at 30m buckets: enough rows to reproduce layout bugs in the data table.
+          samples: Array.from({ length: 336 }, (_, i) => ({
+            sampled_at: new Date(Date.parse(config.updated_at) + i * 1_800_000).toISOString(),
+            pending: i % 5,
+            in_flight: i % 3,
+            failed: 0,
+            dead_letter: 3,
+            stream_len: 0,
+          })),
         })
   }
   if (path.endsWith('/catalog/failures-summary'))
@@ -494,7 +493,23 @@ try {
   console.log('PASS health keeps last good snapshot after refresh failure')
 
   await goto('/ns/a/catalog')
-  await page.getByText('1 recorded time points', { exact: false }).waitFor()
+  await page.getByText('336 recorded time points', { exact: false }).waitFor()
+  const chartSummary = page.getByText('View chart data', { exact: true })
+  const chartTable = page.getByRole('table', { name: 'Chart data', exact: true })
+  assert.equal(await chartTable.count(), 0, 'closed chart data stays out of the DOM')
+  await chartSummary.click()
+  await chartTable.waitFor()
+  await page.mouse.wheel(0, 400)
+  await chartSummary.click()
+  await chartTable.waitFor({ state: 'detached' })
+  for (const key of ['Enter', ' ']) {
+    await chartSummary.focus()
+    await page.keyboard.press(key)
+    await chartTable.waitFor()
+    await page.keyboard.press(key)
+    await chartTable.waitFor({ state: 'detached' })
+  }
+  console.log('PASS chart data toggles by mouse, Enter and Space, before and after scroll')
   await page.getByRole('radio', { name: '7d', exact: true }).click()
   await expectPoll(() => historyQueries.at(-1), '?window=168h&bucket=30m')
   historyFailure = true
