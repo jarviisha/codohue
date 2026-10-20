@@ -223,9 +223,7 @@ Both use [Conventional Commits](https://www.conventionalcommits.org/) vocabulary
 - Scopes: `api`, `cron`, `admin`, `embedder`, `ingest`, `compute`, `recommend`, `nsconfig`, `auth`, `catalog`, `embedstrategy`, `idmap`, `qdrant`, `redis`, `postgres`, `metrics`, `e2e`, `docs`, `ci`.
 
 Pick one primary scope per commit and keep each commit to one logical change. Describe
-repository behavior, not Spec Kit phase labels or task IDs such as `T012`. Older styles
-such as `scope: summary` or numeric branch names such as `001-feature-name` are not used
-for new work.
+repository behavior. Older styles such as `scope: summary` are not used for new work.
 
 ### Before opening a pull request
 

@@ -303,7 +303,7 @@ Normalization is **batch-independent** (one shared helper, `blendHybridScores`, 
 
 Because the clamp assumes unit-norm vectors, **a deploy that changes this scoring must be followed immediately by a full recompute** (`make run-cron`): until the new cron writes normalized vectors, stored raw dots all exceed 1 and clamp to exactly 1.0, collapsing sparse ordering onto freshness decay and the object-id tie-break. A namespace whose cron is stalled stays in that state and nothing alerts on it.
 
-`POST /rankings` takes the **same blend** over the caller's candidate set (a `HasID` filter instead of top-K search, no paging): namespace `alpha` decides the balance, a missing side degrades to the surviving side at full weight (dense-only replaces the old whole-list zero fallback), and the same eligibility exclusions apply (§8.4). Every candidate comes back with a `scored` boolean — `false` means "returned unscored" (never indexed, or excluded), not "irrelevant" — and a subject with no vector at all gets the whole list back unscored with `source: "no_subject_vector"`. Because normalization is batch-independent, scores are comparable across calls: chunked rankings requests merge into the same ordering as one call over the union. Background: [specs/006-darkvoid-alignment/design.md](specs/006-darkvoid-alignment/design.md); cap measurement: [specs/006-darkvoid-alignment/benchmarks.md](specs/006-darkvoid-alignment/benchmarks.md).
+`POST /rankings` takes the **same blend** over the caller's candidate set (a `HasID` filter instead of top-K search, no paging): namespace `alpha` decides the balance, a missing side degrades to the surviving side at full weight (dense-only replaces the old whole-list zero fallback), and the same eligibility exclusions apply (§8.4). Every candidate comes back with a `scored` boolean — `false` means "returned unscored" (never indexed, or excluded), not "irrelevant" — and a subject with no vector at all gets the whole list back unscored with `source: "no_subject_vector"`. Because normalization is batch-independent, scores are comparable across calls: chunked rankings requests merge into the same ordering as one call over the union.
 
 ### 8.3 Time decay & freshness rerank
 
@@ -593,7 +593,6 @@ internal/infra/{postgres,redis,qdrant,metrics}
 
 migrations/                      SQL migrations (001 … 027)
 e2e/                             End-to-end tests (build tag `e2e`)
-specs/                           Feature specs and design docs
 pkg/codohuetypes                 Shared wire types module
 sdk/go                           Public Go SDK (+ sdk/go/admin: bearer admin client)
 sdk/go/redistream                Redis Streams producer SDK (events + catalog)
@@ -608,7 +607,6 @@ docker/                          Migration image and entrypoint
 - [AGENTS.md](AGENTS.md) — contributor / agent conventions.
 - [CLAUDE.md](CLAUDE.md) — thin Claude Code layer that imports the shared `AGENTS.md` instructions.
 - [sdk/go/README.md](sdk/go/README.md) — Go SDK + Redis Streams transport.
-- [specs/](specs/) — per-feature specs and design docs.
 - [internal/architecture/imports_test.go](internal/architecture/imports_test.go) — import rule enforcement.
 
 ### Runtime configuration reports

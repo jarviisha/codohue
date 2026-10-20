@@ -41,7 +41,7 @@ Keep feature logic inside its domain package. The default package shape is `docs
 - `CLAUDE.md` imports `AGENTS.md` and contains only Claude-specific guidance. Do not duplicate shared rules there.
 - `ARCHITECTURE.md` is the canonical architecture and REST API reference. Update it whenever an endpoint, migration, storage contract, process responsibility, or cross-domain flow changes.
 - `README.md`, `.env.example`, and the `Makefile` are authoritative for onboarding, configuration, and executable commands respectively.
-- Feature decisions and implementation artifacts belong under `specs/`; rollout and recovery procedures belong under `deploy/`.
+- Rollout and recovery procedures belong under `deploy/`; architecture decisions go in `ARCHITECTURE.md` or `docs/adr/`.
 - Prefer links to the canonical source over copying long command, API, configuration, or architecture sections into agent instruction files.
 
 ## Architecture Rules
@@ -103,7 +103,7 @@ Use Conventional Commits for all new commits:
 - Prefer lowercase in `type`, `scope`, and summary except for proper nouns, API names, and versions.
 - Pick a single primary scope that best describes the changed area.
 - Keep commits focused so the message describes one logical change.
-- Describe repository behavior, not transient Spec Kit phase labels or task IDs such as `T012`.
+- Describe repository behavior, not task or phase labels.
 
 Recommended commit types:
 
@@ -139,18 +139,9 @@ Use matching Conventional Branch names for feature work:
 - Keep the summary lowercase, hyphen-separated, and concise.
 - Examples: `feat/api-namespace-routes`, `fix/recommend-json-errors`, `test/e2e-client-routes`, `docs/readme-namespace-api`.
 
-Avoid older Spec Kit numeric branch names such as `001-feature-name` for new branches.
-
 In pull requests:
 
 - describe the behavior change and affected modules,
 - call out migration or config changes explicitly,
 - include sample requests or responses for API changes,
 - note required rollout steps if Redis, Qdrant, or cron behavior changes.
-
-<!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the plan of the spec
-you are working on under `specs/`. No spec is currently in flight; the most
-recent one is `specs/007-backend-audit-remediation/` (released in `v0.6.0`).
-<!-- SPECKIT END -->

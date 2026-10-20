@@ -51,7 +51,7 @@ the window is an offset into a buffer that live append keeps shifting.
 Catalog and Subjects apply text searches explicitly and keep applied filters,
 sorting and pagination in the URL. Configuration preserves drafts when a newer
 server snapshot arrives. Each tab saves independently with generation and group
-revision preconditions; conflicts preserve drafts for explicit reconciliation. See the [UX audit and implementation notes](../../specs/admin-console-ux-audit.md).
+revision preconditions; conflicts preserve drafts for explicit reconciliation.
 
 For dev work that also runs the embedded admin binary, use the repo-root targets:
 

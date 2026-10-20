@@ -52,14 +52,13 @@ MIN_EMBEDSTRATEGY  ?= 90
 	up-infra up-infra-build up-infra-d up-infra-build-d \
 	up-app up-app-build up-app-d up-app-build-d down down-v down-app \
 	logs logs-api logs-cron logs-admin logs-embedder logs-app \
-	compose-check compose-check-app compose-check-prod test-docker \
+	compose-check compose-check-app compose-check-prod \
 	lint fmt \
 	vuln \
 	test test-pkg test-verbose test-race \
 	coverage coverage-unit coverage-race coverage-report coverage-html \
 	coverage-check coverage-check-pkg coverage-check-all coverage-clean \
 	test-e2e test-e2e-api test-e2e-heavy \
-	eval \
 	migrate migrate-up migrate-down migrate-version migrate-create \
 	clean
 
@@ -215,9 +214,6 @@ compose-check-app:
 compose-check-prod:
 	$(COMPOSE_PROD_ENV) $(COMPOSE_PROD) config --quiet
 
-test-docker:
-	python3 scripts/test_docker.py
-
 # Lint and format
 
 lint:
@@ -356,13 +352,6 @@ test-e2e-api: build-api
 
 test-e2e-heavy: build
 	go test -v -tags=e2e -timeout=900s ./e2e/... -run 'Ingest|Cron|RecommendComputed|RankComputed|Hybrid|Catalog|Admin'
-
-# Offline recommendation-QUALITY eval against a RUNNING stack. Generates
-# structured synthetic behaviour, temporal-splits it, ingests train events,
-# runs a batch, then scores recommendations (Precision/Recall/NDCG/MAP) vs
-# popularity + random baselines. See scripts/eval.py for flags.
-eval:
-	@python3 scripts/eval.py $(ARGS)
 
 # Migrations
 

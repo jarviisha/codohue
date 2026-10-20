@@ -1,8 +1,7 @@
 # Backend audit remediation — rollout
 
 Four gated releases. Each one is independently deployable and independently
-reversible; do not cross a gate until its evidence is recorded in
-`specs/007-backend-audit-remediation/verification.md`.
+reversible; do not cross a gate until its evidence is recorded.
 
 | Release | Contents | Schema | Reversible by |
 |---------|----------|--------|---------------|
@@ -72,8 +71,7 @@ session advisory locks, so a lease lives on its connection for the whole fenced
 write; `NewPostgresLocker` gives them a **dedicated pool** so a lock holder can
 never be waiting for a work connection that only another lock holder could
 release. Sharing one pool deadlocks the data plane permanently once concurrent
-fenced writes reach the pool size — see the Phase 19 note in
-`specs/007-backend-audit-remediation/verification.md`.
+fenced writes reach the pool size.
 
 Neither pool sets `MaxConns`, so pgxpool's default of `max(4, NumCPU)` applies
 to both. Per host, the ceiling is:
@@ -279,8 +277,7 @@ Progress: `GET /api/admin/v1/namespaces/{ns}/catalog` (backlog) and the
 
 ## Per-namespace completion evidence
 
-Record this for each namespace as it clears each gate. Paste into
-`specs/007-backend-audit-remediation/verification.md`.
+Record this for each namespace as it clears each gate.
 
 ```
 namespace:            <name>
