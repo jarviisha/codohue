@@ -17,7 +17,7 @@ Module path: `github.com/jarviisha/codohue/sdk/go`. Wire types shared with the
 server live in `github.com/jarviisha/codohue/pkg/codohuetypes`.
 
 This module targets Go `1.24.13`. The server application in the repo root
-tracks Go `1.26.1` separately.
+tracks Go `1.26.9` separately.
 
 ## Quick start
 

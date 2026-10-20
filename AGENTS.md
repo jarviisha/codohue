@@ -69,7 +69,7 @@ Use the `Makefile` as the source of truth:
 
 ## Coding Style & Naming Conventions
 
-- Target Go `1.26.1` as defined in `go.mod`.
+- Target the Go version defined in `go.mod`.
 - Format code with standard Go formatting; lint with `golangci-lint run ./...`.
 - Keep package names lowercase and concise.
 - Export identifiers only when they are needed outside the package.

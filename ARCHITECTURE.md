@@ -82,7 +82,7 @@ The repo is a Go workspace ([go.work](go.work)) with **four modules**. `make lin
 | `github.com/jarviisha/codohue/sdk/go`                | Public Go SDK for clients embedding Codohue; includes the `sdk/go/admin` package (bearer-authenticated admin client, `ProvisionCatalogNamespace`) |
 | `github.com/jarviisha/codohue/sdk/go/redistream`     | Redis Streams transport helper for the SDK |
 
-The server module targets Go `1.26.1`. The SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) deliberately stay on Go `1.24.13` for broader downstream adoption.
+The server module targets Go `1.26.9`. The SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) deliberately stay on Go `1.24.13` for broader downstream adoption.
 
 ## 4. Internal layering
 

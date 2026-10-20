@@ -29,7 +29,7 @@ It ingests events and raw catalog content over HTTP and durable Redis Streams, p
 
 ## Requirements
 
-- Go `1.26.7` (server). SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) target Go `1.24.13`.
+- Go `1.26.9` (server). SDK modules (`pkg/codohuetypes`, `sdk/go`, `sdk/go/redistream`) target Go `1.24.13`.
 - Docker + Docker Compose 2.24+ for local infra
 - `golangci-lint` (for `make lint`, `make fmt`)
 - `air` (for `make dev`)
