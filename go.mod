@@ -1,6 +1,6 @@
 module github.com/jarviisha/codohue
 
-go 1.26.7
+go 1.26.9
 
 // Shared wire types live in a sibling module so SDK consumers do not pull in
 // the server's dependency graph (pgx, qdrant, prometheus, etc).
