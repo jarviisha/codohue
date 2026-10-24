@@ -1,0 +1,34 @@
+# Creates the GitHub Release for a v* tag, with that version's CHANGELOG.md
+# section as the notes. Images stay with build.yml and deploying with a
+# manual run of deploy.yml.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Notes from CHANGELOG.md
+        run: |
+          awk -v version="${GITHUB_REF_NAME#v}" '
+            /^## / { if (found) exit; if (index($0, "## [" version "]") == 1) { found = 1; next } }
+            found && /^\[[^]]+\]: / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no section for ${GITHUB_REF_NAME#v}"
+            exit 1
+          fi
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag

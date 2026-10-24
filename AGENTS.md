@@ -38,7 +38,7 @@ Keep feature logic inside its domain package. The default package shape is `docs
 ## Documentation Ownership
 
 - `AGENTS.md` is the canonical source for repository instructions shared by Codex and Claude Code.
-- `CLAUDE.md` imports `AGENTS.md` and contains only Claude-specific guidance. Do not duplicate shared rules there.
+- `CLAUDE.md` contains only `@AGENTS.md`. Put every instruction here, for Codex and Claude Code alike.
 - `ARCHITECTURE.md` is the canonical architecture and REST API reference. Update it whenever an endpoint, migration, storage contract, process responsibility, or cross-domain flow changes.
 - `README.md`, `.env.example`, and the `Makefile` are authoritative for onboarding, configuration, and executable commands respectively.
 - Rollout and recovery procedures belong under `deploy/`; architecture decisions go in `ARCHITECTURE.md` or `docs/adr/`.
@@ -145,3 +145,20 @@ In pull requests:
 - call out migration or config changes explicitly,
 - include sample requests or responses for API changes,
 - note required rollout steps if Redis, Qdrant, or cron behavior changes.
+
+## House style
+
+This repo follows jarviisha/house-style (https://github.com/jarviisha/house-style),
+adopted on 2026-10-24 in #80. Claude: use the house-style skill.
+
+- Squash merge only. PR title = commit title: `type(scope): summary`.
+- PR body is plain text: short paragraphs and `-` bullets, no `##` headings,
+  no emoji, no "Generated with" line. It becomes the squash commit body.
+- Branches: `type/short-slug`.
+- Workflows: ci.yml, release.yml, deploy.yml.
+- Releases: tag vX.Y.Z, release title = tag, body = CHANGELOG section.
+- Everything in English.
+
+History before 2026-10-24 does not follow these rules. Do not copy the style
+of older commits, PR bodies, branches or releases, and do not rewrite or
+rename them.

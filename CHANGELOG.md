@@ -1,13 +1,18 @@
 # Changelog
 
-Notable changes to the public wire contract (`pkg/codohuetypes`) and the Go SDK
-(`sdk/go`, `sdk/go/redistream`). All three modules are versioned together; tag
-them at the same version. A server release that changes no wire type or public
-Go API ships without a new entry here — it reuses the wire version above it.
+Notable changes to codohue, newest first: the server, the public wire contract
+(`pkg/codohuetypes`) and the Go SDK (`sdk/go`, `sdk/go/redistream`). The format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-The format is loosely based on [Keep a Changelog](https://keepachangelog.com).
+Each section is a server release, `## [X.Y.Z] - YYYY-MM-DD`, and its body is the
+GitHub Release notes for tag `vX.Y.Z`. The wire and SDK modules are versioned
+together on their own line; tag all three at the same version. When a release
+moves them, its section says so first: "Wire and SDK: v0.8.0".
 
-## Unreleased
+Sections headed `## vX.Y.Z — date` below are older. They record wire and SDK
+versions only, not server releases.
+
+## [Unreleased]
 
 Additive: one new field on an existing response type. Nothing was removed,
 renamed, or retyped.
